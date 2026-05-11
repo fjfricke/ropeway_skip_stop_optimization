@@ -54,6 +54,7 @@ class MilpV0VariableIndex:
     arc_ids_by_cabin_time: dict[tuple[int, int], tuple[str, ...]]
     out_arc_ids_by_cabin_time_node: dict[tuple[int, int, str], tuple[str, ...]]
     in_arc_ids_by_cabin_time_node: dict[tuple[int, int, str], tuple[str, ...]]
+    reachable_cabin_ids_by_time_node: dict[tuple[int, str], tuple[int, ...]]
 
 
 @dataclass(frozen=True)

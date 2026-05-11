@@ -723,3 +723,23 @@ Potential improvement:
 - build variable dictionaries in chunks
 
 This is more invasive and should be considered only after precomputing outgoing arcs, target nodes, flow terms, and conflict participants.
+
+## Follow-Up Implementation Update
+
+Status: implemented in current code.
+
+Implemented speedups:
+
+- precomputed allowed outgoing arcs per node
+- precomputed arc target nodes
+- cached sparse reachability transitions by reachable node tuple
+- logged sparse index counts when progress logging is enabled
+- built same-node and cross-node conflict participants from `reachable_cabin_ids_by_time_node`
+- generated flow constraints from flat precomputed index dictionaries
+- extracted selected solution values in per-cabin batches via `model.getAttr("X", ...)`
+
+Validation:
+
+- `uv run pytest` passes with 62 tests.
+- isolated `horizon=2400`, `cabins=23` sparse index build now completes in about 16.6 seconds on the local M3 Pro benchmark, compared with the previous observed 702.4 seconds.
+- short full solve/export benchmark with `horizon=240`, `cabins=23`, `sparse_reachability` completed successfully.
