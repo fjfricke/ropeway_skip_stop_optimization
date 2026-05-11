@@ -1,0 +1,272 @@
+export type StationKind = "service" | "terminal" | "storage";
+export type PhysicalNodeKind = "entry_switch" | "exit_switch" | "platform" | "hold" | "depot" | "connector";
+export type TrackSegmentKind = "rope" | "station" | "skip";
+export type SpeedProfileKind = "constant" | "linear";
+export type StationRouteKind = "service" | "skip";
+export type DiscreteArcKind = "move" | "wait";
+export type DiscreteConstraintKind =
+  | "node_occupancy"
+  | "headway"
+  | "switch_occupancy"
+  | "shared_resource"
+  | "route_continuity";
+export type DiscreteConstraintScope = "same_node" | "same_segment" | "cross_segment" | "switch" | "route";
+export type DiscreteConstraintStrength = "hard" | "relaxable";
+
+export interface Station {
+  id: string;
+  kind: StationKind;
+  name: string | null;
+  route_ids: string[];
+}
+
+export interface PhysicalNode {
+  id: string;
+  kind: PhysicalNodeKind;
+  station_id: string | null;
+  allows_waiting: boolean;
+}
+
+export interface SpeedProfile {
+  kind: SpeedProfileKind;
+  speed_m_per_s: number | null;
+  start_speed_m_per_s: number | null;
+  end_speed_m_per_s: number | null;
+}
+
+export interface TrackSegment {
+  id: string;
+  kind: TrackSegmentKind;
+  from_node_id: string;
+  to_node_id: string;
+  length_m: number;
+  speed_profile: SpeedProfile | null;
+  resource_id: string | null;
+}
+
+export interface StationRoute {
+  id: string;
+  station_id: string;
+  kind: StationRouteKind;
+  segment_ids: string[];
+  allows_boarding: boolean;
+  allows_alighting: boolean;
+}
+
+export interface Cabin {
+  id: number;
+}
+
+export interface CabinInitialState {
+  cabin_id: number;
+  node_id: string;
+  available_from: string;
+}
+
+export interface Demand {
+  arrival_time: string;
+  origin: string;
+  destination: string;
+  count: number;
+}
+
+export interface OperatingParameters {
+  rope_speed_m_per_s: number;
+  station_speed_m_per_s: number;
+  cabin_capacity: number;
+  cabin_length_m: number;
+  min_clearance_m: number;
+}
+
+export interface Scenario {
+  scenario_id: string;
+  service_start_time: string;
+  service_end_time: string;
+  stations: Station[];
+  physical_nodes: PhysicalNode[];
+  track_segments: TrackSegment[];
+  station_routes: StationRoute[];
+  cabins: Cabin[];
+  cabin_initial_states: CabinInitialState[];
+  demands: Demand[];
+  operating: OperatingParameters;
+}
+
+export interface DiscreteNode {
+  id: string;
+  source_physical_node_id: string | null;
+  source_segment_id: string | null;
+  station_id: string | null;
+  resource_id: string | null;
+  position_m: number | null;
+  allows_waiting: boolean;
+  allows_boarding: boolean;
+  allows_alighting: boolean;
+}
+
+export interface DiscreteArc {
+  id: string;
+  kind: DiscreteArcKind;
+  from_node_id: string;
+  to_node_id: string;
+  source_segment_id: string | null;
+  source_route_id: string | null;
+}
+
+export interface DiscreteRoute {
+  id: string;
+  source_route_id: string;
+  arc_ids: string[];
+}
+
+export interface DiscreteConstraint {
+  id: string;
+  kind: DiscreteConstraintKind;
+  scope: DiscreteConstraintScope;
+  strength: DiscreteConstraintStrength;
+  node_ids: string[];
+  arc_ids: string[];
+  resource_id: string | null;
+  source_segment_ids: string[];
+  source_route_ids: string[];
+}
+
+export interface DiscreteDemand {
+  time_step: number;
+  origin: string;
+  destination: string;
+  count: number;
+}
+
+export interface DiscreteCabinInitialState {
+  cabin_id: number;
+  node_id: string;
+  available_from_step: number;
+}
+
+export interface DiscreteScenario {
+  id: string;
+  source_scenario_id: string;
+  delta_seconds: number;
+  horizon_steps: number;
+  nodes: DiscreteNode[];
+  arcs: DiscreteArc[];
+  routes: DiscreteRoute[];
+  constraints: DiscreteConstraint[];
+  stations: Station[];
+  station_routes: StationRoute[];
+  cabins: Cabin[];
+  cabin_initial_states: DiscreteCabinInitialState[];
+  demands: DiscreteDemand[];
+  cabin_capacity: number;
+  required_cabin_spacing_m: number;
+}
+
+export interface DiscretePath {
+  id: string;
+  arc_ids: string[];
+  node_ids: string[];
+  source_segment_ids: string[];
+  source_route_ids: string[];
+}
+
+export interface CabinPosition {
+  time_step: number;
+  node_id: string;
+  incoming_arc_id: string | null;
+}
+
+export interface CabinTrajectory {
+  cabin_id: number;
+  positions: CabinPosition[];
+}
+
+export interface MovementPlan {
+  discrete_scenario_id: string;
+  horizon_steps: number;
+  trajectories: CabinTrajectory[];
+  paths: DiscretePath[];
+}
+
+export type BoardingPolicyKind = "greedy_fifo_next_compatible_cabin";
+
+export interface PassengerQueueState {
+  time_step: number;
+  station_id: string;
+  destination: string;
+  waiting_count: number;
+}
+
+export interface OnboardPassengerGroup {
+  batch_id: string;
+  demand_index: number;
+  origin: string;
+  destination: string;
+  arrival_step: number;
+  boarded_step: number;
+  count: number;
+}
+
+export interface CabinLoadState {
+  time_step: number;
+  cabin_id: number;
+  node_id: string;
+  onboard_groups: OnboardPassengerGroup[];
+}
+
+export interface BoardingEvent {
+  time_step: number;
+  cabin_id: number;
+  station_id: string;
+  destination: string;
+  batch_id: string;
+  count: number;
+  waiting_steps: number;
+}
+
+export interface AlightingEvent {
+  time_step: number;
+  cabin_id: number;
+  station_id: string;
+  batch_id: string;
+  count: number;
+  onboard_steps: number;
+}
+
+export interface ReplayStepState {
+  time_step: number;
+  queue_states: PassengerQueueState[];
+  cabin_loads: CabinLoadState[];
+  boarding_events: BoardingEvent[];
+  alighting_events: AlightingEvent[];
+}
+
+export interface ReplaySummary {
+  arrived_passengers: number;
+  boarded_passengers: number;
+  served_passengers: number;
+  unserved_passengers: number;
+  onboard_passengers: number;
+  total_waiting_steps: number;
+  max_waiting_steps: number;
+}
+
+export interface PassengerReplayResult {
+  discrete_scenario_id: string;
+  movement_plan_horizon_steps: number;
+  boarding_policy: BoardingPolicyKind;
+  steps: ReplayStepState[];
+  boarding_events: BoardingEvent[];
+  alighting_events: AlightingEvent[];
+  final_queue_states: PassengerQueueState[];
+  final_cabin_loads: CabinLoadState[];
+  summary: ReplaySummary;
+}
+
+export type Selection =
+  | { type: "node"; id: string }
+  | { type: "segment"; id: string }
+  | { type: "route"; id: string }
+  | { type: "discrete_node"; id: string }
+  | { type: "discrete_arc"; id: string }
+  | { type: "discrete_constraint"; id: string };
