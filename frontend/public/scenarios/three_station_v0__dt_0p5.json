@@ -25287,52 +25287,40 @@
   "delta_seconds": 0.5,
   "demands": [
     {
-      "count": 20,
-      "destination": "R",
-      "origin": "L",
-      "time_step": 120
-    },
-    {
-      "count": 4,
+      "count": 580,
       "destination": "M",
       "origin": "L",
-      "time_step": 240
+      "time_step": 0
     },
     {
-      "count": 5,
-      "destination": "R",
-      "origin": "M",
-      "time_step": 360
-    },
-    {
-      "count": 6,
-      "destination": "L",
-      "origin": "R",
-      "time_step": 480
-    },
-    {
-      "count": 3,
-      "destination": "M",
-      "origin": "R",
-      "time_step": 600
-    },
-    {
-      "count": 4,
-      "destination": "L",
-      "origin": "M",
-      "time_step": 720
-    },
-    {
-      "count": 5,
+      "count": 580,
       "destination": "R",
       "origin": "L",
-      "time_step": 960
+      "time_step": 0
     },
     {
-      "count": 5,
+      "count": 580,
+      "destination": "L",
+      "origin": "M",
+      "time_step": 0
+    },
+    {
+      "count": 580,
+      "destination": "R",
+      "origin": "M",
+      "time_step": 0
+    },
+    {
+      "count": 580,
       "destination": "L",
       "origin": "R",
-      "time_step": 1080
+      "time_step": 0
+    },
+    {
+      "count": 580,
+      "destination": "M",
+      "origin": "R",
+      "time_step": 0
     }
   ],
   "horizon_steps": 2400,
@@ -25351,7 +25339,7 @@
     },
     {
       "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "pn::L_platform_entry",
       "position_m": null,
@@ -25361,7 +25349,7 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
+      "allows_alighting": false,
       "allows_boarding": true,
       "allows_waiting": true,
       "id": "pn::L_platform_exit",
@@ -25395,7 +25383,7 @@
     },
     {
       "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "pn::R_platform_entry",
       "position_m": null,
@@ -25405,7 +25393,7 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
+      "allows_alighting": false,
       "allows_boarding": true,
       "allows_waiting": true,
       "id": "pn::R_platform_exit",
@@ -25450,7 +25438,7 @@
     },
     {
       "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "pn::M_platform_entry_lr",
       "position_m": null,
@@ -25460,7 +25448,7 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
+      "allows_alighting": false,
       "allows_boarding": true,
       "allows_waiting": false,
       "id": "pn::M_platform_exit_lr",
@@ -25516,7 +25504,7 @@
     },
     {
       "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "pn::M_platform_entry_rl",
       "position_m": null,
@@ -25526,7 +25514,7 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
+      "allows_alighting": false,
       "allows_boarding": true,
       "allows_waiting": false,
       "id": "pn::M_platform_exit_rl",
@@ -25581,8 +25569,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::1",
       "position_m": 0.25,
@@ -25592,8 +25580,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::2",
       "position_m": 0.5,
@@ -25603,8 +25591,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::3",
       "position_m": 0.75,
@@ -25614,8 +25602,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::4",
       "position_m": 1.0,
@@ -25625,8 +25613,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::5",
       "position_m": 1.25,
@@ -25636,8 +25624,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::6",
       "position_m": 1.5,
@@ -25647,8 +25635,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::7",
       "position_m": 1.75,
@@ -25658,8 +25646,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::8",
       "position_m": 2.0,
@@ -25669,8 +25657,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::9",
       "position_m": 2.25,
@@ -25680,8 +25668,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::10",
       "position_m": 2.5,
@@ -25691,8 +25679,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::11",
       "position_m": 2.75,
@@ -25702,8 +25690,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::12",
       "position_m": 3.0,
@@ -25713,8 +25701,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::13",
       "position_m": 3.25,
@@ -25724,8 +25712,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::14",
       "position_m": 3.5,
@@ -25735,8 +25723,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::15",
       "position_m": 3.75,
@@ -25746,8 +25734,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::16",
       "position_m": 4.0,
@@ -25757,8 +25745,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::17",
       "position_m": 4.25,
@@ -25768,8 +25756,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::18",
       "position_m": 4.5,
@@ -25779,8 +25767,8 @@
       "station_id": "L"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::L_turnaround_platform::19",
       "position_m": 4.75,
@@ -25834,8 +25822,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::1",
       "position_m": 0.25,
@@ -25845,8 +25833,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::2",
       "position_m": 0.5,
@@ -25856,8 +25844,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::3",
       "position_m": 0.75,
@@ -25867,8 +25855,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::4",
       "position_m": 1.0,
@@ -25878,8 +25866,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::5",
       "position_m": 1.25,
@@ -25889,8 +25877,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::6",
       "position_m": 1.5,
@@ -25900,8 +25888,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::7",
       "position_m": 1.75,
@@ -25911,8 +25899,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::8",
       "position_m": 2.0,
@@ -25922,8 +25910,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::9",
       "position_m": 2.25,
@@ -25933,8 +25921,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::10",
       "position_m": 2.5,
@@ -25944,8 +25932,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::11",
       "position_m": 2.75,
@@ -25955,8 +25943,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::12",
       "position_m": 3.0,
@@ -25966,8 +25954,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::13",
       "position_m": 3.25,
@@ -25977,8 +25965,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::14",
       "position_m": 3.5,
@@ -25988,8 +25976,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::15",
       "position_m": 3.75,
@@ -25999,8 +25987,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::16",
       "position_m": 4.0,
@@ -26010,8 +25998,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::17",
       "position_m": 4.25,
@@ -26021,8 +26009,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::18",
       "position_m": 4.5,
@@ -26032,8 +26020,8 @@
       "station_id": "R"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::R_turnaround_platform::19",
       "position_m": 4.75,
@@ -28694,8 +28682,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::1",
       "position_m": 0.25,
@@ -28705,8 +28693,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::2",
       "position_m": 0.5,
@@ -28716,8 +28704,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::3",
       "position_m": 0.75,
@@ -28727,8 +28715,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::4",
       "position_m": 1.0,
@@ -28738,8 +28726,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::5",
       "position_m": 1.25,
@@ -28749,8 +28737,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::6",
       "position_m": 1.5,
@@ -28760,8 +28748,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::7",
       "position_m": 1.75,
@@ -28771,8 +28759,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::8",
       "position_m": 2.0,
@@ -28782,8 +28770,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::9",
       "position_m": 2.25,
@@ -28793,8 +28781,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::10",
       "position_m": 2.5,
@@ -28804,8 +28792,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::11",
       "position_m": 2.75,
@@ -28815,8 +28803,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::12",
       "position_m": 3.0,
@@ -28826,8 +28814,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::13",
       "position_m": 3.25,
@@ -28837,8 +28825,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::14",
       "position_m": 3.5,
@@ -28848,8 +28836,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::15",
       "position_m": 3.75,
@@ -28859,8 +28847,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::16",
       "position_m": 4.0,
@@ -28870,8 +28858,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::17",
       "position_m": 4.25,
@@ -28881,8 +28869,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::18",
       "position_m": 4.5,
@@ -28892,8 +28880,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_lr_platform::19",
       "position_m": 4.75,
@@ -29266,8 +29254,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::1",
       "position_m": 0.25,
@@ -29277,8 +29265,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::2",
       "position_m": 0.5,
@@ -29288,8 +29276,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::3",
       "position_m": 0.75,
@@ -29299,8 +29287,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::4",
       "position_m": 1.0,
@@ -29310,8 +29298,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::5",
       "position_m": 1.25,
@@ -29321,8 +29309,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::6",
       "position_m": 1.5,
@@ -29332,8 +29320,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::7",
       "position_m": 1.75,
@@ -29343,8 +29331,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::8",
       "position_m": 2.0,
@@ -29354,8 +29342,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::9",
       "position_m": 2.25,
@@ -29365,8 +29353,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::10",
       "position_m": 2.5,
@@ -29376,8 +29364,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::11",
       "position_m": 2.75,
@@ -29387,8 +29375,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::12",
       "position_m": 3.0,
@@ -29398,8 +29386,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::13",
       "position_m": 3.25,
@@ -29409,8 +29397,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::14",
       "position_m": 3.5,
@@ -29420,8 +29408,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::15",
       "position_m": 3.75,
@@ -29431,8 +29419,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::16",
       "position_m": 4.0,
@@ -29442,8 +29430,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::17",
       "position_m": 4.25,
@@ -29453,8 +29441,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::18",
       "position_m": 4.5,
@@ -29464,8 +29452,8 @@
       "station_id": "M"
     },
     {
-      "allows_alighting": true,
-      "allows_boarding": true,
+      "allows_alighting": false,
+      "allows_boarding": false,
       "allows_waiting": false,
       "id": "seg::M_rl_platform::19",
       "position_m": 4.75,

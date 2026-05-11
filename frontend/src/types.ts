@@ -1,6 +1,6 @@
 export type StationKind = "service" | "terminal" | "storage";
 export type PhysicalNodeKind = "entry_switch" | "exit_switch" | "platform" | "hold" | "depot" | "connector";
-export type TrackSegmentKind = "rope" | "station" | "skip";
+export type TrackSegmentKind = "rope" | "station" | "connector" | "skip";
 export type SpeedProfileKind = "constant" | "linear";
 export type StationRouteKind = "service" | "skip";
 export type DiscreteArcKind = "move" | "wait";

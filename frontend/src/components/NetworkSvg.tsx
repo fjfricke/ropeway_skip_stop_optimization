@@ -1,6 +1,6 @@
 import { Maximize2, Move, ZoomIn, ZoomOut } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { MouseEvent, PointerEvent, WheelEvent } from "react";
+import type { MouseEvent, PointerEvent } from "react";
 import type { ScenarioLayout } from "../scenarioLayout";
 import type { DiscreteArc, DiscreteConstraint, DiscreteNode, DiscreteScenario, Scenario, Selection, TrackSegment } from "../types";
 import type { DiscreteOverlayMode, DiscreteViewerToggles, ViewerToggles } from "./ScenarioViewer";
@@ -145,6 +145,19 @@ export function NetworkSvg({
     });
   }, [baseViewBox, minViewBoxScale]);
 
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    const handleNativeWheel = (event: globalThis.WheelEvent) => {
+      event.preventDefault();
+      const rect = svg.getBoundingClientRect();
+      const point = clientToViewBoxPoint(event.clientX, event.clientY, rect, viewBox);
+      setViewBox((current) => zoomViewBox(current, baseViewBox, point, event.deltaY < 0 ? 0.88 : 1.12, minViewBoxScale));
+    };
+    svg.addEventListener("wheel", handleNativeWheel, { passive: false });
+    return () => svg.removeEventListener("wheel", handleNativeWheel);
+  }, [baseViewBox, minViewBoxScale, viewBox]);
+
   function resetView() {
     setViewBox(baseViewBox);
   }
@@ -152,15 +165,6 @@ export function NetworkSvg({
   function zoomAtCenter(direction: "in" | "out") {
     const center = { x: viewBox.x + viewBox.width / 2, y: viewBox.y + viewBox.height / 2 };
     setViewBox((current) => zoomViewBox(current, baseViewBox, center, direction === "in" ? 0.82 : 1.18, minViewBoxScale));
-  }
-
-  function handleWheel(event: WheelEvent<SVGSVGElement>) {
-    event.preventDefault();
-    const svg = svgRef.current;
-    if (!svg) return;
-    const rect = svg.getBoundingClientRect();
-    const point = clientToViewBoxPoint(event.clientX, event.clientY, rect, viewBox);
-    setViewBox((current) => zoomViewBox(current, baseViewBox, point, event.deltaY < 0 ? 0.88 : 1.12, minViewBoxScale));
   }
 
   function handlePointerDown(event: PointerEvent<SVGSVGElement>) {
@@ -234,7 +238,6 @@ export function NetworkSvg({
         role="img"
         aria-label="Physical ropeway scenario network"
         data-testid="network-svg"
-        onWheel={handleWheel}
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}
         onPointerUp={finishPan}

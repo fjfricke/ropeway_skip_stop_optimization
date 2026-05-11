@@ -14,35 +14,37 @@ from ropeway_skip_stop_optimization.replay import (
 def test_demand_arrivals_at_step_returns_fixed_batches() -> None:
     discrete = discretize_scenario(build_three_station_scenario())
 
-    assert demand_arrivals_at_step(discrete, 0) == ()
-    arrivals = demand_arrivals_at_step(discrete, 120)
+    arrivals = demand_arrivals_at_step(discrete, 0)
 
-    assert len(arrivals) == 1
+    assert len(arrivals) == 6
     assert arrivals[0].demand_index == 0
     assert arrivals[0].origin == "L"
-    assert arrivals[0].destination == "R"
-    assert arrivals[0].count == 20
+    assert arrivals[0].destination == "M"
+    assert arrivals[0].count == 580
+    assert demand_arrivals_at_step(discrete, 120) == ()
 
 
 def test_cumulative_passenger_queues_accumulate_without_boarding() -> None:
     discrete = discretize_scenario(build_three_station_scenario())
 
-    assert cumulative_passenger_queues(discrete, 0) == ()
-    assert _queue_map(cumulative_passenger_queues(discrete, 120)) == {("L", "R"): 20}
-    assert _queue_map(cumulative_passenger_queues(discrete, 240)) == {
-        ("L", "R"): 20,
-        ("L", "M"): 4,
+    assert _queue_map(cumulative_passenger_queues(discrete, 0)) == {
+        ("L", "M"): 580,
+        ("L", "R"): 580,
+        ("M", "L"): 580,
+        ("M", "R"): 580,
+        ("R", "L"): 580,
+        ("R", "M"): 580,
     }
     final_queues = cumulative_passenger_queues(discrete, 1080)
     assert _queue_map(final_queues) == {
-        ("L", "M"): 4,
-        ("L", "R"): 25,
-        ("M", "L"): 4,
-        ("M", "R"): 5,
-        ("R", "L"): 11,
-        ("R", "M"): 3,
+        ("L", "M"): 580,
+        ("L", "R"): 580,
+        ("M", "L"): 580,
+        ("M", "R"): 580,
+        ("R", "L"): 580,
+        ("R", "M"): 580,
     }
-    assert total_waiting_count(final_queues) == 52
+    assert total_waiting_count(final_queues) == 3480
 
 
 def test_cumulative_passenger_queues_rejects_steps_outside_horizon() -> None:

@@ -181,16 +181,7 @@ def build_three_station_scenario() -> Scenario:
         CabinInitialState(cabin_id=3, node_id="R_platform_exit", available_from=time(8, 2)),
     )
 
-    demands = (
-        Demand(arrival_time=time(8, 1), origin="L", destination="R", count=20),
-        Demand(arrival_time=time(8, 2), origin="L", destination="M", count=4),
-        Demand(arrival_time=time(8, 3), origin="M", destination="R", count=5),
-        Demand(arrival_time=time(8, 4), origin="R", destination="L", count=6),
-        Demand(arrival_time=time(8, 5), origin="R", destination="M", count=3),
-        Demand(arrival_time=time(8, 6), origin="M", destination="L", count=4),
-        Demand(arrival_time=time(8, 8), origin="L", destination="R", count=5),
-        Demand(arrival_time=time(8, 9), origin="R", destination="L", count=5),
-    )
+    demands = build_three_station_near_capacity_demands()
 
     scenario = Scenario(
         id="three_station_v0",
@@ -215,6 +206,17 @@ def build_three_station_scenario() -> Scenario:
     return scenario
 
 
+def build_three_station_near_capacity_demands() -> tuple[Demand, ...]:
+    return (
+        Demand(arrival_time=time(8, 0), origin="L", destination="M", count=580),
+        Demand(arrival_time=time(8, 0), origin="L", destination="R", count=580),
+        Demand(arrival_time=time(8, 0), origin="M", destination="L", count=580),
+        Demand(arrival_time=time(8, 0), origin="M", destination="R", count=580),
+        Demand(arrival_time=time(8, 0), origin="R", destination="L", count=580),
+        Demand(arrival_time=time(8, 0), origin="R", destination="M", count=580),
+    )
+
+
 def _terminal_station_segments(
     station: str,
     entry_direction: str,
@@ -232,7 +234,7 @@ def _terminal_station_segments(
     return (
         TrackSegment(
             id=f"{station}_turnaround_decelerate",
-            kind=TrackSegmentKind.STATION,
+            kind=TrackSegmentKind.CONNECTOR,
             from_node_id=entry,
             to_node_id=platform_entry,
             length_m=3.0,
@@ -250,7 +252,7 @@ def _terminal_station_segments(
         ),
         TrackSegment(
             id=f"{station}_turnaround_accelerate",
-            kind=TrackSegmentKind.STATION,
+            kind=TrackSegmentKind.CONNECTOR,
             from_node_id=platform_exit,
             to_node_id=exit_node,
             length_m=3.0,
@@ -272,7 +274,7 @@ def _middle_station_segments(
     return (
         TrackSegment(
             id=f"M_{direction}_approach_fast",
-            kind=TrackSegmentKind.STATION,
+            kind=TrackSegmentKind.CONNECTOR,
             from_node_id=entry,
             to_node_id=f"M_service_approach_{direction}",
             length_m=5.0,
@@ -281,7 +283,7 @@ def _middle_station_segments(
         ),
         TrackSegment(
             id=f"M_{direction}_brake",
-            kind=TrackSegmentKind.STATION,
+            kind=TrackSegmentKind.CONNECTOR,
             from_node_id=f"M_service_approach_{direction}",
             to_node_id=f"M_platform_entry_{direction}",
             length_m=3.0,
@@ -299,7 +301,7 @@ def _middle_station_segments(
         ),
         TrackSegment(
             id=f"M_{direction}_accelerate",
-            kind=TrackSegmentKind.STATION,
+            kind=TrackSegmentKind.CONNECTOR,
             from_node_id=f"M_platform_exit_{direction}",
             to_node_id=f"M_service_accelerate_{direction}",
             length_m=3.0,
@@ -308,7 +310,7 @@ def _middle_station_segments(
         ),
         TrackSegment(
             id=f"M_{direction}_depart_fast",
-            kind=TrackSegmentKind.STATION,
+            kind=TrackSegmentKind.CONNECTOR,
             from_node_id=f"M_service_accelerate_{direction}",
             to_node_id=exit_node,
             length_m=5.0,

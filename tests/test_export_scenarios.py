@@ -30,12 +30,13 @@ def test_exports_greedy_all_stop_passenger_replay_json(tmp_path) -> None:
     assert payload["discrete_scenario_id"] == "three_station_v0__dt_0p5"
     assert payload["movement_plan_horizon_steps"] == 2400
     assert payload["boarding_policy"] == "greedy_fifo_next_compatible_cabin"
-    assert payload["summary"]["arrived_passengers"] == 52
-    assert payload["summary"]["boarded_passengers"] == 52
-    assert payload["summary"]["served_passengers"] == 52
+    assert payload["summary"]["arrived_passengers"] == 3480
+    assert payload["summary"]["boarded_passengers"] == 3480
+    assert payload["summary"]["served_passengers"] == 3480
     assert payload["summary"]["unserved_passengers"] == 0
     assert len(payload["steps"]) == 2401
-    assert payload["steps"][120]["boarding_events"][0]["station_id"] == "L"
-    assert payload["steps"][120]["boarding_events"][0]["destination"] == "R"
-    assert payload["steps"][120]["boarding_events"][0]["count"] == 8
-    assert payload["steps"][120]["queue_states"][0]["waiting_count"] == 4
+    assert payload["steps"][0]["queue_states"][0]["waiting_count"] == 580
+    assert payload["boarding_events"][0]["station_id"] == "M"
+    assert payload["boarding_events"][0]["destination"] == "L"
+    assert payload["boarding_events"][0]["count"] == 8
+    assert payload["final_queue_states"] == []

@@ -306,6 +306,10 @@ h3 {
   stroke: var(--service);
 }
 
+.segment--connector {
+  stroke: #64748b;
+}
+
 .segment--skip {
   stroke: var(--skip);
   stroke-dasharray: 12 8;

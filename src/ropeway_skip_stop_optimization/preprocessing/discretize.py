@@ -17,12 +17,12 @@ from ropeway_skip_stop_optimization.models import (
     DiscreteRoute,
     DiscreteScenario,
     PhysicalNode,
-    PhysicalNodeKind,
     Scenario,
     SpeedProfile,
     SpeedProfileKind,
     StationRouteKind,
     TrackSegment,
+    TrackSegmentKind,
 )
 from ropeway_skip_stop_optimization.validation import validate_scenario
 
@@ -60,18 +60,22 @@ def discretize_scenario(
 
     physical_nodes_by_id = {node.id: node for node in scenario.physical_nodes}
     route_id_by_segment_id = _route_id_by_segment_id(scenario)
-    service_segment_ids = _service_platform_segment_ids(scenario, physical_nodes_by_id)
+    segment_node_ids_by_id = {
+        segment.id: _segment_node_ids(segment, duration_steps_for_segment(segment, config))
+        for segment in scenario.track_segments
+    }
+    boarding_node_ids, alighting_node_ids = _service_platform_endpoint_node_ids(scenario, segment_node_ids_by_id)
 
     nodes: list[DiscreteNode] = [
-        _discrete_physical_node(node)
+        _discrete_physical_node(node, boarding_node_ids, alighting_node_ids)
         for node in scenario.physical_nodes
     ]
     arcs: list[DiscreteArc] = []
 
     for segment in scenario.track_segments:
-        duration_steps = duration_steps_for_segment(segment, config)
         route_id = route_id_by_segment_id.get(segment.id)
-        segment_node_ids = _segment_node_ids(segment, duration_steps)
+        segment_node_ids = segment_node_ids_by_id[segment.id]
+        duration_steps = len(segment_node_ids) - 1
 
         for index, node_id in enumerate(segment_node_ids[1:-1], start=1):
             nodes.append(
@@ -82,8 +86,8 @@ def discretize_scenario(
                     resource_id=segment.resource_id,
                     position_m=position_m_at_step(segment, index, duration_steps, config),
                     allows_waiting=False,
-                    allows_boarding=segment.id in service_segment_ids,
-                    allows_alighting=segment.id in service_segment_ids,
+                    allows_boarding=node_id in boarding_node_ids,
+                    allows_alighting=node_id in alighting_node_ids,
                 )
             )
 
@@ -194,14 +198,19 @@ def physical_node_id(source_physical_node_id: str) -> str:
     return f"pn::{source_physical_node_id}"
 
 
-def _discrete_physical_node(node: PhysicalNode) -> DiscreteNode:
+def _discrete_physical_node(
+    node: PhysicalNode,
+    boarding_node_ids: set[str],
+    alighting_node_ids: set[str],
+) -> DiscreteNode:
+    node_id = physical_node_id(node.id)
     return DiscreteNode(
-        id=physical_node_id(node.id),
+        id=node_id,
         source_physical_node_id=node.id,
         station_id=node.station_id,
         allows_waiting=node.allows_waiting,
-        allows_boarding=node.kind is PhysicalNodeKind.PLATFORM,
-        allows_alighting=node.kind is PhysicalNodeKind.PLATFORM,
+        allows_boarding=node_id in boarding_node_ids,
+        allows_alighting=node_id in alighting_node_ids,
     )
 
 
@@ -229,24 +238,47 @@ def _route_id_by_segment_id(scenario: Scenario) -> dict[str, str]:
     return route_id_by_segment_id
 
 
-def _service_platform_segment_ids(
+def _service_platform_endpoint_node_ids(
     scenario: Scenario,
-    physical_nodes_by_id: dict[str, PhysicalNode],
-) -> set[str]:
+    segment_node_ids_by_id: dict[str, tuple[str, ...]],
+) -> tuple[set[str], set[str]]:
     segment_by_id = {segment.id: segment for segment in scenario.track_segments}
-    service_segment_ids: set[str] = set()
+    boarding_node_ids: set[str] = set()
+    alighting_node_ids: set[str] = set()
     for route in scenario.station_routes:
         if route.kind is not StationRouteKind.SERVICE:
             continue
-        if not (route.allows_boarding or route.allows_alighting):
+        station_segment_ids = tuple(
+            segment_id
+            for segment_id in route.segment_ids
+            if segment_by_id[segment_id].kind is TrackSegmentKind.STATION
+        )
+        if not station_segment_ids:
+            raise ValueError(f"service route {route.id!r} needs at least one station/platform segment")
+        platform_node_ids = _route_node_ids(station_segment_ids, segment_node_ids_by_id)
+        if route.allows_alighting:
+            alighting_node_ids.add(platform_node_ids[0])
+        if route.allows_boarding:
+            boarding_node_ids.add(platform_node_ids[-1])
+    return boarding_node_ids, alighting_node_ids
+
+
+def _route_node_ids(
+    segment_ids: tuple[str, ...],
+    segment_node_ids_by_id: dict[str, tuple[str, ...]],
+) -> tuple[str, ...]:
+    node_ids: list[str] = []
+    for segment_id in segment_ids:
+        segment_node_ids = segment_node_ids_by_id[segment_id]
+        if not node_ids:
+            node_ids.extend(segment_node_ids)
             continue
-        for segment_id in route.segment_ids:
-            segment = segment_by_id[segment_id]
-            from_node = physical_nodes_by_id[segment.from_node_id]
-            to_node = physical_nodes_by_id[segment.to_node_id]
-            if from_node.kind is PhysicalNodeKind.PLATFORM and to_node.kind is PhysicalNodeKind.PLATFORM:
-                service_segment_ids.add(segment_id)
-    return service_segment_ids
+        if node_ids[-1] != segment_node_ids[0]:
+            raise ValueError(f"station route is disconnected before segment {segment_id!r}")
+        node_ids.extend(segment_node_ids[1:])
+    if not node_ids:
+        raise ValueError("station route needs at least one node")
+    return tuple(node_ids)
 
 
 def _segment_station_id(

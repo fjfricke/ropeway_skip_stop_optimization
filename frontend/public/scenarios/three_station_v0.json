@@ -37,51 +37,39 @@
   ],
   "demands": [
     {
-      "arrival_time": "08:01",
-      "count": 20,
-      "destination": "R",
-      "origin": "L"
-    },
-    {
-      "arrival_time": "08:02",
-      "count": 4,
+      "arrival_time": "08:00",
+      "count": 580,
       "destination": "M",
       "origin": "L"
     },
     {
-      "arrival_time": "08:03",
-      "count": 5,
-      "destination": "R",
-      "origin": "M"
-    },
-    {
-      "arrival_time": "08:04",
-      "count": 6,
-      "destination": "L",
-      "origin": "R"
-    },
-    {
-      "arrival_time": "08:05",
-      "count": 3,
-      "destination": "M",
-      "origin": "R"
-    },
-    {
-      "arrival_time": "08:06",
-      "count": 4,
-      "destination": "L",
-      "origin": "M"
-    },
-    {
-      "arrival_time": "08:08",
-      "count": 5,
+      "arrival_time": "08:00",
+      "count": 580,
       "destination": "R",
       "origin": "L"
     },
     {
-      "arrival_time": "08:09",
-      "count": 5,
+      "arrival_time": "08:00",
+      "count": 580,
       "destination": "L",
+      "origin": "M"
+    },
+    {
+      "arrival_time": "08:00",
+      "count": 580,
+      "destination": "R",
+      "origin": "M"
+    },
+    {
+      "arrival_time": "08:00",
+      "count": 580,
+      "destination": "L",
+      "origin": "R"
+    },
+    {
+      "arrival_time": "08:00",
+      "count": 580,
+      "destination": "M",
       "origin": "R"
     }
   ],
@@ -324,7 +312,7 @@
     {
       "from_node_id": "L_entry_rl",
       "id": "L_turnaround_decelerate",
-      "kind": "station",
+      "kind": "connector",
       "length_m": 3.0,
       "resource_id": "L_service_turnaround",
       "speed_profile": {
@@ -352,7 +340,7 @@
     {
       "from_node_id": "L_platform_exit",
       "id": "L_turnaround_accelerate",
-      "kind": "station",
+      "kind": "connector",
       "length_m": 3.0,
       "resource_id": "L_service_turnaround",
       "speed_profile": {
@@ -366,7 +354,7 @@
     {
       "from_node_id": "R_entry_lr",
       "id": "R_turnaround_decelerate",
-      "kind": "station",
+      "kind": "connector",
       "length_m": 3.0,
       "resource_id": "R_service_turnaround",
       "speed_profile": {
@@ -394,7 +382,7 @@
     {
       "from_node_id": "R_platform_exit",
       "id": "R_turnaround_accelerate",
-      "kind": "station",
+      "kind": "connector",
       "length_m": 3.0,
       "resource_id": "R_service_turnaround",
       "speed_profile": {
@@ -464,7 +452,7 @@
     {
       "from_node_id": "M_entry_lr",
       "id": "M_lr_approach_fast",
-      "kind": "station",
+      "kind": "connector",
       "length_m": 5.0,
       "resource_id": "M_service_lr",
       "speed_profile": {
@@ -478,7 +466,7 @@
     {
       "from_node_id": "M_service_approach_lr",
       "id": "M_lr_brake",
-      "kind": "station",
+      "kind": "connector",
       "length_m": 3.0,
       "resource_id": "M_service_lr",
       "speed_profile": {
@@ -506,7 +494,7 @@
     {
       "from_node_id": "M_platform_exit_lr",
       "id": "M_lr_accelerate",
-      "kind": "station",
+      "kind": "connector",
       "length_m": 3.0,
       "resource_id": "M_service_lr",
       "speed_profile": {
@@ -520,7 +508,7 @@
     {
       "from_node_id": "M_service_accelerate_lr",
       "id": "M_lr_depart_fast",
-      "kind": "station",
+      "kind": "connector",
       "length_m": 5.0,
       "resource_id": "M_service_lr",
       "speed_profile": {
@@ -548,7 +536,7 @@
     {
       "from_node_id": "M_entry_rl",
       "id": "M_rl_approach_fast",
-      "kind": "station",
+      "kind": "connector",
       "length_m": 5.0,
       "resource_id": "M_service_rl",
       "speed_profile": {
@@ -562,7 +550,7 @@
     {
       "from_node_id": "M_service_approach_rl",
       "id": "M_rl_brake",
-      "kind": "station",
+      "kind": "connector",
       "length_m": 3.0,
       "resource_id": "M_service_rl",
       "speed_profile": {
@@ -590,7 +578,7 @@
     {
       "from_node_id": "M_platform_exit_rl",
       "id": "M_rl_accelerate",
-      "kind": "station",
+      "kind": "connector",
       "length_m": 3.0,
       "resource_id": "M_service_rl",
       "speed_profile": {
@@ -604,7 +592,7 @@
     {
       "from_node_id": "M_service_accelerate_rl",
       "id": "M_rl_depart_fast",
-      "kind": "station",
+      "kind": "connector",
       "length_m": 5.0,
       "resource_id": "M_service_rl",
       "speed_profile": {

@@ -23,6 +23,7 @@ class PhysicalNodeKind(Enum):
 class TrackSegmentKind(Enum):
     ROPE = "rope"
     STATION = "station"
+    CONNECTOR = "connector"
     SKIP = "skip"
 
 

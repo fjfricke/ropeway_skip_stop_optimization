@@ -58,6 +58,20 @@ def test_expected_segment_duration_steps() -> None:
     assert steps_by_segment_id["M_rl_skip_bypass"] == 28
 
 
+def test_only_platform_segments_are_station_kind() -> None:
+    scenario = build_three_station_scenario()
+    segment_kind_by_id = {segment.id: segment.kind.value for segment in scenario.track_segments}
+
+    assert segment_kind_by_id["L_turnaround_decelerate"] == "connector"
+    assert segment_kind_by_id["L_turnaround_platform"] == "station"
+    assert segment_kind_by_id["L_turnaround_accelerate"] == "connector"
+    assert segment_kind_by_id["M_lr_approach_fast"] == "connector"
+    assert segment_kind_by_id["M_lr_brake"] == "connector"
+    assert segment_kind_by_id["M_lr_platform"] == "station"
+    assert segment_kind_by_id["M_lr_accelerate"] == "connector"
+    assert segment_kind_by_id["M_lr_depart_fast"] == "connector"
+
+
 def test_segment_duration_steps_match_movement_arc_counts() -> None:
     scenario = build_three_station_scenario()
     discrete = discretize_scenario(scenario)
@@ -103,14 +117,12 @@ def test_demand_times_convert_exactly() -> None:
     demand_steps = [(demand.origin, demand.destination, demand.count, demand.time_step) for demand in discrete.demands]
 
     assert demand_steps == [
-        ("L", "R", 20, 120),
-        ("L", "M", 4, 240),
-        ("M", "R", 5, 360),
-        ("R", "L", 6, 480),
-        ("R", "M", 3, 600),
-        ("M", "L", 4, 720),
-        ("L", "R", 5, 960),
-        ("R", "L", 5, 1080),
+        ("L", "M", 580, 0),
+        ("L", "R", 580, 0),
+        ("M", "L", 580, 0),
+        ("M", "R", 580, 0),
+        ("R", "L", 580, 0),
+        ("R", "M", 580, 0),
     ]
 
 
@@ -135,6 +147,23 @@ def test_station_route_arcs_are_annotated() -> None:
     assert {arc.source_route_id for arc in move_arcs_by_segment_id["M_lr_skip_bypass"]} == {"M_skip_lr"}
     assert {arc.source_route_id for arc in move_arcs_by_segment_id["M_lr_platform"]} == {"M_service_lr"}
     assert {arc.source_route_id for arc in move_arcs_by_segment_id["L_exit_lr_to_M_entry_lr"]} == {None}
+
+
+def test_service_boarding_and_alighting_use_route_endpoints() -> None:
+    discrete = discretize_scenario(build_three_station_scenario())
+
+    assert {node.id for node in discrete.nodes if node.allows_alighting} == {
+        "pn::L_platform_entry",
+        "pn::M_platform_entry_lr",
+        "pn::M_platform_entry_rl",
+        "pn::R_platform_entry",
+    }
+    assert {node.id for node in discrete.nodes if node.allows_boarding} == {
+        "pn::L_platform_exit",
+        "pn::M_platform_exit_lr",
+        "pn::M_platform_exit_rl",
+        "pn::R_platform_exit",
+    }
 
 
 def test_all_stop_service_cycle_is_connected_and_closed() -> None:
