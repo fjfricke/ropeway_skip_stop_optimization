@@ -260,3 +260,91 @@ class ReplayResult:
         for state in self.final_cabin_loads:
             state.validate(cabin_capacity)
         self.summary.validate()
+
+
+@dataclass(frozen=True)
+class PassengerStationMetric:
+    station_id: str
+    count: int
+
+    def validate(self) -> None:
+        if not self.station_id:
+            raise ValueError("passenger station metric needs a station_id")
+        if self.count < 0:
+            raise ValueError("passenger station metric count must be nonnegative")
+
+
+@dataclass(frozen=True)
+class PassengerOdMetric:
+    origin: str
+    destination: str
+    count: int
+
+    def validate(self) -> None:
+        if not self.origin or not self.destination:
+            raise ValueError("passenger OD metric needs origin and destination")
+        if self.origin == self.destination:
+            raise ValueError("passenger OD metric origin and destination must differ")
+        if self.count < 0:
+            raise ValueError("passenger OD metric count must be nonnegative")
+
+
+@dataclass(frozen=True)
+class ReplayMetricsStep:
+    time_step: int
+    arrivals_count: int
+    boarding_count: int
+    alighting_count: int
+    waiting_count: int
+    onboard_count: int
+    cumulative_waiting_passenger_hours: float
+    waiting_by_station: tuple[PassengerStationMetric, ...]
+    onboard_by_od: tuple[PassengerOdMetric, ...]
+
+    def validate(self) -> None:
+        values = (
+            self.time_step,
+            self.arrivals_count,
+            self.boarding_count,
+            self.alighting_count,
+            self.waiting_count,
+            self.onboard_count,
+        )
+        if any(value < 0 for value in values):
+            raise ValueError("replay metrics step counts must be nonnegative")
+        if self.cumulative_waiting_passenger_hours < 0:
+            raise ValueError("cumulative_waiting_passenger_hours must be nonnegative")
+        for metric in self.waiting_by_station:
+            metric.validate()
+        for metric in self.onboard_by_od:
+            metric.validate()
+        if sum(metric.count for metric in self.waiting_by_station) != self.waiting_count:
+            raise ValueError("waiting_by_station does not sum to waiting_count")
+        if sum(metric.count for metric in self.onboard_by_od) != self.onboard_count:
+            raise ValueError("onboard_by_od does not sum to onboard_count")
+
+
+@dataclass(frozen=True)
+class ReplayMetrics:
+    discrete_scenario_id: str
+    movement_plan_horizon_steps: int
+    delta_seconds: float
+    steps: tuple[ReplayMetricsStep, ...]
+
+    def validate(self) -> None:
+        if not self.discrete_scenario_id:
+            raise ValueError("replay metrics needs a discrete_scenario_id")
+        if self.movement_plan_horizon_steps < 0:
+            raise ValueError("movement_plan_horizon_steps must be nonnegative")
+        if self.delta_seconds <= 0:
+            raise ValueError("delta_seconds must be positive")
+        if len(self.steps) != self.movement_plan_horizon_steps + 1:
+            raise ValueError("replay metrics needs horizon_steps + 1 steps")
+        previous_cumulative = 0.0
+        for expected_step, step in enumerate(self.steps):
+            step.validate()
+            if step.time_step != expected_step:
+                raise ValueError("replay metrics steps must be ordered by time_step")
+            if step.cumulative_waiting_passenger_hours < previous_cumulative:
+                raise ValueError("cumulative_waiting_passenger_hours must be monotonic")
+            previous_cumulative = step.cumulative_waiting_passenger_hours

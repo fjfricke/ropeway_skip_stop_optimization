@@ -1,6 +1,6 @@
 # Replay Metrics View
 
-Status: **not yet implemented**
+Status: **implemented v1**
 
 ## Goal
 
@@ -55,7 +55,7 @@ class ReplayMetricsStep:
     alighting_count: int
     waiting_count: int
     onboard_count: int
-    cumulative_waiting_passenger_seconds: float
+    cumulative_waiting_passenger_hours: float
     waiting_by_station: tuple[PassengerStationMetric, ...]
     onboard_by_od: tuple[PassengerOdMetric, ...]
 
@@ -115,12 +115,12 @@ For each `time_step`:
 - sum of `CabinLoadState.load_count` in `ReplayStepState.cabin_loads`
 - current passengers in transit after that step's replay processing
 
-`cumulative_waiting_passenger_seconds`
+`cumulative_waiting_passenger_hours`
 
 - running integral of queue length over time
-- update rule per step: `cumulative += waiting_count * delta_seconds`
+- update rule per step: `cumulative += waiting_count * delta_seconds / 3600`
 - includes passengers who are still waiting at the end of the horizon
-- displayed in the frontend as passenger-seconds
+- displayed in the frontend as passenger-hours
 
 Important: this is intentionally different from the current replay summary field `total_waiting_steps`, which only counts completed waiting time at boarding. The graph view needs operational waiting already accumulated by all currently waiting passengers, including passengers who might never board.
 
@@ -164,7 +164,7 @@ JSON shape:
       "alighting_count": 0,
       "waiting_count": 3480,
       "onboard_count": 0,
-      "cumulative_waiting_passenger_seconds": 1740.0,
+      "cumulative_waiting_passenger_hours": 0.48333333333333334,
       "waiting_by_station": [
         { "station_id": "L", "count": 1160 },
         { "station_id": "M", "count": 1160 },
@@ -219,15 +219,15 @@ v1 chart:
   - onboard_count
   - cumulative waiting time
 
-Because `cumulative_waiting_passenger_seconds` can be much larger than passenger counts, either:
+Because `cumulative_waiting_passenger_hours` can be much larger than passenger counts, either:
 
-- use a separate right-side axis for cumulative waiting seconds, or
+- use a separate right-side axis for cumulative passenger-hours, or
 - normalize it visually and show exact values in the tooltip.
 
 Recommendation for v1:
 
 - left axis: passenger counts
-- right axis: cumulative passenger-seconds
+- right axis: cumulative passenger-hours
 - all steps remain in JSON
 - frontend may downsample or aggregate only for SVG rendering density
 
@@ -242,7 +242,7 @@ Tooltip should show:
 - waiting by station
 - onboard
 - onboard by OD
-- cumulative waiting seconds
+- cumulative waiting passenger-hours
 
 ## Visual Style
 
@@ -270,8 +270,8 @@ Backend tests:
 
 - metrics length equals `horizon_steps + 1`
 - step `0` arrivals equals total demand for the current near-capacity example
-- cumulative waiting seconds is monotonic
-- final `cumulative_waiting_passenger_seconds` includes current queue waiting over the full horizon, not only boarded passengers
+- cumulative waiting passenger-hours is monotonic
+- final `cumulative_waiting_passenger_hours` includes current queue waiting over the full horizon, not only boarded passengers
 - final `waiting_count` equals replay summary `unserved_passengers`
 - final `onboard_count` equals replay summary `onboard_passengers`
 - `waiting_by_station` sums to `waiting_count`

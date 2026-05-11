@@ -5,6 +5,7 @@ import {
   Gauge,
   GitBranch,
   GitMerge,
+  LineChart,
   Link2,
   MoveRight,
   Network,
@@ -20,20 +21,23 @@ import { useMemo, useState } from "react";
 import { DemandPanel } from "./DemandPanel";
 import { GraphSlackView } from "./GraphSlackView";
 import { InspectorPanel } from "./InspectorPanel";
+import { MetricsView } from "./MetricsView";
 import { NetworkSvg } from "./NetworkSvg";
 import { ParametersPanel } from "./ParametersPanel";
 import { ReplayView } from "./ReplayView";
 import { threeStationLayout } from "../scenarioLayout";
-import type { DiscreteScenario, MovementPlan, PassengerReplayResult, Scenario, Selection } from "../types";
+import type { DiscreteScenario, MovementPlan, PassengerReplayResult, ReplayMetrics, Scenario, Selection } from "../types";
 
 interface ScenarioViewerProps {
   scenario: Scenario;
   discreteScenario: DiscreteScenario | null;
   movementPlan: MovementPlan | null;
   passengerReplay: PassengerReplayResult | null;
+  replayMetrics: ReplayMetrics | null;
   discreteWarning: string | null;
   movementPlanWarning: string | null;
   passengerReplayWarning: string | null;
+  replayMetricsWarning: string | null;
 }
 
 export interface ViewerToggles {
@@ -44,7 +48,7 @@ export interface ViewerToggles {
 }
 
 export type DiscreteOverlayMode = "selected" | "neighborhood";
-type ViewerMode = "scenario" | "graph" | "replay";
+type ViewerMode = "scenario" | "graph" | "metrics" | "replay";
 
 export interface DiscreteViewerToggles {
   enabled: boolean;
@@ -60,9 +64,11 @@ export function ScenarioViewer({
   discreteScenario,
   movementPlan,
   passengerReplay,
+  replayMetrics,
   discreteWarning,
   movementPlanWarning,
   passengerReplayWarning,
+  replayMetricsWarning,
 }: ScenarioViewerProps) {
   const [viewerMode, setViewerMode] = useState<ViewerMode>("scenario");
   const [selected, setSelected] = useState<Selection | null>(null);
@@ -138,6 +144,10 @@ export function ScenarioViewer({
         <button className={viewerMode === "graph" ? "is-active" : ""} onClick={() => setViewerMode("graph")}>
           <BarChart3 size={17} />
           Graph View
+        </button>
+        <button className={viewerMode === "metrics" ? "is-active" : ""} onClick={() => setViewerMode("metrics")}>
+          <LineChart size={17} />
+          Metrics View
         </button>
         <button className={viewerMode === "replay" ? "is-active" : ""} onClick={() => setViewerMode("replay")}>
           <PlayCircle size={17} />
@@ -286,6 +296,12 @@ export function ScenarioViewer({
       ) : (
         viewerMode === "graph" ? (
         <GraphSlackView scenario={scenario} discreteScenario={discreteScenario} />
+        ) : viewerMode === "metrics" ? (
+          <MetricsView
+            scenario={scenario}
+            replayMetrics={replayMetrics}
+            replayMetricsWarning={replayMetricsWarning}
+          />
         ) : (
           <ReplayView
             scenario={scenario}

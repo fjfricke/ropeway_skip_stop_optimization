@@ -263,6 +263,36 @@ export interface PassengerReplayResult {
   summary: ReplaySummary;
 }
 
+export interface PassengerStationMetric {
+  station_id: string;
+  count: number;
+}
+
+export interface PassengerOdMetric {
+  origin: string;
+  destination: string;
+  count: number;
+}
+
+export interface ReplayMetricsStep {
+  time_step: number;
+  arrivals_count: number;
+  boarding_count: number;
+  alighting_count: number;
+  waiting_count: number;
+  onboard_count: number;
+  cumulative_waiting_passenger_hours: number;
+  waiting_by_station: PassengerStationMetric[];
+  onboard_by_od: PassengerOdMetric[];
+}
+
+export interface ReplayMetrics {
+  discrete_scenario_id: string;
+  movement_plan_horizon_steps: number;
+  delta_seconds: number;
+  steps: ReplayMetricsStep[];
+}
+
 export type Selection =
   | { type: "node"; id: string }
   | { type: "segment"; id: string }
