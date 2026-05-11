@@ -8,6 +8,7 @@ from ropeway_skip_stop_optimization.export_scenarios import (
     export_three_station_greedy_all_stop_passenger_replay,
     export_three_station_greedy_all_stop_replay_metrics,
     export_three_station_greedy_all_stop_movement_plan,
+    export_three_station_milp_v0_movement_plan,
 )
 
 
@@ -66,3 +67,18 @@ def test_exports_greedy_all_stop_replay_metrics_json(tmp_path) -> None:
     assert payload["steps"][6]["onboard_count"] == 8
     assert payload["steps"][-1]["waiting_count"] == 0
     assert payload["steps"][-1]["onboard_count"] == 0
+
+
+def test_exports_milp_v0_movement_plan_json(tmp_path) -> None:
+    pytest.importorskip("gurobipy")
+
+    output_path = export_three_station_milp_v0_movement_plan(tmp_path, horizon_steps=2, cabin_count=2)
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert output_path.name == "three_station_v0__dt_0p5__milp_v0_movement_plan_c2_h2.json"
+    assert payload["movement_plan"]["discrete_scenario_id"] == "three_station_v0__dt_0p5"
+    assert payload["movement_plan"]["horizon_steps"] == 2
+    assert len(payload["movement_plan"]["trajectories"]) == 2
+    assert len(payload["movement_plan"]["trajectories"][0]["positions"]) == 3
+    assert payload["metadata"]["status"] == "optimal"
+    assert len(payload["metadata"]["selected_arc_ids_by_cabin"]["0"]) == 2

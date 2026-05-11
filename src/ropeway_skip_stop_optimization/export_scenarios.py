@@ -8,8 +8,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Any
 
-from ropeway_skip_stop_optimization.baselines import build_maximal_greedy_all_stop_circulation_plan
+from ropeway_skip_stop_optimization.baselines import (
+    build_all_stop_cycle_path,
+    build_maximal_greedy_all_stop_circulation_plan,
+    greedy_place_max_cabins_on_cycle,
+)
 from ropeway_skip_stop_optimization.examples import build_three_station_scenario
+from ropeway_skip_stop_optimization.optimization import FixedCabinStart, MilpV0Config, solve_milp_v0
 from ropeway_skip_stop_optimization.preprocessing.discretize import discretize_scenario
 from ropeway_skip_stop_optimization.replay import build_replay_metrics, replay_passenger_boarding
 from ropeway_skip_stop_optimization.validation import validate_scenario
@@ -109,6 +114,47 @@ def export_three_station_greedy_all_stop_replay_metrics(output_dir: Path) -> Pat
     return output_path
 
 
+def export_three_station_milp_v0_movement_plan(
+    output_dir: Path,
+    *,
+    horizon_steps: int = 60,
+    cabin_count: int = 23,
+) -> Path:
+    scenario = build_three_station_scenario()
+    validate_scenario(scenario).raise_for_errors()
+    discrete = discretize_scenario(scenario)
+    if horizon_steps > discrete.horizon_steps:
+        raise ValueError("MILP v0 export horizon_steps exceeds discrete scenario horizon")
+
+    path = build_all_stop_cycle_path(discrete)
+    start_indices = greedy_place_max_cabins_on_cycle(discrete, path.node_ids)
+    if cabin_count > len(start_indices):
+        raise ValueError(f"MILP v0 export requested {cabin_count} cabins, but only {len(start_indices)} fit")
+    fixed_starts = tuple(
+        FixedCabinStart(cabin_id=cabin_id, node_id=path.node_ids[start_index])
+        for cabin_id, start_index in enumerate(start_indices[:cabin_count])
+    )
+    result = solve_milp_v0(
+        discrete,
+        MilpV0Config(
+            horizon_steps=horizon_steps,
+            fixed_starts=fixed_starts,
+        ),
+    )
+    if result.movement_plan is None:
+        raise ValueError(f"MILP v0 did not produce a movement plan; status={result.metadata.status}")
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / f"{discrete.id}__milp_v0_movement_plan_c{cabin_count}_h{horizon_steps}.json"
+    payload = {
+        "movement_plan": scenario_to_jsonable(result.movement_plan),
+        "metadata": scenario_to_jsonable(result.metadata),
+    }
+
+    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return output_path
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Export built-in ropeway scenarios as static JSON.")
     parser.add_argument(
@@ -124,6 +170,7 @@ def main() -> None:
         export_three_station_greedy_all_stop_movement_plan(args.output_dir),
         export_three_station_greedy_all_stop_passenger_replay(args.output_dir),
         export_three_station_greedy_all_stop_replay_metrics(args.output_dir),
+        export_three_station_milp_v0_movement_plan(args.output_dir),
     )
     for output_path in output_paths:
         print(output_path)

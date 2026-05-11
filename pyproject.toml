@@ -7,7 +7,9 @@ authors = [
     { name = "Felix Fricke", email = "felix@frickefamily.de" }
 ]
 requires-python = ">=3.12"
-dependencies = []
+dependencies = [
+    "gurobipy>=13.0.2",
+]
 
 [project.scripts]
 ropeway-skip-stop-optimization = "ropeway_skip_stop_optimization:main"
