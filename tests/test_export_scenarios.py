@@ -10,6 +10,7 @@ from ropeway_skip_stop_optimization.export_scenarios import (
     export_three_station_greedy_all_stop_movement_plan,
     export_three_station_milp_v0_movement_plan,
 )
+from ropeway_skip_stop_optimization.optimization import MilpV0VariableStrategy
 
 
 def test_exports_greedy_all_stop_movement_plan_json(tmp_path) -> None:
@@ -75,10 +76,29 @@ def test_exports_milp_v0_movement_plan_json(tmp_path) -> None:
     output_path = export_three_station_milp_v0_movement_plan(tmp_path, horizon_steps=2, cabin_count=2)
     payload = json.loads(output_path.read_text(encoding="utf-8"))
 
-    assert output_path.name == "three_station_v0__dt_0p5__milp_v0_movement_plan_c2_h2.json"
+    assert output_path.name == "three_station_v0__dt_0p5__milp_v0_dense_movement_plan_c2_h2.json"
     assert payload["movement_plan"]["discrete_scenario_id"] == "three_station_v0__dt_0p5"
     assert payload["movement_plan"]["horizon_steps"] == 2
     assert len(payload["movement_plan"]["trajectories"]) == 2
     assert len(payload["movement_plan"]["trajectories"][0]["positions"]) == 3
     assert payload["metadata"]["status"] == "optimal"
     assert len(payload["metadata"]["selected_arc_ids_by_cabin"]["0"]) == 2
+
+
+def test_exports_sparse_milp_v0_movement_plan_json(tmp_path) -> None:
+    pytest.importorskip("gurobipy")
+
+    output_path = export_three_station_milp_v0_movement_plan(
+        tmp_path,
+        horizon_steps=2,
+        cabin_count=2,
+        variable_strategy=MilpV0VariableStrategy.SPARSE_REACHABILITY,
+    )
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert output_path.name == "three_station_v0__dt_0p5__milp_v0_sparse_movement_plan_c2_h2.json"
+    assert payload["movement_plan"]["discrete_scenario_id"] == "three_station_v0__dt_0p5"
+    assert payload["movement_plan"]["horizon_steps"] == 2
+    assert len(payload["movement_plan"]["trajectories"]) == 2
+    assert payload["metadata"]["status"] == "optimal"
+    assert payload["metadata"]["variable_count"] < 2 * 3 * 406 + 2 * 2 * 410

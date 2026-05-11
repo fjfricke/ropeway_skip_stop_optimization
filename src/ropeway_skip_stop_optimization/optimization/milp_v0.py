@@ -13,16 +13,25 @@ from ropeway_skip_stop_optimization.optimization.models import (
     MilpMovementPlanResult,
     MilpSolveMetadata,
     MilpV0Config,
+    MilpV0VariableStrategy,
 )
 from ropeway_skip_stop_optimization.optimization.movement_plan_validation import (
     validate_optimized_movement_plan,
 )
+from ropeway_skip_stop_optimization.optimization.variable_index import (
+    build_dense_milp_v0_variable_index,
+    build_sparse_reachability_milp_v0_variable_index,
+)
+from ropeway_skip_stop_optimization.progress import ProgressReporter
 
 
 def solve_milp_v0(
     discrete_scenario: DiscreteScenario,
     config: MilpV0Config,
+    *,
+    progress: ProgressReporter | None = None,
 ) -> MilpMovementPlanResult:
+    progress = progress or ProgressReporter()
     try:
         import gurobipy as gp
         from gurobipy import GRB
@@ -33,88 +42,113 @@ def solve_milp_v0(
     if config.horizon_steps > discrete_scenario.horizon_steps:
         raise ValueError("MILP v0 horizon_steps exceeds discrete scenario horizon")
 
-    index = build_discrete_graph_index(discrete_scenario)
-    allowed_arc_ids = _allowed_arc_ids(discrete_scenario, config)
+    with progress.phase("milp_v0.build_graph_index"):
+        index = build_discrete_graph_index(discrete_scenario)
+    with progress.phase("milp_v0.allowed_arcs"):
+        allowed_arc_ids = _allowed_arc_ids(discrete_scenario, config)
     active_cabin_ids = tuple(start.cabin_id for start in config.fixed_starts)
     fixed_start_by_cabin = {start.cabin_id: start.node_id for start in config.fixed_starts}
     missing_start_nodes = set(fixed_start_by_cabin.values()) - index.nodes_by_id.keys()
     if missing_start_nodes:
         raise ValueError(f"MILP v0 fixed starts reference unknown nodes: {missing_start_nodes}")
+    if config.variable_strategy is MilpV0VariableStrategy.DENSE:
+        with progress.phase("milp_v0.build_dense_variable_index"):
+            variable_index = build_dense_milp_v0_variable_index(
+                index,
+                config.fixed_starts,
+                allowed_arc_ids,
+                config.horizon_steps,
+            )
+    elif config.variable_strategy is MilpV0VariableStrategy.SPARSE_REACHABILITY:
+        with progress.phase("milp_v0.build_sparse_variable_index"):
+            variable_index = build_sparse_reachability_milp_v0_variable_index(
+                index,
+                config.fixed_starts,
+                allowed_arc_ids,
+                config.horizon_steps,
+                progress=progress,
+            )
+    else:
+        raise NotImplementedError(f"MILP v0 variable strategy {config.variable_strategy.value!r} is not implemented")
 
-    model = gp.Model("ropeway_milp_v0")
-    x = model.addVars(
-        active_cabin_ids,
-        range(config.horizon_steps + 1),
-        tuple(index.nodes_by_id),
-        vtype=GRB.BINARY,
-        name="x",
-    )
-    y = model.addVars(
-        active_cabin_ids,
-        range(config.horizon_steps),
-        allowed_arc_ids,
-        vtype=GRB.BINARY,
-        name="y",
-    )
+    with progress.phase(
+        f"milp_v0.create_variables x={len(variable_index.x_keys)} y={len(variable_index.y_keys)}"
+    ):
+        model = gp.Model("ropeway_milp_v0")
+        x = model.addVars(variable_index.x_keys, vtype=GRB.BINARY, name="x")
+        y = model.addVars(variable_index.y_keys, vtype=GRB.BINARY, name="y")
 
-    for cabin_id in active_cabin_ids:
+    with progress.phase("milp_v0.add_position_constraints"):
+        for cabin_id in progress.iter(active_cabin_ids, label="position constraints", total=len(active_cabin_ids)):
+            for time_step in range(config.horizon_steps + 1):
+                model.addConstr(
+                    gp.quicksum(
+                        x[cabin_id, time_step, node_id]
+                        for node_id in variable_index.node_ids_by_cabin_time[cabin_id, time_step]
+                    )
+                    == 1,
+                    name=f"position_once[{cabin_id},{time_step}]",
+                )
+
+    with progress.phase("milp_v0.add_flow_constraints"):
+        for cabin_id in progress.iter(active_cabin_ids, label="flow constraints", total=len(active_cabin_ids)):
+            for time_step in range(config.horizon_steps):
+                for node_id in variable_index.node_ids_by_cabin_time[cabin_id, time_step]:
+                    out_arc_ids = variable_index.out_arc_ids_by_cabin_time_node[cabin_id, time_step, node_id]
+                    model.addConstr(
+                        gp.quicksum(y[cabin_id, time_step, arc_id] for arc_id in out_arc_ids)
+                        == x[cabin_id, time_step, node_id],
+                        name=f"outgoing[{cabin_id},{time_step},{node_id}]",
+                    )
+
+            for time_step in range(1, config.horizon_steps + 1):
+                for node_id in variable_index.node_ids_by_cabin_time[cabin_id, time_step]:
+                    in_arc_ids = variable_index.in_arc_ids_by_cabin_time_node[cabin_id, time_step, node_id]
+                    model.addConstr(
+                        gp.quicksum(y[cabin_id, time_step - 1, arc_id] for arc_id in in_arc_ids)
+                        == x[cabin_id, time_step, node_id],
+                        name=f"incoming[{cabin_id},{time_step},{node_id}]",
+                    )
+
+    with progress.phase("milp_v0.add_initial_constraints"):
+        for cabin_id, node_id in fixed_start_by_cabin.items():
+            model.addConstr(x[cabin_id, 0, node_id] == 1, name=f"initial[{cabin_id}]")
+
+    with progress.phase("milp_v0.add_conflict_constraints"):
         for time_step in range(config.horizon_steps + 1):
-            model.addConstr(
-                gp.quicksum(x[cabin_id, time_step, node_id] for node_id in index.nodes_by_id) == 1,
-                name=f"position_once[{cabin_id},{time_step}]",
-            )
-
-    allowed_arc_id_set = set(allowed_arc_ids)
-    for cabin_id in active_cabin_ids:
-        for time_step in range(config.horizon_steps):
             for node_id in index.nodes_by_id:
-                out_arc_ids = tuple(
-                    arc_id
-                    for arc_id in index.out_arc_ids_by_node_id[node_id]
-                    if arc_id in allowed_arc_id_set
-                )
+                participants = [
+                    x[cabin_id, time_step, node_id]
+                    for cabin_id in active_cabin_ids
+                    if (cabin_id, time_step, node_id) in x
+                ]
+                if len(participants) < 2:
+                    continue
                 model.addConstr(
-                    gp.quicksum(y[cabin_id, time_step, arc_id] for arc_id in out_arc_ids)
-                    == x[cabin_id, time_step, node_id],
-                    name=f"outgoing[{cabin_id},{time_step},{node_id}]",
+                    gp.quicksum(participants) <= 1,
+                    name=f"node_occupancy[{time_step},{node_id}]",
                 )
-                in_arc_ids = tuple(
-                    arc_id
-                    for arc_id in index.in_arc_ids_by_node_id[node_id]
-                    if arc_id in allowed_arc_id_set
-                )
-                model.addConstr(
-                    gp.quicksum(y[cabin_id, time_step, arc_id] for arc_id in in_arc_ids)
-                    == x[cabin_id, time_step + 1, node_id],
-                    name=f"incoming[{cabin_id},{time_step},{node_id}]",
-                )
-
-    for cabin_id, node_id in fixed_start_by_cabin.items():
-        model.addConstr(x[cabin_id, 0, node_id] == 1, name=f"initial[{cabin_id}]")
-
-    for time_step in range(config.horizon_steps + 1):
-        for node_id in index.nodes_by_id:
-            model.addConstr(
-                gp.quicksum(x[cabin_id, time_step, node_id] for cabin_id in active_cabin_ids) <= 1,
-                name=f"node_occupancy[{time_step},{node_id}]",
-            )
-        for constraint in discrete_scenario.constraints:
-            if constraint.strength is not DiscreteConstraintStrength.HARD:
-                continue
-            if not constraint.node_ids:
-                continue
-            model.addConstr(
-                gp.quicksum(
+            for constraint in discrete_scenario.constraints:
+                if constraint.strength is not DiscreteConstraintStrength.HARD:
+                    continue
+                if not constraint.node_ids:
+                    continue
+                participants = [
                     x[cabin_id, time_step, node_id]
                     for cabin_id in active_cabin_ids
                     for node_id in constraint.node_ids
+                    if (cabin_id, time_step, node_id) in x
+                ]
+                if len(participants) < 2:
+                    continue
+                model.addConstr(
+                    gp.quicksum(participants) <= 1,
+                    name=f"conflict[{constraint.kind.value},{constraint.scope.value},{constraint.id},{time_step}]",
                 )
-                <= 1,
-                name=f"conflict[{constraint.kind.value},{constraint.scope.value},{constraint.id},{time_step}]",
-            )
 
-    model.setObjective(0.0, GRB.MINIMIZE)
-    model.optimize()
+    with progress.phase("milp_v0.optimize"):
+        model.setObjective(0.0, GRB.MINIMIZE)
+        model.optimize()
 
     status = _status_name(GRB, model.Status)
     objective_value = model.ObjVal if model.SolCount > 0 else None
@@ -132,48 +166,50 @@ def solve_milp_v0(
 
     selected_arc_ids_by_cabin: dict[int, tuple[str, ...]] = {}
     trajectories: list[CabinTrajectory] = []
-    for cabin_id in active_cabin_ids:
-        positions: list[CabinPosition] = []
-        selected_arc_ids: list[str] = []
-        for time_step in range(config.horizon_steps + 1):
-            selected_node_id = _selected_id(
-                node_id
-                for node_id in index.nodes_by_id
-                if x[cabin_id, time_step, node_id].X > 0.5
-            )
-            incoming_arc_id = None
-            if time_step > 0:
-                incoming_arc_id = selected_arc_ids[-1]
-            positions.append(
-                CabinPosition(
-                    time_step=time_step,
-                    node_id=selected_node_id,
-                    incoming_arc_id=incoming_arc_id,
+    with progress.phase("milp_v0.extract_solution"):
+        for cabin_id in progress.iter(active_cabin_ids, label="extract solution", total=len(active_cabin_ids)):
+            positions: list[CabinPosition] = []
+            selected_arc_ids: list[str] = []
+            for time_step in range(config.horizon_steps + 1):
+                selected_node_id = _selected_id(
+                    node_id
+                    for node_id in variable_index.node_ids_by_cabin_time[cabin_id, time_step]
+                    if x[cabin_id, time_step, node_id].X > 0.5
                 )
-            )
-            if time_step < config.horizon_steps:
-                selected_arc_ids.append(
-                    _selected_id(
-                        arc_id
-                        for arc_id in allowed_arc_ids
-                        if y[cabin_id, time_step, arc_id].X > 0.5
+                incoming_arc_id = None
+                if time_step > 0:
+                    incoming_arc_id = selected_arc_ids[-1]
+                positions.append(
+                    CabinPosition(
+                        time_step=time_step,
+                        node_id=selected_node_id,
+                        incoming_arc_id=incoming_arc_id,
                     )
                 )
-        selected_arc_ids_by_cabin[cabin_id] = tuple(selected_arc_ids)
-        trajectories.append(CabinTrajectory(cabin_id=cabin_id, positions=tuple(positions)))
+                if time_step < config.horizon_steps:
+                    selected_arc_ids.append(
+                        _selected_id(
+                            arc_id
+                            for arc_id in variable_index.arc_ids_by_cabin_time[cabin_id, time_step]
+                            if y[cabin_id, time_step, arc_id].X > 0.5
+                        )
+                    )
+            selected_arc_ids_by_cabin[cabin_id] = tuple(selected_arc_ids)
+            trajectories.append(CabinTrajectory(cabin_id=cabin_id, positions=tuple(positions)))
 
     movement_plan = MovementPlan(
         discrete_scenario_id=discrete_scenario.id,
         horizon_steps=config.horizon_steps,
         trajectories=tuple(trajectories),
     )
-    validation = validate_optimized_movement_plan(
-        discrete_scenario,
-        movement_plan,
-        fixed_starts=config.fixed_starts,
-        selected_arc_ids_by_cabin=selected_arc_ids_by_cabin,
-    )
-    validation.raise_for_errors()
+    with progress.phase("milp_v0.validate_solution"):
+        validation = validate_optimized_movement_plan(
+            discrete_scenario,
+            movement_plan,
+            fixed_starts=config.fixed_starts,
+            selected_arc_ids_by_cabin=selected_arc_ids_by_cabin,
+        )
+        validation.raise_for_errors()
 
     return MilpMovementPlanResult(
         movement_plan=movement_plan,

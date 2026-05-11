@@ -14,8 +14,14 @@ from ropeway_skip_stop_optimization.baselines import (
     greedy_place_max_cabins_on_cycle,
 )
 from ropeway_skip_stop_optimization.examples import build_three_station_scenario
-from ropeway_skip_stop_optimization.optimization import FixedCabinStart, MilpV0Config, solve_milp_v0
+from ropeway_skip_stop_optimization.optimization import (
+    FixedCabinStart,
+    MilpV0Config,
+    MilpV0VariableStrategy,
+    solve_milp_v0,
+)
 from ropeway_skip_stop_optimization.preprocessing.discretize import discretize_scenario
+from ropeway_skip_stop_optimization.progress import ProgressReporter, configure_progress_logging
 from ropeway_skip_stop_optimization.replay import build_replay_metrics, replay_passenger_boarding
 from ropeway_skip_stop_optimization.validation import validate_scenario
 
@@ -34,83 +40,114 @@ def scenario_to_jsonable(value: Any) -> Any:
     return value
 
 
-def export_three_station_scenario(output_dir: Path) -> Path:
-    scenario = build_three_station_scenario()
-    validate_scenario(scenario).raise_for_errors()
+def export_three_station_scenario(output_dir: Path, *, progress: bool | ProgressReporter = False) -> Path:
+    reporter = _progress_reporter(progress)
+    with reporter.phase("export_three_station_scenario.build_and_validate"):
+        scenario = build_three_station_scenario()
+        validate_scenario(scenario).raise_for_errors()
 
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{scenario.id}.json"
-    payload = scenario_to_jsonable(scenario)
-    payload["scenario_id"] = payload.pop("id")
+    with reporter.phase("export_three_station_scenario.serialize"):
+        payload = scenario_to_jsonable(scenario)
+        payload["scenario_id"] = payload.pop("id")
 
-    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_json(output_path, payload, reporter)
     return output_path
 
 
-def export_three_station_discrete_scenario(output_dir: Path) -> Path:
-    scenario = build_three_station_scenario()
-    validate_scenario(scenario).raise_for_errors()
-    discrete = discretize_scenario(scenario)
+def export_three_station_discrete_scenario(output_dir: Path, *, progress: bool | ProgressReporter = False) -> Path:
+    reporter = _progress_reporter(progress)
+    with reporter.phase("export_three_station_discrete_scenario.build_and_validate"):
+        scenario = build_three_station_scenario()
+        validate_scenario(scenario).raise_for_errors()
+    with reporter.phase("export_three_station_discrete_scenario.discretize"):
+        discrete = discretize_scenario(scenario)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{discrete.id}.json"
-    payload = scenario_to_jsonable(discrete)
+    with reporter.phase("export_three_station_discrete_scenario.serialize"):
+        payload = scenario_to_jsonable(discrete)
 
-    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_json(output_path, payload, reporter)
     return output_path
 
 
-def export_three_station_greedy_all_stop_movement_plan(output_dir: Path) -> Path:
-    scenario = build_three_station_scenario()
-    validate_scenario(scenario).raise_for_errors()
-    discrete = discretize_scenario(scenario)
-    plan = build_maximal_greedy_all_stop_circulation_plan(
-        discrete,
-        horizon_steps=discrete.horizon_steps,
-    )
+def export_three_station_greedy_all_stop_movement_plan(
+    output_dir: Path,
+    *,
+    progress: bool | ProgressReporter = False,
+) -> Path:
+    reporter = _progress_reporter(progress)
+    with reporter.phase("export_three_station_greedy_all_stop_movement_plan.build_and_discretize"):
+        scenario = build_three_station_scenario()
+        validate_scenario(scenario).raise_for_errors()
+        discrete = discretize_scenario(scenario)
+    with reporter.phase("export_three_station_greedy_all_stop_movement_plan.build_plan"):
+        plan = build_maximal_greedy_all_stop_circulation_plan(
+            discrete,
+            horizon_steps=discrete.horizon_steps,
+        )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{discrete.id}__greedy_all_stop_movement_plan.json"
-    payload = scenario_to_jsonable(plan)
+    with reporter.phase("export_three_station_greedy_all_stop_movement_plan.serialize"):
+        payload = scenario_to_jsonable(plan)
 
-    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_json(output_path, payload, reporter)
     return output_path
 
 
-def export_three_station_greedy_all_stop_passenger_replay(output_dir: Path) -> Path:
-    scenario = build_three_station_scenario()
-    validate_scenario(scenario).raise_for_errors()
-    discrete = discretize_scenario(scenario)
-    plan = build_maximal_greedy_all_stop_circulation_plan(
-        discrete,
-        horizon_steps=discrete.horizon_steps,
-    )
-    replay = replay_passenger_boarding(discrete, plan)
+def export_three_station_greedy_all_stop_passenger_replay(
+    output_dir: Path,
+    *,
+    progress: bool | ProgressReporter = False,
+) -> Path:
+    reporter = _progress_reporter(progress)
+    with reporter.phase("export_three_station_greedy_all_stop_passenger_replay.build_plan"):
+        scenario = build_three_station_scenario()
+        validate_scenario(scenario).raise_for_errors()
+        discrete = discretize_scenario(scenario)
+        plan = build_maximal_greedy_all_stop_circulation_plan(
+            discrete,
+            horizon_steps=discrete.horizon_steps,
+        )
+    with reporter.phase("export_three_station_greedy_all_stop_passenger_replay.replay"):
+        replay = replay_passenger_boarding(discrete, plan)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{discrete.id}__greedy_all_stop_passenger_replay.json"
-    payload = scenario_to_jsonable(replay)
+    with reporter.phase("export_three_station_greedy_all_stop_passenger_replay.serialize"):
+        payload = scenario_to_jsonable(replay)
 
-    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_json(output_path, payload, reporter)
     return output_path
 
 
-def export_three_station_greedy_all_stop_replay_metrics(output_dir: Path) -> Path:
-    scenario = build_three_station_scenario()
-    validate_scenario(scenario).raise_for_errors()
-    discrete = discretize_scenario(scenario)
-    plan = build_maximal_greedy_all_stop_circulation_plan(
-        discrete,
-        horizon_steps=discrete.horizon_steps,
-    )
-    replay = replay_passenger_boarding(discrete, plan)
-    metrics = build_replay_metrics(discrete, replay)
+def export_three_station_greedy_all_stop_replay_metrics(
+    output_dir: Path,
+    *,
+    progress: bool | ProgressReporter = False,
+) -> Path:
+    reporter = _progress_reporter(progress)
+    with reporter.phase("export_three_station_greedy_all_stop_replay_metrics.build_replay"):
+        scenario = build_three_station_scenario()
+        validate_scenario(scenario).raise_for_errors()
+        discrete = discretize_scenario(scenario)
+        plan = build_maximal_greedy_all_stop_circulation_plan(
+            discrete,
+            horizon_steps=discrete.horizon_steps,
+        )
+        replay = replay_passenger_boarding(discrete, plan)
+    with reporter.phase("export_three_station_greedy_all_stop_replay_metrics.build_metrics"):
+        metrics = build_replay_metrics(discrete, replay)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     output_path = output_dir / f"{discrete.id}__greedy_all_stop_replay_metrics.json"
-    payload = scenario_to_jsonable(metrics)
+    with reporter.phase("export_three_station_greedy_all_stop_replay_metrics.serialize"):
+        payload = scenario_to_jsonable(metrics)
 
-    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_json(output_path, payload, reporter)
     return output_path
 
 
@@ -119,40 +156,64 @@ def export_three_station_milp_v0_movement_plan(
     *,
     horizon_steps: int = 60,
     cabin_count: int = 23,
+    variable_strategy: MilpV0VariableStrategy = MilpV0VariableStrategy.DENSE,
+    progress: bool | ProgressReporter = False,
 ) -> Path:
-    scenario = build_three_station_scenario()
-    validate_scenario(scenario).raise_for_errors()
-    discrete = discretize_scenario(scenario)
+    reporter = _progress_reporter(progress)
+    with reporter.phase("export_three_station_milp_v0_movement_plan.build_and_discretize"):
+        scenario = build_three_station_scenario()
+        validate_scenario(scenario).raise_for_errors()
+        discrete = discretize_scenario(scenario)
     if horizon_steps > discrete.horizon_steps:
         raise ValueError("MILP v0 export horizon_steps exceeds discrete scenario horizon")
 
-    path = build_all_stop_cycle_path(discrete)
-    start_indices = greedy_place_max_cabins_on_cycle(discrete, path.node_ids)
-    if cabin_count > len(start_indices):
-        raise ValueError(f"MILP v0 export requested {cabin_count} cabins, but only {len(start_indices)} fit")
-    fixed_starts = tuple(
-        FixedCabinStart(cabin_id=cabin_id, node_id=path.node_ids[start_index])
-        for cabin_id, start_index in enumerate(start_indices[:cabin_count])
-    )
-    result = solve_milp_v0(
-        discrete,
-        MilpV0Config(
-            horizon_steps=horizon_steps,
-            fixed_starts=fixed_starts,
-        ),
-    )
+    with reporter.phase("export_three_station_milp_v0_movement_plan.fixed_starts"):
+        path = build_all_stop_cycle_path(discrete)
+        start_indices = greedy_place_max_cabins_on_cycle(discrete, path.node_ids)
+        if cabin_count > len(start_indices):
+            raise ValueError(f"MILP v0 export requested {cabin_count} cabins, but only {len(start_indices)} fit")
+        fixed_starts = tuple(
+            FixedCabinStart(cabin_id=cabin_id, node_id=path.node_ids[start_index])
+            for cabin_id, start_index in enumerate(start_indices[:cabin_count])
+        )
+    with reporter.phase(
+        f"export_three_station_milp_v0_movement_plan.solve strategy={variable_strategy.value} "
+        f"cabins={cabin_count} horizon={horizon_steps}"
+    ):
+        result = solve_milp_v0(
+            discrete,
+            MilpV0Config(
+                horizon_steps=horizon_steps,
+                fixed_starts=fixed_starts,
+                variable_strategy=variable_strategy,
+            ),
+            progress=reporter,
+        )
     if result.movement_plan is None:
         raise ValueError(f"MILP v0 did not produce a movement plan; status={result.metadata.status}")
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = output_dir / f"{discrete.id}__milp_v0_movement_plan_c{cabin_count}_h{horizon_steps}.json"
-    payload = {
-        "movement_plan": scenario_to_jsonable(result.movement_plan),
-        "metadata": scenario_to_jsonable(result.metadata),
-    }
+    strategy_label = "sparse" if variable_strategy is MilpV0VariableStrategy.SPARSE_REACHABILITY else "dense"
+    output_path = output_dir / f"{discrete.id}__milp_v0_{strategy_label}_movement_plan_c{cabin_count}_h{horizon_steps}.json"
+    with reporter.phase("export_three_station_milp_v0_movement_plan.serialize"):
+        payload = {
+            "movement_plan": scenario_to_jsonable(result.movement_plan),
+            "metadata": scenario_to_jsonable(result.metadata),
+        }
 
-    output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    _write_json(output_path, payload, reporter)
     return output_path
+
+
+def _progress_reporter(progress: bool | ProgressReporter) -> ProgressReporter:
+    if isinstance(progress, ProgressReporter):
+        return progress
+    return ProgressReporter(enabled=progress)
+
+
+def _write_json(output_path: Path, payload: Any, reporter: ProgressReporter) -> None:
+    with reporter.phase(f"write_json {output_path.name}"):
+        output_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
 def main() -> None:
@@ -163,14 +224,42 @@ def main() -> None:
         default=Path("frontend/public/scenarios"),
         help="Directory for exported scenario JSON files.",
     )
+    parser.add_argument("--progress", action="store_true", help="Show export phase logs and progress bars.")
+    parser.add_argument(
+        "--milp-horizon",
+        type=int,
+        default=60,
+        help="Horizon for the built-in MILP v0 movement-plan export.",
+    )
+    parser.add_argument(
+        "--milp-cabin-count",
+        type=int,
+        default=23,
+        help="Number of cabins for the built-in MILP v0 movement-plan export.",
+    )
+    parser.add_argument(
+        "--milp-variable-strategy",
+        choices=tuple(strategy.value for strategy in MilpV0VariableStrategy),
+        default=MilpV0VariableStrategy.DENSE.value,
+        help="Variable strategy for the built-in MILP v0 movement-plan export.",
+    )
     args = parser.parse_args()
+    if args.progress:
+        configure_progress_logging()
+    reporter = ProgressReporter(enabled=args.progress)
     output_paths = (
-        export_three_station_scenario(args.output_dir),
-        export_three_station_discrete_scenario(args.output_dir),
-        export_three_station_greedy_all_stop_movement_plan(args.output_dir),
-        export_three_station_greedy_all_stop_passenger_replay(args.output_dir),
-        export_three_station_greedy_all_stop_replay_metrics(args.output_dir),
-        export_three_station_milp_v0_movement_plan(args.output_dir),
+        export_three_station_scenario(args.output_dir, progress=reporter),
+        export_three_station_discrete_scenario(args.output_dir, progress=reporter),
+        export_three_station_greedy_all_stop_movement_plan(args.output_dir, progress=reporter),
+        export_three_station_greedy_all_stop_passenger_replay(args.output_dir, progress=reporter),
+        export_three_station_greedy_all_stop_replay_metrics(args.output_dir, progress=reporter),
+        export_three_station_milp_v0_movement_plan(
+            args.output_dir,
+            horizon_steps=args.milp_horizon,
+            cabin_count=args.milp_cabin_count,
+            variable_strategy=MilpV0VariableStrategy(args.milp_variable_strategy),
+            progress=reporter,
+        ),
     )
     for output_path in output_paths:
         print(output_path)

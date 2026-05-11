@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from enum import Enum
 
 from ropeway_skip_stop_optimization.models import MovementPlan
 
@@ -17,6 +18,11 @@ class FixedCabinStart:
             raise ValueError("fixed cabin start needs a node_id")
 
 
+class MilpV0VariableStrategy(Enum):
+    DENSE = "dense"
+    SPARSE_REACHABILITY = "sparse_reachability"
+
+
 @dataclass(frozen=True)
 class MilpV0Config:
     horizon_steps: int
@@ -24,6 +30,7 @@ class MilpV0Config:
     allow_move_arcs: bool = True
     allow_wait_arcs: bool = True
     allow_skip_arcs: bool = True
+    variable_strategy: MilpV0VariableStrategy = MilpV0VariableStrategy.DENSE
 
     def validate(self) -> None:
         if self.horizon_steps < 0:
@@ -37,6 +44,16 @@ class MilpV0Config:
             start.validate()
         if not (self.allow_move_arcs or self.allow_wait_arcs):
             raise ValueError("MILP v0 needs at least one allowed arc kind")
+
+
+@dataclass(frozen=True)
+class MilpV0VariableIndex:
+    x_keys: tuple[tuple[int, int, str], ...]
+    y_keys: tuple[tuple[int, int, str], ...]
+    node_ids_by_cabin_time: dict[tuple[int, int], tuple[str, ...]]
+    arc_ids_by_cabin_time: dict[tuple[int, int], tuple[str, ...]]
+    out_arc_ids_by_cabin_time_node: dict[tuple[int, int, str], tuple[str, ...]]
+    in_arc_ids_by_cabin_time_node: dict[tuple[int, int, str], tuple[str, ...]]
 
 
 @dataclass(frozen=True)

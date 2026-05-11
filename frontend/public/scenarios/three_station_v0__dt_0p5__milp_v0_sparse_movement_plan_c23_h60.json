@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "constraint_count": 1221904,
+    "constraint_count": 17259,
     "objective_value": 0.0,
     "selected_arc_ids_by_cabin": {
       "0": [
@@ -859,7 +859,6 @@
         "move::L_turnaround_platform::18",
         "move::L_turnaround_platform::19",
         "move::L_turnaround_platform::20",
-        "wait::pn::L_platform_exit",
         "move::L_turnaround_accelerate::1",
         "move::L_turnaround_accelerate::2",
         "move::L_turnaround_accelerate::3",
@@ -869,7 +868,8 @@
         "move::L_exit_lr_to_M_entry_lr::4",
         "move::L_exit_lr_to_M_entry_lr::5",
         "move::L_exit_lr_to_M_entry_lr::6",
-        "move::L_exit_lr_to_M_entry_lr::7"
+        "move::L_exit_lr_to_M_entry_lr::7",
+        "move::L_exit_lr_to_M_entry_lr::8"
       ],
       "21": [
         "move::M_exit_rl_to_L_entry_rl::50",
@@ -906,7 +906,6 @@
         "move::L_turnaround_platform::18",
         "move::L_turnaround_platform::19",
         "move::L_turnaround_platform::20",
-        "wait::pn::L_platform_exit",
         "move::L_turnaround_accelerate::1",
         "move::L_turnaround_accelerate::2",
         "move::L_turnaround_accelerate::3",
@@ -931,7 +930,8 @@
         "move::L_exit_lr_to_M_entry_lr::19",
         "move::L_exit_lr_to_M_entry_lr::20",
         "move::L_exit_lr_to_M_entry_lr::21",
-        "move::L_exit_lr_to_M_entry_lr::22"
+        "move::L_exit_lr_to_M_entry_lr::22",
+        "move::L_exit_lr_to_M_entry_lr::23"
       ],
       "22": [
         "move::L_turnaround_platform::2",
@@ -1058,36 +1058,34 @@
         "move::M_exit_lr_to_R_entry_lr::17"
       ],
       "4": [
-        "move::M_lr_approach_fast::1",
-        "move::M_lr_approach_fast::2",
-        "move::M_lr_brake::1",
-        "move::M_lr_brake::2",
-        "move::M_lr_brake::3",
-        "move::M_lr_platform::1",
-        "move::M_lr_platform::2",
-        "move::M_lr_platform::3",
-        "move::M_lr_platform::4",
-        "move::M_lr_platform::5",
-        "move::M_lr_platform::6",
-        "move::M_lr_platform::7",
-        "move::M_lr_platform::8",
-        "move::M_lr_platform::9",
-        "move::M_lr_platform::10",
-        "move::M_lr_platform::11",
-        "move::M_lr_platform::12",
-        "move::M_lr_platform::13",
-        "move::M_lr_platform::14",
-        "move::M_lr_platform::15",
-        "move::M_lr_platform::16",
-        "move::M_lr_platform::17",
-        "move::M_lr_platform::18",
-        "move::M_lr_platform::19",
-        "move::M_lr_platform::20",
-        "move::M_lr_accelerate::1",
-        "move::M_lr_accelerate::2",
-        "move::M_lr_accelerate::3",
-        "move::M_lr_depart_fast::1",
-        "move::M_lr_depart_fast::2",
+        "move::M_lr_skip_bypass::1",
+        "move::M_lr_skip_bypass::2",
+        "move::M_lr_skip_bypass::3",
+        "move::M_lr_skip_bypass::4",
+        "move::M_lr_skip_bypass::5",
+        "move::M_lr_skip_bypass::6",
+        "move::M_lr_skip_bypass::7",
+        "move::M_lr_skip_bypass::8",
+        "move::M_lr_skip_bypass::9",
+        "move::M_lr_skip_bypass::10",
+        "move::M_lr_skip_bypass::11",
+        "move::M_lr_skip_bypass::12",
+        "move::M_lr_skip_bypass::13",
+        "move::M_lr_skip_bypass::14",
+        "move::M_lr_skip_bypass::15",
+        "move::M_lr_skip_bypass::16",
+        "move::M_lr_skip_bypass::17",
+        "move::M_lr_skip_bypass::18",
+        "move::M_lr_skip_bypass::19",
+        "move::M_lr_skip_bypass::20",
+        "move::M_lr_skip_bypass::21",
+        "move::M_lr_skip_bypass::22",
+        "move::M_lr_skip_bypass::23",
+        "move::M_lr_skip_bypass::24",
+        "move::M_lr_skip_bypass::25",
+        "move::M_lr_skip_bypass::26",
+        "move::M_lr_skip_bypass::27",
+        "move::M_lr_skip_bypass::28",
         "move::M_exit_lr_to_R_entry_lr::1",
         "move::M_exit_lr_to_R_entry_lr::2",
         "move::M_exit_lr_to_R_entry_lr::3",
@@ -1117,7 +1115,9 @@
         "move::M_exit_lr_to_R_entry_lr::27",
         "move::M_exit_lr_to_R_entry_lr::28",
         "move::M_exit_lr_to_R_entry_lr::29",
-        "move::M_exit_lr_to_R_entry_lr::30"
+        "move::M_exit_lr_to_R_entry_lr::30",
+        "move::M_exit_lr_to_R_entry_lr::31",
+        "move::M_exit_lr_to_R_entry_lr::32"
       ],
       "5": [
         "move::M_lr_platform::11",
@@ -1359,13 +1359,13 @@
         "move::R_turnaround_platform::18",
         "move::R_turnaround_platform::19",
         "move::R_turnaround_platform::20",
-        "wait::pn::R_platform_exit",
         "move::R_turnaround_accelerate::1",
         "move::R_turnaround_accelerate::2",
         "move::R_turnaround_accelerate::3",
         "move::R_exit_rl_to_M_entry_rl::1",
         "move::R_exit_rl_to_M_entry_rl::2",
-        "move::R_exit_rl_to_M_entry_rl::3"
+        "move::R_exit_rl_to_M_entry_rl::3",
+        "move::R_exit_rl_to_M_entry_rl::4"
       ],
       "9": [
         "move::M_exit_lr_to_R_entry_lr::46",
@@ -1406,7 +1406,6 @@
         "move::R_turnaround_platform::18",
         "move::R_turnaround_platform::19",
         "move::R_turnaround_platform::20",
-        "wait::pn::R_platform_exit",
         "move::R_turnaround_accelerate::1",
         "move::R_turnaround_accelerate::2",
         "move::R_turnaround_accelerate::3",
@@ -1427,11 +1426,12 @@
         "move::R_exit_rl_to_M_entry_rl::15",
         "move::R_exit_rl_to_M_entry_rl::16",
         "move::R_exit_rl_to_M_entry_rl::17",
-        "move::R_exit_rl_to_M_entry_rl::18"
+        "move::R_exit_rl_to_M_entry_rl::18",
+        "move::R_exit_rl_to_M_entry_rl::19"
       ]
     },
     "status": "optimal",
-    "variable_count": 1135418
+    "variable_count": 10575
   },
   "movement_plan": {
     "discrete_scenario_id": "three_station_v0__dt_0p5",
@@ -2687,303 +2687,303 @@
             "time_step": 0
           },
           {
-            "incoming_arc_id": "move::M_lr_approach_fast::1",
-            "node_id": "seg::M_lr_approach_fast::1",
+            "incoming_arc_id": "move::M_lr_skip_bypass::1",
+            "node_id": "seg::M_lr_skip_bypass::1",
             "time_step": 1
           },
           {
-            "incoming_arc_id": "move::M_lr_approach_fast::2",
-            "node_id": "pn::M_service_approach_lr",
+            "incoming_arc_id": "move::M_lr_skip_bypass::2",
+            "node_id": "seg::M_lr_skip_bypass::2",
             "time_step": 2
           },
           {
-            "incoming_arc_id": "move::M_lr_brake::1",
-            "node_id": "seg::M_lr_brake::1",
+            "incoming_arc_id": "move::M_lr_skip_bypass::3",
+            "node_id": "seg::M_lr_skip_bypass::3",
             "time_step": 3
           },
           {
-            "incoming_arc_id": "move::M_lr_brake::2",
-            "node_id": "seg::M_lr_brake::2",
+            "incoming_arc_id": "move::M_lr_skip_bypass::4",
+            "node_id": "seg::M_lr_skip_bypass::4",
             "time_step": 4
           },
           {
-            "incoming_arc_id": "move::M_lr_brake::3",
-            "node_id": "pn::M_platform_entry_lr",
+            "incoming_arc_id": "move::M_lr_skip_bypass::5",
+            "node_id": "seg::M_lr_skip_bypass::5",
             "time_step": 5
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::1",
-            "node_id": "seg::M_lr_platform::1",
+            "incoming_arc_id": "move::M_lr_skip_bypass::6",
+            "node_id": "seg::M_lr_skip_bypass::6",
             "time_step": 6
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::2",
-            "node_id": "seg::M_lr_platform::2",
+            "incoming_arc_id": "move::M_lr_skip_bypass::7",
+            "node_id": "seg::M_lr_skip_bypass::7",
             "time_step": 7
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::3",
-            "node_id": "seg::M_lr_platform::3",
+            "incoming_arc_id": "move::M_lr_skip_bypass::8",
+            "node_id": "seg::M_lr_skip_bypass::8",
             "time_step": 8
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::4",
-            "node_id": "seg::M_lr_platform::4",
+            "incoming_arc_id": "move::M_lr_skip_bypass::9",
+            "node_id": "seg::M_lr_skip_bypass::9",
             "time_step": 9
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::5",
-            "node_id": "seg::M_lr_platform::5",
+            "incoming_arc_id": "move::M_lr_skip_bypass::10",
+            "node_id": "seg::M_lr_skip_bypass::10",
             "time_step": 10
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::6",
-            "node_id": "seg::M_lr_platform::6",
+            "incoming_arc_id": "move::M_lr_skip_bypass::11",
+            "node_id": "seg::M_lr_skip_bypass::11",
             "time_step": 11
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::7",
-            "node_id": "seg::M_lr_platform::7",
+            "incoming_arc_id": "move::M_lr_skip_bypass::12",
+            "node_id": "seg::M_lr_skip_bypass::12",
             "time_step": 12
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::8",
-            "node_id": "seg::M_lr_platform::8",
+            "incoming_arc_id": "move::M_lr_skip_bypass::13",
+            "node_id": "seg::M_lr_skip_bypass::13",
             "time_step": 13
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::9",
-            "node_id": "seg::M_lr_platform::9",
+            "incoming_arc_id": "move::M_lr_skip_bypass::14",
+            "node_id": "seg::M_lr_skip_bypass::14",
             "time_step": 14
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::10",
-            "node_id": "seg::M_lr_platform::10",
+            "incoming_arc_id": "move::M_lr_skip_bypass::15",
+            "node_id": "seg::M_lr_skip_bypass::15",
             "time_step": 15
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::11",
-            "node_id": "seg::M_lr_platform::11",
+            "incoming_arc_id": "move::M_lr_skip_bypass::16",
+            "node_id": "seg::M_lr_skip_bypass::16",
             "time_step": 16
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::12",
-            "node_id": "seg::M_lr_platform::12",
+            "incoming_arc_id": "move::M_lr_skip_bypass::17",
+            "node_id": "seg::M_lr_skip_bypass::17",
             "time_step": 17
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::13",
-            "node_id": "seg::M_lr_platform::13",
+            "incoming_arc_id": "move::M_lr_skip_bypass::18",
+            "node_id": "seg::M_lr_skip_bypass::18",
             "time_step": 18
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::14",
-            "node_id": "seg::M_lr_platform::14",
+            "incoming_arc_id": "move::M_lr_skip_bypass::19",
+            "node_id": "seg::M_lr_skip_bypass::19",
             "time_step": 19
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::15",
-            "node_id": "seg::M_lr_platform::15",
+            "incoming_arc_id": "move::M_lr_skip_bypass::20",
+            "node_id": "seg::M_lr_skip_bypass::20",
             "time_step": 20
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::16",
-            "node_id": "seg::M_lr_platform::16",
+            "incoming_arc_id": "move::M_lr_skip_bypass::21",
+            "node_id": "seg::M_lr_skip_bypass::21",
             "time_step": 21
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::17",
-            "node_id": "seg::M_lr_platform::17",
+            "incoming_arc_id": "move::M_lr_skip_bypass::22",
+            "node_id": "seg::M_lr_skip_bypass::22",
             "time_step": 22
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::18",
-            "node_id": "seg::M_lr_platform::18",
+            "incoming_arc_id": "move::M_lr_skip_bypass::23",
+            "node_id": "seg::M_lr_skip_bypass::23",
             "time_step": 23
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::19",
-            "node_id": "seg::M_lr_platform::19",
+            "incoming_arc_id": "move::M_lr_skip_bypass::24",
+            "node_id": "seg::M_lr_skip_bypass::24",
             "time_step": 24
           },
           {
-            "incoming_arc_id": "move::M_lr_platform::20",
-            "node_id": "pn::M_platform_exit_lr",
+            "incoming_arc_id": "move::M_lr_skip_bypass::25",
+            "node_id": "seg::M_lr_skip_bypass::25",
             "time_step": 25
           },
           {
-            "incoming_arc_id": "move::M_lr_accelerate::1",
-            "node_id": "seg::M_lr_accelerate::1",
+            "incoming_arc_id": "move::M_lr_skip_bypass::26",
+            "node_id": "seg::M_lr_skip_bypass::26",
             "time_step": 26
           },
           {
-            "incoming_arc_id": "move::M_lr_accelerate::2",
-            "node_id": "seg::M_lr_accelerate::2",
+            "incoming_arc_id": "move::M_lr_skip_bypass::27",
+            "node_id": "seg::M_lr_skip_bypass::27",
             "time_step": 27
           },
           {
-            "incoming_arc_id": "move::M_lr_accelerate::3",
-            "node_id": "pn::M_service_accelerate_lr",
-            "time_step": 28
-          },
-          {
-            "incoming_arc_id": "move::M_lr_depart_fast::1",
-            "node_id": "seg::M_lr_depart_fast::1",
-            "time_step": 29
-          },
-          {
-            "incoming_arc_id": "move::M_lr_depart_fast::2",
+            "incoming_arc_id": "move::M_lr_skip_bypass::28",
             "node_id": "pn::M_exit_lr",
-            "time_step": 30
+            "time_step": 28
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::1",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::1",
-            "time_step": 31
+            "time_step": 29
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::2",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::2",
-            "time_step": 32
+            "time_step": 30
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::3",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::3",
-            "time_step": 33
+            "time_step": 31
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::4",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::4",
-            "time_step": 34
+            "time_step": 32
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::5",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::5",
-            "time_step": 35
+            "time_step": 33
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::6",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::6",
-            "time_step": 36
+            "time_step": 34
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::7",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::7",
-            "time_step": 37
+            "time_step": 35
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::8",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::8",
-            "time_step": 38
+            "time_step": 36
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::9",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::9",
-            "time_step": 39
+            "time_step": 37
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::10",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::10",
-            "time_step": 40
+            "time_step": 38
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::11",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::11",
-            "time_step": 41
+            "time_step": 39
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::12",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::12",
-            "time_step": 42
+            "time_step": 40
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::13",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::13",
-            "time_step": 43
+            "time_step": 41
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::14",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::14",
-            "time_step": 44
+            "time_step": 42
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::15",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::15",
-            "time_step": 45
+            "time_step": 43
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::16",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::16",
-            "time_step": 46
+            "time_step": 44
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::17",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::17",
-            "time_step": 47
+            "time_step": 45
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::18",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::18",
-            "time_step": 48
+            "time_step": 46
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::19",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::19",
-            "time_step": 49
+            "time_step": 47
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::20",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::20",
-            "time_step": 50
+            "time_step": 48
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::21",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::21",
-            "time_step": 51
+            "time_step": 49
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::22",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::22",
-            "time_step": 52
+            "time_step": 50
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::23",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::23",
-            "time_step": 53
+            "time_step": 51
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::24",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::24",
-            "time_step": 54
+            "time_step": 52
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::25",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::25",
-            "time_step": 55
+            "time_step": 53
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::26",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::26",
-            "time_step": 56
+            "time_step": 54
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::27",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::27",
-            "time_step": 57
+            "time_step": 55
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::28",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::28",
-            "time_step": 58
+            "time_step": 56
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::29",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::29",
-            "time_step": 59
+            "time_step": 57
           },
           {
             "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::30",
             "node_id": "seg::M_exit_lr_to_R_entry_lr::30",
+            "time_step": 58
+          },
+          {
+            "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::31",
+            "node_id": "seg::M_exit_lr_to_R_entry_lr::31",
+            "time_step": 59
+          },
+          {
+            "incoming_arc_id": "move::M_exit_lr_to_R_entry_lr::32",
+            "node_id": "seg::M_exit_lr_to_R_entry_lr::32",
             "time_step": 60
           }
         ]
@@ -4192,38 +4192,38 @@
             "time_step": 53
           },
           {
-            "incoming_arc_id": "wait::pn::R_platform_exit",
-            "node_id": "pn::R_platform_exit",
-            "time_step": 54
-          },
-          {
             "incoming_arc_id": "move::R_turnaround_accelerate::1",
             "node_id": "seg::R_turnaround_accelerate::1",
-            "time_step": 55
+            "time_step": 54
           },
           {
             "incoming_arc_id": "move::R_turnaround_accelerate::2",
             "node_id": "seg::R_turnaround_accelerate::2",
-            "time_step": 56
+            "time_step": 55
           },
           {
             "incoming_arc_id": "move::R_turnaround_accelerate::3",
             "node_id": "pn::R_exit_rl",
-            "time_step": 57
+            "time_step": 56
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::1",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::1",
-            "time_step": 58
+            "time_step": 57
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::2",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::2",
-            "time_step": 59
+            "time_step": 58
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::3",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::3",
+            "time_step": 59
+          },
+          {
+            "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::4",
+            "node_id": "seg::R_exit_rl_to_M_entry_rl::4",
             "time_step": 60
           }
         ]
@@ -4427,113 +4427,113 @@
             "time_step": 38
           },
           {
-            "incoming_arc_id": "wait::pn::R_platform_exit",
-            "node_id": "pn::R_platform_exit",
-            "time_step": 39
-          },
-          {
             "incoming_arc_id": "move::R_turnaround_accelerate::1",
             "node_id": "seg::R_turnaround_accelerate::1",
-            "time_step": 40
+            "time_step": 39
           },
           {
             "incoming_arc_id": "move::R_turnaround_accelerate::2",
             "node_id": "seg::R_turnaround_accelerate::2",
-            "time_step": 41
+            "time_step": 40
           },
           {
             "incoming_arc_id": "move::R_turnaround_accelerate::3",
             "node_id": "pn::R_exit_rl",
-            "time_step": 42
+            "time_step": 41
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::1",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::1",
-            "time_step": 43
+            "time_step": 42
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::2",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::2",
-            "time_step": 44
+            "time_step": 43
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::3",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::3",
-            "time_step": 45
+            "time_step": 44
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::4",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::4",
-            "time_step": 46
+            "time_step": 45
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::5",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::5",
-            "time_step": 47
+            "time_step": 46
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::6",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::6",
-            "time_step": 48
+            "time_step": 47
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::7",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::7",
-            "time_step": 49
+            "time_step": 48
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::8",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::8",
-            "time_step": 50
+            "time_step": 49
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::9",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::9",
-            "time_step": 51
+            "time_step": 50
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::10",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::10",
-            "time_step": 52
+            "time_step": 51
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::11",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::11",
-            "time_step": 53
+            "time_step": 52
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::12",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::12",
-            "time_step": 54
+            "time_step": 53
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::13",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::13",
-            "time_step": 55
+            "time_step": 54
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::14",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::14",
-            "time_step": 56
+            "time_step": 55
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::15",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::15",
-            "time_step": 57
+            "time_step": 56
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::16",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::16",
-            "time_step": 58
+            "time_step": 57
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::17",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::17",
-            "time_step": 59
+            "time_step": 58
           },
           {
             "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::18",
             "node_id": "seg::R_exit_rl_to_M_entry_rl::18",
+            "time_step": 59
+          },
+          {
+            "incoming_arc_id": "move::R_exit_rl_to_M_entry_rl::19",
+            "node_id": "seg::R_exit_rl_to_M_entry_rl::19",
             "time_step": 60
           }
         ]
@@ -7892,58 +7892,58 @@
             "time_step": 49
           },
           {
-            "incoming_arc_id": "wait::pn::L_platform_exit",
-            "node_id": "pn::L_platform_exit",
-            "time_step": 50
-          },
-          {
             "incoming_arc_id": "move::L_turnaround_accelerate::1",
             "node_id": "seg::L_turnaround_accelerate::1",
-            "time_step": 51
+            "time_step": 50
           },
           {
             "incoming_arc_id": "move::L_turnaround_accelerate::2",
             "node_id": "seg::L_turnaround_accelerate::2",
-            "time_step": 52
+            "time_step": 51
           },
           {
             "incoming_arc_id": "move::L_turnaround_accelerate::3",
             "node_id": "pn::L_exit_lr",
-            "time_step": 53
+            "time_step": 52
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::1",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::1",
-            "time_step": 54
+            "time_step": 53
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::2",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::2",
-            "time_step": 55
+            "time_step": 54
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::3",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::3",
-            "time_step": 56
+            "time_step": 55
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::4",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::4",
-            "time_step": 57
+            "time_step": 56
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::5",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::5",
-            "time_step": 58
+            "time_step": 57
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::6",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::6",
-            "time_step": 59
+            "time_step": 58
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::7",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::7",
+            "time_step": 59
+          },
+          {
+            "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::8",
+            "node_id": "seg::L_exit_lr_to_M_entry_lr::8",
             "time_step": 60
           }
         ]
@@ -8127,133 +8127,133 @@
             "time_step": 34
           },
           {
-            "incoming_arc_id": "wait::pn::L_platform_exit",
-            "node_id": "pn::L_platform_exit",
-            "time_step": 35
-          },
-          {
             "incoming_arc_id": "move::L_turnaround_accelerate::1",
             "node_id": "seg::L_turnaround_accelerate::1",
-            "time_step": 36
+            "time_step": 35
           },
           {
             "incoming_arc_id": "move::L_turnaround_accelerate::2",
             "node_id": "seg::L_turnaround_accelerate::2",
-            "time_step": 37
+            "time_step": 36
           },
           {
             "incoming_arc_id": "move::L_turnaround_accelerate::3",
             "node_id": "pn::L_exit_lr",
-            "time_step": 38
+            "time_step": 37
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::1",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::1",
-            "time_step": 39
+            "time_step": 38
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::2",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::2",
-            "time_step": 40
+            "time_step": 39
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::3",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::3",
-            "time_step": 41
+            "time_step": 40
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::4",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::4",
-            "time_step": 42
+            "time_step": 41
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::5",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::5",
-            "time_step": 43
+            "time_step": 42
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::6",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::6",
-            "time_step": 44
+            "time_step": 43
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::7",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::7",
-            "time_step": 45
+            "time_step": 44
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::8",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::8",
-            "time_step": 46
+            "time_step": 45
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::9",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::9",
-            "time_step": 47
+            "time_step": 46
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::10",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::10",
-            "time_step": 48
+            "time_step": 47
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::11",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::11",
-            "time_step": 49
+            "time_step": 48
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::12",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::12",
-            "time_step": 50
+            "time_step": 49
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::13",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::13",
-            "time_step": 51
+            "time_step": 50
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::14",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::14",
-            "time_step": 52
+            "time_step": 51
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::15",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::15",
-            "time_step": 53
+            "time_step": 52
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::16",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::16",
-            "time_step": 54
+            "time_step": 53
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::17",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::17",
-            "time_step": 55
+            "time_step": 54
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::18",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::18",
-            "time_step": 56
+            "time_step": 55
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::19",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::19",
-            "time_step": 57
+            "time_step": 56
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::20",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::20",
-            "time_step": 58
+            "time_step": 57
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::21",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::21",
-            "time_step": 59
+            "time_step": 58
           },
           {
             "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::22",
             "node_id": "seg::L_exit_lr_to_M_entry_lr::22",
+            "time_step": 59
+          },
+          {
+            "incoming_arc_id": "move::L_exit_lr_to_M_entry_lr::23",
+            "node_id": "seg::L_exit_lr_to_M_entry_lr::23",
             "time_step": 60
           }
         ]
