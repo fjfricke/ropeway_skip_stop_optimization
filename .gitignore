@@ -11,3 +11,6 @@ build/
 node_modules/
 frontend/dist/
 .DS_Store
+
+# Generated MILP scenario exports. Small checked-in examples stay tracked.
+frontend/public/scenarios/*__milp_*_c*_h*.json

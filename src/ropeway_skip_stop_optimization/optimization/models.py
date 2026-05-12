@@ -23,6 +23,11 @@ class MilpV0VariableStrategy(Enum):
     SPARSE_REACHABILITY = "sparse_reachability"
 
 
+class MilpV1PassengerWaitingObjective(Enum):
+    FEASIBILITY = "feasibility"
+    WAITING_TIME = "waiting_time"
+
+
 @dataclass(frozen=True)
 class MilpV0Config:
     horizon_steps: int
@@ -44,6 +49,30 @@ class MilpV0Config:
             start.validate()
         if not (self.allow_move_arcs or self.allow_wait_arcs):
             raise ValueError("MILP v0 needs at least one allowed arc kind")
+
+
+@dataclass(frozen=True)
+class MilpV1PassengerWaitingConfig:
+    horizon_steps: int
+    fixed_starts: tuple[FixedCabinStart, ...]
+    allow_move_arcs: bool = True
+    allow_wait_arcs: bool = True
+    allow_skip_arcs: bool = True
+    variable_strategy: MilpV0VariableStrategy = MilpV0VariableStrategy.SPARSE_REACHABILITY
+    objective: MilpV1PassengerWaitingObjective = MilpV1PassengerWaitingObjective.FEASIBILITY
+
+    def validate(self) -> None:
+        if self.horizon_steps < 0:
+            raise ValueError("MILP v1 passenger waiting horizon_steps must be nonnegative")
+        if not self.fixed_starts:
+            raise ValueError("MILP v1 passenger waiting needs at least one fixed cabin start")
+        cabin_ids = [start.cabin_id for start in self.fixed_starts]
+        if len(cabin_ids) != len(set(cabin_ids)):
+            raise ValueError("MILP v1 passenger waiting fixed cabin starts must have unique cabin ids")
+        for start in self.fixed_starts:
+            start.validate()
+        if not (self.allow_move_arcs or self.allow_wait_arcs):
+            raise ValueError("MILP v1 passenger waiting needs at least one allowed arc kind")
 
 
 @dataclass(frozen=True)
@@ -70,6 +99,31 @@ class MilpSolveMetadata:
 class MilpMovementPlanResult:
     movement_plan: MovementPlan | None
     metadata: MilpSolveMetadata
+
+
+@dataclass(frozen=True)
+class MilpPassengerWaitingMetadata:
+    status: str
+    objective_value: float | None
+    objective_passenger_hours: float | None
+    selected_arc_ids_by_cabin: dict[int, tuple[str, ...]]
+    queue_count_by_time_od: dict[tuple[int, str, str], int]
+    boarded_count_by_cabin_time_od: dict[tuple[int, int, str, str], int]
+    onboard_count_by_cabin_time_destination: dict[tuple[int, int, str], int]
+    alighted_count_by_cabin_time_destination: dict[tuple[int, int, str], int]
+    total_boarded: int
+    total_alighted: int
+    total_unserved_at_horizon: int
+    total_onboard_at_horizon: int
+    movement_variable_count: int
+    passenger_variable_count: int
+    constraint_count: int
+
+
+@dataclass(frozen=True)
+class MilpPassengerWaitingResult:
+    movement_plan: MovementPlan | None
+    metadata: MilpPassengerWaitingMetadata
 
 
 @dataclass(frozen=True)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 
 import pytest
 
@@ -9,6 +11,7 @@ from ropeway_skip_stop_optimization.export_scenarios import (
     export_three_station_greedy_all_stop_replay_metrics,
     export_three_station_greedy_all_stop_movement_plan,
     export_three_station_milp_v0_movement_plan,
+    export_three_station_milp_v1_passenger_waiting_plan,
 )
 from ropeway_skip_stop_optimization.optimization import MilpV0VariableStrategy
 
@@ -102,3 +105,84 @@ def test_exports_sparse_milp_v0_movement_plan_json(tmp_path) -> None:
     assert len(payload["movement_plan"]["trajectories"]) == 2
     assert payload["metadata"]["status"] == "optimal"
     assert payload["metadata"]["variable_count"] < 2 * 3 * 406 + 2 * 2 * 410
+
+
+def test_exports_sparse_milp_v1_passenger_waiting_plan_json(tmp_path) -> None:
+    pytest.importorskip("gurobipy")
+
+    output_path = export_three_station_milp_v1_passenger_waiting_plan(
+        tmp_path,
+        horizon_steps=2,
+        cabin_count=2,
+        variable_strategy=MilpV0VariableStrategy.SPARSE_REACHABILITY,
+    )
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+
+    assert output_path.name == "three_station_v0__dt_0p5__milp_v1_passenger_waiting_feasibility_sparse_movement_plan_c2_h2.json"
+    assert payload["movement_plan"]["discrete_scenario_id"] == "three_station_v0__dt_0p5"
+    assert payload["movement_plan"]["horizon_steps"] == 2
+    assert payload["metadata"]["status"] == "optimal"
+    assert payload["metadata"]["passenger_variable_count"] > 0
+    assert payload["metadata"]["total_onboard_at_horizon"] == 0
+
+
+def test_cli_can_export_milp_v1_passenger_mode_without_milp_v0(tmp_path) -> None:
+    pytest.importorskip("gurobipy")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ropeway_skip_stop_optimization.export_scenarios",
+            "--output-dir",
+            str(tmp_path),
+            "--milp-horizon",
+            "2",
+            "--milp-cabin-count",
+            "2",
+            "--milp-variable-strategy",
+            MilpV0VariableStrategy.SPARSE_REACHABILITY.value,
+            "--milp-mode",
+            "passenger",
+            "--milp-objective",
+            "feasibility",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    output_names = {line.rsplit("/", 1)[-1] for line in result.stdout.splitlines()}
+    assert "three_station_v0__dt_0p5__milp_v1_passenger_waiting_feasibility_sparse_movement_plan_c2_h2.json" in output_names
+    assert "three_station_v0__dt_0p5__milp_v0_sparse_movement_plan_c2_h2.json" not in output_names
+    assert not (tmp_path / "three_station_v0__dt_0p5__milp_v0_sparse_movement_plan_c2_h2.json").exists()
+
+
+def test_cli_can_export_milp_v1_waiting_time_objective(tmp_path) -> None:
+    pytest.importorskip("gurobipy")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ropeway_skip_stop_optimization.export_scenarios",
+            "--output-dir",
+            str(tmp_path),
+            "--milp-mode",
+            "passenger",
+            "--milp-objective",
+            "waiting_time",
+            "--milp-horizon",
+            "2",
+            "--milp-cabin-count",
+            "2",
+            "--milp-variable-strategy",
+            MilpV0VariableStrategy.SPARSE_REACHABILITY.value,
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    output_names = {line.rsplit("/", 1)[-1] for line in result.stdout.splitlines()}
+    assert "three_station_v0__dt_0p5__milp_v1_passenger_waiting_waiting_time_sparse_movement_plan_c2_h2.json" in output_names
