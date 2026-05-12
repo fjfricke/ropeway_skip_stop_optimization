@@ -2,14 +2,14 @@ from __future__ import annotations
 
 import pytest
 
-from ropeway_skip_stop_optimization.examples import build_three_station_scenario
+from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
 from ropeway_skip_stop_optimization.models import (
     DiscreteArc,
     DiscreteArcKind,
     DiscreteConstraintKind,
     DiscreteConstraintScope,
 )
-from ropeway_skip_stop_optimization.preprocessing.discretize import (
+from ropeway_skip_stop_optimization.mapping import (
     DiscretizationConfig,
     RoundingPolicy,
     discretize_scenario,

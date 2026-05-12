@@ -5,7 +5,7 @@ from datetime import time
 
 import pytest
 
-from ropeway_skip_stop_optimization.examples import build_three_station_scenario
+from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
 from ropeway_skip_stop_optimization.models import (
     Demand,
     SpeedProfile,

@@ -1,15 +1,15 @@
 from __future__ import annotations
 
 from ropeway_skip_stop_optimization.baselines import build_all_stop_cycle_path, greedy_place_max_cabins_on_cycle
-from ropeway_skip_stop_optimization.examples import build_three_station_scenario
-from ropeway_skip_stop_optimization.optimization import FixedCabinStart, build_discrete_graph_index
-from ropeway_skip_stop_optimization.optimization.milp_v0 import _allowed_arc_ids
-from ropeway_skip_stop_optimization.optimization.models import MilpV0Config
-from ropeway_skip_stop_optimization.optimization.variable_index import (
+from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
+from ropeway_skip_stop_optimization.optimization.discrete_time import FixedCabinStart, build_discrete_graph_index
+from ropeway_skip_stop_optimization.optimization.discrete_time.movement_model import _allowed_arc_ids
+from ropeway_skip_stop_optimization.optimization.discrete_time.models import MilpV0Config
+from ropeway_skip_stop_optimization.optimization.discrete_time.variable_index import (
     build_dense_milp_v0_variable_index,
     build_sparse_reachability_milp_v0_variable_index,
 )
-from ropeway_skip_stop_optimization.preprocessing.discretize import discretize_scenario
+from ropeway_skip_stop_optimization.mapping import discretize_scenario
 
 
 def test_dense_variable_index_matches_cartesian_variable_counts() -> None:

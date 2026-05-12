@@ -136,7 +136,7 @@ Important: this is intentionally different from the current replay summary field
 
 ## Export Contract
 
-Add export function in `export_scenarios.py`:
+Add export artifact builder in `exports/artifacts.py`:
 
 ```python
 def export_three_station_greedy_all_stop_replay_metrics(output_dir: Path) -> Path:

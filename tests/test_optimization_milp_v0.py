@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from ropeway_skip_stop_optimization.models import DiscreteArc, DiscreteArcKind, DiscreteNode, DiscreteScenario
-from ropeway_skip_stop_optimization.optimization import FixedCabinStart, MilpV0Config, solve_milp_v0
+from ropeway_skip_stop_optimization.optimization.discrete_time import FixedCabinStart, MilpV0Config, solve_milp_v0
 
 
 def test_milp_v0_solves_tiny_waiting_model_when_gurobi_is_available() -> None:

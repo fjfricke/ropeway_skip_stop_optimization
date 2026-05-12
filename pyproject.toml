@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Ropeway skip-stop optimization tools and experiments"
 readme = "README.md"
 authors = [
-    { name = "Felix Fricke", email = "felix@frickefamily.de" }
+    { name = "Felix Fricke", email = "f.fricke@tum.de" }
 ]
 requires-python = ">=3.12"
 dependencies = [
@@ -13,7 +13,7 @@ dependencies = [
 ]
 
 [project.scripts]
-ropeway-skip-stop-optimization = "ropeway_skip_stop_optimization:main"
+ropeway-skip-stop-optimization = "ropeway_skip_stop_optimization.exports.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.9.0,<0.10.0"]

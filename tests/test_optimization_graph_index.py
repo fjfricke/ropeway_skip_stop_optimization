@@ -2,9 +2,9 @@ from __future__ import annotations
 
 from dataclasses import replace
 
-from ropeway_skip_stop_optimization.examples import build_three_station_scenario
-from ropeway_skip_stop_optimization.optimization import build_discrete_graph_index
-from ropeway_skip_stop_optimization.preprocessing.discretize import discretize_scenario
+from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
+from ropeway_skip_stop_optimization.optimization.discrete_time import build_discrete_graph_index
+from ropeway_skip_stop_optimization.mapping import discretize_scenario
 
 
 def test_discrete_graph_index_builds_incidence_lookups() -> None:

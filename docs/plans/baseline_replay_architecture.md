@@ -60,9 +60,9 @@ src/ropeway_skip_stop_optimization/
     discrete_scenario.py
     plan.py
     result.py
-  preprocessing/
+  mapping/
     __init__.py
-    discretize.py
+    physical_to_discrete.py
   baseline.py
   replay.py
   metrics.py
@@ -296,7 +296,7 @@ For constant-speed segments, positions can be spaced approximately uniformly. Fo
 
 This means slow station movement automatically creates more discrete positions over the same physical distance. Since required cabin spacing is measured in meters, a slow station path may require conflicts across multiple neighboring discrete positions.
 
-### `preprocessing/discretize.py`
+### `mapping/physical_to_discrete.py`
 
 Converts the physical `Scenario` into a `DiscreteScenario`.
 

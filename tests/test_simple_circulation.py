@@ -10,14 +10,14 @@ from ropeway_skip_stop_optimization.baselines import (
     greedy_place_cabins_on_cycle,
     greedy_place_max_cabins_on_cycle,
 )
-from ropeway_skip_stop_optimization.examples import build_three_station_scenario
+from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
 from ropeway_skip_stop_optimization.models import (
     CabinPosition,
     CabinTrajectory,
     DiscreteConstraintKind,
     MovementPlan,
 )
-from ropeway_skip_stop_optimization.preprocessing.discretize import discretize_scenario
+from ropeway_skip_stop_optimization.mapping import discretize_scenario
 
 
 def test_all_stop_cycle_path_is_closed_and_excludes_skips() -> None:

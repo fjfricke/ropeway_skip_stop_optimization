@@ -4,9 +4,9 @@ from dataclasses import replace
 from datetime import time
 
 from ropeway_skip_stop_optimization.baselines import build_maximal_greedy_all_stop_circulation_plan
-from ropeway_skip_stop_optimization.examples import build_three_station_scenario
+from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
 from ropeway_skip_stop_optimization.models import Demand
-from ropeway_skip_stop_optimization.preprocessing.discretize import discretize_scenario
+from ropeway_skip_stop_optimization.mapping import discretize_scenario
 from ropeway_skip_stop_optimization.replay import (
     can_cabin_serve_destination_from_step,
     replay_passenger_boarding,

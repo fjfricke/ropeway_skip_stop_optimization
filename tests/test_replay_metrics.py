@@ -6,9 +6,9 @@ from datetime import time
 import pytest
 
 from ropeway_skip_stop_optimization.baselines import build_maximal_greedy_all_stop_circulation_plan
-from ropeway_skip_stop_optimization.examples import build_three_station_scenario
+from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
 from ropeway_skip_stop_optimization.models import Demand
-from ropeway_skip_stop_optimization.preprocessing.discretize import discretize_scenario
+from ropeway_skip_stop_optimization.mapping import discretize_scenario
 from ropeway_skip_stop_optimization.replay import build_replay_metrics, replay_passenger_boarding
 
 

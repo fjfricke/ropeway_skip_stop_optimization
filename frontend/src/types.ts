@@ -189,6 +189,44 @@ export interface MovementPlan {
 }
 
 export type BoardingPolicyKind = "greedy_fifo_next_compatible_cabin";
+export type ExportArtifactKind =
+  | "scenario"
+  | "discrete_scenario"
+  | "movement_plan"
+  | "passenger_replay"
+  | "replay_metrics"
+  | "milp_result"
+  | "ean_input"
+  | "ean_result";
+
+export interface ExportArtifactMetadata {
+  id: string;
+  kind: ExportArtifactKind;
+  label: string | null;
+  path: string;
+}
+
+export interface ExportArtifactSetManifest {
+  id: string;
+  label: string;
+  artifacts: Partial<Record<ExportArtifactKind, string>>;
+  artifact_metadata: ExportArtifactMetadata[];
+}
+
+export interface ExportExampleManifest {
+  id: string;
+  label: string;
+  description: string;
+  tags: string[];
+  default_artifact_set: string;
+  artifact_sets: ExportArtifactSetManifest[];
+}
+
+export interface ExportManifest {
+  schema_version: number;
+  generated_at: string | null;
+  examples: ExportExampleManifest[];
+}
 
 export interface PassengerQueueState {
   time_step: number;

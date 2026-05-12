@@ -407,7 +407,8 @@ This is too slow for normal iteration. The bottleneck is currently Python-side r
 Observed command:
 
 ```bash
-uv run python -m ropeway_skip_stop_optimization.export_scenarios \
+uv run python -m ropeway_skip_stop_optimization.exports.cli \
+  --artifact-set milp_v0_feasibility \
   --progress \
   --milp-horizon 2400 \
   --milp-cabin-count 23 \

@@ -36,9 +36,9 @@ v0 does not include:
 ## Module Location
 
 ```text
-src/ropeway_skip_stop_optimization/preprocessing/
+src/ropeway_skip_stop_optimization/mapping/
   __init__.py
-  discretize.py
+  physical_to_discrete.py
 ```
 
 Public API:
@@ -331,7 +331,7 @@ Required tests:
 
 ## Implementation Order
 
-1. Add `preprocessing/discretize.py` with config, time conversion, and travel-time helpers.
+1. Add `mapping/physical_to_discrete.py` with config, time conversion, and travel-time helpers.
 2. Generate physical-node discrete nodes.
 3. Generate segment-position nodes and movement arcs.
 4. Add route-id annotations.

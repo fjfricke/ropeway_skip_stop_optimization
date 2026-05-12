@@ -14,3 +14,6 @@ frontend/dist/
 
 # Generated MILP scenario exports. Small checked-in examples stay tracked.
 frontend/public/scenarios/*__milp_*_c*_h*.json
+
+# Manifest-driven generated frontend artifacts.
+frontend/public/generated/

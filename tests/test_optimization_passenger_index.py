@@ -3,17 +3,17 @@ from __future__ import annotations
 from dataclasses import replace
 
 from ropeway_skip_stop_optimization.baselines import build_all_stop_cycle_path, greedy_place_max_cabins_on_cycle
-from ropeway_skip_stop_optimization.examples import build_three_station_scenario
+from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
 from ropeway_skip_stop_optimization.models import DiscreteDemand
-from ropeway_skip_stop_optimization.optimization import (
+from ropeway_skip_stop_optimization.optimization.discrete_time import (
     FixedCabinStart,
     MilpV0Config,
     build_discrete_graph_index,
     build_passenger_milp_index,
     build_sparse_reachability_milp_v0_variable_index,
 )
-from ropeway_skip_stop_optimization.optimization.milp_v0 import _allowed_arc_ids
-from ropeway_skip_stop_optimization.preprocessing.discretize import discretize_scenario, physical_node_id
+from ropeway_skip_stop_optimization.optimization.discrete_time.movement_model import _allowed_arc_ids
+from ropeway_skip_stop_optimization.mapping import discretize_scenario, physical_node_id
 
 
 def test_passenger_index_aggregates_discrete_demand_by_time_and_od() -> None:

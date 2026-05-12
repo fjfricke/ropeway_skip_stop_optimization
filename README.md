@@ -1,8 +1,8 @@
 # Ropeway Skip-Stop Optimization
 
-Tools and experiments for modeling ropeway systems, discretizing them for optimization, and visualizing scenarios and replays.
+Tools and experiments for modeling ropeway systems, mapping them into optimization representations, and visualizing scenarios and replays.
 
-The project is currently focused on a compact three-station example and a reusable modeling base for later MILP/Gurobi work.
+The project is currently focused on a compact three-station example, legacy discrete-time replay/MILP work, and a newer continuous-time EAN optimization path.
 
 ## What Is Implemented
 
@@ -10,7 +10,16 @@ The project is currently focused on a compact three-station example and a reusab
 - Discretization into graph-like nodes, movement arcs, wait arcs, and typed constraints.
 - A greedy all-stop cabin circulation baseline.
 - Passenger replay with fixed demand arrivals and greedy boarding into compatible cabins.
-- A local React/Vite viewer for the physical scenario, discrete graph, slack view, and cabin/passenger replay.
+- Replay metrics for arrivals, boardings, alightings, in-transit passengers, waiting queues, and cumulative waiting time.
+- Discrete-time MILP feasibility and passenger waiting-time prototypes for Gurobi.
+- EAN dataclasses and builder components for the next continuous-time solver.
+- A local React/Vite viewer for the physical scenario, discrete graph, slack view, replay metrics, and cabin/passenger replay.
+
+## Not Yet Implemented
+
+- A complete continuous-time EAN solver.
+- Projection of optimized EAN solutions back to physical replay.
+- Frontend selection between multiple examples and artifact sets.
 
 ## Example Scenario
 
@@ -23,11 +32,14 @@ The project is currently focused on a compact three-station example and a reusab
 - Brake, accelerate, approach, and depart sections are modeled as connector segments, not platform/station segments.
 - The bundled demand scenario is intentionally near capacity: 3,480 passengers, split evenly across all six OD pairs (`L->M`, `L->R`, `M->L`, `M->R`, `R->L`, `R->M`) at 08:00.
 
-Static exports for this example live in:
+Generated frontend artifacts are written to:
 
 ```text
-frontend/public/scenarios/
+frontend/public/generated/examples/
 ```
+
+That directory is intentionally ignored by git. After a fresh clone, run the
+export command below before starting the viewer.
 
 ## Setup
 
@@ -39,15 +51,27 @@ cd frontend
 npm install
 ```
 
-## Generate Scenario JSON
+## Generate Frontend Artifacts
 
 From the repo root:
 
 ```bash
-uv run python -m ropeway_skip_stop_optimization.export_scenarios --output-dir frontend/public/scenarios
+uv run python -m ropeway_skip_stop_optimization.exports.cli \
+  --artifact-set greedy_all_stop \
+  --output-root frontend/public/generated/examples \
+  --clean
 ```
 
-This writes the physical scenario, discrete scenario, movement plan, and passenger replay JSON used by the frontend.
+This writes the physical scenario, discrete scenario, movement plan, passenger
+replay, replay metrics, and `manifest.json` used by the frontend.
+
+The frontend loads only:
+
+```text
+/generated/examples/manifest.json
+```
+
+All concrete JSON artifact paths come from that manifest.
 
 ## Run Tests
 
@@ -75,21 +99,41 @@ cd frontend
 npm run build
 ```
 
+## Common Workflow
+
+From a clean checkout:
+
+```bash
+uv sync
+cd frontend
+npm install
+cd ..
+uv run python -m ropeway_skip_stop_optimization.exports.cli \
+  --artifact-set greedy_all_stop \
+  --output-root frontend/public/generated/examples \
+  --clean
+cd frontend
+npm run dev
+```
+
 ## Project Structure
 
 ```text
 src/ropeway_skip_stop_optimization/
   models/          domain, discrete, plan, and replay dataclasses
-  preprocessing/   scenario discretization
+  mapping/         mappings from physical scenarios to derived representations
+  examples/        built-in reproducible scenarios
+  exports/         artifact builders, manifest generation, and export CLI
   baselines/       simple all-stop circulation baseline
+  optimization/
+    discrete_time/ legacy discrete-time MILP models
+    ean/           continuous-time EAN models and builders
   replay/          demand and passenger replay logic
   validation/      scenario validation rules
-  examples.py      built-in three-station scenario
-  export_scenarios.py
 
 frontend/
   src/             React/Vite scenario viewer
-  public/scenarios static JSON exports
+  public/generated ignored generated JSON artifacts
 
 docs/plans/        design notes and implementation plans
 tests/             Python regression tests

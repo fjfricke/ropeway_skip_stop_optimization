@@ -3,13 +3,13 @@ from __future__ import annotations
 from dataclasses import replace
 
 from ropeway_skip_stop_optimization.baselines import build_maximal_greedy_all_stop_circulation_plan
-from ropeway_skip_stop_optimization.examples import build_three_station_scenario
+from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
 from ropeway_skip_stop_optimization.models import CabinPosition, CabinTrajectory, MovementPlan
-from ropeway_skip_stop_optimization.optimization import (
+from ropeway_skip_stop_optimization.optimization.discrete_time import (
     FixedCabinStart,
     validate_optimized_movement_plan,
 )
-from ropeway_skip_stop_optimization.preprocessing.discretize import discretize_scenario
+from ropeway_skip_stop_optimization.mapping import discretize_scenario
 
 
 def test_validate_optimized_movement_plan_accepts_greedy_baseline() -> None:

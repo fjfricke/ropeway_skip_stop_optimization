@@ -9,7 +9,7 @@ from ropeway_skip_stop_optimization.models import (
     DiscreteNode,
     DiscreteScenario,
 )
-from ropeway_skip_stop_optimization.optimization import (
+from ropeway_skip_stop_optimization.optimization.discrete_time import (
     FixedCabinStart,
     MilpV1PassengerWaitingObjective,
     MilpV1PassengerWaitingConfig,

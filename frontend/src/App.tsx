@@ -1,12 +1,18 @@
 import { useEffect, useState } from "react";
 import { ScenarioViewer } from "./components/ScenarioViewer";
-import type { DiscreteScenario, MovementPlan, PassengerReplayResult, ReplayMetrics, Scenario } from "./types";
+import type {
+  DiscreteScenario,
+  ExportArtifactKind,
+  ExportArtifactSetManifest,
+  ExportManifest,
+  MovementPlan,
+  PassengerReplayResult,
+  ReplayMetrics,
+  Scenario,
+} from "./types";
 
-const SCENARIO_URL = "/scenarios/three_station_v0.json";
-const DISCRETE_SCENARIO_URL = "/scenarios/three_station_v0__dt_0p5.json";
-const MOVEMENT_PLAN_URL = "/scenarios/three_station_v0__dt_0p5__greedy_all_stop_movement_plan.json";
-const PASSENGER_REPLAY_URL = "/scenarios/three_station_v0__dt_0p5__greedy_all_stop_passenger_replay.json";
-const REPLAY_METRICS_URL = "/scenarios/three_station_v0__dt_0p5__greedy_all_stop_replay_metrics.json";
+const MANIFEST_URL = "/generated/examples/manifest.json";
+const ARTIFACT_BASE_URL = "/generated/examples/";
 
 export default function App() {
   const [scenario, setScenario] = useState<Scenario | null>(null);
@@ -25,78 +31,42 @@ export default function App() {
 
     async function loadScenario() {
       try {
-        const scenarioResponse = await fetch(SCENARIO_URL);
-        if (!scenarioResponse.ok) {
-          throw new Error(`Failed to load ${SCENARIO_URL}: ${scenarioResponse.status}`);
+        const manifest = await fetchRequired<ExportManifest>(MANIFEST_URL);
+        const example = manifest.examples[0];
+        if (!example) {
+          throw new Error(`No examples listed in ${MANIFEST_URL}`);
         }
-        const data = (await scenarioResponse.json()) as Scenario;
-        let discreteData: DiscreteScenario | null = null;
-        let movementData: MovementPlan | null = null;
-        let passengerReplayData: PassengerReplayResult | null = null;
-        let replayMetricsData: ReplayMetrics | null = null;
-        let discreteLoadWarning: string | null = null;
-        let movementLoadWarning: string | null = null;
-        let passengerReplayLoadWarning: string | null = null;
-        let replayMetricsLoadWarning: string | null = null;
-
-        try {
-          const discreteResponse = await fetch(DISCRETE_SCENARIO_URL);
-          if (discreteResponse.ok) {
-            discreteData = (await discreteResponse.json()) as DiscreteScenario;
-          } else {
-            discreteLoadWarning = `Discrete overlay unavailable (${DISCRETE_SCENARIO_URL}: ${discreteResponse.status})`;
-          }
-        } catch (discreteLoadError) {
-          discreteLoadWarning =
-            discreteLoadError instanceof Error ? discreteLoadError.message : "Unknown discrete scenario load error";
+        const artifactSet =
+          example.artifact_sets.find((candidate) => candidate.id === example.default_artifact_set) ??
+          example.artifact_sets[0];
+        if (!artifactSet) {
+          throw new Error(`No artifact sets listed for example ${example.id}`);
         }
 
-        try {
-          const movementResponse = await fetch(MOVEMENT_PLAN_URL);
-          if (movementResponse.ok) {
-            movementData = (await movementResponse.json()) as MovementPlan;
-          } else {
-            movementLoadWarning = `Replay unavailable (${MOVEMENT_PLAN_URL}: ${movementResponse.status})`;
-          }
-        } catch (movementLoadError) {
-          movementLoadWarning =
-            movementLoadError instanceof Error ? movementLoadError.message : "Unknown movement plan load error";
+        const scenarioPath = artifactUrl(artifactSet, "scenario");
+        if (!scenarioPath) {
+          throw new Error(`Artifact set ${artifactSet.id} does not provide a physical scenario`);
         }
-
-        try {
-          const passengerReplayResponse = await fetch(PASSENGER_REPLAY_URL);
-          if (passengerReplayResponse.ok) {
-            passengerReplayData = (await passengerReplayResponse.json()) as PassengerReplayResult;
-          } else {
-            passengerReplayLoadWarning = `Passenger replay unavailable (${PASSENGER_REPLAY_URL}: ${passengerReplayResponse.status})`;
-          }
-        } catch (passengerReplayLoadError) {
-          passengerReplayLoadWarning =
-            passengerReplayLoadError instanceof Error ? passengerReplayLoadError.message : "Unknown passenger replay load error";
-        }
-
-        try {
-          const replayMetricsResponse = await fetch(REPLAY_METRICS_URL);
-          if (replayMetricsResponse.ok) {
-            replayMetricsData = (await replayMetricsResponse.json()) as ReplayMetrics;
-          } else {
-            replayMetricsLoadWarning = `Replay metrics unavailable (${REPLAY_METRICS_URL}: ${replayMetricsResponse.status})`;
-          }
-        } catch (replayMetricsLoadError) {
-          replayMetricsLoadWarning =
-            replayMetricsLoadError instanceof Error ? replayMetricsLoadError.message : "Unknown replay metrics load error";
-        }
+        const data = await fetchRequired<Scenario>(scenarioPath);
+        const discreteResult = await fetchOptional<DiscreteScenario>(artifactSet, "discrete_scenario", "Discrete overlay");
+        const movementResult = await fetchOptional<MovementPlan>(artifactSet, "movement_plan", "Replay");
+        const passengerReplayResult = await fetchOptional<PassengerReplayResult>(
+          artifactSet,
+          "passenger_replay",
+          "Passenger replay",
+        );
+        const replayMetricsResult = await fetchOptional<ReplayMetrics>(artifactSet, "replay_metrics", "Replay metrics");
 
         if (!cancelled) {
           setScenario(data);
-          setDiscreteScenario(discreteData);
-          setMovementPlan(movementData);
-          setPassengerReplay(passengerReplayData);
-          setReplayMetrics(replayMetricsData);
-          setDiscreteWarning(discreteLoadWarning);
-          setMovementPlanWarning(movementLoadWarning);
-          setPassengerReplayWarning(passengerReplayLoadWarning);
-          setReplayMetricsWarning(replayMetricsLoadWarning);
+          setDiscreteScenario(discreteResult.data);
+          setMovementPlan(movementResult.data);
+          setPassengerReplay(passengerReplayResult.data);
+          setReplayMetrics(replayMetricsResult.data);
+          setDiscreteWarning(discreteResult.warning);
+          setMovementPlanWarning(movementResult.warning);
+          setPassengerReplayWarning(passengerReplayResult.warning);
+          setReplayMetricsWarning(replayMetricsResult.warning);
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -140,4 +110,34 @@ export default function App() {
       replayMetricsWarning={replayMetricsWarning}
     />
   );
+}
+
+async function fetchRequired<T>(url: string): Promise<T> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to load ${url}: ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
+async function fetchOptional<T>(
+  artifactSet: ExportArtifactSetManifest,
+  kind: ExportArtifactKind,
+  label: string,
+): Promise<{ data: T | null; warning: string | null }> {
+  const url = artifactUrl(artifactSet, kind);
+  if (!url) {
+    return { data: null, warning: `${label} unavailable in artifact set ${artifactSet.id}` };
+  }
+  try {
+    return { data: await fetchRequired<T>(url), warning: null };
+  } catch (loadError) {
+    const message = loadError instanceof Error ? loadError.message : `Unknown ${label.toLowerCase()} load error`;
+    return { data: null, warning: message };
+  }
+}
+
+function artifactUrl(artifactSet: ExportArtifactSetManifest, kind: ExportArtifactKind): string | null {
+  const relativePath = artifactSet.artifacts[kind];
+  return relativePath ? `${ARTIFACT_BASE_URL}${relativePath}` : null;
 }

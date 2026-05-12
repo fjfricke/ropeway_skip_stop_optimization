@@ -2,8 +2,8 @@ from __future__ import annotations
 
 import pytest
 
-from ropeway_skip_stop_optimization.examples import build_three_station_scenario
-from ropeway_skip_stop_optimization.preprocessing.discretize import discretize_scenario
+from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
+from ropeway_skip_stop_optimization.mapping import discretize_scenario
 from ropeway_skip_stop_optimization.replay import (
     cumulative_passenger_queues,
     demand_arrivals_at_step,
