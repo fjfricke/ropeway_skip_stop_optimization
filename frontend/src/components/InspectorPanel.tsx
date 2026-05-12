@@ -1,6 +1,6 @@
 import { Info } from "lucide-react";
 import type { DiscreteScenario, Scenario, Selection, SpeedProfile } from "../types";
-import type { DiscreteOverlayMode, DiscreteViewerToggles } from "./ScenarioViewer";
+import type { DiscreteOverlayMode, DiscreteViewerToggles } from "./viewerTypes";
 
 interface InspectorPanelProps {
   scenario: Scenario;

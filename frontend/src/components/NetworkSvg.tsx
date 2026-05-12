@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent, PointerEvent } from "react";
 import type { ScenarioLayout } from "../scenarioLayout";
 import type { DiscreteArc, DiscreteConstraint, DiscreteNode, DiscreteScenario, Scenario, Selection, TrackSegment } from "../types";
-import type { DiscreteOverlayMode, DiscreteViewerToggles, ViewerToggles } from "./ScenarioViewer";
+import type { DiscreteOverlayMode, DiscreteViewerToggles, ViewerToggles } from "./viewerTypes";
 
 export interface ReplayCabinMarker {
   cabinId: number;

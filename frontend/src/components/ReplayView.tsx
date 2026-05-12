@@ -15,7 +15,7 @@ import type {
 } from "../types";
 import { DemandSummaryPanel, type DemandSummaryRow } from "./DemandSummaryPanel";
 import { NetworkSvg, type ReplayCabinMarker, type ReplayStationQueueMarker } from "./NetworkSvg";
-import type { DiscreteViewerToggles, ViewerToggles } from "./ScenarioViewer";
+import type { DiscreteViewerToggles, ViewerToggles } from "./viewerTypes";
 
 interface ReplayViewProps {
   scenario: Scenario;
