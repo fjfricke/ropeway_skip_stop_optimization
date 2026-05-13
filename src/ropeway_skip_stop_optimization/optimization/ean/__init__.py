@@ -55,6 +55,11 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
     SwitchVisitBuildResult,
     SwitchVisitDefinition,
 )
+from ropeway_skip_stop_optimization.optimization.ean.optimization_config import (
+    ALL_EAN_OPTIMIZATION_NAMES,
+    EanOptimizationConfig,
+    EanOptimizationName,
+)
 from ropeway_skip_stop_optimization.optimization.ean.optimizers import (
     EanPassengerServiceCheckpointConfig,
     EanPassengerServiceConfig,
@@ -93,6 +98,7 @@ from ropeway_skip_stop_optimization.optimization.ean.validation import (
 
 __all__ = [
     "AllPairsHeadwayPairBuilder",
+    "ALL_EAN_OPTIMIZATION_NAMES",
     "ContinuousAllStopMaxCabinStartBuilder",
     "DeterministicPhysicalNodeToSwitchStartBuilder",
     "EarliestAllStopEanMovementPlanBuilder",
@@ -108,6 +114,8 @@ __all__ = [
     "EanDemandGroup",
     "EanMovementPlan",
     "EanMovementPlanBuilder",
+    "EanOptimizationConfig",
+    "EanOptimizationName",
     "EanPassengerCandidateBuilder",
     "EanPassengerCandidateBuildResult",
     "EanPassengerServiceConfig",

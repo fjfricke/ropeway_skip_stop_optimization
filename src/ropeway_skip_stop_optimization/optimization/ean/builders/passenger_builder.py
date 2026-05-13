@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 
 from ropeway_skip_stop_optimization.models import Demand, Scenario
@@ -13,6 +13,7 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
     SwitchTransition,
     SwitchVisitDefinition,
 )
+from ropeway_skip_stop_optimization.optimization.ean.optimization_config import EanOptimizationConfig
 
 
 LOGGER = logging.getLogger(__name__)
@@ -44,6 +45,7 @@ class EanPassengerCandidateBuildResult:
             candidate_ids.add(candidate.id)
 
 
+@dataclass(frozen=True)
 class EanPassengerCandidateBuilder:
     """Build grouped demand and feasible EAN ride candidates.
 
@@ -53,12 +55,15 @@ class EanPassengerCandidateBuilder:
     visit order.
 
     For the current single directed ring EAN, ride candidates are additionally
-    limited to less than one full switch cycle after boarding. This prevents
-    passengers from riding one or more complete loops before alighting. If an
-    artifact does not match the immutable directed-ring topology, this
-    optimization is skipped with a warning; future branch or multi-cycle
-    artifacts need an explicit graph/path-distance rule instead of visit-index
-    span pruning.
+    limited to less than one full switch cycle after boarding. Candidates that
+    stay onboard for one or more complete loops are dominated: the passenger
+    reaches the same destination earlier, could alight at that first matching
+    visit, and would never get a better waiting-time or journey-time objective
+    by remaining onboard longer. The later candidate also keeps cabin capacity
+    occupied for at least as long. If an artifact does not match the immutable
+    directed-ring topology, this optimization is skipped with a warning; future
+    branch or multi-cycle artifacts need an explicit graph/path-distance rule
+    instead of visit-index span pruning.
 
     Candidate generation also applies conservative horizon pruning as an
     optimization: candidates are skipped only when their earliest possible
@@ -67,10 +72,16 @@ class EanPassengerCandidateBuilder:
     integer solution is removed.
     """
 
+    optimization_config: EanOptimizationConfig = field(default_factory=EanOptimizationConfig)
+
     def build(self, scenario: Scenario, artifact: EanBuildArtifact) -> EanPassengerCandidateBuildResult:
         artifact.validate()
         demand_groups = expand_demands_to_ean_groups(scenario)
-        ride_candidates = build_ean_ride_candidates(demand_groups, artifact)
+        ride_candidates = build_ean_ride_candidates(
+            demand_groups,
+            artifact,
+            optimization_config=self.optimization_config,
+        )
         result = EanPassengerCandidateBuildResult(
             demand_groups=demand_groups,
             ride_candidates=ride_candidates,
@@ -101,12 +112,18 @@ def release_seconds_for_demand(scenario: Scenario, demand: Demand) -> float:
 def build_ean_ride_candidates(
     demand_groups: tuple[EanDemandGroup, ...],
     artifact: EanBuildArtifact,
+    optimization_config: EanOptimizationConfig | None = None,
 ) -> tuple[EanRideCandidate, ...]:
+    optimization_config = optimization_config or EanOptimizationConfig()
     timing_by_switch_id = {timing.switch_id: timing for timing in artifact.timings}
     visits_by_cabin_id = _visits_by_cabin_id(artifact.switch_visits)
     starts_by_cabin_id = {start.cabin_id: start for start in artifact.cabin_starts}
-    ring_span_pruning_enabled = _is_single_directed_ring_artifact(artifact)
-    if not ring_span_pruning_enabled:
+    artifact_supports_ring_pruning = _is_single_directed_ring_artifact(artifact)
+    ring_span_pruning_enabled = (
+        optimization_config.enable_single_ring_dominated_ride_pruning
+        and artifact_supports_ring_pruning
+    )
+    if optimization_config.enable_single_ring_dominated_ride_pruning and not artifact_supports_ring_pruning:
         LOGGER.warning(
             "EAN passenger candidate ring-span pruning skipped: artifact %r does not match the single directed ring topology",
             artifact.scenario_id,
@@ -131,7 +148,7 @@ def build_ean_ride_candidates(
                         switch_cycle_length=len(artifact.switch_cycle),
                     ):
                         continue
-                    if not _can_serve_within_horizon(
+                    if optimization_config.enable_candidate_horizon_pruning and not _can_serve_within_horizon(
                         group=group,
                         cabin_id=cabin_id,
                         cabin_start_time_seconds=starts_by_cabin_id[cabin_id].time_seconds,

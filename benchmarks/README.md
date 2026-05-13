@@ -11,7 +11,17 @@ uv run python benchmarks/run_ean_passenger_benchmark.py \
   --artifact-set ean_passenger_journey_time \
   --ean-solver-policy quick_good_solution \
   --time-limit 300 \
+  --ean-optimizations all \
   --sample-interval 5
+```
+
+`--ean-optimizations` accepts `all`, `none`, or a comma-separated list of
+active optimizations:
+
+```text
+candidate_horizon_pruning
+single_ring_dominated_ride_pruning
+slot_time_relaxation_strengthening
 ```
 
 Default output layout:

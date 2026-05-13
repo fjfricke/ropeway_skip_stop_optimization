@@ -103,6 +103,7 @@ The benchmark runner accepts:
 --ean-solver-policy
 --time-limit
 --sample-interval
+--ean-optimizations
 --label
 --output-dir
 --result-dir
@@ -123,8 +124,18 @@ uv run python benchmarks/run_ean_passenger_benchmark.py \
   --example three_station_v0 \
   --artifact-set ean_passenger_journey_time \
   --ean-solver-policy exact_optimality \
+  --ean-optimizations all \
   --output-dir benchmarks/output \
   --sample-interval 5
+```
+
+`--ean-optimizations` accepts `all`, `none`, or a comma-separated list of active
+optimization names:
+
+```text
+candidate_horizon_pruning
+single_ring_dominated_ride_pruning
+slot_time_relaxation_strengthening
 ```
 
 The plot script accepts:
@@ -194,6 +205,8 @@ variant_id
 artifact_set_id
 objective
 solver_policy
+ean_optimizations
+ean_optimization_config
 model_variable_count
 model_constraint_count
 demand_group_count

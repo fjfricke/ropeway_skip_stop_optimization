@@ -20,6 +20,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanActivationReference,
     EanBuildArtifact,
     EanTimeReference,
+    EanOptimizationConfig,
     EanPassengerServiceConfig,
     EanPassengerServiceObjective,
     EanRideCandidate,
@@ -79,6 +80,32 @@ def test_ean_passenger_service_journey_time_uses_alighting_time() -> None:
     assert ride.alight_visit_index == 1
     assert result.metadata.objective_value_seconds == pytest.approx(9.0)
     assert result.metadata.objective_passenger_hours == pytest.approx(9.0 / 3600.0)
+
+
+def test_ean_passenger_service_can_disable_slot_time_strengthening() -> None:
+    pytest.importorskip("gurobipy")
+    scenario = _minimal_scenario(
+        demands=(Demand(arrival_time=time(8, 0), origin="A", destination="B", count=1),),
+    )
+    artifact = _minimal_artifact(cabin_capacity=2, cycle_count=2)
+
+    strengthened = solve_ean_passenger_service(
+        scenario,
+        artifact,
+        EanPassengerServiceConfig(objective=EanPassengerServiceObjective.JOURNEY_TIME),
+    )
+    unstrengthened = solve_ean_passenger_service(
+        scenario,
+        artifact,
+        EanPassengerServiceConfig(
+            objective=EanPassengerServiceObjective.JOURNEY_TIME,
+            optimization_config=EanOptimizationConfig(enable_slot_time_relaxation_strengthening=False),
+        ),
+    )
+
+    assert strengthened.metadata.objective_value_seconds == pytest.approx(unstrengthened.metadata.objective_value_seconds)
+    assert strengthened.metadata.constraint_count > unstrengthened.metadata.constraint_count
+    assert not unstrengthened.metadata.optimization_config.enable_slot_time_relaxation_strengthening
 
 
 def test_min_candidate_trip_time_uses_physical_lower_bound_between_platforms() -> None:

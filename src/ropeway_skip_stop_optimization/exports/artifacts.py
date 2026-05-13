@@ -34,6 +34,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanPassengerServiceConfig,
     EanPassengerServiceObjective,
     EanPassengerServiceResult,
+    EanOptimizationConfig,
     EanSkipStopFeasibilityConfig,
     GurobiSolverPolicy,
     project_ean_movement_plan_to_physical_replay,
@@ -79,6 +80,7 @@ class ExportContext:
     progress: ProgressReporter
     ean_solver_policy: GurobiSolverPolicy = field(default_factory=GurobiSolverPolicy)
     ean_checkpoint_config: EanPassengerServiceCheckpointConfig | None = None
+    ean_optimization_config: EanOptimizationConfig = field(default_factory=EanOptimizationConfig)
     ean_progress_recorder: Any | None = None
     ean_progress_sample_interval_seconds: float = 5.0
 
@@ -205,6 +207,7 @@ class ExportContext:
                         solver_policy=self.ean_solver_policy,
                         log_to_console=self.progress.enabled,
                         checkpoint=self.ean_checkpoint_config,
+                        optimization_config=self.ean_optimization_config,
                         progress_recorder=self.ean_progress_recorder,
                         progress_sample_interval_seconds=self.ean_progress_sample_interval_seconds,
                     ),

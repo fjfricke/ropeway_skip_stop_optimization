@@ -37,6 +37,7 @@ from ropeway_skip_stop_optimization.optimization.discrete_time import (
 from ropeway_skip_stop_optimization.optimization.ean import (
     EanPassengerServiceCheckpointConfig,
     EanPassengerServiceObjective,
+    EanOptimizationConfig,
     GurobiSolverPolicy,
     GurobiSolverPolicyPreset,
     gurobi_solver_policy_for_preset,
@@ -210,6 +211,7 @@ def export_artifact_set(
     ean_checkpoint_dir: Path | None = None,
     ean_resume_checkpoint: Path | None = None,
     ean_resume_latest_checkpoint: bool = False,
+    ean_optimization_config: EanOptimizationConfig | None = None,
     progress: bool | ProgressReporter = False,
     clean: bool = False,
 ) -> ExportRunResult:
@@ -229,6 +231,7 @@ def export_artifact_set(
         ean_checkpoint_dir=ean_checkpoint_dir,
         ean_resume_checkpoint=ean_resume_checkpoint,
         ean_resume_latest_checkpoint=ean_resume_latest_checkpoint,
+        ean_optimization_config=ean_optimization_config,
         progress=reporter,
         clean=clean,
     )
@@ -243,6 +246,7 @@ def run_artifact_set(
     ean_checkpoint_dir: Path | None = None,
     ean_resume_checkpoint: Path | None = None,
     ean_resume_latest_checkpoint: bool = False,
+    ean_optimization_config: EanOptimizationConfig | None = None,
     ean_progress_recorder: object | None = None,
     ean_progress_sample_interval_seconds: float = 5.0,
     progress: ProgressReporter,
@@ -266,6 +270,7 @@ def run_artifact_set(
         progress=progress,
         ean_solver_policy=ean_solver_policy or GurobiSolverPolicy(),
         ean_checkpoint_config=checkpoint_config,
+        ean_optimization_config=ean_optimization_config or EanOptimizationConfig(),
         ean_progress_recorder=ean_progress_recorder,
         ean_progress_sample_interval_seconds=ean_progress_sample_interval_seconds,
     )

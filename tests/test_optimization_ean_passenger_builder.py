@@ -13,6 +13,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanConfig,
     EanPassengerCandidateBuilder,
     EanPassengerCandidateBuildResult,
+    EanOptimizationConfig,
     EanActivationReference,
     EanTimeReference,
     HeadwayCandidate,
@@ -58,6 +59,19 @@ def test_ean_passenger_candidate_builder_prunes_full_ring_span_candidates() -> N
     assert _candidate_spans(result) == [1, 1]
 
 
+def test_ean_passenger_candidate_builder_can_disable_single_ring_dominated_ride_pruning() -> None:
+    scenario = _minimal_scenario(
+        demands=(Demand(arrival_time=time(8, 0), origin="A", destination="B", count=1),),
+    )
+    artifact = _two_station_artifact(non_ring=False, horizon_seconds=30.0)
+
+    result = EanPassengerCandidateBuilder(
+        optimization_config=EanOptimizationConfig(enable_single_ring_dominated_ride_pruning=False),
+    ).build(scenario, artifact)
+
+    assert _candidate_spans(result) == [1, 1, 3]
+
+
 def test_ean_passenger_candidate_builder_warns_when_ring_span_pruning_cannot_apply(caplog) -> None:
     scenario = _minimal_scenario(
         demands=(Demand(arrival_time=time(8, 0), origin="A", destination="B", count=1),),
@@ -91,6 +105,31 @@ def test_ean_passenger_candidate_builder_prunes_candidates_released_after_horizo
     result = EanPassengerCandidateBuilder().build(scenario, artifact)
 
     assert result.ride_candidates == ()
+
+
+def test_ean_passenger_candidate_builder_can_disable_horizon_pruning() -> None:
+    scenario = _minimal_scenario(
+        demands=(Demand(arrival_time=time(8, 1), origin="A", destination="B", count=1),),
+    )
+    artifact = _two_station_artifact(non_ring=False, horizon_seconds=20.0)
+
+    result = EanPassengerCandidateBuilder(
+        optimization_config=EanOptimizationConfig(enable_candidate_horizon_pruning=False),
+    ).build(scenario, artifact)
+
+    assert _candidate_spans(result) == [1, 1]
+
+
+def test_ean_optimization_config_parses_cli_selection() -> None:
+    assert EanOptimizationConfig.from_selection("all") == EanOptimizationConfig()
+    assert EanOptimizationConfig.from_selection("none") == EanOptimizationConfig.none()
+    assert EanOptimizationConfig.from_selection(
+        "candidate_horizon_pruning,slot_time_relaxation_strengthening"
+    ) == EanOptimizationConfig(
+        enable_candidate_horizon_pruning=True,
+        enable_single_ring_dominated_ride_pruning=False,
+        enable_slot_time_relaxation_strengthening=True,
+    )
 
 
 def _three_station_artifact(scenario):

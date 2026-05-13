@@ -10,7 +10,11 @@ from ropeway_skip_stop_optimization.benchmarking.ean_passenger import (
 )
 from ropeway_skip_stop_optimization.benchmarking.plots import PlotBuilder, load_benchmark_result_dicts
 from ropeway_skip_stop_optimization.exports.runner import DEFAULT_OUTPUT_ROOT
-from ropeway_skip_stop_optimization.optimization.ean import GurobiSolverPolicyPreset
+from ropeway_skip_stop_optimization.optimization.ean import (
+    ALL_EAN_OPTIMIZATION_NAMES,
+    EanOptimizationConfig,
+    GurobiSolverPolicyPreset,
+)
 
 
 def main() -> None:
@@ -27,6 +31,7 @@ def main() -> None:
             ean_solver_policy=GurobiSolverPolicyPreset(args.ean_solver_policy),
             time_limit_seconds=args.time_limit,
             sample_interval_seconds=args.sample_interval,
+            ean_optimization_config=args.ean_optimization_config,
             label=args.label,
             output_dir=output_dir,
             result_dir=result_dir,
@@ -58,6 +63,14 @@ def _parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--time-limit", type=float, default=None)
     parser.add_argument("--sample-interval", type=float, default=5.0)
+    parser.add_argument(
+        "--ean-optimizations",
+        default="all",
+        help=(
+            "'all', 'none', or comma-separated active optimizations: "
+            + ", ".join(name.value for name in ALL_EAN_OPTIMIZATION_NAMES)
+        ),
+    )
     parser.add_argument("--label", default=None)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_BENCHMARK_OUTPUT_DIR)
     parser.add_argument("--result-dir", type=Path, default=None)
@@ -74,6 +87,10 @@ def _parse_args() -> argparse.Namespace:
         parser.error("--sample-interval must be positive")
     if args.resume_checkpoint is not None and args.resume_latest_checkpoint:
         parser.error("Use either --resume-checkpoint or --resume-latest-checkpoint, not both")
+    try:
+        args.ean_optimization_config = EanOptimizationConfig.from_selection(args.ean_optimizations)
+    except ValueError as error:
+        parser.error(str(error))
     return args
 
 

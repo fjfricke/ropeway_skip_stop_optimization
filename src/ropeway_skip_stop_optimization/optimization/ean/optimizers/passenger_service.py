@@ -29,6 +29,7 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
     StationWaitingMode,
     SwitchVisitDefinition,
 )
+from ropeway_skip_stop_optimization.optimization.ean.optimization_config import EanOptimizationConfig
 from ropeway_skip_stop_optimization.optimization.ean.passenger_plan import (
     EanPassengerServicePlan,
     EanServedRideGroup,
@@ -89,6 +90,7 @@ class EanPassengerServiceConfig:
     log_to_console: bool = False
     use_all_stop_mip_start: bool = True
     checkpoint: EanPassengerServiceCheckpointConfig | None = None
+    optimization_config: EanOptimizationConfig = field(default_factory=EanOptimizationConfig)
     progress_recorder: Any | None = None
     progress_sample_interval_seconds: float = 5.0
 
@@ -126,6 +128,7 @@ class EanPassengerServiceMetadata:
     checkpoint_read_path: str | None
     checkpoint_solution_file_prefix: str | None
     checkpoint_final_solution_path: str | None
+    optimization_config: EanOptimizationConfig
 
 
 @dataclass(frozen=True)
@@ -160,7 +163,10 @@ def solve_ean_passenger_service(
     config.validate()
     _require_supported_waiting_modes(artifact)
 
-    passenger_build = (passenger_builder or EanPassengerCandidateBuilder()).build(scenario, artifact)
+    passenger_build = (
+        passenger_builder
+        or EanPassengerCandidateBuilder(optimization_config=config.optimization_config)
+    ).build(scenario, artifact)
     group_by_id = {group.id: group for group in passenger_build.demand_groups}
     timing_by_switch_id = {timing.switch_id: timing for timing in artifact.timings}
     station_config_by_id = {station_config.station_id: station_config for station_config in artifact.config.station_configs}
@@ -266,6 +272,9 @@ def solve_ean_passenger_service(
         horizon_seconds=artifact.config.horizon_seconds,
         time_upper_bound=time_upper_bound,
         big_m=big_m,
+        enable_slot_time_relaxation_strengthening=(
+            config.optimization_config.enable_slot_time_relaxation_strengthening
+        ),
     )
 
     if (
@@ -349,6 +358,7 @@ def solve_ean_passenger_service(
                 skipped_visit_count=0,
                 visible_skipped_visit_count=0,
                 **checkpoint_diagnostics,
+                optimization_config=config.optimization_config,
             ),
         )
 
@@ -407,6 +417,7 @@ def solve_ean_passenger_service(
             skipped_visit_count=skipped_visit_count,
             visible_skipped_visit_count=visible_skipped_visit_count,
             **checkpoint_diagnostics,
+            optimization_config=config.optimization_config,
         ),
     )
 
@@ -594,6 +605,7 @@ def _add_passenger_constraints(
     horizon_seconds: float,
     time_upper_bound: float,
     big_m: float,
+    enable_slot_time_relaxation_strengthening: bool,
 ) -> None:
     ride_by_group_id: dict[str, list[EanRideCandidate]] = {group.id: [] for group in passenger_build.demand_groups}
     for ride_candidate in passenger_build.ride_candidates:
@@ -614,6 +626,7 @@ def _add_passenger_constraints(
             time_upper_bound=time_upper_bound,
             big_m=big_m,
             cabin_capacity=cabin_capacity,
+            enable_slot_time_relaxation_strengthening=enable_slot_time_relaxation_strengthening,
         )
 
     for group in passenger_build.demand_groups:
@@ -661,6 +674,7 @@ def _add_ride_slot_constraints(
     time_upper_bound: float,
     big_m: float,
     cabin_capacity: int,
+    enable_slot_time_relaxation_strengthening: bool,
 ) -> None:
     board_key = (ride_candidate.cabin_id, ride_candidate.board_visit_index)
     alight_key = (ride_candidate.cabin_id, ride_candidate.alight_visit_index)
@@ -707,17 +721,18 @@ def _add_ride_slot_constraints(
                 alight_slot_time >= alight_time - time_upper_bound * (1 - slot_var),
                 name=f"slot_time_alight_lb_{_var_id(ride_candidate.id)}_{slot_index}",
             )
-        _add_slot_time_relaxation_strengthening_constraints(
-            model=model,
-            ride_candidate=ride_candidate,
-            group=group,
-            slot_index=slot_index,
-            slot_var=slot_var,
-            slot_board_time=slot_time,
-            slot_alight_time=slot_alight_time[key] if slot_alight_time is not None else None,
-            visits_by_key=visits_by_key,
-            timing_by_switch_id=timing_by_switch_id,
-        )
+        if enable_slot_time_relaxation_strengthening:
+            _add_slot_time_relaxation_strengthening_constraints(
+                model=model,
+                ride_candidate=ride_candidate,
+                group=group,
+                slot_index=slot_index,
+                slot_var=slot_var,
+                slot_board_time=slot_time,
+                slot_alight_time=slot_alight_time[key] if slot_alight_time is not None else None,
+                visits_by_key=visits_by_key,
+                timing_by_switch_id=timing_by_switch_id,
+            )
         if previous_slot_var is not None:
             model.addConstr(slot_var <= previous_slot_var, name=f"slot_symmetry_{_var_id(ride_candidate.id)}_{slot_index}")
         previous_slot_var = slot_var

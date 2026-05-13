@@ -20,6 +20,7 @@ from ropeway_skip_stop_optimization.exports.runner import (
     run_artifact_set,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
+    EanOptimizationConfig,
     GurobiSolverPolicy,
     GurobiSolverPolicyPreset,
     gurobi_solver_policy_for_preset,
@@ -130,6 +131,7 @@ class BenchmarkRunConfig:
     ean_solver_policy: GurobiSolverPolicyPreset = GurobiSolverPolicyPreset.QUICK_GOOD_SOLUTION
     time_limit_seconds: float | None = None
     sample_interval_seconds: float = 5.0
+    ean_optimization_config: EanOptimizationConfig = field(default_factory=EanOptimizationConfig)
     label: str | None = None
     output_dir: Path = DEFAULT_BENCHMARK_OUTPUT_DIR
     result_dir: Path | None = None
@@ -160,6 +162,8 @@ class BenchmarkRunResult:
     artifact_set_id: str
     objective: str | None
     solver_policy: dict[str, Any]
+    ean_optimizations: tuple[str, ...]
+    ean_optimization_config: dict[str, Any]
     model_variable_count: int | None
     model_constraint_count: int | None
     demand_group_count: int | None
@@ -209,6 +213,7 @@ def run_ean_passenger_benchmark(config: BenchmarkRunConfig) -> tuple[BenchmarkRu
         ean_solver_policy=solver_policy,
         ean_checkpoint_dir=checkpoint_dir,
         ean_resume_checkpoint=resume_checkpoint,
+        ean_optimization_config=config.ean_optimization_config,
         ean_progress_recorder=recorder,
         ean_progress_sample_interval_seconds=config.sample_interval_seconds,
         progress=ProgressReporter(enabled=config.progress),
@@ -233,6 +238,8 @@ def run_ean_passenger_benchmark(config: BenchmarkRunConfig) -> tuple[BenchmarkRu
         artifact_set_id=artifact_set.id,
         objective=metadata.get("objective_kind"),
         solver_policy=to_jsonable(solver_policy),
+        ean_optimizations=tuple(name.value for name in config.ean_optimization_config.enabled_names()),
+        ean_optimization_config=to_jsonable(config.ean_optimization_config),
         model_variable_count=metadata.get("variable_count"),
         model_constraint_count=metadata.get("constraint_count"),
         demand_group_count=metadata.get("demand_group_count"),
@@ -300,6 +307,7 @@ def _run_id(config: BenchmarkRunConfig) -> str:
             _safe_checkpoint_part(config.example_id),
             _safe_checkpoint_part(config.artifact_set_id),
             _safe_checkpoint_part(str(config.ean_solver_policy.value)),
+            _safe_checkpoint_part(config.ean_optimization_config.selection_label().replace(",", "+")),
         )
     )
 
