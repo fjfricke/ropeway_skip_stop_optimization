@@ -4,6 +4,7 @@ import type { MouseEvent, PointerEvent } from "react";
 import type { ScenarioLayout } from "../scenarioLayout";
 import type { Scenario, TrackSegment } from "../types";
 import { SegmentSpeedGradient, segmentSpeedColor, segmentSpeedStroke, speedDomainForSegments, speedProfileLabel } from "./arcColor";
+import { useNodeLabelPlacements } from "./hooks/useNodeLabelPlacements";
 import { lineArcId, lineViewPoints, stationLabel } from "./LineViewLayer";
 import {
   clampViewBox,
@@ -19,7 +20,7 @@ import type { NodeLabelPlacement, ReplayCabinMarker, ReplayCollisionMarker, Repl
 import { ReplayCabinLayer, ReplayCollisionLayer, ReplayStationQueueLayer } from "./ReplayLayers";
 import { aggregateDemandByStation, isSegmentEnabled, routeInfoBySegment } from "./scenarioExportGeometry";
 import { screenNodeLabelPlacementMetrics } from "./scenarioFigureMetrics";
-import type { ScenarioExportConfig } from "./viewerTypes";
+import type { ScenarioExportConfig } from "./export/exportTypes";
 
 interface ScenarioExportSelectorSvgProps {
   scenario: Scenario;
@@ -44,13 +45,6 @@ type PanState = {
 };
 
 const SELECTOR_MIN_VIEWBOX_SCALE = 0.25;
-const EMPTY_NODE_LABEL_PLACEMENTS = new Map<string, NodeLabelPlacement>();
-
-type NodeLabelPlacementWorkerResponse = {
-  jobId: number;
-  placements: [string, NodeLabelPlacement][];
-};
-
 export function ScenarioExportSelectorSvg({
   scenario,
   layout,
@@ -73,16 +67,6 @@ export function ScenarioExportSelectorSvg({
   const zoom = baseViewBox.width / viewBox.width;
   const inverseZoom = 1 / zoom;
   const [labelPlacementScale, setLabelPlacementScale] = useState(inverseZoom);
-  const labelPlacementWorkerRef = useRef<Worker | null>(null);
-  const labelPlacementJobIdRef = useRef(0);
-  const lastNodeLabelInputKeyRef = useRef<string | null>(null);
-  const [nodeLabelState, setNodeLabelState] = useState<{
-    inputKey: string | null;
-    placements: Map<string, NodeLabelPlacement>;
-  }>({
-    inputKey: null,
-    placements: EMPTY_NODE_LABEL_PLACEMENTS,
-  });
   const speedDomain = useMemo(() => speedDomainForSegments(scenario.track_segments), [scenario.track_segments]);
   const routeBySegment = useMemo(() => routeInfoBySegment(scenario), [scenario]);
   const visibleSegments = useMemo(
@@ -101,8 +85,15 @@ export function ScenarioExportSelectorSvg({
         : null,
     [config.displayMode, config.toggles.nodeLabels, layout.viewBox, scenario.physical_nodes, visibleSegments],
   );
-  const shouldRenderNodeLabels = nodeLabelInputKey !== null && nodeLabelState.inputKey === nodeLabelInputKey;
-  const nodeLabelPlacements = shouldRenderNodeLabels ? nodeLabelState.placements : EMPTY_NODE_LABEL_PLACEMENTS;
+  const nodeLabelMetrics = useMemo(() => screenNodeLabelPlacementMetrics(labelPlacementScale), [labelPlacementScale]);
+  const nodeLabelPlacements = useNodeLabelPlacements({
+    inputKey: nodeLabelInputKey,
+    nodes: scenario.physical_nodes,
+    visibleSegments,
+    layout,
+    viewBox: baseViewBox,
+    metrics: nodeLabelMetrics,
+  });
 
   useEffect(() => {
     setViewBox(baseViewBox);
@@ -114,55 +105,6 @@ export function ScenarioExportSelectorSvg({
     }, 140);
     return () => window.clearTimeout(timer);
   }, [inverseZoom]);
-
-  useEffect(() => {
-    labelPlacementWorkerRef.current?.terminate();
-    labelPlacementWorkerRef.current = null;
-    labelPlacementJobIdRef.current += 1;
-
-    if (nodeLabelInputKey === null) {
-      lastNodeLabelInputKeyRef.current = null;
-      setNodeLabelState({ inputKey: null, placements: EMPTY_NODE_LABEL_PLACEMENTS });
-      return undefined;
-    }
-
-    const inputChanged = lastNodeLabelInputKeyRef.current !== nodeLabelInputKey;
-    lastNodeLabelInputKeyRef.current = nodeLabelInputKey;
-    if (inputChanged) {
-      setNodeLabelState({ inputKey: null, placements: EMPTY_NODE_LABEL_PLACEMENTS });
-    }
-
-    const jobId = labelPlacementJobIdRef.current;
-    const frame = window.requestAnimationFrame(() => {
-      const worker = new Worker(new URL("./nodeLabelPlacement.worker.ts", import.meta.url), { type: "module" });
-      labelPlacementWorkerRef.current = worker;
-      worker.onmessage = (event: MessageEvent<NodeLabelPlacementWorkerResponse>) => {
-        if (event.data.jobId !== labelPlacementJobIdRef.current) return;
-        setNodeLabelState({
-          inputKey: nodeLabelInputKey,
-          placements: new Map(event.data.placements),
-        });
-        worker.terminate();
-        if (labelPlacementWorkerRef.current === worker) {
-          labelPlacementWorkerRef.current = null;
-        }
-      };
-      worker.postMessage({
-        jobId,
-        nodes: scenario.physical_nodes,
-        visibleSegments,
-        layout,
-        viewBox: baseViewBox,
-        metrics: screenNodeLabelPlacementMetrics(labelPlacementScale),
-      });
-    });
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      labelPlacementWorkerRef.current?.terminate();
-      labelPlacementWorkerRef.current = null;
-    };
-  }, [baseViewBox, labelPlacementScale, layout, nodeLabelInputKey, scenario.physical_nodes, visibleSegments]);
 
   useEffect(() => {
     const svg = svgRef.current;

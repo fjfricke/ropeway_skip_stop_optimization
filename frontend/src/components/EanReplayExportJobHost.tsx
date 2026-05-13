@@ -3,20 +3,13 @@ import type { RefObject } from "react";
 import type { ScenarioLayout } from "../scenarioLayout";
 import type { EanPassengerServiceResult, EanPhysicalReplay, Scenario } from "../types";
 import { groupEventsByCabin } from "./EanReplayView";
-import {
-  createReplayVideoFrameBuilder,
-  createReplayVideoSpriteCache,
-  downloadBlob,
-  drawReplayVideoFrame,
-  exportRenderConfig,
-  loadSvgImage,
-  nextAnimationFrame,
-  normalizeRange,
-  VIDEO_EXPORT_FPS,
-} from "./EanReplayExportModal";
+import { downloadBlob, loadSvgImage, nextAnimationFrame } from "./export/exportDom";
+import type { ReplayExportConfig, ReplayVideoExportFormat } from "./export/exportTypes";
+import { exportRenderConfig, normalizeRange, VIDEO_EXPORT_FPS } from "./eanReplayExport/replayExportConfig";
+import { createReplayVideoFrameBuilder } from "./eanReplayExport/replayFrameModel";
+import { createReplayVideoSpriteCache, drawReplayVideoFrame } from "./eanReplayExport/replayVideoCanvas";
 import { ScenarioExportSvg } from "./ScenarioExportSvg";
 import { buildScenarioExportRenderPlan } from "./scenarioExportGeometry";
-import type { ReplayExportConfig, ReplayVideoExportFormat } from "./viewerTypes";
 
 export type EanReplayVideoExportJob = {
   id: number;

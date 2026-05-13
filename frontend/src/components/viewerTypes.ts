@@ -30,35 +30,10 @@ export interface ViewerToggles {
   arcLabels: boolean;
 }
 
-export type ScenarioExportScope = "all" | "custom";
-export type ScenarioExportBasis = "a4_width" | "a4_height";
-export type ReplayExportMode = "video" | "frames";
-export type ReplayVideoExportFormat = "webm" | "mp4";
 export type DiscreteOverlayMode = "selected" | "neighborhood";
 export type ScenarioDisplayMode = "physical" | "line";
 export type ArcColorMode = "type" | "speed";
 export type ViewerMode = "scenario" | "graph" | "metrics" | "replay" | "ean" | "ean_metrics" | "ean_replay";
-
-export interface ScenarioExportConfig {
-  displayMode: ScenarioDisplayMode;
-  scope: ScenarioExportScope;
-  selectedNodeIds: string[];
-  selectedArcIds: string[];
-  toggles: ViewerToggles;
-  arcColorMode: ArcColorMode;
-  basis: ScenarioExportBasis;
-  percentage: number;
-}
-
-export interface ReplayExportConfig extends ScenarioExportConfig {
-  exportMode: ReplayExportMode;
-  videoResolutionHeight: number;
-  videoStartSeconds: number;
-  videoEndSeconds: number;
-  exportSpeed: number;
-  selectedFrameTimes: number[];
-  showCabinFill: boolean;
-}
 
 export interface AvailableViewerModes {
   scenario: true;

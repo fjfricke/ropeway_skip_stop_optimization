@@ -15,7 +15,7 @@ import {
   type ScenarioExportRenderPlan,
 } from "./scenarioExportGeometry";
 import { estimateTextSize, type ScenarioExportVisualMetrics } from "./scenarioFigureMetrics";
-import type { ScenarioExportConfig } from "./viewerTypes";
+import type { ScenarioExportConfig } from "./export/exportTypes";
 
 interface ScenarioExportSvgProps {
   scenario: Scenario;

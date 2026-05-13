@@ -6,6 +6,8 @@ export const A4_PORTRAIT_300_DPI = {
   height: 3508,
 };
 
+export const REPORT_TEXT_WIDTH_300_DPI = Math.round((A4_PORTRAIT_300_DPI.width * 147) / 210);
+
 export const FIGURE_FONT_FAMILY = `"TeX Gyre Pagella", "Palatino Linotype", Palatino, serif`;
 
 export type TextSize = {

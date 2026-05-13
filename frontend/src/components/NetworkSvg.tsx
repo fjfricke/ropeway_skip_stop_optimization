@@ -5,6 +5,7 @@ import type { ScenarioLayout } from "../scenarioLayout";
 import type { DiscreteScenario, Scenario, Selection, TrackSegment } from "../types";
 import { SegmentSpeedGradient, segmentSpeedColor, segmentSpeedStroke, speedDomainForSegments, speedProfileLabel } from "./arcColor";
 import { buildDiscreteOverlay, DiscreteOverlayLayer, physicalSelection } from "./DiscreteOverlayLayer";
+import { useNodeLabelPlacements } from "./hooks/useNodeLabelPlacements";
 import { LineViewLayer } from "./LineViewLayer";
 import {
   clampViewBox,
@@ -54,13 +55,6 @@ type PanState = {
 
 const NORMAL_MIN_VIEWBOX_SCALE = 0.25;
 const DISCRETE_MIN_VIEWBOX_SCALE = 0.25;
-const EMPTY_NODE_LABEL_PLACEMENTS = new Map<string, NodeLabelPlacement>();
-
-type NodeLabelPlacementWorkerResponse = {
-  jobId: number;
-  placements: [string, NodeLabelPlacement][];
-};
-
 export function NetworkSvg({
   scenario,
   discreteScenario,
@@ -84,9 +78,6 @@ export function NetworkSvg({
   const svgRef = useRef<SVGSVGElement | null>(null);
   const panRef = useRef<PanState | null>(null);
   const suppressClickRef = useRef(false);
-  const labelPlacementWorkerRef = useRef<Worker | null>(null);
-  const labelPlacementJobIdRef = useRef(0);
-  const lastNodeLabelInputKeyRef = useRef<string | null>(null);
   const baseViewBox = useMemo(() => parseViewBox(layout.viewBox), [layout.viewBox]);
   const [viewBox, setViewBox] = useState<ViewBoxState>(baseViewBox);
   const [isPanning, setIsPanning] = useState(false);
@@ -94,13 +85,6 @@ export function NetworkSvg({
   const zoom = baseViewBox.width / viewBox.width;
   const inverseZoom = 1 / zoom;
   const [labelPlacementScale, setLabelPlacementScale] = useState(inverseZoom);
-  const [nodeLabelState, setNodeLabelState] = useState<{
-    inputKey: string | null;
-    placements: Map<string, NodeLabelPlacement>;
-  }>({
-    inputKey: null,
-    placements: EMPTY_NODE_LABEL_PLACEMENTS,
-  });
   const routeBySegment = useMemo(() => {
     const routes = new Map<string, SegmentRouteInfo>();
     for (const route of scenario.station_routes) {
@@ -136,8 +120,15 @@ export function NetworkSvg({
         : null,
     [isLineView, layout.viewBox, scenario.physical_nodes, toggles.nodeLabels, visibleSegments],
   );
-  const shouldRenderNodeLabels = nodeLabelInputKey !== null && nodeLabelState.inputKey === nodeLabelInputKey;
-  const nodeLabelPlacements = shouldRenderNodeLabels ? nodeLabelState.placements : EMPTY_NODE_LABEL_PLACEMENTS;
+  const nodeLabelMetrics = useMemo(() => screenNodeLabelPlacementMetrics(labelPlacementScale), [labelPlacementScale]);
+  const nodeLabelPlacements = useNodeLabelPlacements({
+    inputKey: nodeLabelInputKey,
+    nodes: scenario.physical_nodes,
+    visibleSegments,
+    layout,
+    viewBox: baseViewBox,
+    metrics: nodeLabelMetrics,
+  });
 
   const demandByStation = aggregateDemandByStation(scenario);
   const overlayAnchor = physicalSelection(selected);
@@ -163,55 +154,6 @@ export function NetworkSvg({
     }, 140);
     return () => window.clearTimeout(timer);
   }, [inverseZoom]);
-
-  useEffect(() => {
-    labelPlacementWorkerRef.current?.terminate();
-    labelPlacementWorkerRef.current = null;
-    labelPlacementJobIdRef.current += 1;
-
-    if (nodeLabelInputKey === null) {
-      lastNodeLabelInputKeyRef.current = null;
-      setNodeLabelState({ inputKey: null, placements: EMPTY_NODE_LABEL_PLACEMENTS });
-      return undefined;
-    }
-
-    const inputChanged = lastNodeLabelInputKeyRef.current !== nodeLabelInputKey;
-    lastNodeLabelInputKeyRef.current = nodeLabelInputKey;
-    if (inputChanged) {
-      setNodeLabelState({ inputKey: null, placements: EMPTY_NODE_LABEL_PLACEMENTS });
-    }
-
-    const jobId = labelPlacementJobIdRef.current;
-    const frame = window.requestAnimationFrame(() => {
-      const worker = new Worker(new URL("./nodeLabelPlacement.worker.ts", import.meta.url), { type: "module" });
-      labelPlacementWorkerRef.current = worker;
-      worker.onmessage = (event: MessageEvent<NodeLabelPlacementWorkerResponse>) => {
-        if (event.data.jobId !== labelPlacementJobIdRef.current) return;
-        setNodeLabelState({
-          inputKey: nodeLabelInputKey,
-          placements: new Map(event.data.placements),
-        });
-        worker.terminate();
-        if (labelPlacementWorkerRef.current === worker) {
-          labelPlacementWorkerRef.current = null;
-        }
-      };
-      worker.postMessage({
-        jobId,
-        nodes: scenario.physical_nodes,
-        visibleSegments,
-        layout,
-        viewBox: baseViewBox,
-        metrics: screenNodeLabelPlacementMetrics(labelPlacementScale),
-      });
-    });
-
-    return () => {
-      window.cancelAnimationFrame(frame);
-      labelPlacementWorkerRef.current?.terminate();
-      labelPlacementWorkerRef.current = null;
-    };
-  }, [baseViewBox, labelPlacementScale, layout, nodeLabelInputKey, scenario.physical_nodes, visibleSegments]);
 
   useEffect(() => {
     const minWidth = baseViewBox.width * minViewBoxScale;
@@ -437,7 +379,7 @@ export function NetworkSvg({
               })}
             </g>
 
-            {toggles.nodeLabels && shouldRenderNodeLabels ? (
+            {toggles.nodeLabels && nodeLabelInputKey !== null && nodeLabelPlacements.size > 0 ? (
               <g className="layer layer--node-labels">
                 {scenario.physical_nodes.map((node) => {
                   const point = layout.nodes[node.id];

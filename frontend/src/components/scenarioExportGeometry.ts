@@ -9,9 +9,10 @@ import {
   A4_PORTRAIT_300_DPI,
   estimateTextSize,
   exportVisualMetrics,
+  REPORT_TEXT_WIDTH_300_DPI,
   type ScenarioExportVisualMetrics,
 } from "./scenarioFigureMetrics";
-import type { ScenarioExportConfig } from "./viewerTypes";
+import type { ScenarioExportConfig } from "./export/exportTypes";
 
 export type ExportArcRenderMode = "full" | "from_start" | "from_end";
 
@@ -300,10 +301,9 @@ function buildLineRenderPlan(scenario: Scenario, baseViewBox: ViewBoxState, conf
   const exportedStations = new Set<string>();
   const links: ExportLineLinkRender[] = [];
   const bounds = { ...EMPTY_BOUNDS };
-  const allMode = config.scope === "all";
 
   for (const point of points) {
-    if (allMode || selectedNodes.has(point.station.id)) {
+    if (selectedNodes.has(point.station.id)) {
       exportedStations.add(point.station.id);
       includePoint(bounds, point);
     }
@@ -313,9 +313,9 @@ function buildLineRenderPlan(scenario: Scenario, baseViewBox: ViewBoxState, conf
     const from = points[index];
     const to = points[index + 1];
     const id = lineArcId(from.station.id, to.station.id);
-    if (!allMode && !selectedArcs.has(id)) continue;
-    const fromSelected = allMode || exportedStations.has(from.station.id);
-    const toSelected = allMode || exportedStations.has(to.station.id);
+    if (!selectedArcs.has(id)) continue;
+    const fromSelected = exportedStations.has(from.station.id);
+    const toSelected = exportedStations.has(to.station.id);
     if (!fromSelected && !toSelected) continue;
     const mode: ExportArcRenderMode = fromSelected && toSelected ? "full" : fromSelected ? "from_start" : "from_end";
     const midpoint = midpointOf(from, to);
@@ -353,23 +353,22 @@ function buildPhysicalRenderPlan(
 ) {
   const selectedNodes = new Set(config.selectedNodeIds);
   const selectedArcs = new Set(config.selectedArcIds);
-  const allMode = config.scope === "all";
   const physicalNodes = new Set<string>();
   const physicalSegments: ExportSegmentRender[] = [];
   const bounds = { ...EMPTY_BOUNDS };
 
   for (const node of scenario.physical_nodes) {
     if (!layout.nodes[node.id]) continue;
-    if (allMode || selectedNodes.has(node.id)) {
+    if (selectedNodes.has(node.id)) {
       physicalNodes.add(node.id);
       includePoint(bounds, layout.nodes[node.id]);
     }
   }
 
   for (const segment of visibleSegments) {
-    if (!allMode && !selectedArcs.has(segment.id)) continue;
-    const fromIncluded = allMode || physicalNodes.has(segment.from_node_id);
-    const toIncluded = allMode || physicalNodes.has(segment.to_node_id);
+    if (!selectedArcs.has(segment.id)) continue;
+    const fromIncluded = physicalNodes.has(segment.from_node_id);
+    const toIncluded = physicalNodes.has(segment.to_node_id);
     if (!fromIncluded && !toIncluded) continue;
     const mode: ExportArcRenderMode = fromIncluded && toIncluded ? "full" : fromIncluded ? "from_start" : "from_end";
     physicalSegments.push({
@@ -451,9 +450,13 @@ function parseLayoutViewBox(value: string): ViewBoxState {
 
 function outputDimensions(config: ScenarioExportConfig, viewBox: ViewBoxState) {
   const percentage = Math.max(1, Math.min(400, config.percentage));
-  const basisPx = config.basis === "a4_width" ? A4_PORTRAIT_300_DPI.width : A4_PORTRAIT_300_DPI.height;
+  const basisPx = config.basis === "a4_height"
+    ? A4_PORTRAIT_300_DPI.height
+    : config.basis === "text_width"
+      ? REPORT_TEXT_WIDTH_300_DPI
+      : A4_PORTRAIT_300_DPI.width;
   const fixed = Math.round((basisPx * percentage) / 100);
-  if (config.basis === "a4_width") {
+  if (config.basis === "a4_width" || config.basis === "text_width") {
     return {
       width: fixed,
       height: Math.max(1, Math.round(fixed * (viewBox.height / viewBox.width))),

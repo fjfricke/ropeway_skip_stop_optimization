@@ -1,13 +1,20 @@
-import { Download, Eye, MousePointer2, Tags, Users, WholeWord, X } from "lucide-react";
+import { Download, Tags, Users, WholeWord, X } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { ScenarioLayout } from "../scenarioLayout";
-import type { Scenario, TrackSegment } from "../types";
-import { lineArcId, lineViewStations, stationLabel } from "./LineViewLayer";
+import type { Scenario } from "../types";
+import { downloadSvgElement } from "./export/exportDom";
+import { ExportItemActions } from "./export/ExportItemActions";
+import { ExportPaneTabs, type ExportPane } from "./export/ExportPaneTabs";
+import { exportArcOptions, exportNodeOptions, toggleId } from "./export/exportSelection";
+import { computeArtboardSize, DEFAULT_EXPORT_PERCENTAGE } from "./export/exportSizing";
+import { ExportSizeControls } from "./export/ExportSizeControls";
+import type { ScenarioExportConfig } from "./export/exportTypes";
+import { useElementSize } from "./hooks/useElementSize";
 import { ScenarioExportSelectorSvg } from "./ScenarioExportSelectorSvg";
 import { ScenarioExportSvg } from "./ScenarioExportSvg";
 import { buildScenarioExportRenderPlan } from "./scenarioExportGeometry";
-import type { ArcColorMode, ScenarioDisplayMode, ScenarioExportBasis, ScenarioExportConfig, ViewerToggles } from "./viewerTypes";
+import type { ArcColorMode, ScenarioDisplayMode, ViewerToggles } from "./viewerTypes";
 
 interface ScenarioExportModalProps {
   scenario: Scenario;
@@ -18,27 +25,22 @@ interface ScenarioExportModalProps {
   onClose: () => void;
 }
 
-const DEFAULT_PERCENTAGE = 100;
-type ExportPane = "preview" | "selector";
-
 export function ScenarioExportModal({ scenario, layout, displayMode, toggles, arcColorMode, onClose }: ScenarioExportModalProps) {
   const nodeOptions = useMemo(() => exportNodeOptions(scenario, displayMode), [scenario, displayMode]);
   const arcOptions = useMemo(() => exportArcOptions(scenario, displayMode), [scenario, displayMode]);
   const [config, setConfig] = useState<ScenarioExportConfig>(() => ({
     displayMode,
-    scope: "custom",
     selectedNodeIds: nodeOptions.map((option) => option.id),
     selectedArcIds: arcOptions.map((option) => option.id),
     toggles: { ...toggles },
     arcColorMode,
     basis: "a4_width",
-    percentage: DEFAULT_PERCENTAGE,
+    percentage: DEFAULT_EXPORT_PERCENTAGE,
   }));
   const [activePane, setActivePane] = useState<ExportPane>("selector");
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const exportSvgRef = useRef<SVGSVGElement | null>(null);
-  const previewCanvasRef = useRef<HTMLDivElement | null>(null);
-  const [previewCanvasSize, setPreviewCanvasSize] = useState({ width: 0, height: 0 });
+  const [previewCanvasRef, previewCanvasSize] = useElementSize<HTMLDivElement>([activePane]);
   const deferredConfig = useDeferredValue(config);
   const renderPlan = useMemo(() => buildScenarioExportRenderPlan({ scenario, layout, config: deferredConfig }), [scenario, layout, deferredConfig]);
   const selectedNodeIds = useMemo(() => new Set(config.selectedNodeIds), [config.selectedNodeIds]);
@@ -52,33 +54,8 @@ export function ScenarioExportModal({ scenario, layout, displayMode, toggles, ar
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [onClose]);
 
-  useEffect(() => {
-    const element = previewCanvasRef.current;
-    if (!element) return undefined;
-    const updateSize = () => {
-      const rect = element.getBoundingClientRect();
-      setPreviewCanvasSize({ width: rect.width, height: rect.height });
-    };
-    updateSize();
-    const observer = new ResizeObserver(updateSize);
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, [activePane]);
-
   const artboardSize = useMemo(() => {
-    const exportAspect = renderPlan.outputWidth / renderPlan.outputHeight;
-    const canvasAspect = previewCanvasSize.width > 0 && previewCanvasSize.height > 0 ? previewCanvasSize.width / previewCanvasSize.height : exportAspect;
-    if (previewCanvasSize.width <= 0 || previewCanvasSize.height <= 0) return null;
-    if (exportAspect >= canvasAspect) {
-      return {
-        width: previewCanvasSize.width,
-        height: previewCanvasSize.width / exportAspect,
-      };
-    }
-    return {
-      width: previewCanvasSize.height * exportAspect,
-      height: previewCanvasSize.height,
-    };
+    return computeArtboardSize(previewCanvasSize, renderPlan.outputWidth, renderPlan.outputHeight);
   }, [previewCanvasSize, renderPlan.outputHeight, renderPlan.outputWidth]);
 
   function downloadSvg(svg: SVGSVGElement, filename: string) {
@@ -155,22 +132,14 @@ export function ScenarioExportModal({ scenario, layout, displayMode, toggles, ar
 
         <div className="export-modal__body">
           <div className="export-modal__settings">
-            <section className="export-section export-section--selection-actions">
-              <div className="export-section__header">
-                <h3>Items</h3>
-                <div className="export-section__actions">
-                  <button type="button" onClick={selectAllCustomItems}>
-                    All
-                  </button>
-                  <button type="button" onClick={clearCustomItems}>
-                    None
-                  </button>
-                </div>
-              </div>
-              <p className="export-section__meta">
-                {selectedNodeIds.size} {displayMode === "line" ? "stations" : "nodes"} · {selectedArcIds.size} {displayMode === "line" ? "links" : "arcs"}
-              </p>
-            </section>
+            <ExportItemActions
+              selectedNodeCount={selectedNodeIds.size}
+              selectedArcCount={selectedArcIds.size}
+              nodeLabel={displayMode === "line" ? "stations" : "nodes"}
+              arcLabel={displayMode === "line" ? "links" : "arcs"}
+              onSelectAll={selectAllCustomItems}
+              onClear={clearCustomItems}
+            />
 
             <section className="export-section">
               <h3>Layers</h3>
@@ -214,33 +183,12 @@ export function ScenarioExportModal({ scenario, layout, displayMode, toggles, ar
               </div>
             </section>
 
-            <section className="export-section">
-              <h3>Size</h3>
-              <div className="export-size-grid">
-                <label>
-                  Basis
-                  <select value={config.basis} onChange={(event) => updateConfig((current) => ({ ...current, basis: event.target.value as ScenarioExportBasis }))}>
-                    <option value="a4_width">A4 width</option>
-                    <option value="a4_height">A4 height</option>
-                  </select>
-                </label>
-                <label>
-                  Percent
-                  <input
-                    type="number"
-                    min="1"
-                    max="400"
-                    value={config.percentage}
-                    onChange={(event) =>
-                      updateConfig((current) => ({
-                        ...current,
-                        percentage: clampNumber(Number(event.target.value), 1, 400),
-                      }))
-                    }
-                  />
-                </label>
-              </div>
-            </section>
+            <ExportSizeControls
+              basis={config.basis}
+              percentage={config.percentage}
+              onBasisChange={(basis) => updateConfig((current) => ({ ...current, basis }))}
+              onPercentageChange={(percentage) => updateConfig((current) => ({ ...current, percentage }))}
+            />
           </div>
 
           <div className="export-modal__preview">
@@ -252,16 +200,7 @@ export function ScenarioExportModal({ scenario, layout, displayMode, toggles, ar
                 </p>
               </div>
               <div className="export-preview__actions">
-                <div className="export-pane-tabs" aria-label="Export panel">
-                  <button type="button" className={activePane === "selector" ? "is-active" : ""} onClick={() => setActivePane("selector")}>
-                    <MousePointer2 size={16} />
-                    Selector
-                  </button>
-                  <button type="button" className={activePane === "preview" ? "is-active" : ""} onClick={() => setActivePane("preview")}>
-                    <Eye size={16} />
-                    Preview
-                  </button>
-                </div>
+                <ExportPaneTabs activePane={activePane} onPaneChange={setActivePane} />
                 <button type="button" onClick={handleDownload}>
                   <Download size={16} />
                   Download SVG
@@ -313,73 +252,7 @@ export function ScenarioExportModal({ scenario, layout, displayMode, toggles, ar
   );
 }
 
-function exportNodeOptions(scenario: Scenario, displayMode: ScenarioDisplayMode) {
-  if (displayMode === "line") {
-    return lineViewStations(scenario).map((station) => ({
-      id: station.id,
-      label: stationLabel(station),
-    }));
-  }
-  return scenario.physical_nodes.map((node) => ({
-    id: node.id,
-    label: node.id.replaceAll("_", " "),
-  }));
-}
-
-function exportArcOptions(scenario: Scenario, displayMode: ScenarioDisplayMode) {
-  if (displayMode === "line") {
-    const stations = lineViewStations(scenario);
-    return stations.slice(0, -1).map((station, index) => {
-      const next = stations[index + 1];
-      return {
-        id: lineArcId(station.id, next.id),
-        label: `${stationLabel(station)} -> ${stationLabel(next)}`,
-      };
-    });
-  }
-  return scenario.track_segments.map((segment) => ({
-    id: segment.id,
-    label: physicalArcLabel(segment),
-  }));
-}
-
-function physicalArcLabel(segment: TrackSegment) {
-  return `${segment.id.replaceAll("_", " ")} (${segment.from_node_id} -> ${segment.to_node_id})`;
-}
-
-function toggleId(ids: string[], id: string) {
-  return ids.includes(id) ? ids.filter((current) => current !== id) : [...ids, id];
-}
-
 function svgFilename(scenarioId: string, config: ScenarioExportConfig) {
   const mode = config.displayMode === "line" ? "line" : "physical";
   return `${scenarioId}_${mode}_scenario_export.svg`;
-}
-
-function downloadSvgElement(svg: SVGSVGElement, filename: string) {
-  const width = Number(svg.getAttribute("width"));
-  const height = Number(svg.getAttribute("height"));
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-    throw new Error("Invalid export size");
-  }
-
-  const clone = svg.cloneNode(true) as SVGSVGElement;
-  clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-  clone.setAttribute("width", String(width));
-  clone.setAttribute("height", String(height));
-  const source = new XMLSerializer().serializeToString(clone);
-  const blob = new Blob([source], { type: "image/svg+xml;charset=utf-8" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  document.body.appendChild(link);
-  link.click();
-  link.remove();
-  URL.revokeObjectURL(url);
-}
-
-function clampNumber(value: number, min: number, max: number) {
-  if (!Number.isFinite(value)) return min;
-  return Math.min(Math.max(value, min), max);
 }
