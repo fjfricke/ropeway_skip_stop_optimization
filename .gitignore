@@ -17,3 +17,6 @@ frontend/public/generated/
 
 # Accidental generated exports when commands are run from the package source tree.
 src/ropeway_skip_stop_optimization/frontend/
+
+# Machine-specific benchmark outputs.
+benchmarks/output/

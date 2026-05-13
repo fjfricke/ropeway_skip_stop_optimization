@@ -1,6 +1,6 @@
 # EAN Passenger Benchmarking and Plots
 
-Status: **planned**
+Status: **implemented initial benchmark runner**
 
 ## Goal
 
@@ -37,10 +37,10 @@ benchmarks/
   README.md
   run_ean_passenger_benchmark.py
   plot_ean_passenger_benchmarks.py
-  results/
-    .gitkeep
-  plots/
-    .gitkeep
+  output/                 # ignored, default local benchmark output
+    results/
+    plots/
+    checkpoints/
 
 src/ropeway_skip_stop_optimization/benchmarking/
   __init__.py
@@ -51,10 +51,7 @@ src/ropeway_skip_stop_optimization/benchmarking/
 Recommended git policy:
 
 ```text
-benchmarks/results/*.json      ignored
-benchmarks/results/*.csv       ignored
-benchmarks/plots/*.svg         ignored by default, committed only for paper figures
-benchmarks/plots/*.png         ignored
+benchmarks/output/             ignored
 ```
 
 The scripts should be committed. Large or machine-specific output should not be
@@ -98,19 +95,25 @@ exports while still making the core logic importable and unit-testable.
 
 ## Benchmark Inputs
 
-The first benchmark script should accept:
+The benchmark runner accepts:
 
 ```text
 --example
 --artifact-set
 --ean-solver-policy
---output-root
---result-dir
---checkpoint-dir
---resume-latest-checkpoint
 --time-limit
 --sample-interval
 --label
+--output-dir
+--result-dir
+--plot-dir
+--checkpoint-dir
+--resume-checkpoint
+--resume-latest-checkpoint
+--export-frontend-artifacts
+--frontend-output-root
+--clean-frontend-output
+--progress / --no-progress
 ```
 
 Initial target command:
@@ -120,9 +123,19 @@ uv run python benchmarks/run_ean_passenger_benchmark.py \
   --example three_station_v0 \
   --artifact-set ean_passenger_journey_time \
   --ean-solver-policy exact_optimality \
-  --result-dir benchmarks/results \
-  --plot-dir benchmarks/plots \
+  --output-dir benchmarks/output \
   --sample-interval 5
+```
+
+The plot script accepts:
+
+```text
+--input
+--input-dir
+--output-dir
+--format
+--include
+--label-field
 ```
 
 ## Callback Metrics
@@ -363,12 +376,19 @@ Then repeat after the next formulation experiment:
 stop/skip timing indicators
 ```
 
-## Open Questions
+## Defaults
 
-- Should benchmark outputs include frontend artifacts, or should they be
-  solver-only by default?
-- Should plots be generated automatically after every benchmark run, or only by
-  a separate plot command?
-- What default time limit should paper-style benchmarks use?
-- Should benchmark JSON include full exported result metadata, or only selected
-  summary fields?
+Benchmark outputs default to:
+
+```text
+results:     benchmarks/output/results
+plots:       benchmarks/output/plots
+checkpoints: benchmarks/output/checkpoints/<run_id>
+```
+
+The benchmark runner generates plots for the current JSON result immediately.
+The separate plot command compares one or more existing JSON files.
+
+Frontend artifacts are not exported by default. They are written only when
+`--export-frontend-artifacts` is set, with `--frontend-output-root` defaulting
+to the normal frontend generated artifact directory.

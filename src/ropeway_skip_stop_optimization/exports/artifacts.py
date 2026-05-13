@@ -79,6 +79,8 @@ class ExportContext:
     progress: ProgressReporter
     ean_solver_policy: GurobiSolverPolicy = field(default_factory=GurobiSolverPolicy)
     ean_checkpoint_config: EanPassengerServiceCheckpointConfig | None = None
+    ean_progress_recorder: Any | None = None
+    ean_progress_sample_interval_seconds: float = 5.0
 
     _scenario: Scenario | None = None
     _discrete_scenario: DiscreteScenario | None = None
@@ -203,6 +205,8 @@ class ExportContext:
                         solver_policy=self.ean_solver_policy,
                         log_to_console=self.progress.enabled,
                         checkpoint=self.ean_checkpoint_config,
+                        progress_recorder=self.ean_progress_recorder,
+                        progress_sample_interval_seconds=self.ean_progress_sample_interval_seconds,
                     ),
                 )
                 if result.movement_plan is None or result.passenger_plan is None:

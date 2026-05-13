@@ -89,11 +89,15 @@ class EanPassengerServiceConfig:
     log_to_console: bool = False
     use_all_stop_mip_start: bool = True
     checkpoint: EanPassengerServiceCheckpointConfig | None = None
+    progress_recorder: Any | None = None
+    progress_sample_interval_seconds: float = 5.0
 
     def validate(self) -> None:
         self.solver_policy.validate()
         if self.checkpoint is not None:
             self.checkpoint.validate()
+        if self.progress_sample_interval_seconds <= 0:
+            raise ValueError("progress_sample_interval_seconds must be positive")
 
 
 @dataclass(frozen=True)
@@ -309,7 +313,18 @@ def solve_ean_passenger_service(
             config.solver_policy,
             ",".join(sorted({station_config.waiting_mode.value for station_config in artifact.config.station_configs})),
         )
-    model.optimize()
+    if config.progress_recorder is None:
+        model.optimize()
+    else:
+        model.optimize(
+            lambda callback_model, where: config.progress_recorder.record_callback(
+                callback_model,
+                GRB,
+                where,
+                sample_interval_seconds=config.progress_sample_interval_seconds,
+            )
+        )
+        config.progress_recorder.record_final(model, GRB)
     _write_final_gurobi_checkpoint(model, config.checkpoint)
 
     solver_diagnostics = _solver_diagnostics(model, GRB, config.solver_policy)

@@ -243,6 +243,8 @@ def run_artifact_set(
     ean_checkpoint_dir: Path | None = None,
     ean_resume_checkpoint: Path | None = None,
     ean_resume_latest_checkpoint: bool = False,
+    ean_progress_recorder: object | None = None,
+    ean_progress_sample_interval_seconds: float = 5.0,
     progress: ProgressReporter,
     clean: bool = False,
 ) -> ExportRunResult:
@@ -264,6 +266,8 @@ def run_artifact_set(
         progress=progress,
         ean_solver_policy=ean_solver_policy or GurobiSolverPolicy(),
         ean_checkpoint_config=checkpoint_config,
+        ean_progress_recorder=ean_progress_recorder,
+        ean_progress_sample_interval_seconds=ean_progress_sample_interval_seconds,
     )
     artifacts: list[ExportArtifact] = []
     artifact_paths: list[Path] = []
