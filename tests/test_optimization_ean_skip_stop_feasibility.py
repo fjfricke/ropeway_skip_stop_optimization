@@ -22,7 +22,7 @@ def test_ean_skip_stop_feasibility_finds_valid_three_station_plan() -> None:
     assert result.metadata.status == "optimal"
     assert result.movement_plan is not None
     validate_ean_movement_plan_against_artifact(artifact, result.movement_plan).raise_for_errors()
-    assert len(result.movement_plan.trajectories) == 30
+    assert len(result.movement_plan.trajectories) == len(artifact.cabin_starts)
     assert result.metadata.skipped_visit_count > 0
     assert {
         visit.decision

@@ -6,6 +6,11 @@ from dataclasses import dataclass
 from typing import Any
 
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
+from ropeway_skip_stop_optimization.optimization.ean.headway_semantics import (
+    PLATFORM_EXIT_WAIT_OCCUPANCY_SEMANTICS,
+    POINT_HEADWAY_SEMANTICS,
+    uses_platform_exit_wait_occupancy,
+)
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanActivationReference,
     EanCabinStartKind,
@@ -55,6 +60,13 @@ class EanSkipStopFeasibilityMetadata:
 class EanSkipStopFeasibilityResult:
     movement_plan: EanMovementPlan | None
     metadata: EanSkipStopFeasibilityMetadata
+
+
+@dataclass(frozen=True)
+class HeadwayTimeExpressions:
+    leader_clear_time: Any
+    follower_enter_time: Any
+    semantics_label: str
 
 
 def solve_ean_skip_stop_feasibility(
@@ -133,6 +145,7 @@ def solve_ean_skip_stop_feasibility(
         artifact=artifact,
         checkpoint_by_id=checkpoint_by_id,
         candidate_by_id=candidate_by_id,
+        station_config_by_id=station_config_by_id,
         visits_by_key=visits_by_key,
         timing_by_switch_id=timing_by_switch_id,
         big_m=big_m,
@@ -284,6 +297,7 @@ def _add_headway_constraints(
     artifact: EanBuildArtifact,
     checkpoint_by_id: dict[str, HeadwayCheckpointDefinition],
     candidate_by_id: dict[str, HeadwayCandidate],
+    station_config_by_id: dict[str, StationEanConfig],
     visits_by_key: dict[tuple[int, int], SwitchVisitDefinition],
     timing_by_switch_id: dict[str, Any],
     big_m: float,
@@ -294,37 +308,86 @@ def _add_headway_constraints(
         checkpoint = checkpoint_by_id[pair.checkpoint_id]
         first_key = (first_candidate.cabin_id, first_candidate.visit_index)
         second_key = (second_candidate.cabin_id, second_candidate.visit_index)
+        station_config = station_config_by_id.get(checkpoint.station_id)
 
-        first_time = _candidate_time_expr(
-            first_candidate,
-            switch_time,
-            exit_switch_time,
-            wait_time,
-            visits_by_key,
-            timing_by_switch_id,
+        first_times = _headway_time_expressions(
+            candidate=first_candidate,
+            checkpoint=checkpoint,
+            station_config=station_config,
+            switch_time=switch_time,
+            exit_switch_time=exit_switch_time,
+            wait_time=wait_time,
+            visits_by_key=visits_by_key,
+            timing_by_switch_id=timing_by_switch_id,
         )
-        second_time = _candidate_time_expr(
-            second_candidate,
-            switch_time,
-            exit_switch_time,
-            wait_time,
-            visits_by_key,
-            timing_by_switch_id,
+        second_times = _headway_time_expressions(
+            candidate=second_candidate,
+            checkpoint=checkpoint,
+            station_config=station_config,
+            switch_time=switch_time,
+            exit_switch_time=exit_switch_time,
+            wait_time=wait_time,
+            visits_by_key=visits_by_key,
+            timing_by_switch_id=timing_by_switch_id,
         )
+        semantics_label = first_times.semantics_label
         first_inactive = _candidate_inactive_expr(first_candidate, checkpoint, stop)
         second_inactive = _candidate_inactive_expr(second_candidate, checkpoint, stop)
         order = model.addVar(vtype="B", name=f"order_{pair.id}")
 
         model.addConstr(
-            first_time + pair.headway_seconds
-            <= second_time + big_m * (1 - order + first_inactive + second_inactive),
-            name=f"headway_forward_{first_key}_{second_key}_{pair.checkpoint_id}",
+            first_times.leader_clear_time + pair.headway_seconds
+            <= second_times.follower_enter_time + big_m * (1 - order + first_inactive + second_inactive),
+            name=f"headway_forward_{first_key}_{second_key}_{pair.checkpoint_id}_{semantics_label}",
         )
         model.addConstr(
-            second_time + pair.headway_seconds
-            <= first_time + big_m * (order + first_inactive + second_inactive),
-            name=f"headway_reverse_{first_key}_{second_key}_{pair.checkpoint_id}",
+            second_times.leader_clear_time + pair.headway_seconds
+            <= first_times.follower_enter_time + big_m * (order + first_inactive + second_inactive),
+            name=f"headway_reverse_{first_key}_{second_key}_{pair.checkpoint_id}_{semantics_label}",
         )
+
+
+def _headway_time_expressions(
+    candidate: HeadwayCandidate,
+    checkpoint: HeadwayCheckpointDefinition,
+    station_config: StationEanConfig | None,
+    switch_time: dict[tuple[int, int], Any],
+    exit_switch_time: dict[tuple[int, int], Any],
+    wait_time: dict[tuple[int, int], Any],
+    visits_by_key: dict[tuple[int, int], SwitchVisitDefinition],
+    timing_by_switch_id: dict[str, Any],
+) -> HeadwayTimeExpressions:
+    if uses_platform_exit_wait_occupancy(checkpoint, station_config):
+        key = (candidate.cabin_id, candidate.visit_index)
+        return HeadwayTimeExpressions(
+            leader_clear_time=_platform_exit_time_expr(
+                key,
+                switch_time,
+                wait_time,
+                visits_by_key,
+                timing_by_switch_id,
+            ),
+            follower_enter_time=_platform_exit_wait_entry_time_expr(
+                key,
+                switch_time,
+                visits_by_key,
+                timing_by_switch_id,
+            ),
+            semantics_label=PLATFORM_EXIT_WAIT_OCCUPANCY_SEMANTICS,
+        )
+    candidate_time = _candidate_time_expr(
+        candidate,
+        switch_time,
+        exit_switch_time,
+        wait_time,
+        visits_by_key,
+        timing_by_switch_id,
+    )
+    return HeadwayTimeExpressions(
+        leader_clear_time=candidate_time,
+        follower_enter_time=candidate_time,
+        semantics_label=POINT_HEADWAY_SEMANTICS,
+    )
 
 
 def _candidate_time_expr(
@@ -336,21 +399,40 @@ def _candidate_time_expr(
     timing_by_switch_id: dict[str, Any],
 ) -> Any:
     key = (candidate.cabin_id, candidate.visit_index)
-    timing = timing_by_switch_id[visits_by_key[key].switch_id]
     if candidate.time_reference is EanTimeReference.PLATFORM_ENTRY_TIME:
+        timing = timing_by_switch_id[visits_by_key[key].switch_id]
         return switch_time[key] + timing.entry_to_platform_entry_seconds
     if candidate.time_reference is EanTimeReference.PLATFORM_EXIT_TIME:
-        return (
-            switch_time[key]
-            + timing.entry_to_platform_entry_seconds
-            + timing.min_platform_entry_to_platform_exit_seconds
-            + wait_time[key]
-        )
+        return _platform_exit_time_expr(key, switch_time, wait_time, visits_by_key, timing_by_switch_id)
     if candidate.time_reference is EanTimeReference.EXIT_SWITCH_TIME:
         return exit_switch_time[key]
     if candidate.time_reference is EanTimeReference.ENTRY_TIME:
         return switch_time[key]
     raise ValueError(f"unsupported candidate time reference: {candidate.time_reference}")
+
+
+def _platform_exit_time_expr(
+    key: tuple[int, int],
+    switch_time: dict[tuple[int, int], Any],
+    wait_time: dict[tuple[int, int], Any],
+    visits_by_key: dict[tuple[int, int], SwitchVisitDefinition],
+    timing_by_switch_id: dict[str, Any],
+) -> Any:
+    return _platform_exit_wait_entry_time_expr(key, switch_time, visits_by_key, timing_by_switch_id) + wait_time[key]
+
+
+def _platform_exit_wait_entry_time_expr(
+    key: tuple[int, int],
+    switch_time: dict[tuple[int, int], Any],
+    visits_by_key: dict[tuple[int, int], SwitchVisitDefinition],
+    timing_by_switch_id: dict[str, Any],
+) -> Any:
+    timing = timing_by_switch_id[visits_by_key[key].switch_id]
+    return (
+        switch_time[key]
+        + timing.entry_to_platform_entry_seconds
+        + timing.min_platform_entry_to_platform_exit_seconds
+    )
 
 
 def _candidate_inactive_expr(

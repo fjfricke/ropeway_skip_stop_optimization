@@ -123,12 +123,20 @@ def test_ean_passenger_candidate_builder_can_disable_horizon_pruning() -> None:
 def test_ean_optimization_config_parses_cli_selection() -> None:
     assert EanOptimizationConfig.from_selection("all") == EanOptimizationConfig()
     assert EanOptimizationConfig.from_selection("none") == EanOptimizationConfig.none()
+    assert not EanOptimizationConfig.from_selection("all").enable_tight_big_m_bounds
+    assert EanOptimizationConfig.from_selection("all").selection_label() == "all"
     assert EanOptimizationConfig.from_selection(
         "candidate_horizon_pruning,slot_time_relaxation_strengthening"
     ) == EanOptimizationConfig(
         enable_candidate_horizon_pruning=True,
         enable_single_ring_dominated_ride_pruning=False,
         enable_slot_time_relaxation_strengthening=True,
+    )
+    assert EanOptimizationConfig.from_selection("tight_big_m_bounds") == EanOptimizationConfig(
+        enable_candidate_horizon_pruning=False,
+        enable_single_ring_dominated_ride_pruning=False,
+        enable_slot_time_relaxation_strengthening=False,
+        enable_tight_big_m_bounds=True,
     )
 
 

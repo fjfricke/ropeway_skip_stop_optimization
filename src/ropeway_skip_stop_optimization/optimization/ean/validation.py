@@ -1,6 +1,14 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
+from ropeway_skip_stop_optimization.optimization.ean.headway_semantics import (
+    PLATFORM_EXIT_WAIT_OCCUPANCY_SEMANTICS,
+    POINT_HEADWAY_SEMANTICS,
+    headway_semantics_label,
+    uses_platform_exit_wait_occupancy,
+)
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanActivationReference,
     EanCabinStart,
@@ -24,6 +32,13 @@ from ropeway_skip_stop_optimization.validation import (
     ValidationReport,
     ValidationSeverity,
 )
+
+
+@dataclass(frozen=True)
+class HeadwayTimes:
+    leader_clear_time: float
+    follower_enter_time: float
+    semantics_label: str
 
 
 def validate_ean_movement_plan_against_artifact(
@@ -71,6 +86,7 @@ def validate_ean_movement_plan_against_artifact(
         candidate_by_id=candidate_by_id,
         checkpoint_by_id=checkpoint_by_id,
         station_config_by_id=station_config_by_id,
+        timing_by_switch_id=timing_by_switch_id,
         visit_by_key=visit_by_key,
         model_end_seconds=artifact.config.model_end_seconds,
         issues=issues,
@@ -366,6 +382,7 @@ def _validate_headways(
     candidate_by_id: dict[str, HeadwayCandidate],
     checkpoint_by_id: dict[str, HeadwayCheckpointDefinition],
     station_config_by_id: dict[str, StationEanConfig],
+    timing_by_switch_id: dict[str, SkipStopTiming],
     visit_by_key: dict[tuple[int, int], EanCabinVisit],
     model_end_seconds: float,
     issues: list[ValidationIssue],
@@ -389,18 +406,40 @@ def _validate_headways(
             continue
         if not _candidate_is_active(second_candidate, checkpoint, second_visit):
             continue
-        first_time = _candidate_time(first_candidate, first_visit)
-        second_time = _candidate_time(second_candidate, second_visit)
-        if first_time is None or second_time is None:
+        first_times = _candidate_headway_times(
+            first_candidate,
+            checkpoint,
+            station_config,
+            first_visit,
+            timing_by_switch_id,
+        )
+        second_times = _candidate_headway_times(
+            second_candidate,
+            checkpoint,
+            station_config,
+            second_visit,
+            timing_by_switch_id,
+        )
+        if first_times is None or second_times is None:
             continue
-        if first_time > model_end_seconds + tolerance_seconds or second_time > model_end_seconds + tolerance_seconds:
+        if (
+            first_times.leader_clear_time > model_end_seconds + tolerance_seconds
+            or second_times.leader_clear_time > model_end_seconds + tolerance_seconds
+        ):
             continue
-        if abs(first_time - second_time) + tolerance_seconds < pair.headway_seconds:
+        forward_gap = second_times.follower_enter_time - first_times.leader_clear_time
+        reverse_gap = first_times.follower_enter_time - second_times.leader_clear_time
+        if max(forward_gap, reverse_gap) + tolerance_seconds < pair.headway_seconds:
+            semantics_label = headway_semantics_label(checkpoint, station_config)
             _add_issue(
                 issues,
                 "EAN_HEADWAY_VIOLATION",
-                f"headway pair {pair.id!r} has times {first_time} and {second_time}, "
-                f"needs {pair.headway_seconds}",
+                f"headway pair {pair.id!r} at checkpoint {checkpoint.id!r} "
+                f"uses {semantics_label!r}: forward leader_clear_time={first_times.leader_clear_time}, "
+                f"forward follower_enter_time={second_times.follower_enter_time}, "
+                f"reverse leader_clear_time={second_times.leader_clear_time}, "
+                f"reverse follower_enter_time={first_times.follower_enter_time}, "
+                f"needs headway_seconds={pair.headway_seconds}",
                 "ean_headway_pair",
                 pair.id,
             )
@@ -433,6 +472,40 @@ def _candidate_time(candidate: HeadwayCandidate, visit: EanCabinVisit) -> float 
     if candidate.time_reference is EanTimeReference.EXIT_SWITCH_TIME:
         return visit.exit_switch_time_seconds
     return None
+
+
+def _candidate_headway_times(
+    candidate: HeadwayCandidate,
+    checkpoint: HeadwayCheckpointDefinition,
+    station_config: StationEanConfig | None,
+    visit: EanCabinVisit,
+    timing_by_switch_id: dict[str, SkipStopTiming],
+) -> HeadwayTimes | None:
+    if uses_platform_exit_wait_occupancy(checkpoint, station_config):
+        if visit.platform_exit_time_seconds is None:
+            return None
+        timing = timing_by_switch_id.get(visit.switch_id)
+        if timing is None:
+            return None
+        wait_entry_time = (
+            visit.switch_time_seconds
+            + timing.entry_to_platform_entry_seconds
+            + timing.min_platform_entry_to_platform_exit_seconds
+        )
+        return HeadwayTimes(
+            leader_clear_time=visit.platform_exit_time_seconds,
+            follower_enter_time=wait_entry_time,
+            semantics_label=PLATFORM_EXIT_WAIT_OCCUPANCY_SEMANTICS,
+        )
+
+    candidate_time = _candidate_time(candidate, visit)
+    if candidate_time is None:
+        return None
+    return HeadwayTimes(
+        leader_clear_time=candidate_time,
+        follower_enter_time=candidate_time,
+        semantics_label=POINT_HEADWAY_SEMANTICS,
+    )
 
 
 def _validate_time_equals(

@@ -427,6 +427,23 @@ def test_cli_can_export_milp_v1_passenger_mode_without_milp_v0(tmp_path: Path) -
     assert not (tmp_path / "three_station_v0" / "milp_v0_sparse_movement_plan_c2_h2.json").exists()
 
 
+def test_cli_help_includes_ean_optimization_selection() -> None:
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "ropeway_skip_stop_optimization.exports.cli",
+            "--help",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert "--ean-optimizations" in result.stdout
+    assert "tight_big_m_bounds" in result.stdout
+
+
 def test_cli_can_export_milp_v1_waiting_time_objective(tmp_path: Path) -> None:
     pytest.importorskip("gurobipy")
 

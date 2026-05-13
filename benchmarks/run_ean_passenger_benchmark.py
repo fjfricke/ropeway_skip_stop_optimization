@@ -67,7 +67,7 @@ def _parse_args() -> argparse.Namespace:
         "--ean-optimizations",
         default="all",
         help=(
-            "'all', 'none', or comma-separated active optimizations: "
+            "'all' for the current default set, 'none', or comma-separated active optimizations: "
             + ", ".join(name.value for name in ALL_EAN_OPTIMIZATION_NAMES)
         ),
     )

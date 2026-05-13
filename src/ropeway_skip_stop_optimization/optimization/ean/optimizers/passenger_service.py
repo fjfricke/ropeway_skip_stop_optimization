@@ -29,6 +29,11 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
     StationWaitingMode,
     SwitchVisitDefinition,
 )
+from ropeway_skip_stop_optimization.optimization.ean.headway_semantics import (
+    PLATFORM_EXIT_WAIT_OCCUPANCY_SEMANTICS,
+    POINT_HEADWAY_SEMANTICS,
+    uses_platform_exit_wait_occupancy,
+)
 from ropeway_skip_stop_optimization.optimization.ean.optimization_config import EanOptimizationConfig
 from ropeway_skip_stop_optimization.optimization.ean.passenger_plan import (
     EanPassengerServicePlan,
@@ -138,6 +143,21 @@ class EanPassengerServiceResult:
     metadata: EanPassengerServiceMetadata
 
 
+@dataclass(frozen=True)
+class StopSkipBigMBounds:
+    service_exit_ub: float
+    service_exit_lb: float
+    skip_exit_ub: float
+    skip_exit_lb: float
+
+
+@dataclass(frozen=True)
+class HeadwayTimeExpressions:
+    leader_clear_time: Any
+    follower_enter_time: Any
+    semantics_label: str
+
+
 def solve_ean_passenger_service(
     scenario: Scenario,
     artifact: EanBuildArtifact,
@@ -240,6 +260,7 @@ def solve_ean_passenger_service(
         station_config_by_id,
         time_upper_bound,
         big_m,
+        config.optimization_config.enable_tight_big_m_bounds,
     )
     _add_chain_constraints(model, switch_time, exit_switch_time, visits_by_cabin_id, timing_by_switch_id)
     _add_headway_constraints(
@@ -275,6 +296,7 @@ def solve_ean_passenger_service(
         enable_slot_time_relaxation_strengthening=(
             config.optimization_config.enable_slot_time_relaxation_strengthening
         ),
+        enable_tight_big_m_bounds=config.optimization_config.enable_tight_big_m_bounds,
     )
 
     if (
@@ -487,6 +509,7 @@ def _add_timing_constraints(
     station_config_by_id: dict[str, StationEanConfig],
     time_upper_bound: float,
     big_m: float,
+    enable_tight_big_m_bounds: bool,
 ) -> None:
     for key, visit in visits_by_key.items():
         timing = timing_by_switch_id[visit.switch_id]
@@ -503,22 +526,80 @@ def _add_timing_constraints(
                 f"unsupported EAN passenger-service waiting mode: {station_config.waiting_mode.value}"
             )
 
+        big_m_bounds = _stop_skip_big_m_bounds(
+            timing=timing,
+            station_config=station_config,
+            time_upper_bound=time_upper_bound,
+            global_big_m=big_m,
+            enable_tight_big_m_bounds=enable_tight_big_m_bounds,
+        )
         model.addConstr(
-            exit_switch_time[key] - switch_time[key] - service_seconds - wait_time[key] <= big_m * (1 - stop[key]),
+            exit_switch_time[key] - switch_time[key] - service_seconds - wait_time[key]
+            <= big_m_bounds.service_exit_ub * (1 - stop[key]),
             name=f"service_exit_ub_{key[0]}_{key[1]}",
         )
         model.addConstr(
-            exit_switch_time[key] - switch_time[key] - service_seconds - wait_time[key] >= -big_m * (1 - stop[key]),
+            exit_switch_time[key] - switch_time[key] - service_seconds - wait_time[key]
+            >= -big_m_bounds.service_exit_lb * (1 - stop[key]),
             name=f"service_exit_lb_{key[0]}_{key[1]}",
         )
         model.addConstr(
-            exit_switch_time[key] - switch_time[key] - skip_seconds <= big_m * stop[key],
+            exit_switch_time[key] - switch_time[key] - skip_seconds <= big_m_bounds.skip_exit_ub * stop[key],
             name=f"skip_exit_ub_{key[0]}_{key[1]}",
         )
         model.addConstr(
-            exit_switch_time[key] - switch_time[key] - skip_seconds >= -big_m * stop[key],
+            exit_switch_time[key] - switch_time[key] - skip_seconds >= -big_m_bounds.skip_exit_lb * stop[key],
             name=f"skip_exit_lb_{key[0]}_{key[1]}",
         )
+
+
+def _stop_skip_big_m_bounds(
+    timing: SkipStopTiming,
+    station_config: StationEanConfig,
+    time_upper_bound: float,
+    global_big_m: float,
+    enable_tight_big_m_bounds: bool,
+) -> StopSkipBigMBounds:
+    """Return Big-M bounds for stop/skip timing implications.
+
+    The tight bounds are derived from the opposite active binary branch. For
+    example, service timing constraints are inactive only when skip timing and
+    zero waiting are active. This preserves all integer-feasible solutions while
+    reducing slack in the LP relaxation.
+    """
+
+    if not enable_tight_big_m_bounds:
+        return StopSkipBigMBounds(
+            service_exit_ub=global_big_m,
+            service_exit_lb=global_big_m,
+            skip_exit_ub=global_big_m,
+            skip_exit_lb=global_big_m,
+        )
+
+    if station_config.waiting_mode is StationWaitingMode.NO_WAITING:
+        wait_upper_bound = 0.0
+    elif station_config.waiting_mode is StationWaitingMode.END_OF_PLATFORM_WAIT:
+        wait_upper_bound = time_upper_bound
+    else:
+        raise NotImplementedError(
+            f"unsupported EAN passenger-service waiting mode: {station_config.waiting_mode.value}"
+        )
+
+    service_seconds = _service_entry_to_exit_switch_seconds(timing)
+    skip_seconds = timing.skip_entry_to_exit_switch_seconds
+
+    return StopSkipBigMBounds(
+        service_exit_ub=max(0.0, skip_seconds - service_seconds),
+        service_exit_lb=max(0.0, service_seconds - skip_seconds),
+        skip_exit_ub=max(
+            0.0,
+            min(
+                service_seconds + wait_upper_bound - skip_seconds,
+                time_upper_bound - skip_seconds,
+            ),
+        ),
+        skip_exit_lb=max(0.0, skip_seconds - service_seconds),
+    )
 
 
 def _add_chain_constraints(
@@ -552,39 +633,49 @@ def _add_headway_constraints(
     timing_by_switch_id: dict[str, SkipStopTiming],
     big_m: float,
 ) -> None:
+    station_config_by_id = {
+        station_config.station_id: station_config
+        for station_config in artifact.config.station_configs
+    }
     for pair in artifact.headway_pairs:
         first_candidate = candidate_by_id[pair.first_candidate_id]
         second_candidate = candidate_by_id[pair.second_candidate_id]
         checkpoint = checkpoint_by_id[pair.checkpoint_id]
-        first_time = _candidate_time_expr(
-            first_candidate,
-            switch_time,
-            exit_switch_time,
-            wait_time,
-            visits_by_key,
-            timing_by_switch_id,
+        station_config = station_config_by_id.get(checkpoint.station_id)
+        first_times = _headway_time_expressions(
+            candidate=first_candidate,
+            checkpoint=checkpoint,
+            station_config=station_config,
+            switch_time=switch_time,
+            exit_switch_time=exit_switch_time,
+            wait_time=wait_time,
+            visits_by_key=visits_by_key,
+            timing_by_switch_id=timing_by_switch_id,
         )
-        second_time = _candidate_time_expr(
-            second_candidate,
-            switch_time,
-            exit_switch_time,
-            wait_time,
-            visits_by_key,
-            timing_by_switch_id,
+        second_times = _headway_time_expressions(
+            candidate=second_candidate,
+            checkpoint=checkpoint,
+            station_config=station_config,
+            switch_time=switch_time,
+            exit_switch_time=exit_switch_time,
+            wait_time=wait_time,
+            visits_by_key=visits_by_key,
+            timing_by_switch_id=timing_by_switch_id,
         )
+        semantics_label = first_times.semantics_label
         first_inactive = _candidate_inactive_expr(first_candidate, checkpoint, stop)
         second_inactive = _candidate_inactive_expr(second_candidate, checkpoint, stop)
         order = model.addVar(vtype="B", name=f"order_{pair.id}")
 
         model.addConstr(
-            first_time + pair.headway_seconds
-            <= second_time + big_m * (1 - order + first_inactive + second_inactive),
-            name=f"headway_forward_{pair.id}",
+            first_times.leader_clear_time + pair.headway_seconds
+            <= second_times.follower_enter_time + big_m * (1 - order + first_inactive + second_inactive),
+            name=f"headway_forward_{pair.id}_{semantics_label}",
         )
         model.addConstr(
-            second_time + pair.headway_seconds
-            <= first_time + big_m * (order + first_inactive + second_inactive),
-            name=f"headway_reverse_{pair.id}",
+            second_times.leader_clear_time + pair.headway_seconds
+            <= first_times.follower_enter_time + big_m * (order + first_inactive + second_inactive),
+            name=f"headway_reverse_{pair.id}_{semantics_label}",
         )
 
 
@@ -606,6 +697,7 @@ def _add_passenger_constraints(
     time_upper_bound: float,
     big_m: float,
     enable_slot_time_relaxation_strengthening: bool,
+    enable_tight_big_m_bounds: bool,
 ) -> None:
     ride_by_group_id: dict[str, list[EanRideCandidate]] = {group.id: [] for group in passenger_build.demand_groups}
     for ride_candidate in passenger_build.ride_candidates:
@@ -627,6 +719,7 @@ def _add_passenger_constraints(
             big_m=big_m,
             cabin_capacity=cabin_capacity,
             enable_slot_time_relaxation_strengthening=enable_slot_time_relaxation_strengthening,
+            enable_tight_big_m_bounds=enable_tight_big_m_bounds,
         )
 
     for group in passenger_build.demand_groups:
@@ -675,12 +768,18 @@ def _add_ride_slot_constraints(
     big_m: float,
     cabin_capacity: int,
     enable_slot_time_relaxation_strengthening: bool,
+    enable_tight_big_m_bounds: bool,
 ) -> None:
     board_key = (ride_candidate.cabin_id, ride_candidate.board_visit_index)
     alight_key = (ride_candidate.cabin_id, ride_candidate.alight_visit_index)
     board_time = _platform_exit_time_expr(board_key, switch_time, wait_time, visits_by_key, timing_by_switch_id)
     alight_time = _platform_entry_time_expr(alight_key, switch_time, visits_by_key, timing_by_switch_id)
     slot_count = min(group.count, cabin_capacity)
+    release_big_m = _slot_release_big_m(
+        group=group,
+        global_big_m=big_m,
+        enable_tight_big_m_bounds=enable_tight_big_m_bounds,
+    )
 
     previous_slot_var = None
     for slot_index in range(slot_count):
@@ -690,7 +789,7 @@ def _add_ride_slot_constraints(
         model.addConstr(slot_var <= stop[board_key], name=f"slot_board_stop_{_var_id(ride_candidate.id)}_{slot_index}")
         model.addConstr(slot_var <= stop[alight_key], name=f"slot_alight_stop_{_var_id(ride_candidate.id)}_{slot_index}")
         model.addConstr(
-            board_time >= group.release_time_seconds - big_m * (1 - slot_var),
+            board_time >= group.release_time_seconds - release_big_m * (1 - slot_var),
             name=f"slot_release_{_var_id(ride_candidate.id)}_{slot_index}",
         )
         model.addConstr(
@@ -736,6 +835,26 @@ def _add_ride_slot_constraints(
         if previous_slot_var is not None:
             model.addConstr(slot_var <= previous_slot_var, name=f"slot_symmetry_{_var_id(ride_candidate.id)}_{slot_index}")
         previous_slot_var = slot_var
+
+
+def _slot_release_big_m(
+    group: EanDemandGroup,
+    global_big_m: float,
+    enable_tight_big_m_bounds: bool,
+) -> float:
+    """Return Big-M for the inactive passenger release-time constraint.
+
+    For `slot = 0`, using `M = release_time` relaxes
+    `board_time >= release_time - M * (1 - slot)` to `board_time >= 0`.
+    That is safe because board-time expressions are built from nonnegative
+    switch/wait variables and nonnegative timing constants. Other slot-time
+    horizon constraints stay on the conservative global Big-M until we have
+    proven expression-specific upper bounds.
+    """
+
+    if not enable_tight_big_m_bounds:
+        return global_big_m
+    return group.release_time_seconds
 
 
 def _add_slot_time_relaxation_strengthening_constraints(
@@ -1169,6 +1288,49 @@ def _candidate_time_expr(
     raise ValueError(f"unsupported candidate time reference: {candidate.time_reference}")
 
 
+def _headway_time_expressions(
+    candidate: HeadwayCandidate,
+    checkpoint: HeadwayCheckpointDefinition,
+    station_config: StationEanConfig | None,
+    switch_time: dict[tuple[int, int], Any],
+    exit_switch_time: dict[tuple[int, int], Any],
+    wait_time: dict[tuple[int, int], Any],
+    visits_by_key: dict[tuple[int, int], SwitchVisitDefinition],
+    timing_by_switch_id: dict[str, SkipStopTiming],
+) -> HeadwayTimeExpressions:
+    if uses_platform_exit_wait_occupancy(checkpoint, station_config):
+        key = (candidate.cabin_id, candidate.visit_index)
+        return HeadwayTimeExpressions(
+            leader_clear_time=_platform_exit_time_expr(
+                key,
+                switch_time,
+                wait_time,
+                visits_by_key,
+                timing_by_switch_id,
+            ),
+            follower_enter_time=_platform_exit_wait_entry_time_expr(
+                key,
+                switch_time,
+                visits_by_key,
+                timing_by_switch_id,
+            ),
+            semantics_label=PLATFORM_EXIT_WAIT_OCCUPANCY_SEMANTICS,
+        )
+    candidate_time = _candidate_time_expr(
+        candidate,
+        switch_time,
+        exit_switch_time,
+        wait_time,
+        visits_by_key,
+        timing_by_switch_id,
+    )
+    return HeadwayTimeExpressions(
+        leader_clear_time=candidate_time,
+        follower_enter_time=candidate_time,
+        semantics_label=POINT_HEADWAY_SEMANTICS,
+    )
+
+
 def _candidate_inactive_expr(
     candidate: HeadwayCandidate,
     checkpoint: HeadwayCheckpointDefinition,
@@ -1212,6 +1374,20 @@ def _platform_exit_time_expr(
         + timing.entry_to_platform_entry_seconds
         + timing.min_platform_entry_to_platform_exit_seconds
         + wait_time[key]
+    )
+
+
+def _platform_exit_wait_entry_time_expr(
+    key: tuple[int, int],
+    switch_time: dict[tuple[int, int], Any],
+    visits_by_key: dict[tuple[int, int], SwitchVisitDefinition],
+    timing_by_switch_id: dict[str, SkipStopTiming],
+) -> Any:
+    timing = timing_by_switch_id[visits_by_key[key].switch_id]
+    return (
+        switch_time[key]
+        + timing.entry_to_platform_entry_seconds
+        + timing.min_platform_entry_to_platform_exit_seconds
     )
 
 

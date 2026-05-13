@@ -5,7 +5,11 @@ from pathlib import Path
 
 from ropeway_skip_stop_optimization.exports.runner import DEFAULT_OUTPUT_ROOT, export_artifact_set, known_artifact_set_ids
 from ropeway_skip_stop_optimization.optimization.discrete_time import MilpV0VariableStrategy
-from ropeway_skip_stop_optimization.optimization.ean import GurobiSolverPolicyPreset
+from ropeway_skip_stop_optimization.optimization.ean import (
+    ALL_EAN_OPTIMIZATION_NAMES,
+    EanOptimizationConfig,
+    GurobiSolverPolicyPreset,
+)
 from ropeway_skip_stop_optimization.progress import configure_progress_logging
 
 
@@ -52,6 +56,14 @@ def main() -> None:
         help="Load the newest checkpoint for the selected EAN example/artifact set from --ean-checkpoint-dir.",
     )
     parser.add_argument(
+        "--ean-optimizations",
+        default="all",
+        help=(
+            "'all' for the current default set, 'none', or comma-separated active optimizations: "
+            + ", ".join(name.value for name in ALL_EAN_OPTIMIZATION_NAMES)
+        ),
+    )
+    parser.add_argument(
         "--milp-variable-strategy",
         choices=tuple(strategy.value for strategy in MilpV0VariableStrategy),
         default=MilpV0VariableStrategy.DENSE.value,
@@ -62,6 +74,10 @@ def main() -> None:
         parser.error("--ean-resume-checkpoint and --ean-resume-latest-checkpoint are mutually exclusive")
     if args.ean_resume_latest_checkpoint and args.ean_checkpoint_dir is None:
         parser.error("--ean-resume-latest-checkpoint requires --ean-checkpoint-dir")
+    try:
+        ean_optimization_config = EanOptimizationConfig.from_selection(args.ean_optimizations)
+    except ValueError as error:
+        parser.error(str(error))
 
     if args.progress:
         configure_progress_logging()
@@ -77,6 +93,7 @@ def main() -> None:
         ean_checkpoint_dir=args.ean_checkpoint_dir,
         ean_resume_checkpoint=args.ean_resume_checkpoint,
         ean_resume_latest_checkpoint=args.ean_resume_latest_checkpoint,
+        ean_optimization_config=ean_optimization_config,
         progress=args.progress,
         clean=args.clean,
     )

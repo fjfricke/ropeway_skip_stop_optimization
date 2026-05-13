@@ -9,9 +9,15 @@ class EanOptimizationName(StrEnum):
     CANDIDATE_HORIZON_PRUNING = "candidate_horizon_pruning"
     SINGLE_RING_DOMINATED_RIDE_PRUNING = "single_ring_dominated_ride_pruning"
     SLOT_TIME_RELAXATION_STRENGTHENING = "slot_time_relaxation_strengthening"
+    TIGHT_BIG_M_BOUNDS = "tight_big_m_bounds"
 
 
 ALL_EAN_OPTIMIZATION_NAMES: tuple[EanOptimizationName, ...] = tuple(EanOptimizationName)
+DEFAULT_EAN_OPTIMIZATION_NAMES: tuple[EanOptimizationName, ...] = (
+    EanOptimizationName.CANDIDATE_HORIZON_PRUNING,
+    EanOptimizationName.SINGLE_RING_DOMINATED_RIDE_PRUNING,
+    EanOptimizationName.SLOT_TIME_RELAXATION_STRENGTHENING,
+)
 
 
 @dataclass(frozen=True)
@@ -19,6 +25,7 @@ class EanOptimizationConfig:
     enable_candidate_horizon_pruning: bool = True
     enable_single_ring_dominated_ride_pruning: bool = True
     enable_slot_time_relaxation_strengthening: bool = True
+    enable_tight_big_m_bounds: bool = False
 
     @classmethod
     def all(cls) -> EanOptimizationConfig:
@@ -30,6 +37,7 @@ class EanOptimizationConfig:
             enable_candidate_horizon_pruning=False,
             enable_single_ring_dominated_ride_pruning=False,
             enable_slot_time_relaxation_strengthening=False,
+            enable_tight_big_m_bounds=False,
         )
 
     @classmethod
@@ -43,6 +51,7 @@ class EanOptimizationConfig:
             enable_slot_time_relaxation_strengthening=(
                 EanOptimizationName.SLOT_TIME_RELAXATION_STRENGTHENING in enabled
             ),
+            enable_tight_big_m_bounds=EanOptimizationName.TIGHT_BIG_M_BOUNDS in enabled,
         )
 
     @classmethod
@@ -65,11 +74,13 @@ class EanOptimizationConfig:
             names.append(EanOptimizationName.SINGLE_RING_DOMINATED_RIDE_PRUNING)
         if self.enable_slot_time_relaxation_strengthening:
             names.append(EanOptimizationName.SLOT_TIME_RELAXATION_STRENGTHENING)
+        if self.enable_tight_big_m_bounds:
+            names.append(EanOptimizationName.TIGHT_BIG_M_BOUNDS)
         return tuple(names)
 
     def selection_label(self) -> str:
         enabled = self.enabled_names()
-        if enabled == ALL_EAN_OPTIMIZATION_NAMES:
+        if enabled == DEFAULT_EAN_OPTIMIZATION_NAMES:
             return "all"
         if not enabled:
             return "none"

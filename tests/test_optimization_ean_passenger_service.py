@@ -9,6 +9,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanCabinStart,
     EanCabinStartKind,
     EanConfig,
+    EanDemandGroup,
     HeadwayCandidate,
     HeadwayCheckpointDefinition,
     HeadwayCheckpointKind,
@@ -28,8 +29,12 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     solve_ean_passenger_service,
 )
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.passenger_service import (
+    StopSkipBigMBounds,
+    _headway_time_expressions,
     _min_candidate_trip_time_seconds,
     _solver_diagnostics,
+    _slot_release_big_m,
+    _stop_skip_big_m_bounds,
 )
 
 
@@ -82,6 +87,53 @@ def test_ean_passenger_service_journey_time_uses_alighting_time() -> None:
     assert result.metadata.objective_passenger_hours == pytest.approx(9.0 / 3600.0)
 
 
+def test_headway_time_expressions_use_wait_occupancy_for_platform_exit_waiting() -> None:
+    candidate = HeadwayCandidate(
+        id="candidate::platform_exit::A_entry::cabin_0::visit_0",
+        checkpoint_id="platform_exit::A_entry",
+        cabin_id=0,
+        visit_index=0,
+        time_reference=EanTimeReference.PLATFORM_EXIT_TIME,
+        activation_reference=EanActivationReference.SERVE,
+    )
+    checkpoint = HeadwayCheckpointDefinition(
+        id="platform_exit::A_entry",
+        kind=HeadwayCheckpointKind.PLATFORM_EXIT,
+        switch_id="A_entry",
+        station_id="A",
+        headway_seconds=2.0,
+        applies_to_serve=True,
+        applies_to_skip=False,
+        waiting_modes=(StationWaitingMode.END_OF_PLATFORM_WAIT,),
+    )
+    timing = SkipStopTiming(
+        switch_id="A_entry",
+        station_id="A",
+        entry_to_platform_entry_seconds=1.0,
+        min_platform_entry_to_platform_exit_seconds=2.0,
+        platform_exit_to_exit_switch_seconds=1.0,
+        skip_entry_to_exit_switch_seconds=4.0,
+        rope_to_next_switch_seconds=5.0,
+        skip_allowed=True,
+    )
+    key = (0, 0)
+
+    times = _headway_time_expressions(
+        candidate=candidate,
+        checkpoint=checkpoint,
+        station_config=StationEanConfig(station_id="A", waiting_mode=StationWaitingMode.END_OF_PLATFORM_WAIT),
+        switch_time={key: 100.0},
+        exit_switch_time={key: 109.0},
+        wait_time={key: 5.0},
+        visits_by_key={key: SwitchVisitDefinition(cabin_id=0, visit_index=0, switch_id="A_entry")},
+        timing_by_switch_id={"A_entry": timing},
+    )
+
+    assert times.follower_enter_time == pytest.approx(103.0)
+    assert times.leader_clear_time == pytest.approx(108.0)
+    assert times.semantics_label == "platform_exit_wait_occupancy"
+
+
 def test_ean_passenger_service_can_disable_slot_time_strengthening() -> None:
     pytest.importorskip("gurobipy")
     scenario = _minimal_scenario(
@@ -106,6 +158,135 @@ def test_ean_passenger_service_can_disable_slot_time_strengthening() -> None:
     assert strengthened.metadata.objective_value_seconds == pytest.approx(unstrengthened.metadata.objective_value_seconds)
     assert strengthened.metadata.constraint_count > unstrengthened.metadata.constraint_count
     assert not unstrengthened.metadata.optimization_config.enable_slot_time_relaxation_strengthening
+
+
+def test_ean_passenger_service_tight_big_m_bounds_preserves_minimal_solution() -> None:
+    pytest.importorskip("gurobipy")
+    scenario = _minimal_scenario(
+        demands=(Demand(arrival_time=time(8, 0), origin="A", destination="B", count=1),),
+    )
+    artifact = _minimal_artifact(cabin_capacity=2, cycle_count=2)
+
+    baseline = solve_ean_passenger_service(
+        scenario,
+        artifact,
+        EanPassengerServiceConfig(objective=EanPassengerServiceObjective.JOURNEY_TIME),
+    )
+    tightened = solve_ean_passenger_service(
+        scenario,
+        artifact,
+        EanPassengerServiceConfig(
+            objective=EanPassengerServiceObjective.JOURNEY_TIME,
+            optimization_config=EanOptimizationConfig(enable_tight_big_m_bounds=True),
+        ),
+    )
+
+    assert tightened.metadata.status == "optimal"
+    assert tightened.metadata.objective_value_seconds == pytest.approx(baseline.metadata.objective_value_seconds)
+    assert tightened.metadata.served_passenger_count == baseline.metadata.served_passenger_count
+    assert tightened.metadata.unserved_passenger_count == baseline.metadata.unserved_passenger_count
+    assert tightened.passenger_plan is not None
+    assert baseline.passenger_plan is not None
+    assert tightened.passenger_plan.unserved_counts_by_demand_group_id == (
+        baseline.passenger_plan.unserved_counts_by_demand_group_id
+    )
+    assert tightened.metadata.optimization_config.enable_tight_big_m_bounds
+
+
+def test_slot_release_big_m_can_use_release_time_when_tightened() -> None:
+    group = EanDemandGroup(
+        id="demand::0",
+        origin_station_id="A",
+        destination_station_id="B",
+        release_time_seconds=15.0,
+        count=1,
+    )
+
+    assert _slot_release_big_m(
+        group=group,
+        global_big_m=100.0,
+        enable_tight_big_m_bounds=False,
+    ) == pytest.approx(100.0)
+    assert _slot_release_big_m(
+        group=group,
+        global_big_m=100.0,
+        enable_tight_big_m_bounds=True,
+    ) == pytest.approx(15.0)
+
+
+def test_stop_skip_big_m_bounds_return_global_m_when_disabled() -> None:
+    timing = _timing(service_seconds=6.0, skip_seconds=4.0)
+    station_config = StationEanConfig(station_id="A", waiting_mode=StationWaitingMode.NO_WAITING)
+
+    assert _stop_skip_big_m_bounds(
+        timing=timing,
+        station_config=station_config,
+        time_upper_bound=20.0,
+        global_big_m=100.0,
+        enable_tight_big_m_bounds=False,
+    ) == StopSkipBigMBounds(
+        service_exit_ub=100.0,
+        service_exit_lb=100.0,
+        skip_exit_ub=100.0,
+        skip_exit_lb=100.0,
+    )
+
+
+def test_stop_skip_big_m_bounds_tighten_no_waiting_station() -> None:
+    timing = _timing(service_seconds=6.0, skip_seconds=4.0)
+    station_config = StationEanConfig(station_id="A", waiting_mode=StationWaitingMode.NO_WAITING)
+
+    assert _stop_skip_big_m_bounds(
+        timing=timing,
+        station_config=station_config,
+        time_upper_bound=20.0,
+        global_big_m=100.0,
+        enable_tight_big_m_bounds=True,
+    ) == StopSkipBigMBounds(
+        service_exit_ub=0.0,
+        service_exit_lb=2.0,
+        skip_exit_ub=2.0,
+        skip_exit_lb=0.0,
+    )
+
+
+def test_stop_skip_big_m_bounds_tighten_end_of_platform_wait_station() -> None:
+    timing = _timing(service_seconds=6.0, skip_seconds=4.0)
+    station_config = StationEanConfig(
+        station_id="A",
+        waiting_mode=StationWaitingMode.END_OF_PLATFORM_WAIT,
+    )
+
+    assert _stop_skip_big_m_bounds(
+        timing=timing,
+        station_config=station_config,
+        time_upper_bound=20.0,
+        global_big_m=100.0,
+        enable_tight_big_m_bounds=True,
+    ) == StopSkipBigMBounds(
+        service_exit_ub=0.0,
+        service_exit_lb=2.0,
+        skip_exit_ub=16.0,
+        skip_exit_lb=0.0,
+    )
+
+
+def test_stop_skip_big_m_bounds_allow_zero_values() -> None:
+    timing = _timing(service_seconds=4.0, skip_seconds=4.0)
+    station_config = StationEanConfig(station_id="A", waiting_mode=StationWaitingMode.NO_WAITING)
+
+    assert _stop_skip_big_m_bounds(
+        timing=timing,
+        station_config=station_config,
+        time_upper_bound=20.0,
+        global_big_m=100.0,
+        enable_tight_big_m_bounds=True,
+    ) == StopSkipBigMBounds(
+        service_exit_ub=0.0,
+        service_exit_lb=0.0,
+        skip_exit_ub=0.0,
+        skip_exit_lb=0.0,
+    )
 
 
 def test_min_candidate_trip_time_uses_physical_lower_bound_between_platforms() -> None:
@@ -302,4 +483,22 @@ def _minimal_artifact(
             ),
         ),
         headway_pairs=(),
+    )
+
+
+def _timing(service_seconds: float, skip_seconds: float) -> SkipStopTiming:
+    entry_seconds = 1.0
+    min_platform_seconds = 1.0
+    platform_exit_seconds = service_seconds - entry_seconds - min_platform_seconds
+    if platform_exit_seconds <= 0:
+        raise ValueError("service_seconds must be greater than 2")
+    return SkipStopTiming(
+        switch_id="A_entry",
+        station_id="A",
+        entry_to_platform_entry_seconds=entry_seconds,
+        min_platform_entry_to_platform_exit_seconds=min_platform_seconds,
+        platform_exit_to_exit_switch_seconds=platform_exit_seconds,
+        skip_entry_to_exit_switch_seconds=skip_seconds,
+        rope_to_next_switch_seconds=5.0,
+        skip_allowed=True,
     )

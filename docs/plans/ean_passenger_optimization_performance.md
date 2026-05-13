@@ -212,7 +212,7 @@ src/ropeway_skip_stop_optimization/optimization/ean/optimizers/passenger_service
 
 ## Priority 4: Solver-Preserving Formulation Improvements
 
-Status: **next formulation step after metadata and benchmark**
+Status: **partially implemented**
 
 Current Big-M uses a broad global value:
 
@@ -228,9 +228,53 @@ M_slot[candidate] = candidate-specific time upper bound
 M_stop_visit = visit-specific latest - earliest
 ```
 
-Also evaluate Gurobi indicator reformulations for clean conditional blocks,
-especially stop/skip timing. Details and the headway caveat live in
-`ean_solver_preserving_optimizations.md`.
+Implemented formulation experiments:
+
+```text
+tight_big_m_bounds Phase 1:
+  passenger slot release-time Big-M
+
+tight_big_m_bounds Phase 2:
+  stop/skip timing Big-M values derived from the opposite active branch
+```
+
+The tight Big-M toggle is mathematically valid and remains exposed via:
+
+```text
+--ean-optimizations candidate_horizon_pruning,single_ring_dominated_ride_pruning,slot_time_relaxation_strengthening,tight_big_m_bounds
+```
+
+Current benchmark decision:
+
+```text
+keep tight_big_m_bounds opt-in
+do not include it in --ean-optimizations all yet
+```
+
+Reason: Phase 2 substantially improved the proof side of the solve, reducing
+the five-minute final gap from about 6.36% to 5.25%, but the best incumbent was
+slightly worse in that single run. That makes it useful for proof/diagnostic
+benchmarks, but not yet a robust export default.
+
+Detailed plans and benchmark findings:
+
+```text
+docs/plans/ean_tight_big_m_bounds.md
+docs/plans/ean_stop_skip_big_m_bounds.md
+docs/findings/ean_passenger_optimization_benchmark_2026_05_13.md
+```
+
+Remaining formulation experiments:
+
+```text
+headway Big-M / indicator / AND reformulation
+candidate-specific latest board/alight bounds
+slot activation indicators, if still useful after more benchmarks
+```
+
+Gurobi indicator reformulations remain an experiment rather than the immediate
+next step. Stop/skip timing already has tighter Big-Ms, and indicators may
+increase model size or alter search behavior. Benchmark before keeping them.
 
 Expected effect:
 
@@ -425,12 +469,19 @@ PY
 2. Done: add exact candidate pruning and verify candidate/slot counts decrease.
 3. Done: add CLI/config presets for MIP gap, time limit, and solution focus.
 4. Done: add solver metadata to exported result JSON and frontend solver cards.
-5. Next: run a fixed benchmark export with `--ean-solver-policy quick_good_solution`.
-6. Then: replace stop/skip timing Big-M constraints with `addGenConstrIndicator` and
-   benchmark against the current formulation.
-7. Optionally replace slot activation Big-M constraints with indicators while
-   keeping the Priority 1 strengthening inequalities.
-8. Improve MIP start quality, then add multiple starts or hints if useful.
-9. Add smaller debug fixtures if formulation changes need faster iteration.
-10. Experiment with headway indicator/AND reformulation only after the smaller
-    formulation changes are measured.
+5. Done: add benchmark runner, callback progress samples, checkpoints, and plots.
+6. Done: benchmark current formulation toggles against `none`.
+7. Done: implement `tight_big_m_bounds` Phase 1 and Phase 2 as opt-in.
+8. Done: benchmark `all` against `all + tight_big_m_bounds`; keep the toggle
+   out of `all` until repeated or longer runs show no incumbent-quality penalty.
+9. Next: improve MIP start quality so the solver starts with a stronger
+   incumbent, especially when bound-strengthening changes improve proof
+   progress but alter search toward weaker early incumbents.
+10. Then: rerun `all` vs `all + tight_big_m_bounds` with 5-, 10-, and
+    15-minute limits to decide whether the toggle should remain proof-only or
+    become default.
+11. Add smaller debug fixtures if formulation changes need faster iteration.
+12. Experiment with headway Big-M / indicator / AND reformulation only after MIP
+    start quality is improved and benchmarked.
+13. Optionally evaluate stop/skip or slot activation indicators as separate
+    experiments, but do not assume they dominate the tighter Big-M formulation.
