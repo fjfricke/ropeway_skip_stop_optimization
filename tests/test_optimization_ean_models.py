@@ -7,6 +7,8 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanCabinStart,
     EanCabinStartKind,
     EanConfig,
+    EanDemandGroup,
+    EanRideCandidate,
     EanTimeReference,
     HeadwayCandidate,
     HeadwayCheckpointDefinition,
@@ -170,4 +172,30 @@ def test_passenger_and_ride_candidate_validate() -> None:
             cabin_id=0,
             board_visit_index=3,
             alight_visit_index=3,
+        ).validate()
+
+
+def test_grouped_ean_passenger_models_validate() -> None:
+    EanDemandGroup(
+        id="demand::0",
+        origin_station_id="L",
+        destination_station_id="R",
+        release_time_seconds=0.0,
+        count=8,
+    ).validate()
+    EanRideCandidate(
+        id="ride::demand::0::cabin_0::board_1::alight_3",
+        demand_group_id="demand::0",
+        cabin_id=0,
+        board_visit_index=1,
+        alight_visit_index=3,
+    ).validate()
+
+    with pytest.raises(ValueError, match="count"):
+        EanDemandGroup(
+            id="demand::0",
+            origin_station_id="L",
+            destination_station_id="R",
+            release_time_seconds=0.0,
+            count=0,
         ).validate()

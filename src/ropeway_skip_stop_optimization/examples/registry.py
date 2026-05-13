@@ -1,11 +1,20 @@
 from __future__ import annotations
 
 from ropeway_skip_stop_optimization.examples.base import ScenarioExample
-from ropeway_skip_stop_optimization.examples.three_station import ThreeStationExample
+from ropeway_skip_stop_optimization.examples.linear_skip_stop import (
+    FiveStationExample,
+    FiveStationHalfNoSkipNoWaitExample,
+    FiveStationNoWaitExample,
+)
+from ropeway_skip_stop_optimization.examples.three_station import ThreeStationDepotExample, ThreeStationExample
 
 
 EXAMPLES: dict[str, ScenarioExample] = {
     ThreeStationExample.metadata.id: ThreeStationExample(),
+    ThreeStationDepotExample.metadata.id: ThreeStationDepotExample(),
+    FiveStationExample.metadata.id: FiveStationExample(),
+    FiveStationNoWaitExample.metadata.id: FiveStationNoWaitExample(),
+    FiveStationHalfNoSkipNoWaitExample.metadata.id: FiveStationHalfNoSkipNoWaitExample(),
 }
 
 

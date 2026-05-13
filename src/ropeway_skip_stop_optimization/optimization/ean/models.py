@@ -43,6 +43,7 @@ class SkipStopTiming:
     platform_exit_to_exit_switch_seconds: float
     skip_entry_to_exit_switch_seconds: float
     rope_to_next_switch_seconds: float
+    skip_allowed: bool = True
 
     def validate(self) -> None:
         _require_id("skip/stop timing switch_id", self.switch_id)
@@ -243,6 +244,43 @@ class RideCandidate:
         _require_nonnegative_int("ride candidate alight_visit_index", self.alight_visit_index)
         if self.board_visit_index >= self.alight_visit_index:
             raise ValueError("ride candidate board_visit_index must be before alight_visit_index")
+
+
+@dataclass(frozen=True)
+class EanDemandGroup:
+    id: str
+    origin_station_id: str
+    destination_station_id: str
+    release_time_seconds: float
+    count: int
+
+    def validate(self) -> None:
+        _require_id("EAN demand group id", self.id)
+        _require_id("EAN demand group origin_station_id", self.origin_station_id)
+        _require_id("EAN demand group destination_station_id", self.destination_station_id)
+        if self.origin_station_id == self.destination_station_id:
+            raise ValueError("EAN demand group origin and destination must differ")
+        _require_nonnegative("EAN demand group release_time_seconds", self.release_time_seconds)
+        if self.count <= 0:
+            raise ValueError("EAN demand group count must be positive")
+
+
+@dataclass(frozen=True)
+class EanRideCandidate:
+    id: str
+    demand_group_id: str
+    cabin_id: int
+    board_visit_index: int
+    alight_visit_index: int
+
+    def validate(self) -> None:
+        _require_id("EAN ride candidate id", self.id)
+        _require_id("EAN ride candidate demand_group_id", self.demand_group_id)
+        _require_nonnegative_int("EAN ride candidate cabin_id", self.cabin_id)
+        _require_nonnegative_int("EAN ride candidate board_visit_index", self.board_visit_index)
+        _require_nonnegative_int("EAN ride candidate alight_visit_index", self.alight_visit_index)
+        if self.board_visit_index >= self.alight_visit_index:
+            raise ValueError("EAN ride candidate board_visit_index must be before alight_visit_index")
 
 
 def _require_id(label: str, value: str) -> None:

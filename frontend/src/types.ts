@@ -197,7 +197,8 @@ export type ExportArtifactKind =
   | "replay_metrics"
   | "milp_result"
   | "ean_input"
-  | "ean_result";
+  | "ean_result"
+  | "ean_replay";
 
 export interface ExportArtifactMetadata {
   id: string;
@@ -329,6 +330,204 @@ export interface ReplayMetrics {
   movement_plan_horizon_steps: number;
   delta_seconds: number;
   steps: ReplayMetricsStep[];
+}
+
+export type EanStationWaitingMode = "no_waiting" | "end_of_platform_wait" | "station_fifo_buffer";
+export type EanCabinStartKind = "fixed" | "earliest";
+export type EanVisitDecision = "stop" | "skip";
+export type EanHeadwayCheckpointKind = "platform_entry" | "exit_switch";
+export type EanHeadwayCandidateActivationReference = "serve" | "skip" | "active";
+export type EanHeadwayCandidateTimeReference =
+  | "switch_time"
+  | "platform_entry_time"
+  | "platform_exit_time"
+  | "exit_switch_time"
+  | "next_switch_time";
+export type EanPhysicalEventKind =
+  | "enter_switch"
+  | "enter_platform"
+  | "enter_wait"
+  | "exit_wait"
+  | "exit_platform"
+  | "exit_switch"
+  | "reach_next_switch";
+
+export interface EanStationConfig {
+  station_id: string;
+  waiting_mode: EanStationWaitingMode;
+  fifo_capacity: number | null;
+}
+
+export interface EanConfig {
+  horizon_seconds: number;
+  tail_seconds: number;
+  cabin_capacity: number;
+  station_configs: EanStationConfig[];
+}
+
+export interface EanSkipStopTiming {
+  switch_id: string;
+  station_id: string;
+  entry_to_platform_entry_seconds: number;
+  min_platform_entry_to_platform_exit_seconds: number;
+  platform_exit_to_exit_switch_seconds: number;
+  skip_entry_to_exit_switch_seconds: number;
+  rope_to_next_switch_seconds: number;
+  skip_allowed: boolean;
+}
+
+export interface EanCabinStart {
+  cabin_id: number;
+  first_switch_id: string;
+  kind: EanCabinStartKind;
+  time_seconds: number;
+}
+
+export interface EanSwitchVisitDefinition {
+  cabin_id: number;
+  visit_index: number;
+  switch_id: string;
+}
+
+export interface EanSwitchTransition {
+  from_switch_id: string;
+  to_switch_id: string;
+  min_seconds: number;
+  max_seconds: number | null;
+}
+
+export interface EanHeadwayCheckpoint {
+  id: string;
+  kind: EanHeadwayCheckpointKind;
+  switch_id: string;
+  station_id: string;
+  headway_seconds: number;
+  applies_to_serve: boolean;
+  applies_to_skip: boolean;
+  waiting_modes: EanStationWaitingMode[];
+}
+
+export interface EanHeadwayCandidate {
+  id: string;
+  checkpoint_id: string;
+  cabin_id: number;
+  visit_index: number;
+  activation_reference: EanHeadwayCandidateActivationReference;
+  time_reference: EanHeadwayCandidateTimeReference;
+}
+
+export interface EanHeadwayPair {
+  id: string;
+  checkpoint_id: string;
+  first_candidate_id: string;
+  second_candidate_id: string;
+  headway_seconds: number;
+}
+
+export interface EanBuildArtifact {
+  scenario_id: string;
+  config: EanConfig;
+  switch_cycle: string[];
+  timings: EanSkipStopTiming[];
+  cabin_starts: EanCabinStart[];
+  switch_visits: EanSwitchVisitDefinition[];
+  switch_transitions: EanSwitchTransition[];
+  headway_checkpoints: EanHeadwayCheckpoint[];
+  headway_candidates: EanHeadwayCandidate[];
+  headway_pairs: EanHeadwayPair[];
+}
+
+export interface EanVisitPlan {
+  cabin_id: number;
+  visit_index: number;
+  switch_id: string;
+  station_id: string;
+  decision: EanVisitDecision;
+  switch_time_seconds: number;
+  platform_entry_time_seconds: number | null;
+  platform_exit_time_seconds: number | null;
+  exit_switch_time_seconds: number;
+  next_switch_time_seconds: number;
+  wait_seconds: number;
+}
+
+export interface EanCabinTrajectory {
+  cabin_id: number;
+  visits: EanVisitPlan[];
+}
+
+export interface EanMovementPlan {
+  scenario_id: string;
+  horizon_seconds: number;
+  model_end_seconds: number;
+  trajectories: EanCabinTrajectory[];
+}
+
+export interface EanPhysicalEvent {
+  cabin_id: number;
+  visit_index: number;
+  event_kind: EanPhysicalEventKind;
+  time_seconds: number;
+  switch_id: string;
+  station_id: string;
+  physical_node_id: string;
+  source_segment_ids: string[];
+}
+
+export interface EanPhysicalReplay {
+  scenario_id: string;
+  horizon_seconds: number;
+  model_end_seconds: number;
+  events: EanPhysicalEvent[];
+}
+
+export type EanPassengerServiceObjectiveKind = "waiting_time" | "journey_time";
+
+export interface EanServedRideGroup {
+  demand_group_id: string;
+  cabin_id: number;
+  board_visit_index: number;
+  alight_visit_index: number;
+  count: number;
+  boarding_time_seconds: number;
+  alighting_time_seconds: number;
+}
+
+export interface EanPassengerServicePlan {
+  scenario_id: string;
+  horizon_seconds: number;
+  served_rides: EanServedRideGroup[];
+  unserved_counts_by_demand_group_id: Record<string, number>;
+}
+
+export interface EanPassengerServiceMetadata {
+  status: string;
+  solver_status?: string;
+  objective_kind: EanPassengerServiceObjectiveKind;
+  objective_value_seconds: number | null;
+  objective_passenger_hours: number | null;
+  best_bound?: number | null;
+  mip_gap?: number | null;
+  runtime_seconds?: number | null;
+  node_count?: number | null;
+  solution_count?: number;
+  mip_gap_target?: number | null;
+  time_limit_seconds?: number | null;
+  demand_group_count: number;
+  ride_candidate_count: number;
+  slot_variable_count: number;
+  served_passenger_count: number;
+  unserved_passenger_count: number;
+  variable_count: number;
+  constraint_count: number;
+  skipped_visit_count: number;
+  visible_skipped_visit_count: number;
+}
+
+export interface EanPassengerServiceResult {
+  movement_plan: EanMovementPlan | null;
+  passenger_plan: EanPassengerServicePlan | null;
+  metadata: EanPassengerServiceMetadata;
 }
 
 export type Selection =

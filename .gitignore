@@ -12,8 +12,8 @@ node_modules/
 frontend/dist/
 .DS_Store
 
-# Generated MILP scenario exports. Small checked-in examples stay tracked.
-frontend/public/scenarios/*__milp_*_c*_h*.json
-
 # Manifest-driven generated frontend artifacts.
 frontend/public/generated/
+
+# Accidental generated exports when commands are run from the package source tree.
+src/ropeway_skip_stop_optimization/frontend/

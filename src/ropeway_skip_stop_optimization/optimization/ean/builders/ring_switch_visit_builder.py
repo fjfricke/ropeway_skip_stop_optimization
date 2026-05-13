@@ -104,14 +104,21 @@ def calculate_min_max_switch_to_next_seconds(
         + timing.min_platform_entry_to_platform_exit_seconds
         + timing.platform_exit_to_exit_switch_seconds
     )
-    skip_seconds = timing.skip_entry_to_exit_switch_seconds
-    min_seconds = min(service_min_seconds, skip_seconds) + timing.rope_to_next_switch_seconds
+    if timing.skip_allowed:
+        min_seconds = min(service_min_seconds, timing.skip_entry_to_exit_switch_seconds)
+    else:
+        min_seconds = service_min_seconds
+    min_seconds += timing.rope_to_next_switch_seconds
 
     if station_config.waiting_mode is StationWaitingMode.NO_WAITING:
         service_max_seconds = service_min_seconds
     else:
         service_max_seconds = math.inf
-    max_seconds = max(service_max_seconds, skip_seconds) + timing.rope_to_next_switch_seconds
+    if timing.skip_allowed:
+        max_seconds = max(service_max_seconds, timing.skip_entry_to_exit_switch_seconds)
+    else:
+        max_seconds = service_max_seconds
+    max_seconds += timing.rope_to_next_switch_seconds
 
     return min_seconds, max_seconds
 

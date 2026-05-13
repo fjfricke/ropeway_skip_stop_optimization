@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import time
 
 from ropeway_skip_stop_optimization.examples.base import ScenarioExample, ScenarioExampleMetadata
+from ropeway_skip_stop_optimization.mapping import DiscretizationConfig
 from ropeway_skip_stop_optimization.models import (
     Cabin,
     CabinInitialState,
@@ -20,6 +21,12 @@ from ropeway_skip_stop_optimization.models import (
     TrackSegment,
     TrackSegmentKind,
 )
+from ropeway_skip_stop_optimization.optimization.ean import (
+    ContinuousAllStopMaxCabinStartBuilder,
+    EanBuildArtifactBuilder,
+    EanConfig,
+    RingEanBuildArtifactBuilder,
+)
 
 
 class ThreeStationExample(ScenarioExample):
@@ -32,6 +39,43 @@ class ThreeStationExample(ScenarioExample):
 
     def build_scenario(self) -> Scenario:
         return build_three_station_scenario()
+
+    def build_discretization_config(self, scenario: Scenario) -> DiscretizationConfig:
+        config = DiscretizationConfig()
+        config.validate()
+        return config
+
+    def build_ean_config(self, scenario: Scenario) -> EanConfig:
+        from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_config
+
+        return build_three_station_ean_config(scenario)
+
+    def build_ean_artifact_builder(
+        self,
+        scenario: Scenario,
+        config: EanConfig,
+    ) -> EanBuildArtifactBuilder:
+        from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_ring_switch_order
+
+        switch_cycle = build_three_station_ean_ring_switch_order(scenario)
+        return RingEanBuildArtifactBuilder(
+            switch_cycle=switch_cycle,
+            start_builder=ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
+        )
+
+
+class ThreeStationDepotExample(ThreeStationExample):
+    metadata = ScenarioExampleMetadata(
+        id="three_station_depot_v0",
+        label="Three station ring with depot",
+        description=(
+            "Three-station skip-stop ring with a storage depot connected after the left terminal platform."
+        ),
+        tags=("ring", "skip-stop", "depot", "storage", "discrete-time-demo"),
+    )
+
+    def build_scenario(self) -> Scenario:
+        return build_three_station_depot_scenario()
 
 
 def build_three_station_scenario() -> Scenario:
@@ -222,6 +266,80 @@ def build_three_station_scenario() -> Scenario:
     return scenario
 
 
+def build_three_station_depot_scenario() -> Scenario:
+    """Build the three-station example with a side depot at L.
+
+    The depot is physical infrastructure only in v0. Passenger demand still
+    uses the terminal/service stations, while depot insertion/pull-out segments
+    make the storage connection visible to exports and frontend inspection.
+    """
+    base = build_three_station_scenario()
+    depot_profile = SpeedProfile(SpeedProfileKind.CONSTANT, speed_m_per_s=base.operating.station_speed_m_per_s)
+    insertion_profile = SpeedProfile(SpeedProfileKind.CONSTANT, speed_m_per_s=base.operating.rope_speed_m_per_s)
+
+    scenario = Scenario(
+        id=ThreeStationDepotExample.metadata.id,
+        service_start_time=base.service_start_time,
+        service_end_time=base.service_end_time,
+        stations=(
+            *base.stations,
+            Station(id="D", kind=StationKind.STORAGE, name="Left depot"),
+        ),
+        physical_nodes=(
+            *base.physical_nodes,
+            PhysicalNode(id="D_entry", kind=PhysicalNodeKind.DEPOT, station_id="D"),
+            PhysicalNode(id="D_hold", kind=PhysicalNodeKind.HOLD, station_id="D", allows_waiting=True),
+            PhysicalNode(id="D_exit", kind=PhysicalNodeKind.DEPOT, station_id="D"),
+        ),
+        track_segments=(
+            *base.track_segments,
+            TrackSegment(
+                id="L_platform_exit_to_D_entry",
+                kind=TrackSegmentKind.CONNECTOR,
+                from_node_id="L_platform_exit",
+                to_node_id="D_entry",
+                length_m=12.0,
+                speed_profile=depot_profile,
+                resource_id="D_pullout",
+            ),
+            TrackSegment(
+                id="D_entry_to_D_hold",
+                kind=TrackSegmentKind.CONNECTOR,
+                from_node_id="D_entry",
+                to_node_id="D_hold",
+                length_m=8.0,
+                speed_profile=depot_profile,
+                resource_id="D_storage",
+            ),
+            TrackSegment(
+                id="D_hold_to_D_exit",
+                kind=TrackSegmentKind.CONNECTOR,
+                from_node_id="D_hold",
+                to_node_id="D_exit",
+                length_m=8.0,
+                speed_profile=depot_profile,
+                resource_id="D_storage",
+            ),
+            TrackSegment(
+                id="D_exit_to_L_exit_lr",
+                kind=TrackSegmentKind.CONNECTOR,
+                from_node_id="D_exit",
+                to_node_id="L_exit_lr",
+                length_m=12.0,
+                speed_profile=insertion_profile,
+                resource_id="D_insertion",
+            ),
+        ),
+        station_routes=base.station_routes,
+        cabins=base.cabins,
+        cabin_initial_states=base.cabin_initial_states,
+        demands=base.demands,
+        operating=base.operating,
+    )
+    scenario.validate()
+    return scenario
+
+
 def build_three_station_near_capacity_demands() -> tuple[Demand, ...]:
     return (
         Demand(arrival_time=time(8, 0), origin="L", destination="M", count=580),
@@ -262,7 +380,7 @@ def _terminal_station_segments(
             kind=TrackSegmentKind.STATION,
             from_node_id=platform_entry,
             to_node_id=platform_exit,
-            length_m=5.0,
+            length_m=10.0,
             speed_profile=platform_profile,
             resource_id=resource_id,
         ),
@@ -311,7 +429,7 @@ def _middle_station_segments(
             kind=TrackSegmentKind.STATION,
             from_node_id=f"M_platform_entry_{direction}",
             to_node_id=f"M_platform_exit_{direction}",
-            length_m=5.0,
+            length_m=10.0,
             speed_profile=platform_profile,
             resource_id=f"M_service_{direction}",
         ),
@@ -338,7 +456,7 @@ def _middle_station_segments(
             kind=TrackSegmentKind.SKIP,
             from_node_id=entry,
             to_node_id=exit_node,
-            length_m=70.0,
+            length_m=20.0,
             speed_profile=SpeedProfile(SpeedProfileKind.CONSTANT, speed_m_per_s=5.0),
             resource_id=f"M_skip_{direction}",
         ),

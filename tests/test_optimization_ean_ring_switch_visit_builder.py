@@ -28,6 +28,16 @@ def test_calculate_min_max_switch_to_next_seconds_for_no_waiting_station() -> No
     assert max_seconds == 20.0
 
 
+def test_calculate_min_max_switch_to_next_seconds_ignores_disabled_skip() -> None:
+    timing = _timing("sw_a", "A", skip_allowed=False)
+    station_config = StationEanConfig(station_id="A", waiting_mode=StationWaitingMode.NO_WAITING)
+
+    min_seconds, max_seconds = calculate_min_max_switch_to_next_seconds(timing, station_config)
+
+    assert min_seconds == 20.0
+    assert max_seconds == 20.0
+
+
 def test_calculate_min_max_switch_to_next_seconds_for_waiting_station() -> None:
     timing = _timing("sw_a", "A")
     station_config = StationEanConfig(station_id="A", waiting_mode=StationWaitingMode.END_OF_PLATFORM_WAIT)
@@ -123,7 +133,7 @@ def test_ring_switch_visit_builder_rejects_invalid_inputs() -> None:
         )
 
 
-def _timing(switch_id: str, station_id: str) -> SkipStopTiming:
+def _timing(switch_id: str, station_id: str, skip_allowed: bool = True) -> SkipStopTiming:
     return SkipStopTiming(
         switch_id=switch_id,
         station_id=station_id,
@@ -132,6 +142,7 @@ def _timing(switch_id: str, station_id: str) -> SkipStopTiming:
         platform_exit_to_exit_switch_seconds=3.0,
         skip_entry_to_exit_switch_seconds=4.0,
         rope_to_next_switch_seconds=10.0,
+        skip_allowed=skip_allowed,
     )
 
 

@@ -1,9 +1,10 @@
 import { Gauge } from "lucide-react";
+import { useMemo } from "react";
 import { DemandPanel } from "./DemandPanel";
 import { InspectorPanel } from "./InspectorPanel";
 import { NetworkSvg } from "./NetworkSvg";
 import { ParametersPanel } from "./ParametersPanel";
-import { threeStationLayout } from "../scenarioLayout";
+import { layoutForScenario } from "../scenarioLayout";
 import type { DiscreteOverlayMode, DiscreteViewerToggles, ViewerToggles } from "./viewerTypes";
 import type { DiscreteScenario, Scenario, Selection } from "../types";
 
@@ -32,6 +33,12 @@ export function ScenarioView({
   onSelect,
   onHover,
 }: ScenarioViewProps) {
+  const layout = useMemo(() => layoutForScenario(scenario), [scenario]);
+  const stationLine = scenario.stations
+    .filter((station) => station.kind === "terminal" || station.kind === "service")
+    .map((station) => station.id)
+    .join("-");
+
   return (
     <>
       <section className="workspace">
@@ -39,7 +46,7 @@ export function ScenarioView({
           <div className="network-panel__header">
             <div>
               <h2>Physical Scenario</h2>
-              <p>Circulating L-M-R line with terminal turnarounds and skip branches at M</p>
+              <p>Circulating {stationLine} line with terminal turnarounds and skip branches at service stations</p>
             </div>
             <div className="status-pill">
               <Gauge size={16} />
@@ -49,7 +56,7 @@ export function ScenarioView({
           <NetworkSvg
             scenario={scenario}
             discreteScenario={discreteScenario}
-            layout={threeStationLayout}
+            layout={layout}
             selected={selected}
             hovered={hovered}
             toggles={toggles}

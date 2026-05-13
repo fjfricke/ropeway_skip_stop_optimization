@@ -89,7 +89,7 @@ class SkipStopHeadwayCheckpointBuilder(HeadwayCheckpointBuilder):
                     station_id=timing.station_id,
                     headway_seconds=exit_switch_headway_seconds,
                     applies_to_serve=True,
-                    applies_to_skip=True,
+                    applies_to_skip=timing.skip_allowed,
                     waiting_modes=waiting_modes,
                 )
             )

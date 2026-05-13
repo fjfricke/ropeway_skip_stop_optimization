@@ -59,6 +59,19 @@ def test_skip_stop_headway_checkpoint_builder_adds_platform_exit_for_end_waiting
     }
 
 
+def test_skip_stop_headway_checkpoint_builder_marks_disabled_skip_at_exit() -> None:
+    builder = _builder()
+
+    checkpoints = builder.build(
+        timings=(_timing("sw_a", "A", skip_allowed=False),),
+        station_configs=(StationEanConfig(station_id="A", waiting_mode=StationWaitingMode.NO_WAITING),),
+    )
+
+    assert checkpoints[1].id == "exit_switch::sw_a"
+    assert checkpoints[1].applies_to_serve is True
+    assert checkpoints[1].applies_to_skip is False
+
+
 def test_skip_stop_headway_checkpoint_builder_adds_platform_exit_for_fifo_buffer() -> None:
     builder = _builder()
 
@@ -164,7 +177,7 @@ def _builder() -> SkipStopHeadwayCheckpointBuilder:
     )
 
 
-def _timing(switch_id: str, station_id: str) -> SkipStopTiming:
+def _timing(switch_id: str, station_id: str, skip_allowed: bool = True) -> SkipStopTiming:
     return SkipStopTiming(
         switch_id=switch_id,
         station_id=station_id,
@@ -173,4 +186,5 @@ def _timing(switch_id: str, station_id: str) -> SkipStopTiming:
         platform_exit_to_exit_switch_seconds=3.0,
         skip_entry_to_exit_switch_seconds=4.0,
         rope_to_next_switch_seconds=10.0,
+        skip_allowed=skip_allowed,
     )

@@ -1,10 +1,11 @@
 import { AlertTriangle, GitCommitHorizontal, TimerReset } from "lucide-react";
 import { useMemo } from "react";
-import type { DiscreteScenario, Scenario, SpeedProfile, TrackSegment } from "../types";
+import type { DiscreteScenario, EanPassengerServiceResult, Scenario, SpeedProfile, TrackSegment } from "../types";
 
 interface GraphSlackViewProps {
   scenario: Scenario;
   discreteScenario: DiscreteScenario | null;
+  eanPassengerService?: EanPassengerServiceResult | null;
 }
 
 interface SegmentSlackRow {
@@ -15,7 +16,7 @@ interface SegmentSlackRow {
   slackSeconds: number;
 }
 
-export function GraphSlackView({ scenario, discreteScenario }: GraphSlackViewProps) {
+export function GraphSlackView({ scenario, discreteScenario, eanPassengerService = null }: GraphSlackViewProps) {
   const rows = useMemo(
     () => (discreteScenario ? buildSegmentSlackRows(scenario, discreteScenario) : []),
     [scenario, discreteScenario],
@@ -49,8 +50,47 @@ export function GraphSlackView({ scenario, discreteScenario }: GraphSlackViewPro
             <GitCommitHorizontal size={15} />
             {roundedSegments} rounded segments
           </span>
+          {eanPassengerService ? (
+            <span>
+              <TimerReset size={15} />
+              {objectiveLabel(eanPassengerService.metadata.objective_kind)} · {formatPassengerHours(eanPassengerService.metadata.objective_passenger_hours)}
+            </span>
+          ) : null}
         </div>
       </header>
+
+      {eanPassengerService ? (
+        <section className="graph-objective-panel" aria-label="EAN objective summary">
+          <div className="metric">
+            <span>solver status</span>
+            <strong>{eanPassengerService.metadata.solver_status ?? eanPassengerService.metadata.status}</strong>
+          </div>
+          <div className="metric">
+            <span>gap</span>
+            <strong>{formatPercent(eanPassengerService.metadata.mip_gap)}</strong>
+          </div>
+          <div className="metric">
+            <span>best bound</span>
+            <strong>{formatPassengerSecondsAsHours(eanPassengerService.metadata.best_bound)}</strong>
+          </div>
+          <div className="metric">
+            <span>runtime</span>
+            <strong>{formatOptionalSeconds(eanPassengerService.metadata.runtime_seconds)}</strong>
+          </div>
+          <div className="metric">
+            <span>served</span>
+            <strong>{formatInteger(eanPassengerService.metadata.served_passenger_count)}</strong>
+          </div>
+          <div className="metric">
+            <span>unserved</span>
+            <strong>{formatInteger(eanPassengerService.metadata.unserved_passenger_count)}</strong>
+          </div>
+          <div className="metric">
+            <span>visible skips</span>
+            <strong>{formatInteger(eanPassengerService.metadata.visible_skipped_visit_count)}</strong>
+          </div>
+        </section>
+      ) : null}
 
       <div className="slack-table" role="table" aria-label="Segment slack table">
         <div className="slack-row slack-row--header" role="row">
@@ -118,7 +158,35 @@ function formatSeconds(value: number) {
   return `${value.toFixed(3)}s`;
 }
 
+function formatOptionalSeconds(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "n/a";
+  return formatSeconds(value);
+}
+
 function barPercent(value: number, maxValue: number) {
   if (maxValue <= 0 || value <= 0) return 0;
   return Math.max(4, (value / maxValue) * 100);
+}
+
+function objectiveLabel(value: string) {
+  return value.replaceAll("_", " ");
+}
+
+function formatPassengerHours(value: number | null | undefined) {
+  if (value === null || value === undefined) return "n/a";
+  return `${value.toFixed(1)} pax-h`;
+}
+
+function formatPassengerSecondsAsHours(value: number | null | undefined) {
+  if (value === null || value === undefined) return "n/a";
+  return formatPassengerHours(value / 3600.0);
+}
+
+function formatPercent(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "n/a";
+  return `${(value * 100).toFixed(value < 0.01 ? 2 : 1)}%`;
+}
+
+function formatInteger(value: number) {
+  return new Intl.NumberFormat("en-US", { maximumFractionDigits: 0 }).format(value);
 }

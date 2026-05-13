@@ -1,5 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DiscreteOverlayToolbar } from "./DiscreteOverlayToolbar";
+import { EanMetricsView } from "./EanMetricsView";
+import { EanReplayView } from "./EanReplayView";
+import { EanView } from "./EanView";
 import { GraphSlackView } from "./GraphSlackView";
 import { MetricsView } from "./MetricsView";
 import { ReplayView } from "./ReplayView";
@@ -9,12 +12,24 @@ import { ViewerHeader } from "./ViewerHeader";
 import { ViewerModeTabs } from "./ViewerModeTabs";
 import type {
   ArtifactSelectionControl,
+  AvailableViewerModes,
   DiscreteOverlayMode,
   DiscreteViewerToggles,
   ViewerMode,
   ViewerToggles,
 } from "./viewerTypes";
-import type { DiscreteScenario, MovementPlan, PassengerReplayResult, ReplayMetrics, Scenario, Selection } from "../types";
+import type {
+  DiscreteScenario,
+  EanBuildArtifact,
+  EanMovementPlan,
+  EanPassengerServiceResult,
+  EanPhysicalReplay,
+  MovementPlan,
+  PassengerReplayResult,
+  ReplayMetrics,
+  Scenario,
+  Selection,
+} from "../types";
 
 interface ScenarioViewerProps {
   scenario: Scenario;
@@ -22,10 +37,18 @@ interface ScenarioViewerProps {
   movementPlan: MovementPlan | null;
   passengerReplay: PassengerReplayResult | null;
   replayMetrics: ReplayMetrics | null;
+  eanInput: EanBuildArtifact | null;
+  eanResult: EanMovementPlan | null;
+  eanReplay: EanPhysicalReplay | null;
+  eanPassengerService: EanPassengerServiceResult | null;
   discreteWarning: string | null;
   movementPlanWarning: string | null;
   passengerReplayWarning: string | null;
   replayMetricsWarning: string | null;
+  eanInputWarning: string | null;
+  eanResultWarning: string | null;
+  eanReplayWarning: string | null;
+  eanPassengerServiceWarning: string | null;
   artifactSelection: ArtifactSelectionControl;
 }
 
@@ -35,10 +58,18 @@ export function ScenarioViewer({
   movementPlan,
   passengerReplay,
   replayMetrics,
+  eanInput,
+  eanResult,
+  eanReplay,
+  eanPassengerService,
   discreteWarning,
   movementPlanWarning,
   passengerReplayWarning,
   replayMetricsWarning,
+  eanInputWarning,
+  eanResultWarning,
+  eanReplayWarning,
+  eanPassengerServiceWarning,
   artifactSelection,
 }: ScenarioViewerProps) {
   const [viewerMode, setViewerMode] = useState<ViewerMode>("scenario");
@@ -89,6 +120,24 @@ export function ScenarioViewer({
 
   const activeSelection = isDiscreteSelection(hovered) ? hovered : selected;
   const hasDiscrete = discreteScenario !== null;
+  const availableModes: AvailableViewerModes = useMemo(
+    () => ({
+      scenario: true,
+      graph: discreteScenario !== null,
+      metrics: replayMetrics !== null,
+      replay: discreteScenario !== null && movementPlan !== null,
+      ean: eanInput !== null || eanResult !== null || eanReplay !== null || eanPassengerService !== null,
+      ean_metrics: eanPassengerService?.passenger_plan !== null && eanPassengerService?.passenger_plan !== undefined,
+      ean_replay: eanReplay !== null,
+    }),
+    [discreteScenario, eanInput, eanPassengerService, eanReplay, eanResult, movementPlan, replayMetrics],
+  );
+
+  useEffect(() => {
+    if (!isViewerModeAvailable(viewerMode, availableModes)) {
+      setViewerMode("scenario");
+    }
+  }, [availableModes, viewerMode]);
 
   return (
     <main className="viewer-shell">
@@ -99,7 +148,7 @@ export function ScenarioViewer({
         artifactSelection={artifactSelection}
       />
 
-      <ViewerModeTabs viewerMode={viewerMode} onViewerModeChange={setViewerMode} />
+      <ViewerModeTabs viewerMode={viewerMode} availableModes={availableModes} onViewerModeChange={setViewerMode} />
 
       {viewerMode === "scenario" ? (
         <>
@@ -129,12 +178,42 @@ export function ScenarioViewer({
         </>
       ) : (
         viewerMode === "graph" ? (
-        <GraphSlackView scenario={scenario} discreteScenario={discreteScenario} />
+          <GraphSlackView
+            scenario={scenario}
+            discreteScenario={discreteScenario}
+            eanPassengerService={eanPassengerService}
+          />
         ) : viewerMode === "metrics" ? (
           <MetricsView
             scenario={scenario}
             replayMetrics={replayMetrics}
             replayMetricsWarning={replayMetricsWarning}
+          />
+        ) : viewerMode === "ean" ? (
+          <EanView
+            scenario={scenario}
+            eanInput={eanInput}
+            eanResult={eanResult}
+            eanReplay={eanReplay}
+            eanPassengerService={eanPassengerService}
+            eanInputWarning={eanInputWarning}
+            eanResultWarning={eanResultWarning}
+            eanReplayWarning={eanReplayWarning}
+            eanPassengerServiceWarning={eanPassengerServiceWarning}
+          />
+        ) : viewerMode === "ean_metrics" ? (
+          <EanMetricsView
+            scenario={scenario}
+            eanPassengerService={eanPassengerService}
+            eanPassengerServiceWarning={eanPassengerServiceWarning}
+          />
+        ) : viewerMode === "ean_replay" ? (
+          <EanReplayView
+            scenario={scenario}
+            eanReplay={eanReplay}
+            eanPassengerService={eanPassengerService}
+            eanReplayWarning={eanReplayWarning}
+            eanPassengerServiceWarning={eanPassengerServiceWarning}
           />
         ) : (
           <ReplayView
@@ -153,4 +232,8 @@ export function ScenarioViewer({
 
 function isDiscreteSelection(selection: Selection | null) {
   return selection?.type === "discrete_node" || selection?.type === "discrete_arc" || selection?.type === "discrete_constraint";
+}
+
+function isViewerModeAvailable(mode: ViewerMode, availableModes: AvailableViewerModes) {
+  return availableModes[mode];
 }

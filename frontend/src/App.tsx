@@ -2,6 +2,10 @@ import { useEffect, useState } from "react";
 import { ScenarioViewer } from "./components/ScenarioViewer";
 import type {
   DiscreteScenario,
+  EanBuildArtifact,
+  EanMovementPlan,
+  EanPassengerServiceResult,
+  EanPhysicalReplay,
   ExportArtifactKind,
   ExportArtifactSetManifest,
   ExportExampleManifest,
@@ -21,10 +25,18 @@ interface LoadedArtifacts {
   movementPlan: MovementPlan | null;
   passengerReplay: PassengerReplayResult | null;
   replayMetrics: ReplayMetrics | null;
+  eanInput: EanBuildArtifact | null;
+  eanResult: EanMovementPlan | null;
+  eanReplay: EanPhysicalReplay | null;
+  eanPassengerService: EanPassengerServiceResult | null;
   discreteWarning: string | null;
   movementPlanWarning: string | null;
   passengerReplayWarning: string | null;
   replayMetricsWarning: string | null;
+  eanInputWarning: string | null;
+  eanResultWarning: string | null;
+  eanReplayWarning: string | null;
+  eanPassengerServiceWarning: string | null;
 }
 
 export default function App() {
@@ -86,7 +98,7 @@ export default function App() {
       setIsLoadingArtifacts(true);
       setError(null);
       try {
-        const nextArtifacts = await loadArtifactSet(artifactSet);
+        const nextArtifacts = await loadArtifactSet(example, artifactSet);
         if (!cancelled) {
           setArtifacts(nextArtifacts);
         }
@@ -138,10 +150,18 @@ export default function App() {
       movementPlan={artifacts.movementPlan}
       passengerReplay={artifacts.passengerReplay}
       replayMetrics={artifacts.replayMetrics}
+      eanInput={artifacts.eanInput}
+      eanResult={artifacts.eanResult}
+      eanReplay={artifacts.eanReplay}
+      eanPassengerService={artifacts.eanPassengerService}
       discreteWarning={artifacts.discreteWarning}
       movementPlanWarning={artifacts.movementPlanWarning}
       passengerReplayWarning={artifacts.passengerReplayWarning}
       replayMetricsWarning={artifacts.replayMetricsWarning}
+      eanInputWarning={artifacts.eanInputWarning}
+      eanResultWarning={artifacts.eanResultWarning}
+      eanReplayWarning={artifacts.eanReplayWarning}
+      eanPassengerServiceWarning={artifacts.eanPassengerServiceWarning}
       artifactSelection={{
         examples: manifest.examples,
         selectedExampleId,
@@ -162,18 +182,37 @@ async function fetchRequired<T>(url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function loadArtifactSet(artifactSet: ExportArtifactSetManifest): Promise<LoadedArtifacts> {
+async function loadArtifactSet(example: ExportExampleManifest, artifactSet: ExportArtifactSetManifest): Promise<LoadedArtifacts> {
   const scenarioPath = artifactUrl(artifactSet, "scenario");
   if (!scenarioPath) {
     throw new Error(`Artifact set ${artifactSet.id} does not provide a physical scenario`);
   }
+  const discreteArtifactSet = artifactSet.artifacts.discrete_scenario
+    ? artifactSet
+    : example.artifact_sets.find((candidate) => candidate.artifacts.discrete_scenario);
 
-  const [scenario, discreteResult, movementResult, passengerReplayResult, replayMetricsResult] = await Promise.all([
+  const [
+    scenario,
+    discreteResult,
+    movementResult,
+    passengerReplayResult,
+    replayMetricsResult,
+    eanInputResult,
+    eanResultResult,
+    eanReplayResult,
+    eanPassengerServiceResult,
+  ] = await Promise.all([
     fetchRequired<Scenario>(scenarioPath),
-    fetchOptional<DiscreteScenario>(artifactSet, "discrete_scenario", "Discrete overlay"),
+    discreteArtifactSet
+      ? fetchOptional<DiscreteScenario>(discreteArtifactSet, "discrete_scenario", "Discrete overlay")
+      : Promise.resolve({ data: null, warning: `Discrete overlay unavailable in artifact set ${artifactSet.id}` }),
     fetchOptional<MovementPlan>(artifactSet, "movement_plan", "Replay"),
     fetchOptional<PassengerReplayResult>(artifactSet, "passenger_replay", "Passenger replay"),
     fetchOptional<ReplayMetrics>(artifactSet, "replay_metrics", "Replay metrics"),
+    fetchOptional<EanBuildArtifact>(artifactSet, "ean_input", "EAN input"),
+    fetchOptional<EanMovementPlan>(artifactSet, "ean_result", "EAN result"),
+    fetchOptional<EanPhysicalReplay>(artifactSet, "ean_replay", "EAN replay"),
+    fetchOptional<EanPassengerServiceResult>(artifactSet, "milp_result", "MILP result"),
   ]);
 
   return {
@@ -182,11 +221,23 @@ async function loadArtifactSet(artifactSet: ExportArtifactSetManifest): Promise<
     movementPlan: movementResult.data,
     passengerReplay: passengerReplayResult.data,
     replayMetrics: replayMetricsResult.data,
+    eanInput: eanInputResult.data,
+    eanResult: eanResultResult.data,
+    eanReplay: eanReplayResult.data,
+    eanPassengerService: isEanPassengerServiceResult(eanPassengerServiceResult.data) ? eanPassengerServiceResult.data : null,
     discreteWarning: discreteResult.warning,
     movementPlanWarning: movementResult.warning,
     passengerReplayWarning: passengerReplayResult.warning,
     replayMetricsWarning: replayMetricsResult.warning,
+    eanInputWarning: eanInputResult.warning,
+    eanResultWarning: eanResultResult.warning,
+    eanReplayWarning: eanReplayResult.warning,
+    eanPassengerServiceWarning: eanPassengerServiceResult.warning,
   };
+}
+
+function isEanPassengerServiceResult(value: EanPassengerServiceResult | null): value is EanPassengerServiceResult {
+  return value !== null && typeof value === "object" && "passenger_plan" in value && "metadata" in value;
 }
 
 async function fetchOptional<T>(
@@ -221,8 +272,16 @@ const emptyArtifacts: LoadedArtifacts = {
   movementPlan: null,
   passengerReplay: null,
   replayMetrics: null,
+  eanInput: null,
+  eanResult: null,
+  eanReplay: null,
+  eanPassengerService: null,
   discreteWarning: null,
   movementPlanWarning: null,
   passengerReplayWarning: null,
   replayMetricsWarning: null,
+  eanInputWarning: null,
+  eanResultWarning: null,
+  eanReplayWarning: null,
+  eanPassengerServiceWarning: null,
 };

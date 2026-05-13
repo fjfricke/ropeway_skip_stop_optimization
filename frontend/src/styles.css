@@ -205,11 +205,29 @@ h3 {
 }
 
 .toolbar--mode {
+  display: grid;
+  gap: 8px;
   padding: 8px 10px;
 }
 
 .toolbar--mode button {
   min-width: 160px;
+}
+
+.toolbar__row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.toolbar__row--ean {
+  border-top: 1px solid color-mix(in oklch, var(--line), white 22%);
+  padding-top: 8px;
+}
+
+.toolbar__row--ean button.is-active {
+  border-color: color-mix(in oklch, var(--service), white 28%);
+  box-shadow: inset 0 -3px 0 color-mix(in oklch, var(--service), white 12%);
 }
 
 .toolbar--discrete button.is-active {
@@ -687,10 +705,12 @@ h3 {
 }
 
 .panel {
+  min-width: 0;
   padding: 14px;
 }
 
 .panel__header {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 8px;
@@ -698,7 +718,13 @@ h3 {
 }
 
 .panel__header svg {
+  flex: 0 0 auto;
   color: var(--accent);
+}
+
+.panel__header h2 {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .panel__count {
@@ -922,10 +948,19 @@ h3 {
 
 .graph-view__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: start;
   justify-content: space-between;
   gap: 18px;
   margin-bottom: 14px;
+}
+
+.graph-view__header > div {
+  min-width: 0;
+}
+
+.graph-view__header > div:first-child {
+  flex: 1 1 260px;
 }
 
 .graph-view__header p {
@@ -935,6 +970,9 @@ h3 {
 }
 
 .graph-view__summary {
+  flex: 1 1 320px;
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -942,6 +980,9 @@ h3 {
 }
 
 .graph-view__summary span {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
   min-height: 34px;
   display: inline-flex;
   align-items: center;
@@ -952,9 +993,21 @@ h3 {
   padding: 6px 9px;
   font-size: 0.82rem;
   font-weight: 760;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+.graph-objective-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr));
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
 .slack-table {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
   display: grid;
   border: 1px solid var(--line);
   background: #fff;
@@ -1017,9 +1070,18 @@ h3 {
 
 .metrics-view__header {
   display: flex;
+  flex-wrap: wrap;
   align-items: start;
   justify-content: space-between;
   gap: 18px;
+}
+
+.metrics-view__header > div {
+  min-width: 0;
+}
+
+.metrics-view__header > div:first-child {
+  flex: 1 1 260px;
 }
 
 .metrics-view__header p {
@@ -1029,6 +1091,9 @@ h3 {
 }
 
 .metrics-summary {
+  flex: 1 1 320px;
+  min-width: 0;
+  max-width: 100%;
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
@@ -1036,6 +1101,7 @@ h3 {
 }
 
 .metrics-summary span {
+  flex: 0 1 auto;
   min-height: 34px;
   display: inline-flex;
   align-items: center;
@@ -1046,6 +1112,10 @@ h3 {
   padding: 6px 9px;
   font-size: 0.82rem;
   font-weight: 760;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  white-space: normal;
 }
 
 .metrics-chart-shell {
@@ -1087,6 +1157,10 @@ h3 {
 
 .metrics-bars--arrivals rect {
   fill: #285aa8;
+}
+
+.metrics-bars--boardings rect {
+  fill: #d97925;
 }
 
 .metrics-bars--alightings rect {
@@ -1134,8 +1208,12 @@ h3 {
 
 .metrics-lower {
   display: grid;
-  grid-template-columns: minmax(280px, 1.1fr) minmax(260px, 0.8fr) minmax(280px, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr));
   gap: 14px;
+}
+
+.metrics-lower > * {
+  min-width: 0;
 }
 
 .metrics-breakdown__rows {
@@ -1152,9 +1230,16 @@ h3 {
 
 .metrics-breakdown__row span,
 .metrics-breakdown__row strong {
+  min-width: 0;
   color: var(--ink);
   font-size: 0.84rem;
   font-weight: 780;
+}
+
+.metrics-breakdown__row > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .metrics-breakdown__row strong {
@@ -1170,6 +1255,208 @@ h3 {
   height: 100%;
   display: block;
   background: var(--accent);
+}
+
+.ean-view {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+  border: 1px solid var(--line);
+  background: color-mix(in oklch, var(--paper), white 40%);
+  padding: 16px;
+}
+
+.ean-empty {
+  min-height: 180px;
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: color-mix(in oklch, var(--paper), white 40%);
+  color: var(--danger);
+  padding: 16px;
+}
+
+.ean-view__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.ean-view__header p {
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.ean-grid {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(330px, 410px);
+  gap: 14px;
+}
+
+.ean-grid > * {
+  min-width: 0;
+}
+
+.ean-main {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+}
+
+.ean-side {
+  align-content: start;
+}
+
+.metric-grid--ean {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.ean-note {
+  margin-top: 10px;
+  border: 1px solid color-mix(in oklch, var(--accent), white 64%);
+  background: color-mix(in oklch, var(--accent), white 92%);
+  color: color-mix(in oklch, var(--accent), #17202b 34%);
+  padding: 9px 10px;
+  font-size: 0.82rem;
+  font-weight: 740;
+}
+
+.ean-cycle {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.ean-cycle__item {
+  min-width: 0;
+  border: 1px solid var(--line);
+  background: #fff;
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+}
+
+.ean-cycle__item span {
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 820;
+  text-transform: uppercase;
+}
+
+.ean-cycle__item strong {
+  min-width: 0;
+  color: var(--ink);
+  font-size: 0.9rem;
+  word-break: break-word;
+}
+
+.ean-table-wrap {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  overflow-x: auto;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.ean-table {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+
+.ean-table th,
+.ean-table td {
+  border-bottom: 1px solid var(--line);
+  padding: 9px 10px;
+  text-align: left;
+  vertical-align: top;
+  font-size: 0.82rem;
+}
+
+.ean-table th {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 840;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.ean-table td {
+  color: var(--ink);
+  font-weight: 680;
+}
+
+.ean-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.ean-event-summary {
+  margin-bottom: 10px;
+}
+
+.ean-event-list {
+  max-height: 430px;
+  overflow: auto;
+  display: grid;
+  gap: 7px;
+}
+
+.ean-event {
+  width: 100%;
+  display: grid;
+  grid-template-columns: 58px 38px minmax(0, 1fr);
+  gap: 3px 8px;
+  align-items: center;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  padding: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.ean-event.is-active {
+  border-color: color-mix(in oklch, var(--accent), white 25%);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.ean-event span,
+.ean-event strong,
+.ean-event em,
+.ean-event small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ean-event span {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 820;
+}
+
+.ean-event strong {
+  font-size: 0.82rem;
+}
+
+.ean-event em {
+  font-size: 0.8rem;
+  font-style: normal;
+  font-weight: 760;
+}
+
+.ean-event small {
+  grid-column: 3;
+  color: var(--muted);
+  font-size: 0.76rem;
+  font-weight: 700;
 }
 
 .slack-kind {
@@ -1371,6 +1658,38 @@ h3 {
   }
 }
 
+@media (max-width: 1100px) {
+  .graph-view__header {
+    flex-direction: column;
+  }
+
+  .graph-view__header > div:first-child {
+    width: 100%;
+    flex: 0 1 auto;
+  }
+
+  .graph-view__summary {
+    width: 100%;
+    flex: 0 1 auto;
+    justify-content: flex-start;
+  }
+
+  .metrics-view__header {
+    flex-direction: column;
+  }
+
+  .metrics-view__header > div:first-child {
+    width: 100%;
+    flex: 0 1 auto;
+  }
+
+  .metrics-summary {
+    width: 100%;
+    flex: 0 1 auto;
+    justify-content: flex-start;
+  }
+}
+
 @media (max-width: 680px) {
   .toolbar {
     display: grid;
@@ -1413,12 +1732,24 @@ h3 {
     justify-content: flex-start;
   }
 
+  .graph-objective-panel {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .metrics-summary {
     justify-content: flex-start;
   }
 
   .metrics-lower {
     grid-template-columns: 1fr;
+  }
+
+  .ean-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-grid--ean {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .network-svg-wrap {
@@ -1434,6 +1765,14 @@ h3 {
   }
 
   .metric-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .ean-view__header {
+    flex-direction: column;
+  }
+
+  .ean-cycle {
     grid-template-columns: 1fr;
   }
 }

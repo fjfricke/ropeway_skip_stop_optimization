@@ -8,6 +8,8 @@ import type { DiscreteOverlayMode, DiscreteViewerToggles, ViewerToggles } from "
 export interface ReplayCabinMarker {
   cabinId: number;
   nodeId: string;
+  x?: number;
+  y?: number;
   incomingArcId?: string | null;
   loadCount?: number;
   capacity?: number;
@@ -337,8 +339,7 @@ export function NetworkSvg({
         {toggles.demand ? (
           <g className="layer layer--demand">
             {scenario.stations.map((station) => {
-              const nodeId = station.id === "L" ? "L_platform_exit" : station.id === "R" ? "R_platform_exit" : "M_platform_entry_lr";
-              const point = layout.nodes[nodeId];
+              const point = stationAnchor(station.id, layout);
               const count = demandByStation.get(station.id) ?? 0;
               if (!point || count === 0) return null;
               return (
@@ -357,7 +358,7 @@ export function NetworkSvg({
           <ReplayStationQueueLayer queues={replayStationQueues} layout={layout} inverseZoom={inverseZoom} />
         ) : null}
 
-        {replayCabins.length > 0 && discreteScenario ? (
+        {replayCabins.length > 0 ? (
           <ReplayCabinLayer
             cabins={replayCabins}
             discreteScenario={discreteScenario}
@@ -430,7 +431,7 @@ function ReplayCabinLayer({
   onCabinSelect,
 }: {
   cabins: ReplayCabinMarker[];
-  discreteScenario: DiscreteScenario;
+  discreteScenario: DiscreteScenario | null;
   scenario: Scenario;
   layout: ScenarioLayout;
   inverseZoom: number;
@@ -438,13 +439,17 @@ function ReplayCabinLayer({
   onCabinSelect?: (cabinId: number) => void;
 }) {
   const segmentById = new Map(scenario.track_segments.map((segment) => [segment.id, segment]));
-  const nodeById = new Map(discreteScenario.nodes.map((node) => [node.id, node]));
+  const nodeById = new Map((discreteScenario?.nodes ?? []).map((node) => [node.id, node]));
 
   return (
     <g className="layer layer--replay-cabins">
       {cabins.map((cabin, index) => {
         const node = nodeById.get(cabin.nodeId);
-        const point = node ? discreteNodePoint(node, layout, segmentById) : null;
+        const point = cabin.x !== undefined && cabin.y !== undefined
+          ? { x: cabin.x, y: cabin.y }
+          : node
+            ? discreteNodePoint(node, layout, segmentById)
+            : layout.nodes[cabin.nodeId] ?? null;
         if (!point) return null;
         const selected = selectedCabinId === cabin.cabinId;
         const capacity = cabin.capacity ?? 0;
@@ -531,19 +536,20 @@ function destinationClass(destination: string) {
 }
 
 function stationQueueAnchor(stationId: string, layout: ScenarioLayout) {
-  if (stationId === "L") {
-    const point = layout.nodes.L_platform_exit;
-    return point ? { x: point.x + 24, y: point.y - 46 } : null;
-  }
-  if (stationId === "R") {
-    const point = layout.nodes.R_platform_exit;
-    return point ? { x: point.x - 112, y: point.y - 42 } : null;
-  }
-  if (stationId === "M") {
-    const point = layout.nodes.M_platform_entry_lr;
-    return point ? { x: point.x - 36, y: point.y - 64 } : null;
-  }
-  return null;
+  const point = stationAnchor(stationId, layout);
+  if (!point) return null;
+  return { x: point.x - 36, y: point.y - 64 };
+}
+
+function stationAnchor(stationId: string, layout: ScenarioLayout) {
+  return (
+    layout.nodes[`${stationId}_platform_exit`] ??
+    layout.nodes[`${stationId}_platform_entry_lr`] ??
+    layout.nodes[`${stationId}_platform_exit_lr`] ??
+    layout.nodes[`${stationId}_platform_entry`] ??
+    layout.nodes[`${stationId}_platform_entry_rl`] ??
+    null
+  );
 }
 
 function DiscreteOverlayLayer({

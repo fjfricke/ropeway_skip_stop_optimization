@@ -1,3 +1,5 @@
+import type { Scenario, Station } from "./types";
+
 export interface LayoutPoint {
   x: number;
   y: number;
@@ -56,3 +58,126 @@ export const threeStationLayout: ScenarioLayout = {
     M_rl_skip_bypass: { curve: -60, labelDx: 2, labelDy: 64 },
   },
 };
+
+export function layoutForScenario(scenario: Scenario): ScenarioLayout {
+  if (scenario.scenario_id === "three_station_v0" || scenario.scenario_id === "three_station_depot_v0") {
+    return threeStationLayout;
+  }
+  return linearSkipStopLayout(scenario);
+}
+
+function linearSkipStopLayout(scenario: Scenario): ScenarioLayout {
+  const passengerStations = scenario.stations.filter((station) => station.kind === "terminal" || station.kind === "service");
+  if (passengerStations.length < 3) return threeStationLayout;
+
+  const width = Math.max(1000, 240 * (passengerStations.length - 1) + 220);
+  const leftPad = 90;
+  const rightPad = 90;
+  const topY = 178;
+  const bottomY = 422;
+  const terminalPlatformTopY = 242;
+  const terminalPlatformBottomY = 338;
+  const middleTopPlatformY = 118;
+  const middleBottomPlatformY = 482;
+  const usableWidth = width - leftPad - rightPad;
+  const step = usableWidth / (passengerStations.length - 1);
+
+  const nodes: Record<string, LayoutPoint> = {};
+  const segments: Record<string, SegmentStyleHint> = {};
+
+  passengerStations.forEach((station, index) => {
+    const x = leftPad + step * index;
+    if (index === 0) {
+      addLeftTerminal(nodes, station, x, topY, bottomY, terminalPlatformTopY, terminalPlatformBottomY);
+      addTerminalSegmentHints(segments, station.id, "left");
+      return;
+    }
+    if (index === passengerStations.length - 1) {
+      addRightTerminal(nodes, station, x, topY, bottomY, terminalPlatformTopY, terminalPlatformBottomY);
+      addTerminalSegmentHints(segments, station.id, "right");
+      return;
+    }
+    addMiddleStation(nodes, station, x, topY, bottomY, middleTopPlatformY, middleBottomPlatformY);
+    segments[`${station.id}_lr_skip_bypass`] = { curve: -48, labelDx: 0, labelDy: -54 };
+    segments[`${station.id}_rl_skip_bypass`] = { curve: 48, labelDx: 0, labelDy: 62 };
+  });
+
+  for (const segment of scenario.track_segments) {
+    if (segment.kind !== "rope") continue;
+    const from = nodes[segment.from_node_id];
+    const to = nodes[segment.to_node_id];
+    if (!from || !to) continue;
+    segments[segment.id] = {
+      curve: segment.id.includes("_lr") ? -12 : 12,
+      labelDx: from.x < to.x ? -4 : -52,
+      labelDy: segment.id.includes("_lr") ? -18 : 28,
+    };
+  }
+
+  return {
+    viewBox: `0 0 ${width} 620`,
+    nodes,
+    segments,
+  };
+}
+
+function addLeftTerminal(
+  nodes: Record<string, LayoutPoint>,
+  station: Station,
+  x: number,
+  topY: number,
+  bottomY: number,
+  platformTopY: number,
+  platformBottomY: number,
+) {
+  nodes[`${station.id}_exit_lr`] = { x: x + 54, y: topY, labelDx: -34, labelDy: -18 };
+  nodes[`${station.id}_platform_exit`] = { x, y: platformTopY, labelDx: -70, labelDy: -10 };
+  nodes[`${station.id}_platform_entry`] = { x, y: platformBottomY, labelDx: -72, labelDy: 18 };
+  nodes[`${station.id}_entry_rl`] = { x: x + 54, y: bottomY, labelDx: -34, labelDy: 38 };
+}
+
+function addRightTerminal(
+  nodes: Record<string, LayoutPoint>,
+  station: Station,
+  x: number,
+  topY: number,
+  bottomY: number,
+  platformTopY: number,
+  platformBottomY: number,
+) {
+  nodes[`${station.id}_entry_lr`] = { x: x - 54, y: topY, labelDx: 10, labelDy: -18 };
+  nodes[`${station.id}_platform_entry`] = { x, y: platformTopY, labelDx: 12, labelDy: -10 };
+  nodes[`${station.id}_platform_exit`] = { x, y: platformBottomY, labelDx: 12, labelDy: 18 };
+  nodes[`${station.id}_exit_rl`] = { x: x - 54, y: bottomY, labelDx: 10, labelDy: 38 };
+}
+
+function addMiddleStation(
+  nodes: Record<string, LayoutPoint>,
+  station: Station,
+  x: number,
+  topY: number,
+  bottomY: number,
+  platformTopY: number,
+  platformBottomY: number,
+) {
+  nodes[`${station.id}_entry_lr`] = { x: x - 76, y: topY, labelDx: -40, labelDy: -26 };
+  nodes[`${station.id}_service_approach_lr`] = { x: x - 40, y: topY - 36 };
+  nodes[`${station.id}_platform_entry_lr`] = { x: x - 18, y: platformTopY, labelDx: -36, labelDy: -24 };
+  nodes[`${station.id}_platform_exit_lr`] = { x: x + 18, y: platformTopY, labelDx: -4, labelDy: -24 };
+  nodes[`${station.id}_service_accelerate_lr`] = { x: x + 40, y: topY - 36 };
+  nodes[`${station.id}_exit_lr`] = { x: x + 76, y: topY, labelDx: 8, labelDy: -26 };
+
+  nodes[`${station.id}_entry_rl`] = { x: x + 76, y: bottomY, labelDx: 8, labelDy: 36 };
+  nodes[`${station.id}_service_approach_rl`] = { x: x + 40, y: bottomY + 36 };
+  nodes[`${station.id}_platform_entry_rl`] = { x: x + 18, y: platformBottomY, labelDx: -2, labelDy: 42 };
+  nodes[`${station.id}_platform_exit_rl`] = { x: x - 18, y: platformBottomY, labelDx: -38, labelDy: 42 };
+  nodes[`${station.id}_service_accelerate_rl`] = { x: x - 40, y: bottomY + 36 };
+  nodes[`${station.id}_exit_rl`] = { x: x - 76, y: bottomY, labelDx: -44, labelDy: 36 };
+}
+
+function addTerminalSegmentHints(segments: Record<string, SegmentStyleHint>, stationId: string, side: "left" | "right") {
+  const sign = side === "left" ? -1 : 1;
+  segments[`${stationId}_turnaround_decelerate`] = { labelDx: 36 * sign, labelDy: side === "left" ? 20 : -18 };
+  segments[`${stationId}_turnaround_platform`] = { labelDx: 50 * sign, labelDy: 0 };
+  segments[`${stationId}_turnaround_accelerate`] = { labelDx: 36 * sign, labelDy: side === "left" ? -18 : 20 };
+}

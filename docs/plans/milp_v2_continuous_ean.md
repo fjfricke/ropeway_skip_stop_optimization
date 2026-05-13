@@ -587,8 +587,8 @@ models.py
 
 switch_visit_builder.py
   Builds fixed skip/stop switch visit sequences per cabin from cabin starts,
-  timings, horizon_seconds, and tail_seconds. Computes the upper-bound K and
-  emits SwitchVisitDefinition records.
+  timings, and model_end_seconds. Computes the upper-bound K and emits
+  SwitchVisitDefinition records.
 
 headway_candidate_builder.py
   Builds HeadwayCandidate records from switch visits, station configs, and
@@ -730,7 +730,6 @@ Global EAN solver configuration should stay small:
 
 ```text
 horizon_seconds
-tail_seconds
 cabin_capacity
 station_configs
 ```
@@ -739,16 +738,18 @@ Semantics:
 
 ```text
 horizon_seconds:
-  passenger service and objective cutoff
+  passenger service, objective cutoff, and current physical model boundary
 
 tail_seconds:
-  movement/headway continuation after the passenger horizon
+  deferred / not implemented in v0
 
-model_end_seconds = horizon_seconds + tail_seconds
+model_end_seconds = horizon_seconds
 ```
 
-`model_end_seconds` is derived from `horizon_seconds` and `tail_seconds`. It
-must not be passed as an independent config value.
+For v0, `tail_seconds` remains `0.0` and the model accepts horizon-edge
+artifacts. Automatic tail generation is deliberately deferred. If we later want
+post-horizon physical/headway continuation, `model_end_seconds` should again be
+derived instead of passed as an independent config value.
 
 Passenger rides must be fully completed inside `horizon_seconds`:
 
@@ -757,15 +758,15 @@ boarding_time <= horizon_seconds
 alighting_time <= horizon_seconds
 ```
 
-Cabin movement and headway constraints may continue until `model_end_seconds`:
+Cabin movement and headway constraints currently apply only until
+`model_end_seconds == horizon_seconds`:
 
 ```text
 active switch visits must satisfy exit_switch_time <= model_end_seconds
 ```
 
-This avoids hard horizon artifacts where cabins disappear immediately at the
-passenger cutoff, while keeping the passenger objective scoped to the requested
-planning horizon.
+This keeps the first EAN optimizer simpler. Hard horizon artifacts are accepted
+until tail semantics are explicitly implemented.
 
 Do not put `max_switch_visits` into `EanConfig` initially. The builder/solver
 should compute the required number of switch visits per cabin from:

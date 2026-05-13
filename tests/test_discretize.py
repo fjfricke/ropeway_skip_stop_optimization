@@ -48,14 +48,14 @@ def test_expected_segment_duration_steps() -> None:
     assert steps_by_segment_id["M_exit_lr_to_R_entry_lr"] == 60
     assert steps_by_segment_id["R_exit_rl_to_M_entry_rl"] == 60
     assert steps_by_segment_id["M_exit_rl_to_L_entry_rl"] == 60
-    assert steps_by_segment_id["L_turnaround_platform"] == 20
-    assert steps_by_segment_id["R_turnaround_platform"] == 20
+    assert steps_by_segment_id["L_turnaround_platform"] == 40
+    assert steps_by_segment_id["R_turnaround_platform"] == 40
     assert steps_by_segment_id["M_lr_approach_fast"] == 2
     assert steps_by_segment_id["M_lr_brake"] == 3
     assert steps_by_segment_id["M_lr_accelerate"] == 3
     assert steps_by_segment_id["M_lr_depart_fast"] == 2
-    assert steps_by_segment_id["M_lr_skip_bypass"] == 28
-    assert steps_by_segment_id["M_rl_skip_bypass"] == 28
+    assert steps_by_segment_id["M_lr_skip_bypass"] == 8
+    assert steps_by_segment_id["M_rl_skip_bypass"] == 8
 
 
 def test_only_platform_segments_are_station_kind() -> None:
@@ -198,9 +198,9 @@ def test_discrete_routes_are_generated_for_station_routes() -> None:
     discrete_route_by_source_id = {route.source_route_id: route for route in discrete.routes}
 
     assert set(discrete_route_by_source_id) == {route.id for route in scenario.station_routes}
-    assert len(discrete_route_by_source_id["M_service_lr"].arc_ids) == 30
-    assert len(discrete_route_by_source_id["M_skip_lr"].arc_ids) == 28
-    assert len(discrete_route_by_source_id["L_service_turnaround"].arc_ids) == 26
+    assert len(discrete_route_by_source_id["M_service_lr"].arc_ids) == 50
+    assert len(discrete_route_by_source_id["M_skip_lr"].arc_ids) == 8
+    assert len(discrete_route_by_source_id["L_service_turnaround"].arc_ids) == 46
 
 
 def test_discrete_route_arc_sequences_are_connected() -> None:

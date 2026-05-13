@@ -10,6 +10,14 @@ from ropeway_skip_stop_optimization.exports.artifacts import (
     ArtifactBuilder,
     ArtifactSet,
     DiscreteScenarioArtifactBuilder,
+    EanAllStopMovementPlanArtifactBuilder,
+    EanBuildArtifactArtifactBuilder,
+    EanPhysicalReplayArtifactBuilder,
+    EanPassengerServiceArtifactBuilder,
+    EanPassengerServiceMovementPlanArtifactBuilder,
+    EanPassengerServicePhysicalReplayArtifactBuilder,
+    EanSkipStopMovementPlanArtifactBuilder,
+    EanSkipStopPhysicalReplayArtifactBuilder,
     ExportArtifact,
     ExportContext,
     GreedyAllStopMovementPlanArtifactBuilder,
@@ -24,6 +32,12 @@ from ropeway_skip_stop_optimization.exports.manifest import merge_and_write_mani
 from ropeway_skip_stop_optimization.optimization.discrete_time import (
     MilpV0VariableStrategy,
     MilpV1PassengerWaitingObjective,
+)
+from ropeway_skip_stop_optimization.optimization.ean import (
+    EanPassengerServiceObjective,
+    GurobiSolverPolicy,
+    GurobiSolverPolicyPreset,
+    gurobi_solver_policy_for_preset,
 )
 from ropeway_skip_stop_optimization.progress import ProgressReporter
 
@@ -65,6 +79,53 @@ def build_artifact_set(
                 GreedyAllStopReplayMetricsArtifactBuilder(),
             ),
             is_default=True,
+        )
+    if artifact_set_id == "ean_all_stop_baseline":
+        return ArtifactSet(
+            "ean_all_stop_baseline",
+            "EAN all-stop baseline",
+            (
+                PhysicalScenarioArtifactBuilder(),
+                EanBuildArtifactArtifactBuilder(),
+                EanAllStopMovementPlanArtifactBuilder(),
+                EanPhysicalReplayArtifactBuilder(),
+            ),
+        )
+    if artifact_set_id == "ean_skip_stop_feasibility":
+        return ArtifactSet(
+            "ean_skip_stop_feasibility",
+            "EAN skip/stop feasibility",
+            (
+                PhysicalScenarioArtifactBuilder(),
+                EanBuildArtifactArtifactBuilder(),
+                EanSkipStopMovementPlanArtifactBuilder(),
+                EanSkipStopPhysicalReplayArtifactBuilder(),
+            ),
+        )
+    if artifact_set_id == "ean_passenger_waiting_time":
+        return ArtifactSet(
+            "ean_passenger_waiting_time",
+            "EAN passenger waiting-time objective",
+            (
+                *common,
+                EanBuildArtifactArtifactBuilder(),
+                EanPassengerServiceMovementPlanArtifactBuilder(),
+                EanPassengerServicePhysicalReplayArtifactBuilder(),
+                EanPassengerServiceArtifactBuilder(),
+            ),
+        )
+    if artifact_set_id == "ean_passenger_journey_time":
+        objective = EanPassengerServiceObjective.JOURNEY_TIME
+        return ArtifactSet(
+            "ean_passenger_journey_time",
+            "EAN passenger journey-time objective",
+            (
+                *common,
+                EanBuildArtifactArtifactBuilder(),
+                EanPassengerServiceMovementPlanArtifactBuilder(objective=objective),
+                EanPassengerServicePhysicalReplayArtifactBuilder(objective=objective),
+                EanPassengerServiceArtifactBuilder(objective=objective),
+            ),
         )
     if artifact_set_id == "milp_v0_feasibility":
         return ArtifactSet(
@@ -117,6 +178,10 @@ def known_artifact_set_ids() -> tuple[str, ...]:
         "physical_only",
         "discrete_debug",
         "greedy_all_stop",
+        "ean_all_stop_baseline",
+        "ean_skip_stop_feasibility",
+        "ean_passenger_waiting_time",
+        "ean_passenger_journey_time",
         "milp_v0_feasibility",
         "milp_v1_passenger_feasibility",
         "milp_v1_waiting_time",
@@ -131,6 +196,7 @@ def export_artifact_set(
     milp_horizon_steps: int = 60,
     milp_cabin_count: int = 23,
     milp_variable_strategy: MilpV0VariableStrategy = MilpV0VariableStrategy.DENSE,
+    ean_solver_policy_preset: GurobiSolverPolicyPreset = GurobiSolverPolicyPreset.QUICK_GOOD_SOLUTION,
     progress: bool | ProgressReporter = False,
     clean: bool = False,
 ) -> ExportRunResult:
@@ -146,6 +212,7 @@ def export_artifact_set(
         example,
         artifact_set,
         output_root=output_root,
+        ean_solver_policy=gurobi_solver_policy_for_preset(ean_solver_policy_preset),
         progress=reporter,
         clean=clean,
     )
@@ -156,6 +223,7 @@ def run_artifact_set(
     artifact_set: ArtifactSet,
     *,
     output_root: Path,
+    ean_solver_policy: GurobiSolverPolicy | None = None,
     progress: ProgressReporter,
     clean: bool = False,
 ) -> ExportRunResult:
@@ -165,7 +233,11 @@ def run_artifact_set(
             shutil.rmtree(example_dir)
 
     output_root.mkdir(parents=True, exist_ok=True)
-    context = ExportContext(example=example, progress=progress)
+    context = ExportContext(
+        example=example,
+        progress=progress,
+        ean_solver_policy=ean_solver_policy or GurobiSolverPolicy(),
+    )
     artifacts: list[ExportArtifact] = []
     artifact_paths: list[Path] = []
 

@@ -51,8 +51,11 @@ src/ropeway_skip_stop_optimization/
   examples/
     __init__.py
     base.py
+    discrete.py
+    ean.py
     registry.py
     three_station.py
+    three_station_ean.py
 
   exports/
     __init__.py
@@ -100,6 +103,9 @@ examples/three_station.py
   ThreeStationExample
   build_three_station_near_capacity_demands
   helper functions for physical topology construction
+
+examples/three_station_ean.py
+  example-specific EAN config and ring switch interpretation
 ```
 
 The registry maps stable ids to example objects:
@@ -109,6 +115,24 @@ EXAMPLES: dict[str, ScenarioExample] = {
     "three_station_v0": ThreeStationExample(),
 }
 ```
+
+Optional example capabilities keep generated artifact types explicit:
+
+```text
+examples/discrete.py
+  DiscreteScenarioExample
+    build_discretization_config(scenario)
+
+examples/ean.py
+  EanScenarioExample
+    build_ean_config(scenario)
+    build_ean_artifact_builder(scenario, config)
+```
+
+An artifact set that needs a discrete scenario should require
+`DiscreteScenarioExample`. An artifact set that needs EAN should require
+`EanScenarioExample`. This avoids assuming every physical example can be mapped
+to every optimization/replay representation.
 
 ## Export Artifact Layer
 
@@ -131,6 +155,7 @@ class ArtifactKind(StrEnum):
     MILP_RESULT = "milp_result"
     EAN_INPUT = "ean_input"
     EAN_RESULT = "ean_result"
+    EAN_REPLAY = "ean_replay"
 
 
 @dataclass(frozen=True)
@@ -163,8 +188,9 @@ Examples:
 - `ReplayMetricsArtifactBuilder`
 - `MilpV0MovementPlanArtifactBuilder`
 - `MilpV1PassengerWaitingPlanArtifactBuilder`
-- later `EanInputArtifactBuilder`
-- later `EanSolutionArtifactBuilder`
+- `EanBuildArtifactArtifactBuilder`
+- `EanAllStopMovementPlanArtifactBuilder`
+- `EanPhysicalReplayArtifactBuilder`
 
 ## Export Context
 
@@ -181,6 +207,9 @@ class ExportContext:
     _discrete_scenario: DiscreteScenario | None = None
     _greedy_plan: MovementPlan | None = None
     _greedy_passenger_replay: PassengerReplayResult | None = None
+    _ean_artifact: EanBuildArtifact | None = None
+    _ean_all_stop_plan: EanMovementPlan | None = None
+    _ean_physical_replay: EanPhysicalReplay | None = None
 
     def scenario(self) -> Scenario:
         ...
@@ -193,10 +222,19 @@ class ExportContext:
 
     def greedy_passenger_replay(self) -> PassengerReplayResult:
         ...
+
+    def ean_artifact(self) -> EanBuildArtifact:
+        ...
+
+    def ean_all_stop_plan(self) -> EanMovementPlan:
+        ...
+
+    def ean_physical_replay(self) -> EanPhysicalReplay:
+        ...
 ```
 
-Later MILP and EAN builders can either extend this context or use builder-local
-parameters for solver-specific outputs.
+MILP builders use builder-local parameters for solver-specific outputs. EAN and
+discrete exports use example capabilities to get their example-specific config.
 
 ## Artifact Sets
 
@@ -219,7 +257,7 @@ Suggested initial sets:
 - `milp_v0_feasibility`
 - `milp_v1_passenger_feasibility`
 - `milp_v1_waiting_time`
-- later `ean_v0_feasibility`
+- `ean_all_stop_baseline`
 
 The default frontend set for `three_station_v0` should be `greedy_all_stop`
 until an optimized solution is stable enough to become the default.

@@ -1,6 +1,28 @@
 # EAN Baseline Replay Implementation Plan
 
-Status: **planned**
+Status: **partially implemented**
+
+Implemented so far:
+
+- example-specific three-station EAN config and ring switch order
+- reusable EAN plan models
+- reusable EAN build artifact model
+- physical timing derivation
+- deterministic physical node to EAN switch start derivation
+- ring EAN artifact builder pipeline
+- deterministic earliest all-stop EAN movement plan builder
+- EAN movement plan validation against `EanBuildArtifact`
+- physical event projection from EAN movement plan
+- explicit `NotImplementedError` for FIFO-buffer waits in projection until
+  station position traces exist
+- generic EAN export artifact set
+- manifest wiring for EAN build artifact, EAN result, and EAN replay
+
+Not yet implemented:
+
+- station FIFO wait position traces for `time -> position` replay
+- frontend wiring for EAN artifacts
+- Gurobi/SAT feasibility builders for finding a plan
 
 ## Goal
 
@@ -117,6 +139,10 @@ Notes:
 - `wait_seconds` is `0.0` in v0, but the field prepares the model for later
   station waiting.
 - Platform times are `None` for future skip visits.
+- v0 intentionally uses `tail_seconds = 0.0`, so `model_end_seconds` equals
+  `horizon_seconds`. The horizon is currently the physical model boundary.
+- Automatic tail generation is deferred. It should only be reintroduced once we
+  explicitly decide to model post-horizon physical/headway effects.
 
 OOP: dataclasses are enough. No plan class hierarchy needed.
 
@@ -150,6 +176,8 @@ Add generic physical event projection:
 EanPhysicalEventKind
   ENTER_SWITCH
   ENTER_PLATFORM
+  ENTER_WAIT
+  EXIT_WAIT
   EXIT_PLATFORM
   EXIT_SWITCH
   REACH_NEXT_SWITCH
@@ -183,6 +211,42 @@ project_ean_movement_plan_to_physical_replay(
 
 OOP: use a function first. A class is not needed until projection gets multiple
 strategies.
+
+Projection v0 supports `NO_WAITING` and `END_OF_PLATFORM_WAIT`. It must raise
+`NotImplementedError` when a visit has `wait_seconds > 0` at a station with
+`STATION_FIFO_BUFFER`, because a FIFO wait cannot be mapped to one physical node.
+It needs a separate station trace model that maps each cabin's station position
+as a function of time.
+
+Future FIFO trace model:
+
+```text
+StationFifoPositionTraceBuilder
+  input:
+    visits for one station/service direction
+    platform entry/exit times
+    station path length
+    station speed profile
+    required cabin spacing
+  output:
+    piecewise cabin traces:
+      move intervals: t0, t1, s0, s1
+      wait intervals: t0, t1, s
+```
+
+FIFO projection semantics:
+
+- local station coordinate `s` runs along the service station path
+- cabins enter in platform-entry-time order
+- no overtaking
+- moving cabins advance at the station speed/profile unless blocked by the
+  required spacing to the cabin in front
+- waiting positions are derived by this traffic simulation, not by assigning all
+  waits to `platform_exit`
+- a plan is not FIFO-projectable if a cabin cannot reach `platform_exit` by its
+  `platform_exit_time_seconds`
+- replay can later render these traces as `time -> position` in the station
+  instead of only point events
 
 ### `builders/artifact_builder.py`
 
@@ -268,6 +332,7 @@ Responsibilities:
 
 - derive service timing from station route segment ids
 - derive skip timing from skip route segment ids
+- set `skip_allowed=False` when no physical skip route exists, e.g. terminals
 - derive `rope_to_next_switch_seconds` from the rope segment between exit switch
   and next entry switch
 - reuse a shared physical segment travel-time calculation for constant and
@@ -400,10 +465,16 @@ min_platform_entry_to_platform_exit_seconds
 platform_exit_to_exit_switch_seconds
 skip_entry_to_exit_switch_seconds
 rope_to_next_switch_seconds
+skip_allowed
 ```
 
 Do not enter these numbers manually for the example. They should come from
 segment lengths and speed profiles.
+
+If no physical skip route exists for a switch, `skip_allowed` is `False` and
+transition builders must ignore `skip_entry_to_exit_switch_seconds` as a
+decision option. The seconds value can still be populated with service travel
+time to keep the timing record numeric.
 
 If the existing EAN builders already calculate part of this, reuse that logic.
 If not, add the timing builder described above:
@@ -428,28 +499,184 @@ operating speeds are sufficient.
 
 ## Validation
 
-Add later, but design for:
+Validation checks a concrete optimizer/baseline output. It does not search for a
+feasible plan. Gurobi/SAT belongs in a separate movement-plan builder that
+produces an `EanMovementPlan`; the validator then checks that concrete output.
+
+Add:
+
+```text
+src/ropeway_skip_stop_optimization/optimization/ean/validation.py
+```
+
+Public API:
 
 ```python
-validate_ean_movement_plan(artifact, plan)
+def validate_ean_movement_plan_against_artifact(
+    artifact: EanBuildArtifact,
+    plan: EanMovementPlan,
+    tolerance_seconds: float = 1e-6,
+) -> ValidationReport:
+    ...
 ```
 
 Checks:
 
-- station configs exist for all stations in timings
-- every visit references a known timing
-- all v0 station configs are `NO_WAITING`
-- all v0 visits have `decision == STOP`
-- all v0 visits have `wait_seconds == 0`
+- artifact and plan dataclasses validate structurally
+- `plan.scenario_id`, `horizon_seconds`, and `model_end_seconds` match the artifact
+- plan trajectories cover exactly the artifact cabin starts
+- plan visits match artifact switch visit definitions by `(cabin_id, visit_index)`
+- every plan visit `station_id` matches the `SkipStopTiming.station_id` for its
+  switch
+- first visit respects `EanCabinStart`:
+  - `FIXED`: `switch_time_seconds == start.time_seconds`
+  - `EARLIEST`: `switch_time_seconds >= start.time_seconds`
+- `SKIP` visits are only allowed when `SkipStopTiming.skip_allowed` is true
+- `wait_seconds > 0` is only allowed for station configs whose waiting mode is
+  not `NO_WAITING`
+- headway checkpoints only apply when the station config waiting mode is in
+  `checkpoint.waiting_modes`
+- candidate activation must respect both activation reference and checkpoint
+  path applicability:
+  - `SERVE`: active only for `STOP` and `checkpoint.applies_to_serve`
+  - `SKIP`: active only for `SKIP` and `checkpoint.applies_to_skip`
+  - `ACTIVE`: active for `STOP` when `checkpoint.applies_to_serve`, and active
+    for `SKIP` when `checkpoint.applies_to_skip`
 - timing equations match `SkipStopTiming`
-- event times are monotonic per cabin
-- projected events are sorted
+  - STOP:
+    - `platform_entry = switch + entry_to_platform_entry`
+    - `platform_exit = platform_entry + min_platform_entry_to_platform_exit + wait`
+    - `exit_switch = platform_exit + platform_exit_to_exit_switch`
+    - `next_switch = exit_switch + rope_to_next_switch`
+  - SKIP:
+    - platform times are `None`
+    - `wait_seconds == 0`
+    - `exit_switch = switch + skip_entry_to_exit_switch`
+    - `next_switch = exit_switch + rope_to_next_switch`
+- per-cabin visits are chained:
+  - `next_visit.switch_time_seconds == previous_visit.next_switch_time_seconds`
+- event times and safety visits:
+  - all emitted visits are structurally and timing-equation validated
+  - switch visits after `model_end_seconds` may exist because the artifact can
+    include safety visits for downstream chaining
+  - headway pairs are evaluated only when both candidate event times are within
+    `model_end_seconds`
+  - no event time may be negative
+  - replay/projection should later filter emitted events by horizon/model-end
+    depending on the artifact being exported
+  - for the current v0 baseline, `model_end_seconds == horizon_seconds`; this is
+    deliberate and accepts horizon-edge artifacts instead of adding tail logic
+- active headway pairs satisfy:
+  - `abs(t1 - t2) >= pair.headway_seconds`
+  - pairs are ignored if their checkpoint is inactive for the station waiting
+    mode
 
-## Export Later
+Issue codes:
 
-Do not implement export first.
+```text
+EAN_PLAN_ID_MISMATCH
+EAN_PLAN_HORIZON_MISMATCH
+EAN_TRAJECTORY_CABIN_MISMATCH
+EAN_VISIT_MISMATCH
+EAN_VISIT_STATION_MISMATCH
+EAN_START_TIME_VIOLATION
+EAN_SKIP_NOT_ALLOWED
+EAN_WAIT_NOT_ALLOWED
+EAN_CHECKPOINT_MODE_MISMATCH
+EAN_TIMING_MISMATCH
+EAN_TRAJECTORY_CHAIN_MISMATCH
+EAN_TIME_WINDOW_VIOLATION
+EAN_HEADWAY_VIOLATION
+```
 
-After the Python pipeline works, add an artifact set:
+Use `ValidationReport`/`ValidationIssue` from the existing validation package so
+callers can inspect all issues instead of failing at the first error.
+
+Tests:
+
+```text
+tests/test_optimization_ean_movement_plan_validation.py
+```
+
+Minimum assertions:
+
+- Three-station artifact + `EarliestAllStopEanMovementPlanBuilder` validates
+  shape and timing without timing mismatch issues.
+- Mutating a platform entry time produces `EAN_TIMING_MISMATCH`.
+- Mutating a terminal visit to `SKIP` produces `EAN_SKIP_NOT_ALLOWED`.
+- Mutating a `NO_WAITING` visit to positive `wait_seconds` produces
+  `EAN_WAIT_NOT_ALLOWED`.
+- Mutating a visit station id away from its timing station id produces
+  `EAN_VISIT_STATION_MISMATCH`.
+- Mutating checkpoint waiting modes so they exclude the configured station mode
+  produces `EAN_CHECKPOINT_MODE_MISMATCH`.
+- Moving a first switch time before an `EARLIEST` start produces
+  `EAN_START_TIME_VIOLATION`.
+- Mutating a relevant event time to a negative value produces
+  `EAN_TIME_WINDOW_VIOLATION`.
+- A synthetic too-close pair produces `EAN_HEADWAY_VIOLATION`.
+
+## Export
+
+Do not hardcode `three_station_v0` inside the export pipeline.
+
+Generic EAN export support works by teaching examples to advertise whether they
+can build an EAN artifact. The export system depends on that capability, not on
+a specific example id.
+
+### Example Capability
+
+Protocol near the example abstractions:
+
+```python
+class EanScenarioExample(Protocol):
+    def build_ean_config(self, scenario: Scenario) -> EanConfig:
+        ...
+
+    def build_ean_artifact_builder(
+        self,
+        scenario: Scenario,
+        config: EanConfig,
+    ) -> EanBuildArtifactBuilder:
+        ...
+```
+
+`ThreeStationExample` implements this protocol by delegating to:
+
+```text
+build_three_station_ean_config(scenario)
+RingEanBuildArtifactBuilder(
+  switch_cycle=build_three_station_ean_ring_switch_order(scenario)
+)
+```
+
+Keep the physical scenario builder focused on physical data. The example-level
+EAN methods are the bridge from the physical example to its EAN interpretation.
+
+### Export Context
+
+EAN caches on `ExportContext`:
+
+```text
+ean_artifact()
+ean_all_stop_plan()
+ean_physical_replay()
+```
+
+These methods:
+
+- validate that `context.example` implements `EanScenarioExample`
+- build the scenario once through `context.scenario()`
+- build the EAN config and artifact through the example capability
+- build the deterministic all-stop EAN movement plan
+- validate the plan against the artifact before projecting it
+- project the plan back to physical replay events
+
+If an example does not support EAN, fail with a clear `ValueError`.
+
+### Artifact Set
+
+Artifact set:
 
 ```text
 ean_all_stop_baseline
@@ -463,17 +690,28 @@ ean_all_stop_movement_plan.json
 ean_physical_replay.json
 ```
 
-This should use the manifest-driven export system.
+Kinds:
+
+```text
+ean_input
+ean_result
+ean_replay
+```
+
+`ArtifactKind` has `EAN_INPUT`, `EAN_RESULT`, and `EAN_REPLAY`.
+The manifest should expose all three so the frontend can later choose an EAN
+view/replay independently from the deprecated discrete-time replay.
 
 ## Tests
 
-Add tests in this order:
+Implemented Python pipeline tests:
 
 ```text
 tests/test_optimization_ean_fixed_start_builder.py
 tests/test_optimization_ean_artifact_builder.py
-tests/test_optimization_ean_all_stop_baseline.py
+tests/test_optimization_ean_earliest_all_stop_baseline.py
 tests/test_optimization_ean_projection.py
+tests/test_optimization_ean_movement_plan_validation.py
 ```
 
 Minimum assertions:
@@ -489,7 +727,26 @@ Minimum assertions:
 - per-cabin event times are monotonic
 - projection emits sorted events
 
+Implemented export tests:
+
+```text
+tests/test_export_scenarios.py
+```
+
+Minimum assertions:
+
+- `ean_all_stop_baseline` writes all three EAN JSON artifacts
+- manifest contains `ean_input`, `ean_result`, and `ean_replay`
+- build artifact has `scenario_id == "three_station_v0"`
+- build artifact has four skip/stop timings for the three-station ring
+- middle-station switches allow skip
+- terminal switches do not allow skip
+- EAN movement plan visits are all `STOP`
+- EAN physical replay contains events and references physical node ids
+
 ## Implementation Order
+
+Completed:
 
 1. Add EAN config helpers in `examples/three_station_ean.py`.
 2. Add `plan.py`.
@@ -498,7 +755,23 @@ Minimum assertions:
 5. Add `builders/fixed_start_builder.py`.
 6. Add `builders/artifact_builder.py`.
 7. Add `baselines/movement_plan_builder.py`.
-8. Add `baselines/all_stop.py`.
-9. Add `projection.py`.
-10. Add tests.
-11. Only then add exports/frontend support.
+8. Add earliest all-stop baseline.
+9. Add `validation.py`.
+10. Add `projection.py`.
+11. Add EAN unit tests.
+
+Completed export step:
+
+1. Add the `EanScenarioExample` protocol.
+2. Make `ThreeStationExample` implement it without hardcoding anything in
+   `exports`.
+3. Add EAN caches to `ExportContext`.
+4. Add EAN artifact builders.
+5. Add `ean_all_stop_baseline` to the artifact set registry.
+6. Add export tests.
+
+Remaining:
+
+1. Wire the exported EAN artifacts into the frontend.
+2. Implement station FIFO position traces.
+3. Add solver-backed EAN movement-plan builders.

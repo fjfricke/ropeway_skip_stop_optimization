@@ -1,7 +1,7 @@
 import { CircleAlert, FastForward, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { cumulativeDemandQueues, demandArrivalsAtStep, totalDemandCount, type DemandArrivalRow, type DemandQueueRow } from "../replayDemand";
-import { threeStationLayout } from "../scenarioLayout";
+import { layoutForScenario } from "../scenarioLayout";
 import type {
   AlightingEvent,
   BoardingEvent,
@@ -52,6 +52,7 @@ export function ReplayView({
   movementPlanWarning,
   passengerReplayWarning,
 }: ReplayViewProps) {
+  const layout = useMemo(() => layoutForScenario(scenario), [scenario]);
   const [timeStep, setTimeStep] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
@@ -134,7 +135,7 @@ export function ReplayView({
         <NetworkSvg
           scenario={scenario}
           discreteScenario={discreteScenario}
-          layout={threeStationLayout}
+          layout={layout}
           selected={null}
           hovered={null}
           toggles={REPLAY_TOGGLES}

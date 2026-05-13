@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from dataclasses import fields, is_dataclass
 from datetime import time
 from enum import Enum
@@ -15,6 +16,8 @@ def to_jsonable(value: Any) -> Any:
         return value.isoformat(timespec="minutes")
     if isinstance(value, Path):
         return value.as_posix()
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
     if is_dataclass(value):
         return {field.name: to_jsonable(getattr(value, field.name)) for field in fields(value)}
     if isinstance(value, tuple | list):
@@ -26,4 +29,7 @@ def to_jsonable(value: Any) -> Any:
 
 def write_json(output_path: Path, payload: Any) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(json.dumps(to_jsonable(payload), indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    output_path.write_text(
+        json.dumps(to_jsonable(payload), allow_nan=False, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )

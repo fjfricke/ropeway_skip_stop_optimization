@@ -222,13 +222,17 @@ result with redundant state.
 Core rule:
 
 ```text
-model_end_seconds = horizon_seconds + tail_seconds
+model_end_seconds = horizon_seconds
 ```
 
+Tail generation is deferred for v0. Current example exports set
+`tail_seconds = 0.0`, so `model_end_seconds == horizon_seconds` and the horizon
+is treated as the physical model boundary. This accepts horizon-edge artifacts
+until we explicitly decide to model post-horizon physical/headway continuation.
+
 The builder computes a conservative upper bound of visits per cabin from the
-minimum-time ring traversal. It should be large enough that waiting decisions
-cannot accidentally remove feasible movement inside `model_end_seconds`, but
-tight enough to avoid useless visits.
+minimum-time ring traversal. It should be large enough to cover movement inside
+`model_end_seconds`, but tight enough to avoid useless visits.
 
 First compute the minimum and maximum time from every switch to the next switch
 in the ring:

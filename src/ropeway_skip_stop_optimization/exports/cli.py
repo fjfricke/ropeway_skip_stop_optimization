@@ -5,6 +5,7 @@ from pathlib import Path
 
 from ropeway_skip_stop_optimization.exports.runner import DEFAULT_OUTPUT_ROOT, export_artifact_set, known_artifact_set_ids
 from ropeway_skip_stop_optimization.optimization.discrete_time import MilpV0VariableStrategy
+from ropeway_skip_stop_optimization.optimization.ean import GurobiSolverPolicyPreset
 from ropeway_skip_stop_optimization.progress import configure_progress_logging
 
 
@@ -28,6 +29,12 @@ def main() -> None:
     parser.add_argument("--milp-horizon", type=int, default=60, help="Horizon for MILP artifact sets.")
     parser.add_argument("--milp-cabin-count", type=int, default=23, help="Number of cabins for MILP artifact sets.")
     parser.add_argument(
+        "--ean-solver-policy",
+        choices=tuple(policy.value for policy in GurobiSolverPolicyPreset),
+        default=GurobiSolverPolicyPreset.QUICK_GOOD_SOLUTION.value,
+        help="Gurobi solver policy preset for EAN passenger optimization artifact sets.",
+    )
+    parser.add_argument(
         "--milp-variable-strategy",
         choices=tuple(strategy.value for strategy in MilpV0VariableStrategy),
         default=MilpV0VariableStrategy.DENSE.value,
@@ -45,6 +52,7 @@ def main() -> None:
         milp_horizon_steps=args.milp_horizon,
         milp_cabin_count=args.milp_cabin_count,
         milp_variable_strategy=MilpV0VariableStrategy(args.milp_variable_strategy),
+        ean_solver_policy_preset=GurobiSolverPolicyPreset(args.ean_solver_policy),
         progress=args.progress,
         clean=args.clean,
     )
