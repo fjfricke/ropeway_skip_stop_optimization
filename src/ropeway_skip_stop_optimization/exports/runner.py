@@ -9,6 +9,7 @@ from ropeway_skip_stop_optimization.examples.registry import get_example
 from ropeway_skip_stop_optimization.exports.artifacts import (
     ArtifactBuilder,
     ArtifactSet,
+    ArtifactSetBackend,
     DiscreteScenarioArtifactBuilder,
     EanAllStopMovementPlanArtifactBuilder,
     EanBuildArtifactArtifactBuilder,
@@ -34,6 +35,7 @@ from ropeway_skip_stop_optimization.optimization.discrete_time import (
     MilpV1PassengerWaitingObjective,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
+    EanPassengerServiceCheckpointConfig,
     EanPassengerServiceObjective,
     GurobiSolverPolicy,
     GurobiSolverPolicyPreset,
@@ -67,7 +69,7 @@ def build_artifact_set(
     if artifact_set_id == "physical_only":
         return ArtifactSet("physical_only", "Physical scenario", (PhysicalScenarioArtifactBuilder(),))
     if artifact_set_id == "discrete_debug":
-        return ArtifactSet("discrete_debug", "Discrete debug", common)
+        return ArtifactSet("discrete_debug", "Discrete debug", common, backend=ArtifactSetBackend.DISCRETE)
     if artifact_set_id == "greedy_all_stop":
         return ArtifactSet(
             "greedy_all_stop",
@@ -78,6 +80,7 @@ def build_artifact_set(
                 GreedyAllStopPassengerReplayArtifactBuilder(),
                 GreedyAllStopReplayMetricsArtifactBuilder(),
             ),
+            backend=ArtifactSetBackend.DISCRETE,
             is_default=True,
         )
     if artifact_set_id == "ean_all_stop_baseline":
@@ -90,6 +93,7 @@ def build_artifact_set(
                 EanAllStopMovementPlanArtifactBuilder(),
                 EanPhysicalReplayArtifactBuilder(),
             ),
+            backend=ArtifactSetBackend.EAN,
         )
     if artifact_set_id == "ean_skip_stop_feasibility":
         return ArtifactSet(
@@ -101,6 +105,7 @@ def build_artifact_set(
                 EanSkipStopMovementPlanArtifactBuilder(),
                 EanSkipStopPhysicalReplayArtifactBuilder(),
             ),
+            backend=ArtifactSetBackend.EAN,
         )
     if artifact_set_id == "ean_passenger_waiting_time":
         return ArtifactSet(
@@ -113,6 +118,7 @@ def build_artifact_set(
                 EanPassengerServicePhysicalReplayArtifactBuilder(),
                 EanPassengerServiceArtifactBuilder(),
             ),
+            backend=ArtifactSetBackend.EAN,
         )
     if artifact_set_id == "ean_passenger_journey_time":
         objective = EanPassengerServiceObjective.JOURNEY_TIME
@@ -126,6 +132,7 @@ def build_artifact_set(
                 EanPassengerServicePhysicalReplayArtifactBuilder(objective=objective),
                 EanPassengerServiceArtifactBuilder(objective=objective),
             ),
+            backend=ArtifactSetBackend.EAN,
         )
     if artifact_set_id == "milp_v0_feasibility":
         return ArtifactSet(
@@ -139,6 +146,7 @@ def build_artifact_set(
                     variable_strategy=milp_variable_strategy,
                 ),
             ),
+            backend=ArtifactSetBackend.DISCRETE,
         )
     if artifact_set_id == "milp_v1_passenger_feasibility":
         return ArtifactSet(
@@ -153,6 +161,7 @@ def build_artifact_set(
                     objective=MilpV1PassengerWaitingObjective.FEASIBILITY,
                 ),
             ),
+            backend=ArtifactSetBackend.DISCRETE,
         )
     if artifact_set_id == "milp_v1_waiting_time":
         return ArtifactSet(
@@ -167,6 +176,7 @@ def build_artifact_set(
                     objective=MilpV1PassengerWaitingObjective.WAITING_TIME,
                 ),
             ),
+            backend=ArtifactSetBackend.DISCRETE,
         )
 
     known = ", ".join(known_artifact_set_ids())
@@ -197,6 +207,9 @@ def export_artifact_set(
     milp_cabin_count: int = 23,
     milp_variable_strategy: MilpV0VariableStrategy = MilpV0VariableStrategy.DENSE,
     ean_solver_policy_preset: GurobiSolverPolicyPreset = GurobiSolverPolicyPreset.QUICK_GOOD_SOLUTION,
+    ean_checkpoint_dir: Path | None = None,
+    ean_resume_checkpoint: Path | None = None,
+    ean_resume_latest_checkpoint: bool = False,
     progress: bool | ProgressReporter = False,
     clean: bool = False,
 ) -> ExportRunResult:
@@ -213,6 +226,9 @@ def export_artifact_set(
         artifact_set,
         output_root=output_root,
         ean_solver_policy=gurobi_solver_policy_for_preset(ean_solver_policy_preset),
+        ean_checkpoint_dir=ean_checkpoint_dir,
+        ean_resume_checkpoint=ean_resume_checkpoint,
+        ean_resume_latest_checkpoint=ean_resume_latest_checkpoint,
         progress=reporter,
         clean=clean,
     )
@@ -224,9 +240,19 @@ def run_artifact_set(
     *,
     output_root: Path,
     ean_solver_policy: GurobiSolverPolicy | None = None,
+    ean_checkpoint_dir: Path | None = None,
+    ean_resume_checkpoint: Path | None = None,
+    ean_resume_latest_checkpoint: bool = False,
     progress: ProgressReporter,
     clean: bool = False,
 ) -> ExportRunResult:
+    checkpoint_config = _ean_checkpoint_config(
+        example=example,
+        artifact_set=artifact_set,
+        checkpoint_dir=ean_checkpoint_dir,
+        resume_checkpoint=ean_resume_checkpoint,
+        resume_latest_checkpoint=ean_resume_latest_checkpoint,
+    )
     if clean:
         example_dir = output_root / example.metadata.id
         if example_dir.exists():
@@ -237,6 +263,7 @@ def run_artifact_set(
         example=example,
         progress=progress,
         ean_solver_policy=ean_solver_policy or GurobiSolverPolicy(),
+        ean_checkpoint_config=checkpoint_config,
     )
     artifacts: list[ExportArtifact] = []
     artifact_paths: list[Path] = []
@@ -251,13 +278,75 @@ def run_artifact_set(
         artifact_paths.append(output_path)
 
     with progress.phase("export.manifest"):
-        manifest_path = merge_and_write_manifest(output_root, example, artifact_set, tuple(artifacts))
+        manifest_path = merge_and_write_manifest(output_root, example, artifact_set, tuple(artifacts), clean=clean)
     return ExportRunResult(
         example_id=example.metadata.id,
         artifact_set_id=artifact_set.id,
         artifact_paths=tuple(artifact_paths),
         manifest_path=manifest_path,
     )
+
+
+def _ean_checkpoint_config(
+    *,
+    example: ScenarioExample,
+    artifact_set: ArtifactSet,
+    checkpoint_dir: Path | None,
+    resume_checkpoint: Path | None,
+    resume_latest_checkpoint: bool,
+) -> EanPassengerServiceCheckpointConfig | None:
+    if resume_checkpoint is not None and resume_latest_checkpoint:
+        raise ValueError("Use either ean_resume_checkpoint or ean_resume_latest_checkpoint, not both")
+    read_path = resume_checkpoint
+    if resume_latest_checkpoint:
+        if checkpoint_dir is None:
+            raise ValueError("ean_resume_latest_checkpoint requires ean_checkpoint_dir")
+        read_path = _latest_ean_checkpoint_path(
+            checkpoint_dir,
+            example_id=example.metadata.id,
+            artifact_set_id=artifact_set.id,
+        )
+    if checkpoint_dir is None and read_path is None:
+        return None
+    solution_file_prefix = (
+        _ean_checkpoint_prefix(
+            checkpoint_dir,
+            example_id=example.metadata.id,
+            artifact_set_id=artifact_set.id,
+        )
+        if checkpoint_dir is not None
+        else None
+    )
+    final_solution_path = solution_file_prefix.with_suffix(".final.sol") if solution_file_prefix is not None else None
+    return EanPassengerServiceCheckpointConfig(
+        read_solution_path=read_path,
+        solution_file_prefix=solution_file_prefix,
+        final_solution_path=final_solution_path,
+    )
+
+
+def _ean_checkpoint_prefix(checkpoint_dir: Path, *, example_id: str, artifact_set_id: str) -> Path:
+    return checkpoint_dir / f"{_safe_checkpoint_part(example_id)}__{_safe_checkpoint_part(artifact_set_id)}__incumbent"
+
+
+def _latest_ean_checkpoint_path(checkpoint_dir: Path, *, example_id: str, artifact_set_id: str) -> Path:
+    prefix = _ean_checkpoint_prefix(checkpoint_dir, example_id=example_id, artifact_set_id=artifact_set_id)
+    candidates = [
+        path
+        for suffix in ("*.sol", "*.mst")
+        for path in checkpoint_dir.glob(f"{prefix.name}{suffix}")
+        if path.is_file()
+    ]
+    if not candidates:
+        raise ValueError(
+            "No EAN checkpoint found for "
+            f"example={example_id!r} artifact_set={artifact_set_id!r} in {checkpoint_dir}"
+        )
+    return max(candidates, key=lambda path: (path.stat().st_mtime_ns, path.name))
+
+
+def _safe_checkpoint_part(value: str) -> str:
+    return value.replace("/", "_").replace("\\", "_")
 
 
 def _progress_reporter(progress: bool | ProgressReporter) -> ProgressReporter:

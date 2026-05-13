@@ -95,6 +95,10 @@ class FiveStationExample(ScenarioExample):
             "and middle-station waiting enabled."
         ),
         tags=("ring", "skip-stop", "ean-demo", "scaling-demo", "half-cabins", "waiting"),
+        family_id="five_station_ring",
+        family_label="Five station ring",
+        variant_id="half_cabins_skip_wait",
+        variant_label="Half cabins skip+wait",
     )
 
     spec = LinearSkipStopSpec(
@@ -138,6 +142,10 @@ class FiveStationNoWaitExample(FiveStationExample):
             "Bidirectional five-station ring with all EAN start cabins, skip enabled, and station waiting disabled."
         ),
         tags=("ring", "skip-stop", "ean-demo", "scaling-demo", "full-cabins", "no-waiting"),
+        family_id="five_station_ring",
+        family_label="Five station ring",
+        variant_id="full_cabins_skip_no_wait",
+        variant_label="Full cabins skip+no_wait",
     )
 
     spec = LinearSkipStopSpec(
@@ -175,6 +183,10 @@ class FiveStationHalfNoSkipNoWaitExample(FiveStationExample):
             "and station waiting disabled."
         ),
         tags=("ring", "ean-demo", "scaling-demo", "half-cabins", "no-skip", "no-waiting"),
+        family_id="five_station_ring",
+        family_label="Five station ring",
+        variant_id="half_cabins_no_skip_no_wait",
+        variant_label="Half cabins no_skip+no_wait",
     )
 
     spec = LinearSkipStopSpec(

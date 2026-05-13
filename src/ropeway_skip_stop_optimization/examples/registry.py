@@ -6,12 +6,17 @@ from ropeway_skip_stop_optimization.examples.linear_skip_stop import (
     FiveStationHalfNoSkipNoWaitExample,
     FiveStationNoWaitExample,
 )
-from ropeway_skip_stop_optimization.examples.three_station import ThreeStationDepotExample, ThreeStationExample
+from ropeway_skip_stop_optimization.examples.three_station import (
+    ThreeStationExample,
+    ThreeStationFullNoSkipNoWaitExample,
+    ThreeStationHalfNoSkipNoWaitExample,
+)
 
 
 EXAMPLES: dict[str, ScenarioExample] = {
     ThreeStationExample.metadata.id: ThreeStationExample(),
-    ThreeStationDepotExample.metadata.id: ThreeStationDepotExample(),
+    ThreeStationFullNoSkipNoWaitExample.metadata.id: ThreeStationFullNoSkipNoWaitExample(),
+    ThreeStationHalfNoSkipNoWaitExample.metadata.id: ThreeStationHalfNoSkipNoWaitExample(),
     FiveStationExample.metadata.id: FiveStationExample(),
     FiveStationNoWaitExample.metadata.id: FiveStationNoWaitExample(),
     FiveStationHalfNoSkipNoWaitExample.metadata.id: FiveStationHalfNoSkipNoWaitExample(),

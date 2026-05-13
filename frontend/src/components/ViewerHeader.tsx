@@ -1,4 +1,11 @@
+import type { ExportArtifactSetBackend } from "../types";
 import type { ArtifactSelectionControl, ViewerCounts } from "./viewerTypes";
+
+const BACKEND_LABELS: Record<ExportArtifactSetBackend, string> = {
+  physical: "Physical",
+  discrete: "Discrete",
+  ean: "EAN",
+};
 
 interface ViewerHeaderProps {
   scenarioId: string;
@@ -8,8 +15,19 @@ interface ViewerHeaderProps {
 }
 
 export function ViewerHeader({ scenarioId, counts, hasDiscrete, artifactSelection }: ViewerHeaderProps) {
-  const selectedExample = artifactSelection.examples.find((example) => example.id === artifactSelection.selectedExampleId);
-  const artifactSets = selectedExample?.artifact_sets ?? [];
+  const selectedFamily = artifactSelection.families.find(
+    (family) => family.id === artifactSelection.selectedFamilyId,
+  );
+  const variants = selectedFamily?.variants ?? [];
+  const selectedVariant = variants.find((variant) => variant.id === artifactSelection.selectedVariantId);
+  const availableBackends = new Set(selectedVariant?.artifact_sets.map((artifactSet) => artifactSet.backend) ?? []);
+  const nonPhysicalBackends = (["discrete", "ean"] as const).filter((backend) => availableBackends.has(backend));
+  const backendOptions: ExportArtifactSetBackend[] = nonPhysicalBackends.length > 0
+    ? nonPhysicalBackends
+    : (["physical"] as const).filter((backend) => availableBackends.has(backend));
+  const artifactSets = selectedVariant?.artifact_sets.filter(
+    (artifactSet) => artifactSet.backend === artifactSelection.selectedBackend,
+  ) ?? [];
 
   return (
     <header className="topbar">
@@ -28,33 +46,63 @@ export function ViewerHeader({ scenarioId, counts, hasDiscrete, artifactSelectio
         </div>
         <div className="artifact-controls" aria-label="Loaded artifact selection">
           <label>
-            <span>Example</span>
+            <span>Stations</span>
             <select
-              aria-label="Example"
-              value={artifactSelection.selectedExampleId}
-              onChange={(event) => artifactSelection.onExampleChange(event.target.value)}
+              aria-label="Stations setup"
+              value={artifactSelection.selectedFamilyId}
+              onChange={(event) => artifactSelection.onFamilyChange(event.target.value)}
             >
-              {artifactSelection.examples.map((example) => (
-                <option key={example.id} value={example.id}>
-                  {example.label}
+              {artifactSelection.families.map((family) => (
+                <option key={family.id} value={family.id}>
+                  {family.label}
                 </option>
               ))}
             </select>
           </label>
           <label>
-            <span>Artifact Set</span>
+            <span>Scenario</span>
             <select
-              aria-label="Artifact Set"
-              value={artifactSelection.selectedArtifactSetId}
-              onChange={(event) => artifactSelection.onArtifactSetChange(event.target.value)}
+              aria-label="Scenario variant"
+              value={artifactSelection.selectedVariantId}
+              onChange={(event) => artifactSelection.onVariantChange(event.target.value)}
             >
-              {artifactSets.map((artifactSet) => (
-                <option key={artifactSet.id} value={artifactSet.id}>
-                  {artifactSet.label}
+              {variants.map((variant) => (
+                <option key={variant.id} value={variant.id}>
+                  {variant.label}
                 </option>
               ))}
             </select>
           </label>
+          {backendOptions.length > 1 ? (
+            <div className="artifact-controls__segments" aria-label="Backend">
+              {backendOptions.map((backend) => (
+                <button
+                  key={backend}
+                  className={backend === artifactSelection.selectedBackend ? "is-active" : ""}
+                  type="button"
+                  onClick={() => artifactSelection.onBackendChange(backend)}
+                >
+                  {BACKEND_LABELS[backend]}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {artifactSets.length > 1 ? (
+            <label>
+              <span>Artifact</span>
+              <select
+                aria-label="Artifact Set"
+                value={artifactSelection.selectedArtifactSetId}
+                onChange={(event) => artifactSelection.onArtifactSetChange(event.target.value)}
+              >
+                {artifactSets.map((artifactSet) => (
+                  <option key={artifactSet.id} value={artifactSet.id}>
+                    {artifactSet.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          ) : null}
           {artifactSelection.isLoading ? <span className="artifact-controls__status">Loading</span> : null}
         </div>
       </div>

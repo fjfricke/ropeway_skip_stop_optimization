@@ -30,6 +30,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanBuildArtifact,
     EanMovementPlan,
     EanPhysicalReplay,
+    EanPassengerServiceCheckpointConfig,
     EanPassengerServiceConfig,
     EanPassengerServiceObjective,
     EanPassengerServiceResult,
@@ -57,6 +58,12 @@ class ArtifactKind(StrEnum):
     EAN_REPLAY = "ean_replay"
 
 
+class ArtifactSetBackend(StrEnum):
+    PHYSICAL = "physical"
+    DISCRETE = "discrete"
+    EAN = "ean"
+
+
 @dataclass(frozen=True)
 class ExportArtifact:
     id: str
@@ -71,6 +78,7 @@ class ExportContext:
     example: ScenarioExample
     progress: ProgressReporter
     ean_solver_policy: GurobiSolverPolicy = field(default_factory=GurobiSolverPolicy)
+    ean_checkpoint_config: EanPassengerServiceCheckpointConfig | None = None
 
     _scenario: Scenario | None = None
     _discrete_scenario: DiscreteScenario | None = None
@@ -194,6 +202,7 @@ class ExportContext:
                         objective=objective,
                         solver_policy=self.ean_solver_policy,
                         log_to_console=self.progress.enabled,
+                        checkpoint=self.ean_checkpoint_config,
                     ),
                 )
                 if result.movement_plan is None or result.passenger_plan is None:
@@ -239,6 +248,7 @@ class ArtifactSet:
     id: str
     label: str
     builders: tuple[ArtifactBuilder, ...]
+    backend: ArtifactSetBackend = ArtifactSetBackend.PHYSICAL
     is_default: bool = False
 
 

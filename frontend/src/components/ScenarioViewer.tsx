@@ -91,16 +91,18 @@ export function ScenarioViewer({
     showMultiSegmentHeadway: true,
   });
 
+  const selectedBackend = artifactSelection.selectedBackend;
+  const visibleDiscreteScenario = selectedBackend === "discrete" ? discreteScenario : null;
   const counts = useMemo(
     () => ({
       stations: scenario.stations.length,
       nodes: scenario.physical_nodes.length,
       segments: scenario.track_segments.length,
       routes: scenario.station_routes.length,
-      discreteNodes: discreteScenario?.nodes.length ?? 0,
-      constraints: discreteScenario?.constraints.length ?? 0,
+      discreteNodes: visibleDiscreteScenario?.nodes.length ?? 0,
+      constraints: visibleDiscreteScenario?.constraints.length ?? 0,
     }),
-    [scenario, discreteScenario],
+    [scenario, visibleDiscreteScenario],
   );
 
   function toggle(key: keyof ViewerToggles) {
@@ -118,19 +120,19 @@ export function ScenarioViewer({
     }
   }
 
-  const activeSelection = isDiscreteSelection(hovered) ? hovered : selected;
-  const hasDiscrete = discreteScenario !== null;
+  const activeSelection = selectedBackend === "discrete" && isDiscreteSelection(hovered) ? hovered : selected;
+  const hasDiscrete = visibleDiscreteScenario !== null;
   const availableModes: AvailableViewerModes = useMemo(
     () => ({
       scenario: true,
-      graph: discreteScenario !== null,
-      metrics: replayMetrics !== null,
-      replay: discreteScenario !== null && movementPlan !== null,
-      ean: eanInput !== null || eanResult !== null || eanReplay !== null || eanPassengerService !== null,
-      ean_metrics: eanPassengerService?.passenger_plan !== null && eanPassengerService?.passenger_plan !== undefined,
-      ean_replay: eanReplay !== null,
+      graph: visibleDiscreteScenario !== null,
+      metrics: selectedBackend === "discrete" && replayMetrics !== null,
+      replay: visibleDiscreteScenario !== null && movementPlan !== null,
+      ean: selectedBackend === "ean" && (eanInput !== null || eanResult !== null || eanReplay !== null || eanPassengerService !== null),
+      ean_metrics: selectedBackend === "ean" && eanPassengerService?.passenger_plan !== null && eanPassengerService?.passenger_plan !== undefined,
+      ean_replay: selectedBackend === "ean" && eanReplay !== null,
     }),
-    [discreteScenario, eanInput, eanPassengerService, eanReplay, eanResult, movementPlan, replayMetrics],
+    [eanInput, eanPassengerService, eanReplay, eanResult, movementPlan, replayMetrics, selectedBackend, visibleDiscreteScenario],
   );
 
   useEffect(() => {
@@ -153,19 +155,21 @@ export function ScenarioViewer({
       {viewerMode === "scenario" ? (
         <>
           <ScenarioToolbar toggles={toggles} onToggle={toggle} />
-          <DiscreteOverlayToolbar
-            hasDiscrete={hasDiscrete}
-            selected={selected}
-            discreteMode={discreteMode}
-            discreteToggles={discreteToggles}
-            warning={discreteWarning}
-            onDiscreteModeChange={setDiscreteMode}
-            onToggle={toggleDiscrete}
-            onClearSelection={() => setSelected(null)}
-          />
+          {selectedBackend === "discrete" ? (
+            <DiscreteOverlayToolbar
+              hasDiscrete={hasDiscrete}
+              selected={selected}
+              discreteMode={discreteMode}
+              discreteToggles={discreteToggles}
+              warning={discreteWarning}
+              onDiscreteModeChange={setDiscreteMode}
+              onToggle={toggleDiscrete}
+              onClearSelection={() => setSelected(null)}
+            />
+          ) : null}
           <ScenarioView
             scenario={scenario}
-            discreteScenario={discreteScenario}
+            discreteScenario={visibleDiscreteScenario}
             selected={selected}
             hovered={hovered}
             activeSelection={activeSelection}

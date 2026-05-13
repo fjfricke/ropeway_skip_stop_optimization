@@ -10,6 +10,7 @@ class GurobiSolverPolicyPreset(StrEnum):
     DEBUG_SHORT = "debug_short"
     QUICK_GOOD_SOLUTION = "quick_good_solution"
     PAPER_BENCHMARK = "paper_benchmark"
+    EXACT_OPTIMALITY = "exact_optimality"
 
 
 @dataclass(frozen=True)
@@ -50,6 +51,12 @@ def gurobi_solver_policy_for_preset(preset: GurobiSolverPolicyPreset | str) -> G
     if preset is GurobiSolverPolicyPreset.PAPER_BENCHMARK:
         return GurobiSolverPolicy(
             mip_gap=0.01,
+            method=3,
+            mip_focus=2,
+        )
+    if preset is GurobiSolverPolicyPreset.EXACT_OPTIMALITY:
+        return GurobiSolverPolicy(
+            mip_gap=0.0,
             method=3,
             mip_focus=2,
         )

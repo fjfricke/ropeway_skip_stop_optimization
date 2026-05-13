@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -8,11 +9,25 @@ from pathlib import Path
 import pytest
 
 from ropeway_skip_stop_optimization.examples.base import ScenarioExample, ScenarioExampleMetadata
-from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
-from ropeway_skip_stop_optimization.exports.artifacts import ArtifactSet, DiscreteScenarioArtifactBuilder
-from ropeway_skip_stop_optimization.exports.runner import export_artifact_set
+from ropeway_skip_stop_optimization.examples.registry import get_example
+from ropeway_skip_stop_optimization.examples.three_station import ThreeStationExample, build_three_station_scenario
+from ropeway_skip_stop_optimization.exports.artifacts import (
+    ArtifactSet,
+    DiscreteScenarioArtifactBuilder,
+    PhysicalScenarioArtifactBuilder,
+)
+from ropeway_skip_stop_optimization.exports.runner import build_artifact_set, export_artifact_set
+from ropeway_skip_stop_optimization.exports.runner import _latest_ean_checkpoint_path
 from ropeway_skip_stop_optimization.exports.runner import run_artifact_set
+from ropeway_skip_stop_optimization.exports.manifest import load_manifest
 from ropeway_skip_stop_optimization.optimization.discrete_time import MilpV0VariableStrategy
+from ropeway_skip_stop_optimization.optimization.ean import (
+    DeterministicPhysicalNodeToSwitchStartBuilder,
+    EanConfig,
+    RingEanBuildArtifactBuilder,
+    StationEanConfig,
+    StationWaitingMode,
+)
 from ropeway_skip_stop_optimization.progress import ProgressReporter
 
 
@@ -23,8 +38,16 @@ def test_exports_greedy_all_stop_manifest_and_movement_plan_json(tmp_path: Path)
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
 
     assert output_path in result.artifact_paths
-    assert manifest["examples"][0]["default_artifact_set"] == "greedy_all_stop"
-    assert manifest["examples"][0]["artifact_sets"][0]["artifacts"]["movement_plan"] == (
+    variant = _manifest_variant(manifest, "three_station_ring", "half_cabins_skip_wait")
+    assert variant["default_artifact_set"] == "greedy_all_stop"
+    artifact_set = _manifest_artifact_set(
+        manifest,
+        "three_station_ring",
+        "half_cabins_skip_wait",
+        "greedy_all_stop",
+    )
+    assert artifact_set["backend"] == "discrete"
+    assert artifact_set["artifacts"]["movement_plan"] == (
         "three_station_v0/greedy_all_stop_movement_plan.json"
     )
     assert payload["discrete_scenario_id"] == "three_station_v0__dt_0p5"
@@ -94,7 +117,13 @@ def test_exports_ean_all_stop_baseline_json(tmp_path: Path) -> None:
     assert artifact_path in result.artifact_paths
     assert plan_path in result.artifact_paths
     assert replay_path in result.artifact_paths
-    artifact_set = _manifest_artifact_set(manifest, "three_station_v0", "ean_all_stop_baseline")
+    artifact_set = _manifest_artifact_set(
+        manifest,
+        "three_station_ring",
+        "half_cabins_skip_wait",
+        "ean_all_stop_baseline",
+    )
+    assert artifact_set["backend"] == "ean"
     assert artifact_set["artifacts"] == {
         "scenario": "three_station_v0/scenario.json",
         "ean_input": "three_station_v0/ean_build_artifact.json",
@@ -104,7 +133,7 @@ def test_exports_ean_all_stop_baseline_json(tmp_path: Path) -> None:
 
     timings_by_switch = {timing["switch_id"]: timing for timing in artifact_payload["timings"]}
     assert artifact_payload["scenario_id"] == "three_station_v0"
-    assert len(artifact_payload["cabin_starts"]) == 30
+    assert len(artifact_payload["cabin_starts"]) == 15
     assert len(timings_by_switch) == 4
     assert timings_by_switch["M_entry_lr"]["skip_allowed"] is True
     assert timings_by_switch["M_entry_rl"]["skip_allowed"] is True
@@ -112,7 +141,7 @@ def test_exports_ean_all_stop_baseline_json(tmp_path: Path) -> None:
     assert timings_by_switch["R_entry_lr"]["skip_allowed"] is False
 
     assert plan_payload["scenario_id"] == "three_station_v0"
-    assert len(plan_payload["trajectories"]) == 30
+    assert len(plan_payload["trajectories"]) == 15
     assert {
         visit["decision"]
         for trajectory in plan_payload["trajectories"]
@@ -120,25 +149,35 @@ def test_exports_ean_all_stop_baseline_json(tmp_path: Path) -> None:
     } == {"stop"}
     assert replay_payload["scenario_id"] == "three_station_v0"
     assert replay_payload["events"]
-    assert len({event["cabin_id"] for event in replay_payload["events"]}) == 30
+    assert len({event["cabin_id"] for event in replay_payload["events"]}) == 15
     assert replay_payload["events"][0]["physical_node_id"] in timings_by_switch
 
 
 def test_exports_ean_skip_stop_feasibility_json(tmp_path: Path) -> None:
     pytest.importorskip("gurobipy")
-    result = export_artifact_set(output_root=tmp_path, artifact_set_id="ean_skip_stop_feasibility")
-    plan_path = tmp_path / "three_station_v0" / "ean_skip_stop_movement_plan.json"
-    replay_path = tmp_path / "three_station_v0" / "ean_skip_stop_physical_replay.json"
+    result = run_artifact_set(
+        _TinyThreeStationSkipNoWaitEanExample(),
+        build_artifact_set("ean_skip_stop_feasibility"),
+        output_root=tmp_path,
+        progress=ProgressReporter(enabled=False),
+    )
+    plan_path = tmp_path / "three_station_skip_no_wait_test" / "ean_skip_stop_movement_plan.json"
+    replay_path = tmp_path / "three_station_skip_no_wait_test" / "ean_skip_stop_physical_replay.json"
     plan_payload = json.loads(plan_path.read_text(encoding="utf-8"))
     replay_payload = json.loads(replay_path.read_text(encoding="utf-8"))
     manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
 
-    artifact_set = _manifest_artifact_set(manifest, "three_station_v0", "ean_skip_stop_feasibility")
+    artifact_set = _manifest_artifact_set(
+        manifest,
+        "three_station_ring",
+        "skip_no_wait_test",
+        "ean_skip_stop_feasibility",
+    )
     assert artifact_set["artifacts"] == {
-        "scenario": "three_station_v0/scenario.json",
-        "ean_input": "three_station_v0/ean_build_artifact.json",
-        "ean_result": "three_station_v0/ean_skip_stop_movement_plan.json",
-        "ean_replay": "three_station_v0/ean_skip_stop_physical_replay.json",
+        "scenario": "three_station_skip_no_wait_test/scenario.json",
+        "ean_input": "three_station_skip_no_wait_test/ean_build_artifact.json",
+        "ean_result": "three_station_skip_no_wait_test/ean_skip_stop_movement_plan.json",
+        "ean_replay": "three_station_skip_no_wait_test/ean_skip_stop_physical_replay.json",
     }
     decisions = {
         visit["decision"]
@@ -146,7 +185,7 @@ def test_exports_ean_skip_stop_feasibility_json(tmp_path: Path) -> None:
         for visit in trajectory["visits"]
     }
     assert decisions == {"skip", "stop"}
-    assert len(plan_payload["trajectories"]) == 30
+    assert len(plan_payload["trajectories"]) == 4
     assert replay_payload["events"]
 
 
@@ -164,6 +203,138 @@ def test_discrete_export_requires_discrete_example_capability(tmp_path: Path) ->
             output_root=tmp_path,
             progress=ProgressReporter(enabled=False),
         )
+
+
+def test_manifest_merges_new_variant_without_rebuilding_family(tmp_path: Path) -> None:
+    run_artifact_set(
+        _ManifestVariantExample("manifest_variant_a", "variant_a", "Variant A"),
+        _physical_artifact_set("physical_one"),
+        output_root=tmp_path,
+        progress=ProgressReporter(enabled=False),
+    )
+    result = run_artifact_set(
+        _ManifestVariantExample("manifest_variant_b", "variant_b", "Variant B"),
+        _physical_artifact_set("physical_one"),
+        output_root=tmp_path,
+        progress=ProgressReporter(enabled=False),
+    )
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+
+    family = _manifest_family(manifest, "manifest_family")
+    assert {variant["id"] for variant in family["variants"]} == {"variant_a", "variant_b"}
+    assert _manifest_variant(manifest, "manifest_family", "variant_a")["example_id"] == "manifest_variant_a"
+    assert _manifest_variant(manifest, "manifest_family", "variant_b")["example_id"] == "manifest_variant_b"
+
+
+def test_manifest_clean_removes_only_selected_variant_artifact_sets(tmp_path: Path) -> None:
+    variant_a = _ManifestVariantExample("manifest_variant_a", "variant_a", "Variant A")
+    variant_b = _ManifestVariantExample("manifest_variant_b", "variant_b", "Variant B")
+    run_artifact_set(
+        variant_a,
+        _physical_artifact_set("physical_one"),
+        output_root=tmp_path,
+        progress=ProgressReporter(enabled=False),
+    )
+    run_artifact_set(
+        variant_a,
+        _physical_artifact_set("physical_two"),
+        output_root=tmp_path,
+        progress=ProgressReporter(enabled=False),
+    )
+    run_artifact_set(
+        variant_b,
+        _physical_artifact_set("physical_one"),
+        output_root=tmp_path,
+        progress=ProgressReporter(enabled=False),
+    )
+
+    result = run_artifact_set(
+        variant_a,
+        _physical_artifact_set("physical_one"),
+        output_root=tmp_path,
+        progress=ProgressReporter(enabled=False),
+        clean=True,
+    )
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+
+    selected = _manifest_variant(manifest, "manifest_family", "variant_a")
+    sibling = _manifest_variant(manifest, "manifest_family", "variant_b")
+    assert {artifact_set["id"] for artifact_set in selected["artifact_sets"]} == {"physical_one"}
+    assert {artifact_set["id"] for artifact_set in sibling["artifact_sets"]} == {"physical_one"}
+
+
+def test_legacy_three_station_no_skip_manifest_maps_to_full_cabins_variant(tmp_path: Path) -> None:
+    (tmp_path / "manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "generated_at": None,
+                "examples": [
+                    {
+                        "id": "three_station_no_skip_no_wait_v0",
+                        "label": "Three station ring no_skip+no_wait",
+                        "description": "",
+                        "tags": [],
+                        "default_artifact_set": "physical_only",
+                        "artifact_sets": [
+                            {
+                                "id": "physical_only",
+                                "label": "Physical scenario",
+                                "artifacts": {"scenario": "three_station_no_skip_no_wait_v0/scenario.json"},
+                            }
+                        ],
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    manifest = load_manifest(tmp_path)
+
+    variant = _manifest_variant(manifest, "three_station_ring", "full_cabins_no_skip_no_wait")
+    assert variant["example_id"] == "three_station_no_skip_no_wait_v0"
+
+
+def test_latest_ean_checkpoint_uses_selected_example_and_artifact_set(tmp_path: Path) -> None:
+    older = tmp_path / "three_station_v0__ean_passenger_journey_time__incumbent_0.sol"
+    newer = tmp_path / "three_station_v0__ean_passenger_journey_time__incumbent.final.sol"
+    other = tmp_path / "three_station_v0__ean_passenger_waiting_time__incumbent_9.sol"
+    older.write_text("old", encoding="utf-8")
+    newer.write_text("new", encoding="utf-8")
+    other.write_text("other", encoding="utf-8")
+    os.utime(older, (1, 1))
+    os.utime(newer, (2, 2))
+    os.utime(other, (3, 3))
+
+    assert _latest_ean_checkpoint_path(
+        tmp_path,
+        example_id="three_station_v0",
+        artifact_set_id="ean_passenger_journey_time",
+    ) == newer
+
+
+def test_three_station_family_exports_three_named_variants(tmp_path: Path) -> None:
+    for example_id in (
+        "three_station_full_no_skip_no_wait_v0",
+        "three_station_half_no_skip_no_wait_v0",
+        "three_station_v0",
+    ):
+        result = run_artifact_set(
+            get_example(example_id),
+            build_artifact_set("physical_only"),
+            output_root=tmp_path,
+            progress=ProgressReporter(enabled=False),
+        )
+
+    manifest = json.loads(result.manifest_path.read_text(encoding="utf-8"))
+    family = _manifest_family(manifest, "three_station_ring")
+
+    assert {variant["id"] for variant in family["variants"]} == {
+        "full_cabins_no_skip_no_wait",
+        "half_cabins_no_skip_no_wait",
+        "half_cabins_skip_wait",
+    }
 
 
 def test_exports_milp_v0_movement_plan_json(tmp_path: Path) -> None:
@@ -284,9 +455,18 @@ def test_cli_can_export_milp_v1_waiting_time_objective(tmp_path: Path) -> None:
     assert "milp_v1_passenger_waiting_waiting_time_sparse_movement_plan_c2_h2.json" in output_names
 
 
-def _manifest_artifact_set(manifest: dict, example_id: str, artifact_set_id: str) -> dict:
-    example = next(example for example in manifest["examples"] if example["id"] == example_id)
-    return next(artifact_set for artifact_set in example["artifact_sets"] if artifact_set["id"] == artifact_set_id)
+def _manifest_family(manifest: dict, family_id: str) -> dict:
+    return next(family for family in manifest["families"] if family["id"] == family_id)
+
+
+def _manifest_variant(manifest: dict, family_id: str, variant_id: str) -> dict:
+    family = _manifest_family(manifest, family_id)
+    return next(variant for variant in family["variants"] if variant["id"] == variant_id)
+
+
+def _manifest_artifact_set(manifest: dict, family_id: str, variant_id: str, artifact_set_id: str) -> dict:
+    variant = _manifest_variant(manifest, family_id, variant_id)
+    return next(artifact_set for artifact_set in variant["artifact_sets"] if artifact_set["id"] == artifact_set_id)
 
 
 class _PhysicalOnlyExample(ScenarioExample):
@@ -298,3 +478,66 @@ class _PhysicalOnlyExample(ScenarioExample):
 
     def build_scenario(self):
         return build_three_station_scenario()
+
+
+class _TinyThreeStationSkipNoWaitEanExample(ThreeStationExample):
+    metadata = ScenarioExampleMetadata(
+        id="three_station_skip_no_wait_test",
+        label="Three station skip/no-wait test",
+        description="Small three-station EAN skip/stop solver smoke test with no station waiting.",
+        tags=("ring", "skip-stop", "no-waiting", "test"),
+        family_id="three_station_ring",
+        family_label="Three station ring",
+        variant_id="skip_no_wait_test",
+        variant_label="Skip/no-wait test",
+    )
+
+    def build_scenario(self):
+        scenario = build_three_station_scenario()
+        return scenario.__class__(id=self.metadata.id, **{key: value for key, value in scenario.__dict__.items() if key != "id"})
+
+    def build_ean_config(self, scenario) -> EanConfig:
+        base_config = super().build_ean_config(scenario)
+        return EanConfig(
+            horizon_seconds=base_config.horizon_seconds,
+            tail_seconds=base_config.tail_seconds,
+            cabin_capacity=base_config.cabin_capacity,
+            station_configs=tuple(
+                StationEanConfig(station_id=config.station_id, waiting_mode=StationWaitingMode.NO_WAITING)
+                for config in base_config.station_configs
+            ),
+        )
+
+    def build_ean_artifact_builder(self, scenario, config):
+        from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_ring_switch_order
+
+        switch_cycle = build_three_station_ean_ring_switch_order(scenario)
+        return RingEanBuildArtifactBuilder(
+            switch_cycle=switch_cycle,
+            start_builder=DeterministicPhysicalNodeToSwitchStartBuilder(),
+        )
+
+
+class _ManifestVariantExample(ScenarioExample):
+    def __init__(self, example_id: str, variant_id: str, variant_label: str) -> None:
+        self.metadata = ScenarioExampleMetadata(
+            id=example_id,
+            label=variant_label,
+            description=f"{variant_label} test variant.",
+            family_id="manifest_family",
+            family_label="Manifest family",
+            variant_id=variant_id,
+            variant_label=variant_label,
+        )
+
+    def build_scenario(self):
+        scenario = build_three_station_scenario()
+        return scenario.__class__(id=self.metadata.id, **{key: value for key, value in scenario.__dict__.items() if key != "id"})
+
+
+def _physical_artifact_set(artifact_set_id: str) -> ArtifactSet:
+    return ArtifactSet(
+        id=artifact_set_id,
+        label=artifact_set_id.replace("_", " ").title(),
+        builders=(PhysicalScenarioArtifactBuilder(),),
+    )

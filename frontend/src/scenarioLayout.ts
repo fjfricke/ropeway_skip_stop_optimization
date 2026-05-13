@@ -60,7 +60,7 @@ export const threeStationLayout: ScenarioLayout = {
 };
 
 export function layoutForScenario(scenario: Scenario): ScenarioLayout {
-  if (scenario.scenario_id === "three_station_v0" || scenario.scenario_id === "three_station_depot_v0") {
+  if (scenario.scenario_id === "three_station_v0" || scenario.scenario_id.startsWith("three_station_")) {
     return threeStationLayout;
   }
   return linearSkipStopLayout(scenario);

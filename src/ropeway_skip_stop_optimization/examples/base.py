@@ -12,6 +12,10 @@ class ScenarioExampleMetadata:
     label: str
     description: str
     tags: tuple[str, ...] = ()
+    family_id: str | None = None
+    family_label: str | None = None
+    variant_id: str | None = None
+    variant_label: str | None = None
 
 
 class ScenarioExample(ABC):

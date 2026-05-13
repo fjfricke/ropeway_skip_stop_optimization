@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, replace
 from datetime import time
 
 from ropeway_skip_stop_optimization.examples.base import ScenarioExample, ScenarioExampleMetadata
@@ -23,18 +24,47 @@ from ropeway_skip_stop_optimization.models import (
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
     ContinuousAllStopMaxCabinStartBuilder,
+    EanCabinStart,
+    EanCabinStartBuilder,
     EanBuildArtifactBuilder,
     EanConfig,
     RingEanBuildArtifactBuilder,
+    StationEanConfig,
+    StationWaitingMode,
 )
+
+
+@dataclass(frozen=True)
+class KeepEverySecondCabinStartBuilder(EanCabinStartBuilder):
+    base_builder: EanCabinStartBuilder
+
+    def build(
+        self,
+        scenario: Scenario,
+        config: EanConfig,
+        target_switch_ids: frozenset[str],
+    ) -> tuple[EanCabinStart, ...]:
+        starts = self.base_builder.build(
+            scenario=scenario,
+            config=config,
+            target_switch_ids=target_switch_ids,
+        )
+        return tuple(start for index, start in enumerate(starts) if index % 2 == 0)
 
 
 class ThreeStationExample(ScenarioExample):
     metadata = ScenarioExampleMetadata(
         id="three_station_v0",
-        label="Three station ring",
-        description="Bidirectional three-station ropeway with terminal turnarounds and a middle skip route.",
-        tags=("ring", "skip-stop", "discrete-time-demo"),
+        label="Three station ring half cabins skip+wait",
+        description=(
+            "Bidirectional three-station ropeway with every second EAN start cabin, skip enabled, "
+            "and middle-station waiting enabled."
+        ),
+        tags=("ring", "skip-stop", "discrete-time-demo", "half-cabins", "waiting"),
+        family_id="three_station_ring",
+        family_label="Three station ring",
+        variant_id="half_cabins_skip_wait",
+        variant_label="Half cabins skip+wait",
     )
 
     def build_scenario(self) -> Scenario:
@@ -60,22 +90,87 @@ class ThreeStationExample(ScenarioExample):
         switch_cycle = build_three_station_ean_ring_switch_order(scenario)
         return RingEanBuildArtifactBuilder(
             switch_cycle=switch_cycle,
+            start_builder=KeepEverySecondCabinStartBuilder(
+                ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
+            ),
+        )
+
+
+class ThreeStationFullNoSkipNoWaitExample(ThreeStationExample):
+    metadata = ScenarioExampleMetadata(
+        id="three_station_full_no_skip_no_wait_v0",
+        label="Three station ring full cabins no_skip+no_wait",
+        description=(
+            "Bidirectional three-station ropeway with all EAN start cabins, skip disabled, "
+            "and station waiting disabled."
+        ),
+        tags=("ring", "discrete-time-demo", "full-cabins", "no-skip", "no-waiting"),
+        family_id="three_station_ring",
+        family_label="Three station ring",
+        variant_id="full_cabins_no_skip_no_wait",
+        variant_label="Full cabins no_skip+no_wait",
+    )
+
+    def build_scenario(self) -> Scenario:
+        return build_three_station_no_skip_no_wait_scenario(self.metadata.id)
+
+    def build_ean_config(self, scenario: Scenario) -> EanConfig:
+        from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_config
+
+        base_config = build_three_station_ean_config(scenario)
+        return EanConfig(
+            horizon_seconds=base_config.horizon_seconds,
+            tail_seconds=base_config.tail_seconds,
+            cabin_capacity=base_config.cabin_capacity,
+            station_configs=tuple(
+                StationEanConfig(station_id=config.station_id, waiting_mode=StationWaitingMode.NO_WAITING)
+                for config in base_config.station_configs
+            ),
+        )
+
+    def build_ean_artifact_builder(
+        self,
+        scenario: Scenario,
+        config: EanConfig,
+    ) -> EanBuildArtifactBuilder:
+        from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_ring_switch_order
+
+        switch_cycle = build_three_station_ean_ring_switch_order(scenario)
+        return RingEanBuildArtifactBuilder(
+            switch_cycle=switch_cycle,
             start_builder=ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
         )
 
 
-class ThreeStationDepotExample(ThreeStationExample):
+class ThreeStationHalfNoSkipNoWaitExample(ThreeStationFullNoSkipNoWaitExample):
     metadata = ScenarioExampleMetadata(
-        id="three_station_depot_v0",
-        label="Three station ring with depot",
+        id="three_station_half_no_skip_no_wait_v0",
+        label="Three station ring half cabins no_skip+no_wait",
         description=(
-            "Three-station skip-stop ring with a storage depot connected after the left terminal platform."
+            "Bidirectional three-station ropeway with every second EAN start cabin, skip disabled, "
+            "and station waiting disabled."
         ),
-        tags=("ring", "skip-stop", "depot", "storage", "discrete-time-demo"),
+        tags=("ring", "discrete-time-demo", "half-cabins", "no-skip", "no-waiting"),
+        family_id="three_station_ring",
+        family_label="Three station ring",
+        variant_id="half_cabins_no_skip_no_wait",
+        variant_label="Half cabins no_skip+no_wait",
     )
 
-    def build_scenario(self) -> Scenario:
-        return build_three_station_depot_scenario()
+    def build_ean_artifact_builder(
+        self,
+        scenario: Scenario,
+        config: EanConfig,
+    ) -> EanBuildArtifactBuilder:
+        from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_ring_switch_order
+
+        switch_cycle = build_three_station_ean_ring_switch_order(scenario)
+        return RingEanBuildArtifactBuilder(
+            switch_cycle=switch_cycle,
+            start_builder=KeepEverySecondCabinStartBuilder(
+                ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
+            ),
+        )
 
 
 def build_three_station_scenario() -> Scenario:
@@ -266,71 +361,28 @@ def build_three_station_scenario() -> Scenario:
     return scenario
 
 
-def build_three_station_depot_scenario() -> Scenario:
-    """Build the three-station example with a side depot at L.
-
-    The depot is physical infrastructure only in v0. Passenger demand still
-    uses the terminal/service stations, while depot insertion/pull-out segments
-    make the storage connection visible to exports and frontend inspection.
-    """
+def build_three_station_no_skip_no_wait_scenario(
+    scenario_id: str = ThreeStationFullNoSkipNoWaitExample.metadata.id,
+) -> Scenario:
     base = build_three_station_scenario()
-    depot_profile = SpeedProfile(SpeedProfileKind.CONSTANT, speed_m_per_s=base.operating.station_speed_m_per_s)
-    insertion_profile = SpeedProfile(SpeedProfileKind.CONSTANT, speed_m_per_s=base.operating.rope_speed_m_per_s)
-
+    skip_route_ids = frozenset({"M_skip_lr", "M_skip_rl"})
+    skip_segment_ids = frozenset({"M_lr_skip_bypass", "M_rl_skip_bypass"})
     scenario = Scenario(
-        id=ThreeStationDepotExample.metadata.id,
+        id=scenario_id,
         service_start_time=base.service_start_time,
         service_end_time=base.service_end_time,
-        stations=(
-            *base.stations,
-            Station(id="D", kind=StationKind.STORAGE, name="Left depot"),
+        stations=tuple(
+            replace(
+                station,
+                route_ids=tuple(route_id for route_id in station.route_ids if route_id not in skip_route_ids),
+            )
+            if station.id == "M"
+            else station
+            for station in base.stations
         ),
-        physical_nodes=(
-            *base.physical_nodes,
-            PhysicalNode(id="D_entry", kind=PhysicalNodeKind.DEPOT, station_id="D"),
-            PhysicalNode(id="D_hold", kind=PhysicalNodeKind.HOLD, station_id="D", allows_waiting=True),
-            PhysicalNode(id="D_exit", kind=PhysicalNodeKind.DEPOT, station_id="D"),
-        ),
-        track_segments=(
-            *base.track_segments,
-            TrackSegment(
-                id="L_platform_exit_to_D_entry",
-                kind=TrackSegmentKind.CONNECTOR,
-                from_node_id="L_platform_exit",
-                to_node_id="D_entry",
-                length_m=12.0,
-                speed_profile=depot_profile,
-                resource_id="D_pullout",
-            ),
-            TrackSegment(
-                id="D_entry_to_D_hold",
-                kind=TrackSegmentKind.CONNECTOR,
-                from_node_id="D_entry",
-                to_node_id="D_hold",
-                length_m=8.0,
-                speed_profile=depot_profile,
-                resource_id="D_storage",
-            ),
-            TrackSegment(
-                id="D_hold_to_D_exit",
-                kind=TrackSegmentKind.CONNECTOR,
-                from_node_id="D_hold",
-                to_node_id="D_exit",
-                length_m=8.0,
-                speed_profile=depot_profile,
-                resource_id="D_storage",
-            ),
-            TrackSegment(
-                id="D_exit_to_L_exit_lr",
-                kind=TrackSegmentKind.CONNECTOR,
-                from_node_id="D_exit",
-                to_node_id="L_exit_lr",
-                length_m=12.0,
-                speed_profile=insertion_profile,
-                resource_id="D_insertion",
-            ),
-        ),
-        station_routes=base.station_routes,
+        physical_nodes=base.physical_nodes,
+        track_segments=tuple(segment for segment in base.track_segments if segment.id not in skip_segment_ids),
+        station_routes=tuple(route for route in base.station_routes if route.id not in skip_route_ids),
         cabins=base.cabins,
         cabin_initial_states=base.cabin_initial_states,
         demands=base.demands,

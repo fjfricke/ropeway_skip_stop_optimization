@@ -1,11 +1,15 @@
-import type { ExportExampleManifest } from "../types";
+import type { ExportArtifactSetBackend, ExportScenarioFamilyManifest } from "../types";
 
 export interface ArtifactSelectionControl {
-  examples: ExportExampleManifest[];
-  selectedExampleId: string;
+  families: ExportScenarioFamilyManifest[];
+  selectedFamilyId: string;
+  selectedVariantId: string;
+  selectedBackend: ExportArtifactSetBackend;
   selectedArtifactSetId: string;
   isLoading: boolean;
-  onExampleChange: (exampleId: string) => void;
+  onFamilyChange: (familyId: string) => void;
+  onVariantChange: (variantId: string) => void;
+  onBackendChange: (backend: ExportArtifactSetBackend) => void;
   onArtifactSetChange: (artifactSetId: string) => void;
 }
 

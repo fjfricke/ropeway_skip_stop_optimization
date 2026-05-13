@@ -5,6 +5,7 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.skip_stop_feasib
     solve_ean_skip_stop_feasibility,
 )
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.passenger_service import (
+    EanPassengerServiceCheckpointConfig,
     EanPassengerServiceConfig,
     EanPassengerServiceMetadata,
     EanPassengerServiceObjective,
@@ -20,6 +21,7 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.solver_policy im
 
 __all__ = [
     "EanPassengerServiceConfig",
+    "EanPassengerServiceCheckpointConfig",
     "EanPassengerServiceMetadata",
     "EanPassengerServiceObjective",
     "EanPassengerServiceResult",

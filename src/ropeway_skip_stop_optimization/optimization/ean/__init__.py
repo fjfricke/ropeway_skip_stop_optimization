@@ -56,6 +56,7 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
     SwitchVisitDefinition,
 )
 from ropeway_skip_stop_optimization.optimization.ean.optimizers import (
+    EanPassengerServiceCheckpointConfig,
     EanPassengerServiceConfig,
     EanPassengerServiceMetadata,
     EanPassengerServiceObjective,
@@ -110,6 +111,7 @@ __all__ = [
     "EanPassengerCandidateBuilder",
     "EanPassengerCandidateBuildResult",
     "EanPassengerServiceConfig",
+    "EanPassengerServiceCheckpointConfig",
     "EanPassengerServiceMetadata",
     "EanPassengerServiceObjective",
     "EanPassengerServicePlan",

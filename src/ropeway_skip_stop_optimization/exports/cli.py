@@ -35,12 +35,33 @@ def main() -> None:
         help="Gurobi solver policy preset for EAN passenger optimization artifact sets.",
     )
     parser.add_argument(
+        "--ean-checkpoint-dir",
+        type=Path,
+        default=None,
+        help="Directory for EAN passenger-service Gurobi incumbent solution checkpoints.",
+    )
+    parser.add_argument(
+        "--ean-resume-checkpoint",
+        type=Path,
+        default=None,
+        help="Load this .sol or .mst file as an EAN passenger-service MIP start before optimizing.",
+    )
+    parser.add_argument(
+        "--ean-resume-latest-checkpoint",
+        action="store_true",
+        help="Load the newest checkpoint for the selected EAN example/artifact set from --ean-checkpoint-dir.",
+    )
+    parser.add_argument(
         "--milp-variable-strategy",
         choices=tuple(strategy.value for strategy in MilpV0VariableStrategy),
         default=MilpV0VariableStrategy.DENSE.value,
         help="Variable strategy for MILP artifact sets.",
     )
     args = parser.parse_args()
+    if args.ean_resume_checkpoint is not None and args.ean_resume_latest_checkpoint:
+        parser.error("--ean-resume-checkpoint and --ean-resume-latest-checkpoint are mutually exclusive")
+    if args.ean_resume_latest_checkpoint and args.ean_checkpoint_dir is None:
+        parser.error("--ean-resume-latest-checkpoint requires --ean-checkpoint-dir")
 
     if args.progress:
         configure_progress_logging()
@@ -53,6 +74,9 @@ def main() -> None:
         milp_cabin_count=args.milp_cabin_count,
         milp_variable_strategy=MilpV0VariableStrategy(args.milp_variable_strategy),
         ean_solver_policy_preset=GurobiSolverPolicyPreset(args.ean_solver_policy),
+        ean_checkpoint_dir=args.ean_checkpoint_dir,
+        ean_resume_checkpoint=args.ean_resume_checkpoint,
+        ean_resume_latest_checkpoint=args.ean_resume_latest_checkpoint,
         progress=args.progress,
         clean=args.clean,
     )

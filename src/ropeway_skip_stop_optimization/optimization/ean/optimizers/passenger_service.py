@@ -4,6 +4,7 @@ import math
 import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
+from pathlib import Path
 from typing import Any
 
 from ropeway_skip_stop_optimization.models import Scenario
@@ -58,6 +59,28 @@ class EanPassengerServiceObjective(StrEnum):
 
 
 @dataclass(frozen=True)
+class EanPassengerServiceCheckpointConfig:
+    """Filesystem checkpoints for EAN passenger-service MIP starts.
+
+    This is a solver warm-start optimization, not a persisted branch-and-bound
+    tree. Gurobi writes incumbent solution files while solving, and a later run
+    can load one as a MIP start before optimization begins.
+    """
+
+    read_solution_path: Path | None = None
+    solution_file_prefix: Path | None = None
+    final_solution_path: Path | None = None
+
+    def validate(self) -> None:
+        if self.read_solution_path is not None and not self.read_solution_path.exists():
+            raise ValueError(f"checkpoint read solution does not exist: {self.read_solution_path}")
+        if self.solution_file_prefix is not None and not self.solution_file_prefix.name:
+            raise ValueError("checkpoint solution file prefix must include a filename prefix")
+        if self.final_solution_path is not None and self.final_solution_path.suffix.lower() not in {".mst", ".sol"}:
+            raise ValueError("checkpoint final solution path must end in .mst or .sol")
+
+
+@dataclass(frozen=True)
 class EanPassengerServiceConfig:
     """Config for continuous EAN passenger-service optimization."""
 
@@ -65,9 +88,12 @@ class EanPassengerServiceConfig:
     solver_policy: GurobiSolverPolicy = field(default_factory=GurobiSolverPolicy)
     log_to_console: bool = False
     use_all_stop_mip_start: bool = True
+    checkpoint: EanPassengerServiceCheckpointConfig | None = None
 
     def validate(self) -> None:
         self.solver_policy.validate()
+        if self.checkpoint is not None:
+            self.checkpoint.validate()
 
 
 @dataclass(frozen=True)
@@ -93,6 +119,9 @@ class EanPassengerServiceMetadata:
     constraint_count: int
     skipped_visit_count: int
     visible_skipped_visit_count: int
+    checkpoint_read_path: str | None
+    checkpoint_solution_file_prefix: str | None
+    checkpoint_final_solution_path: str | None
 
 
 @dataclass(frozen=True)
@@ -235,7 +264,10 @@ def solve_ean_passenger_service(
         big_m=big_m,
     )
 
-    if config.use_all_stop_mip_start:
+    if (
+        config.use_all_stop_mip_start
+        and (config.checkpoint is None or config.checkpoint.read_solution_path is None)
+    ):
         _set_all_stop_mip_start(
             artifact=artifact,
             passenger_build=passenger_build,
@@ -262,6 +294,7 @@ def solve_ean_passenger_service(
         gp=gp,
     )
     model.setObjective(objective, GRB.MINIMIZE)
+    _configure_gurobi_checkpoints(model, config.checkpoint)
     if config.log_to_console:
         model.update()
         LOGGER.info(
@@ -277,8 +310,10 @@ def solve_ean_passenger_service(
             ",".join(sorted({station_config.waiting_mode.value for station_config in artifact.config.station_configs})),
         )
     model.optimize()
+    _write_final_gurobi_checkpoint(model, config.checkpoint)
 
     solver_diagnostics = _solver_diagnostics(model, GRB, config.solver_policy)
+    checkpoint_diagnostics = _checkpoint_diagnostics(config.checkpoint)
     status = solver_diagnostics["status"]
     if model.SolCount <= 0:
         return EanPassengerServiceResult(
@@ -298,6 +333,7 @@ def solve_ean_passenger_service(
                 constraint_count=model.NumConstrs,
                 skipped_visit_count=0,
                 visible_skipped_visit_count=0,
+                **checkpoint_diagnostics,
             ),
         )
 
@@ -355,8 +391,48 @@ def solve_ean_passenger_service(
             constraint_count=model.NumConstrs,
             skipped_visit_count=skipped_visit_count,
             visible_skipped_visit_count=visible_skipped_visit_count,
+            **checkpoint_diagnostics,
         ),
     )
+
+
+def _configure_gurobi_checkpoints(model: Any, checkpoint: EanPassengerServiceCheckpointConfig | None) -> None:
+    if checkpoint is None:
+        return
+    if checkpoint.solution_file_prefix is not None:
+        checkpoint.solution_file_prefix.parent.mkdir(parents=True, exist_ok=True)
+        model.Params.SolFiles = str(checkpoint.solution_file_prefix)
+    if checkpoint.read_solution_path is not None:
+        model.update()
+        LOGGER.info("Loading EAN passenger-service checkpoint MIP start from %s", checkpoint.read_solution_path)
+        model.read(str(checkpoint.read_solution_path))
+
+
+def _write_final_gurobi_checkpoint(model: Any, checkpoint: EanPassengerServiceCheckpointConfig | None) -> None:
+    if checkpoint is None or checkpoint.final_solution_path is None or _safe_int_attr(model, "SolCount") == 0:
+        return
+    checkpoint.final_solution_path.parent.mkdir(parents=True, exist_ok=True)
+    model.write(str(checkpoint.final_solution_path))
+
+
+def _checkpoint_diagnostics(checkpoint: EanPassengerServiceCheckpointConfig | None) -> dict[str, str | None]:
+    if checkpoint is None:
+        return {
+            "checkpoint_read_path": None,
+            "checkpoint_solution_file_prefix": None,
+            "checkpoint_final_solution_path": None,
+        }
+    return {
+        "checkpoint_read_path": (
+            checkpoint.read_solution_path.as_posix() if checkpoint.read_solution_path is not None else None
+        ),
+        "checkpoint_solution_file_prefix": (
+            checkpoint.solution_file_prefix.as_posix() if checkpoint.solution_file_prefix is not None else None
+        ),
+        "checkpoint_final_solution_path": (
+            checkpoint.final_solution_path.as_posix() if checkpoint.final_solution_path is not None else None
+        ),
+    }
 
 
 def _add_start_constraints(

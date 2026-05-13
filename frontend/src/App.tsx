@@ -7,9 +7,12 @@ import type {
   EanPassengerServiceResult,
   EanPhysicalReplay,
   ExportArtifactKind,
+  ExportArtifactSetBackend,
   ExportArtifactSetManifest,
   ExportExampleManifest,
   ExportManifest,
+  ExportScenarioFamilyManifest,
+  ExportScenarioVariantManifest,
   MovementPlan,
   PassengerReplayResult,
   ReplayMetrics,
@@ -39,10 +42,16 @@ interface LoadedArtifacts {
   eanPassengerServiceWarning: string | null;
 }
 
+interface ArtifactSelectionState {
+  familyId: string;
+  variantId: string;
+  backend: ExportArtifactSetBackend;
+  artifactSetId: string;
+}
+
 export default function App() {
   const [manifest, setManifest] = useState<ExportManifest | null>(null);
-  const [selectedExampleId, setSelectedExampleId] = useState<string>("");
-  const [selectedArtifactSetId, setSelectedArtifactSetId] = useState<string>("");
+  const [selection, setSelection] = useState<ArtifactSelectionState | null>(null);
   const [artifacts, setArtifacts] = useState<LoadedArtifacts>(emptyArtifacts);
   const [isLoadingArtifacts, setIsLoadingArtifacts] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -52,19 +61,14 @@ export default function App() {
 
     async function loadManifest() {
       try {
-        const nextManifest = await fetchRequired<ExportManifest>(MANIFEST_URL);
-        const example = nextManifest.examples[0];
-        if (!example) {
-          throw new Error(`No examples listed in ${MANIFEST_URL}`);
-        }
-        const artifactSet = defaultArtifactSet(example);
-        if (!artifactSet) {
-          throw new Error(`No artifact sets listed for example ${example.id}`);
+        const nextManifest = normalizeManifest(await fetchRequired<ExportManifest>(MANIFEST_URL));
+        const nextSelection = defaultSelection(nextManifest);
+        if (!nextSelection) {
+          throw new Error(`No export variants listed in ${MANIFEST_URL}`);
         }
         if (!cancelled) {
           setManifest(nextManifest);
-          setSelectedExampleId(example.id);
-          setSelectedArtifactSetId(artifactSet.id);
+          setSelection(nextSelection);
         }
       } catch (loadError) {
         if (!cancelled) {
@@ -80,25 +84,27 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!manifest || !selectedExampleId || !selectedArtifactSetId) {
+    if (!manifest || !selection) {
       return;
     }
 
     let cancelled = false;
     const activeManifest = manifest;
+    const activeSelection = selection;
 
     async function loadArtifacts() {
-      const example = activeManifest.examples.find((candidate) => candidate.id === selectedExampleId);
-      const artifactSet = example?.artifact_sets.find((candidate) => candidate.id === selectedArtifactSetId);
-      if (!example || !artifactSet) {
-        setError(`Unknown artifact selection ${selectedExampleId}/${selectedArtifactSetId}`);
+      const resolved = resolveSelection(activeManifest, activeSelection);
+      if (!resolved) {
+        setError(
+          `Unknown artifact selection ${activeSelection.familyId}/${activeSelection.variantId}/${activeSelection.artifactSetId}`,
+        );
         return;
       }
 
       setIsLoadingArtifacts(true);
       setError(null);
       try {
-        const nextArtifacts = await loadArtifactSet(example, artifactSet);
+        const nextArtifacts = await loadArtifactSet(resolved.variant, resolved.artifactSet);
         if (!cancelled) {
           setArtifacts(nextArtifacts);
         }
@@ -118,13 +124,42 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [manifest, selectedArtifactSetId, selectedExampleId]);
+  }, [manifest, selection]);
 
-  function handleExampleChange(exampleId: string) {
-    const example = manifest?.examples.find((candidate) => candidate.id === exampleId);
-    const artifactSet = example ? defaultArtifactSet(example) : null;
-    setSelectedExampleId(exampleId);
-    setSelectedArtifactSetId(artifactSet?.id ?? "");
+  function handleFamilyChange(familyId: string) {
+    const family = manifest?.families.find((candidate) => candidate.id === familyId);
+    const nextSelection = family ? defaultSelectionForFamily(family) : null;
+    setSelection(nextSelection);
+  }
+
+  function handleVariantChange(variantId: string) {
+    if (!manifest || !selection) {
+      return;
+    }
+    const family = manifest.families.find((candidate) => candidate.id === selection.familyId);
+    const variant = family?.variants.find((candidate) => candidate.id === variantId);
+    const nextSelection = family && variant ? defaultSelectionForVariant(family.id, variant) : null;
+    setSelection(nextSelection);
+  }
+
+  function handleBackendChange(backend: ExportArtifactSetBackend) {
+    if (!manifest || !selection) {
+      return;
+    }
+    const resolved = resolveSelection(manifest, selection);
+    const artifactSet = resolved ? defaultArtifactSet(resolved.variant, backend) : null;
+    if (!artifactSet) {
+      return;
+    }
+    setSelection({
+      ...selection,
+      backend,
+      artifactSetId: artifactSet.id,
+    });
+  }
+
+  function handleArtifactSetChange(artifactSetId: string) {
+    setSelection((current) => current ? { ...current, artifactSetId } : current);
   }
 
   if (error) {
@@ -135,7 +170,7 @@ export default function App() {
     );
   }
 
-  if (!manifest || !artifacts.scenario) {
+  if (!manifest || !selection || !artifacts.scenario) {
     return (
       <main className="app-shell">
         <section className="load-state">Loading scenario</section>
@@ -163,12 +198,16 @@ export default function App() {
       eanReplayWarning={artifacts.eanReplayWarning}
       eanPassengerServiceWarning={artifacts.eanPassengerServiceWarning}
       artifactSelection={{
-        examples: manifest.examples,
-        selectedExampleId,
-        selectedArtifactSetId,
+        families: manifest.families,
+        selectedFamilyId: selection.familyId,
+        selectedVariantId: selection.variantId,
+        selectedBackend: selection.backend,
+        selectedArtifactSetId: selection.artifactSetId,
         isLoading: isLoadingArtifacts,
-        onExampleChange: handleExampleChange,
-        onArtifactSetChange: setSelectedArtifactSetId,
+        onFamilyChange: handleFamilyChange,
+        onVariantChange: handleVariantChange,
+        onBackendChange: handleBackendChange,
+        onArtifactSetChange: handleArtifactSetChange,
       }}
     />
   );
@@ -182,14 +221,17 @@ async function fetchRequired<T>(url: string): Promise<T> {
   return (await response.json()) as T;
 }
 
-async function loadArtifactSet(example: ExportExampleManifest, artifactSet: ExportArtifactSetManifest): Promise<LoadedArtifacts> {
+async function loadArtifactSet(
+  variant: ExportScenarioVariantManifest,
+  artifactSet: ExportArtifactSetManifest,
+): Promise<LoadedArtifacts> {
   const scenarioPath = artifactUrl(artifactSet, "scenario");
   if (!scenarioPath) {
     throw new Error(`Artifact set ${artifactSet.id} does not provide a physical scenario`);
   }
   const discreteArtifactSet = artifactSet.artifacts.discrete_scenario
     ? artifactSet
-    : example.artifact_sets.find((candidate) => candidate.artifacts.discrete_scenario);
+    : variant.artifact_sets.find((candidate) => candidate.artifacts.discrete_scenario);
 
   const [
     scenario,
@@ -205,7 +247,7 @@ async function loadArtifactSet(example: ExportExampleManifest, artifactSet: Expo
     fetchRequired<Scenario>(scenarioPath),
     discreteArtifactSet
       ? fetchOptional<DiscreteScenario>(discreteArtifactSet, "discrete_scenario", "Discrete overlay")
-      : Promise.resolve({ data: null, warning: `Discrete overlay unavailable in artifact set ${artifactSet.id}` }),
+      : Promise.resolve({ data: null, warning: `Discrete overlay unavailable in variant ${variant.id}` }),
     fetchOptional<MovementPlan>(artifactSet, "movement_plan", "Replay"),
     fetchOptional<PassengerReplayResult>(artifactSet, "passenger_replay", "Passenger replay"),
     fetchOptional<ReplayMetrics>(artifactSet, "replay_metrics", "Replay metrics"),
@@ -262,8 +304,187 @@ function artifactUrl(artifactSet: ExportArtifactSetManifest, kind: ExportArtifac
   return relativePath ? `${ARTIFACT_BASE_URL}${relativePath}` : null;
 }
 
-function defaultArtifactSet(example: ExportExampleManifest): ExportArtifactSetManifest | null {
-  return example.artifact_sets.find((candidate) => candidate.id === example.default_artifact_set) ?? example.artifact_sets[0] ?? null;
+function resolveSelection(manifest: ExportManifest, selection: ArtifactSelectionState) {
+  const family = manifest.families.find((candidate) => candidate.id === selection.familyId);
+  const variant = family?.variants.find((candidate) => candidate.id === selection.variantId);
+  const artifactSet = variant?.artifact_sets.find((candidate) => candidate.id === selection.artifactSetId);
+  if (!family || !variant || !artifactSet) {
+    return null;
+  }
+  return { family, variant, artifactSet };
+}
+
+function defaultSelection(manifest: ExportManifest): ArtifactSelectionState | null {
+  const family = manifest.families[0];
+  return family ? defaultSelectionForFamily(family) : null;
+}
+
+function defaultSelectionForFamily(family: ExportScenarioFamilyManifest): ArtifactSelectionState | null {
+  const variant = family.variants[0];
+  return variant ? defaultSelectionForVariant(family.id, variant) : null;
+}
+
+function defaultSelectionForVariant(
+  familyId: string,
+  variant: ExportScenarioVariantManifest,
+): ArtifactSelectionState | null {
+  const artifactSet = defaultArtifactSet(variant);
+  return artifactSet
+    ? {
+      familyId,
+      variantId: variant.id,
+      backend: artifactSet.backend,
+      artifactSetId: artifactSet.id,
+    }
+    : null;
+}
+
+function defaultArtifactSet(
+  variant: ExportScenarioVariantManifest,
+  backend?: ExportArtifactSetBackend,
+): ExportArtifactSetManifest | null {
+  const artifactSets = backend
+    ? variant.artifact_sets.filter((candidate) => candidate.backend === backend)
+    : variant.artifact_sets;
+  if (!backend) {
+    const defaultSet = artifactSets.find((candidate) => candidate.id === variant.default_artifact_set);
+    if (defaultSet?.backend !== "physical") {
+      return defaultSet ?? artifactSets.find((candidate) => candidate.backend !== "physical") ?? artifactSets[0] ?? null;
+    }
+    return artifactSets.find((candidate) => candidate.backend !== "physical") ?? defaultSet ?? artifactSets[0] ?? null;
+  }
+  return artifactSets.find((candidate) => candidate.id === variant.default_artifact_set) ?? artifactSets[0] ?? null;
+}
+
+function normalizeManifest(manifest: ExportManifest): ExportManifest {
+  if (manifest.families) {
+    return {
+      ...manifest,
+      families: manifest.families.map((family) => ({
+        ...family,
+        variants: family.variants.map((variant) => ({
+          ...variant,
+          artifact_sets: variant.artifact_sets.map(withBackend),
+        })),
+      })),
+    };
+  }
+  return {
+    schema_version: 2,
+    generated_at: manifest.generated_at,
+    families: legacyExamplesToFamilies(manifest.examples ?? []),
+  };
+}
+
+function legacyExamplesToFamilies(examples: ExportExampleManifest[]): ExportScenarioFamilyManifest[] {
+  const families = new Map<string, ExportScenarioFamilyManifest>();
+  for (const example of examples) {
+    const group = legacyGroupForExample(example);
+    const family = families.get(group.familyId) ?? {
+      id: group.familyId,
+      label: group.familyLabel,
+      variants: [],
+    };
+    family.variants = [
+      ...family.variants.filter((variant) => variant.id !== group.variantId),
+      {
+        id: group.variantId,
+        label: group.variantLabel,
+        example_id: example.id,
+        example_label: example.label,
+        description: example.description,
+        tags: example.tags,
+        default_artifact_set: example.default_artifact_set,
+        artifact_sets: example.artifact_sets.map(withBackend),
+      },
+    ].sort((left, right) => left.id.localeCompare(right.id));
+    families.set(family.id, family);
+  }
+  return Array.from(families.values()).sort((left, right) => left.id.localeCompare(right.id));
+}
+
+function legacyGroupForExample(example: ExportExampleManifest) {
+  if (example.id === "three_station_v0") {
+    return {
+      familyId: "three_station_ring",
+      familyLabel: "Three station ring",
+      variantId: "half_cabins_skip_wait",
+      variantLabel: "Half cabins skip+wait",
+    };
+  }
+  if (example.id === "three_station_no_skip_no_wait_v0") {
+    return {
+      familyId: "three_station_ring",
+      familyLabel: "Three station ring",
+      variantId: "full_cabins_no_skip_no_wait",
+      variantLabel: "Full cabins no_skip+no_wait",
+    };
+  }
+  if (example.id === "three_station_full_no_skip_no_wait_v0") {
+    return {
+      familyId: "three_station_ring",
+      familyLabel: "Three station ring",
+      variantId: "full_cabins_no_skip_no_wait",
+      variantLabel: "Full cabins no_skip+no_wait",
+    };
+  }
+  if (example.id === "three_station_half_no_skip_no_wait_v0") {
+    return {
+      familyId: "three_station_ring",
+      familyLabel: "Three station ring",
+      variantId: "half_cabins_no_skip_no_wait",
+      variantLabel: "Half cabins no_skip+no_wait",
+    };
+  }
+  if (example.id === "five_station_v0") {
+    return {
+      familyId: "five_station_ring",
+      familyLabel: "Five station ring",
+      variantId: "half_cabins_skip_wait",
+      variantLabel: "Half cabins skip+wait",
+    };
+  }
+  if (example.id === "five_station_no_wait_v0") {
+    return {
+      familyId: "five_station_ring",
+      familyLabel: "Five station ring",
+      variantId: "full_cabins_skip_no_wait",
+      variantLabel: "Full cabins skip+no_wait",
+    };
+  }
+  if (example.id === "five_station_half_no_skip_no_wait_v0") {
+    return {
+      familyId: "five_station_ring",
+      familyLabel: "Five station ring",
+      variantId: "half_cabins_no_skip_no_wait",
+      variantLabel: "Half cabins no_skip+no_wait",
+    };
+  }
+  return { familyId: example.id, familyLabel: example.label, variantId: example.id, variantLabel: example.label };
+}
+
+function withBackend(artifactSet: ExportArtifactSetManifest): ExportArtifactSetManifest {
+  return {
+    ...artifactSet,
+    backend: artifactSet.backend ?? inferBackend(artifactSet),
+  };
+}
+
+function inferBackend(artifactSet: ExportArtifactSetManifest): ExportArtifactSetBackend {
+  const artifacts = artifactSet.artifacts;
+  if (artifacts.ean_input || artifacts.ean_result || artifacts.ean_replay) {
+    return "ean";
+  }
+  if (
+    artifacts.discrete_scenario
+    || artifacts.movement_plan
+    || artifacts.passenger_replay
+    || artifacts.replay_metrics
+    || artifacts.milp_result
+  ) {
+    return "discrete";
+  }
+  return "physical";
 }
 
 const emptyArtifacts: LoadedArtifacts = {

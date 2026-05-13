@@ -210,9 +210,12 @@ export interface ExportArtifactMetadata {
 export interface ExportArtifactSetManifest {
   id: string;
   label: string;
+  backend: ExportArtifactSetBackend;
   artifacts: Partial<Record<ExportArtifactKind, string>>;
   artifact_metadata: ExportArtifactMetadata[];
 }
+
+export type ExportArtifactSetBackend = "physical" | "discrete" | "ean";
 
 export interface ExportExampleManifest {
   id: string;
@@ -223,10 +226,28 @@ export interface ExportExampleManifest {
   artifact_sets: ExportArtifactSetManifest[];
 }
 
+export interface ExportScenarioVariantManifest {
+  id: string;
+  label: string;
+  example_id: string;
+  example_label: string;
+  description: string;
+  tags: string[];
+  default_artifact_set: string;
+  artifact_sets: ExportArtifactSetManifest[];
+}
+
+export interface ExportScenarioFamilyManifest {
+  id: string;
+  label: string;
+  variants: ExportScenarioVariantManifest[];
+}
+
 export interface ExportManifest {
   schema_version: number;
   generated_at: string | null;
-  examples: ExportExampleManifest[];
+  families: ExportScenarioFamilyManifest[];
+  examples?: ExportExampleManifest[];
 }
 
 export interface PassengerQueueState {
@@ -513,6 +534,9 @@ export interface EanPassengerServiceMetadata {
   solution_count?: number;
   mip_gap_target?: number | null;
   time_limit_seconds?: number | null;
+  checkpoint_read_path?: string | null;
+  checkpoint_solution_file_prefix?: string | null;
+  checkpoint_final_solution_path?: string | null;
   demand_group_count: number;
   ride_candidate_count: number;
   slot_variable_count: number;
