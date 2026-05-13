@@ -6,15 +6,17 @@ import { EanView } from "./EanView";
 import { GraphSlackView } from "./GraphSlackView";
 import { MetricsView } from "./MetricsView";
 import { ReplayView } from "./ReplayView";
-import { ScenarioToolbar } from "./ScenarioToolbar";
+import { NetworkContextToggles, ScenarioToolbar } from "./ScenarioToolbar";
 import { ScenarioView } from "./ScenarioView";
 import { ViewerHeader } from "./ViewerHeader";
-import { ViewerModeTabs } from "./ViewerModeTabs";
+import { OptimizationModeTabs, ViewerModeTabs } from "./ViewerModeTabs";
 import type {
   ArtifactSelectionControl,
+  ArcColorMode,
   AvailableViewerModes,
   DiscreteOverlayMode,
   DiscreteViewerToggles,
+  ScenarioDisplayMode,
   ViewerMode,
   ViewerToggles,
 } from "./viewerTypes";
@@ -24,6 +26,7 @@ import type {
   EanMovementPlan,
   EanPassengerServiceResult,
   EanPhysicalReplay,
+  ExportArtifactSetBackend,
   MovementPlan,
   PassengerReplayResult,
   ReplayMetrics,
@@ -52,6 +55,22 @@ interface ScenarioViewerProps {
   artifactSelection: ArtifactSelectionControl;
 }
 
+const DISCRETE_REPLAY_TOGGLES: ViewerToggles = {
+  serviceRoutes: true,
+  skipRoutes: false,
+  demand: true,
+  nodeLabels: true,
+  arcLabels: false,
+};
+
+const EAN_REPLAY_TOGGLES: ViewerToggles = {
+  serviceRoutes: true,
+  skipRoutes: true,
+  demand: true,
+  nodeLabels: true,
+  arcLabels: false,
+};
+
 export function ScenarioViewer({
   scenario,
   discreteScenario,
@@ -79,8 +98,15 @@ export function ScenarioViewer({
     serviceRoutes: true,
     skipRoutes: true,
     demand: true,
-    parameters: true,
+    nodeLabels: true,
+    arcLabels: false,
   });
+  const [scenarioDisplayMode, setScenarioDisplayMode] = useState<ScenarioDisplayMode>("line");
+  const [arcColorMode, setArcColorMode] = useState<ArcColorMode>("type");
+  const [discreteReplayToggles, setDiscreteReplayToggles] = useState<ViewerToggles>(DISCRETE_REPLAY_TOGGLES);
+  const [discreteReplayArcColorMode, setDiscreteReplayArcColorMode] = useState<ArcColorMode>("type");
+  const [eanReplayToggles, setEanReplayToggles] = useState<ViewerToggles>(EAN_REPLAY_TOGGLES);
+  const [eanReplayArcColorMode, setEanReplayArcColorMode] = useState<ArcColorMode>("type");
   const [discreteMode, setDiscreteMode] = useState<DiscreteOverlayMode>("neighborhood");
   const [discreteToggles, setDiscreteToggles] = useState<DiscreteViewerToggles>({
     enabled: true,
@@ -107,6 +133,26 @@ export function ScenarioViewer({
 
   function toggle(key: keyof ViewerToggles) {
     setToggles((current) => ({ ...current, [key]: !current[key] }));
+  }
+
+  function toggleArcColorMode() {
+    setArcColorMode((current) => (current === "type" ? "speed" : "type"));
+  }
+
+  function toggleDiscreteReplay(key: keyof ViewerToggles) {
+    setDiscreteReplayToggles((current) => ({ ...current, [key]: !current[key] }));
+  }
+
+  function toggleDiscreteReplayArcColorMode() {
+    setDiscreteReplayArcColorMode((current) => (current === "type" ? "speed" : "type"));
+  }
+
+  function toggleEanReplay(key: keyof ViewerToggles) {
+    setEanReplayToggles((current) => ({ ...current, [key]: !current[key] }));
+  }
+
+  function toggleEanReplayArcColorMode() {
+    setEanReplayArcColorMode((current) => (current === "type" ? "speed" : "type"));
   }
 
   function toggleDiscrete(key: keyof DiscreteViewerToggles) {
@@ -137,9 +183,17 @@ export function ScenarioViewer({
 
   useEffect(() => {
     if (!isViewerModeAvailable(viewerMode, availableModes)) {
-      setViewerMode("scenario");
+      setViewerMode(firstOptimizationMode(selectedBackend, availableModes) ?? "scenario");
     }
-  }, [availableModes, viewerMode]);
+  }, [availableModes, selectedBackend, viewerMode]);
+
+  const hasOptimizationModes = firstOptimizationMode(selectedBackend, availableModes) !== null;
+  const isReplayMode = viewerMode === "replay" || viewerMode === "ean_replay";
+
+  function handleOptimizationModeChange() {
+    const nextMode = firstOptimizationMode(selectedBackend, availableModes);
+    if (nextMode) setViewerMode(nextMode);
+  }
 
   return (
     <main className="viewer-shell">
@@ -150,11 +204,24 @@ export function ScenarioViewer({
         artifactSelection={artifactSelection}
       />
 
-      <ViewerModeTabs viewerMode={viewerMode} availableModes={availableModes} onViewerModeChange={setViewerMode} />
+      <ViewerModeTabs
+        viewerMode={viewerMode}
+        selectedBackend={selectedBackend}
+        hasOptimizationModes={hasOptimizationModes}
+        onScenarioModeChange={() => setViewerMode("scenario")}
+        onOptimizationModeChange={handleOptimizationModeChange}
+      />
 
       {viewerMode === "scenario" ? (
         <>
-          <ScenarioToolbar toggles={toggles} onToggle={toggle} />
+          <ScenarioToolbar
+            toggles={toggles}
+            displayMode={scenarioDisplayMode}
+            arcColorMode={arcColorMode}
+            onToggle={toggle}
+            onDisplayModeChange={setScenarioDisplayMode}
+            onArcColorModeToggle={toggleArcColorMode}
+          />
           {selectedBackend === "discrete" ? (
             <DiscreteOverlayToolbar
               hasDiscrete={hasDiscrete}
@@ -174,6 +241,8 @@ export function ScenarioViewer({
             hovered={hovered}
             activeSelection={activeSelection}
             toggles={toggles}
+            displayMode={scenarioDisplayMode}
+            arcColorMode={arcColorMode}
             discreteMode={discreteMode}
             discreteToggles={discreteToggles}
             onSelect={handleSelect}
@@ -181,54 +250,92 @@ export function ScenarioViewer({
           />
         </>
       ) : (
-        viewerMode === "graph" ? (
-          <GraphSlackView
-            scenario={scenario}
-            discreteScenario={discreteScenario}
-            eanPassengerService={eanPassengerService}
-          />
-        ) : viewerMode === "metrics" ? (
-          <MetricsView
-            scenario={scenario}
-            replayMetrics={replayMetrics}
-            replayMetricsWarning={replayMetricsWarning}
-          />
-        ) : viewerMode === "ean" ? (
-          <EanView
-            scenario={scenario}
-            eanInput={eanInput}
-            eanResult={eanResult}
-            eanReplay={eanReplay}
-            eanPassengerService={eanPassengerService}
-            eanInputWarning={eanInputWarning}
-            eanResultWarning={eanResultWarning}
-            eanReplayWarning={eanReplayWarning}
-            eanPassengerServiceWarning={eanPassengerServiceWarning}
-          />
-        ) : viewerMode === "ean_metrics" ? (
-          <EanMetricsView
-            scenario={scenario}
-            eanPassengerService={eanPassengerService}
-            eanPassengerServiceWarning={eanPassengerServiceWarning}
-          />
-        ) : viewerMode === "ean_replay" ? (
-          <EanReplayView
-            scenario={scenario}
-            eanReplay={eanReplay}
-            eanPassengerService={eanPassengerService}
-            eanReplayWarning={eanReplayWarning}
-            eanPassengerServiceWarning={eanPassengerServiceWarning}
-          />
-        ) : (
-          <ReplayView
-            scenario={scenario}
-            discreteScenario={discreteScenario}
-            movementPlan={movementPlan}
-            passengerReplay={passengerReplay}
-            movementPlanWarning={movementPlanWarning}
-            passengerReplayWarning={passengerReplayWarning}
-          />
-        )
+        <>
+          <section className="toolbar toolbar--optimization-context" aria-label="Optimization view controls">
+            <OptimizationModeTabs
+              viewerMode={viewerMode}
+              selectedBackend={selectedBackend}
+              availableModes={availableModes}
+              onViewerModeChange={setViewerMode}
+            />
+            {isReplayMode ? (
+              <>
+                <span className="toolbar__spacer" aria-hidden="true" />
+                <div className="toolbar__context-toggle" aria-label="Replay network toggles">
+                  {viewerMode === "ean_replay" ? (
+                    <NetworkContextToggles
+                      toggles={eanReplayToggles}
+                      arcColorMode={eanReplayArcColorMode}
+                      showDemandToggle
+                      onToggle={toggleEanReplay}
+                      onArcColorModeToggle={toggleEanReplayArcColorMode}
+                    />
+                  ) : (
+                    <NetworkContextToggles
+                      toggles={discreteReplayToggles}
+                      arcColorMode={discreteReplayArcColorMode}
+                      showDemandToggle
+                      onToggle={toggleDiscreteReplay}
+                      onArcColorModeToggle={toggleDiscreteReplayArcColorMode}
+                    />
+                  )}
+                </div>
+              </>
+            ) : null}
+          </section>
+          {viewerMode === "graph" ? (
+            <GraphSlackView
+              scenario={scenario}
+              discreteScenario={discreteScenario}
+              eanPassengerService={eanPassengerService}
+            />
+          ) : viewerMode === "metrics" ? (
+            <MetricsView
+              scenario={scenario}
+              replayMetrics={replayMetrics}
+              replayMetricsWarning={replayMetricsWarning}
+            />
+          ) : viewerMode === "ean" ? (
+            <EanView
+              scenario={scenario}
+              eanInput={eanInput}
+              eanResult={eanResult}
+              eanReplay={eanReplay}
+              eanPassengerService={eanPassengerService}
+              eanInputWarning={eanInputWarning}
+              eanResultWarning={eanResultWarning}
+              eanReplayWarning={eanReplayWarning}
+              eanPassengerServiceWarning={eanPassengerServiceWarning}
+            />
+          ) : viewerMode === "ean_metrics" ? (
+            <EanMetricsView
+              scenario={scenario}
+              eanPassengerService={eanPassengerService}
+              eanPassengerServiceWarning={eanPassengerServiceWarning}
+            />
+          ) : viewerMode === "ean_replay" ? (
+            <EanReplayView
+              scenario={scenario}
+              eanReplay={eanReplay}
+              eanPassengerService={eanPassengerService}
+              eanReplayWarning={eanReplayWarning}
+              eanPassengerServiceWarning={eanPassengerServiceWarning}
+              toggles={eanReplayToggles}
+              arcColorMode={eanReplayArcColorMode}
+            />
+          ) : (
+            <ReplayView
+              scenario={scenario}
+              discreteScenario={discreteScenario}
+              movementPlan={movementPlan}
+              passengerReplay={passengerReplay}
+              movementPlanWarning={movementPlanWarning}
+              passengerReplayWarning={passengerReplayWarning}
+              toggles={discreteReplayToggles}
+              arcColorMode={discreteReplayArcColorMode}
+            />
+          )}
+        </>
       )}
     </main>
   );
@@ -240,4 +347,21 @@ function isDiscreteSelection(selection: Selection | null) {
 
 function isViewerModeAvailable(mode: ViewerMode, availableModes: AvailableViewerModes) {
   return availableModes[mode];
+}
+
+function firstOptimizationMode(selectedBackend: ExportArtifactSetBackend, availableModes: AvailableViewerModes): ViewerMode | null {
+  if (selectedBackend === "ean") {
+    if (availableModes.ean) return "ean";
+    if (availableModes.ean_metrics) return "ean_metrics";
+    if (availableModes.ean_replay) return "ean_replay";
+    return null;
+  }
+
+  if (selectedBackend === "discrete") {
+    if (availableModes.graph) return "graph";
+    if (availableModes.metrics) return "metrics";
+    if (availableModes.replay) return "replay";
+  }
+
+  return null;
 }

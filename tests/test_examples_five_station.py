@@ -44,6 +44,14 @@ def test_five_station_scenario_validates_with_three_middle_skip_stations() -> No
     }
 
 
+def test_five_station_terminal_platform_exits_do_not_allow_waiting() -> None:
+    scenario = build_five_station_scenario()
+    waiting_node_ids = {node.id for node in scenario.physical_nodes if node.allows_waiting}
+
+    assert "L_platform_exit" not in waiting_node_ids
+    assert "R_platform_exit" not in waiting_node_ids
+
+
 def test_five_station_ean_config_waits_only_at_middle_stations() -> None:
     config = build_five_station_ean_config()
 

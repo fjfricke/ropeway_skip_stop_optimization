@@ -25,6 +25,14 @@ def test_three_station_discretization_config_uses_default_dt() -> None:
     assert config.rounding_policy.value == "ceil"
 
 
+def test_three_station_terminal_platform_exits_do_not_allow_waiting() -> None:
+    scenario = build_three_station_scenario()
+    waiting_node_ids = {node.id for node in scenario.physical_nodes if node.allows_waiting}
+
+    assert "L_platform_exit" not in waiting_node_ids
+    assert "R_platform_exit" not in waiting_node_ids
+
+
 def test_three_station_no_skip_no_wait_scenario_removes_skip_routes_and_segments() -> None:
     scenario = build_three_station_no_skip_no_wait_scenario("three_station_test_no_skip_no_wait")
     middle_station = next(station for station in scenario.stations if station.id == "M")

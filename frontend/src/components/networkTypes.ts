@@ -1,0 +1,48 @@
+import type { DiscreteArc, DiscreteConstraint, DiscreteNode } from "../types";
+
+export interface ReplayCabinMarker {
+  cabinId: number;
+  nodeId: string;
+  x?: number;
+  y?: number;
+  incomingArcId?: string | null;
+  loadCount?: number;
+  capacity?: number;
+  destinationLoads?: { destination: string; count: number }[];
+}
+
+export interface ReplayStationQueueMarker {
+  stationId: string;
+  totalCount: number;
+  destinationQueues: { destination: string; count: number }[];
+}
+
+export type SegmentRouteInfo = {
+  routeId: string;
+  routeKind: "service" | "skip";
+};
+
+export type ViewBoxState = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+export type DiscreteOverlayData = {
+  nodes: DiscreteNode[];
+  selectedNodeIds: Set<string>;
+  arcs: DiscreteArc[];
+  constraints: DiscreteConstraint[];
+  haloSegmentIds: Set<string>;
+};
+
+export type NodeLabelPlacement = {
+  dx: number;
+  dy: number;
+};
+
+export type SpeedDomain = {
+  min: number;
+  max: number;
+};

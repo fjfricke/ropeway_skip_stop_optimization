@@ -468,7 +468,6 @@ def _terminal_nodes(
             id=f"{station}_platform_exit",
             kind=PhysicalNodeKind.PLATFORM,
             station_id=station,
-            allows_waiting=True,
         ),
         PhysicalNode(id=f"{station}_exit_{exit_direction}", kind=PhysicalNodeKind.EXIT_SWITCH, station_id=station),
     )

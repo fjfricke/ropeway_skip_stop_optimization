@@ -9,6 +9,7 @@
   --panel: #f6f8f7;
   --line: #d9e0df;
   --rope: #627184;
+  --connector: #8a6680;
   --service: #1c8c74;
   --skip: #d97925;
   --accent: #285aa8;
@@ -53,8 +54,7 @@ button {
 .topbar,
 .toolbar,
 .network-panel,
-.panel,
-.timeline-reserve {
+.panel {
   border: 1px solid var(--line);
   background: color-mix(in oklch, var(--paper), white 40%);
 }
@@ -244,10 +244,44 @@ h3 {
   min-width: 160px;
 }
 
+.toolbar--network-context {
+  border-left: 0;
+  border-right: 0;
+  padding: 8px 10px;
+}
+
 .toolbar__row {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+.toolbar__spacer {
+  flex: 1 1 32px;
+}
+
+.toolbar__view-toggle {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.toolbar__context-toggle {
+  margin-left: auto;
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.toolbar button.toolbar__arc-color-button--type.is-active {
+  border-color: color-mix(in oklch, var(--accent), white 35%);
+  box-shadow: inset 0 -3px 0 color-mix(in oklch, var(--accent), white 20%);
+}
+
+.toolbar button.toolbar__arc-color-button--speed.is-active {
+  border-color: color-mix(in oklch, var(--skip), white 34%);
+  box-shadow: inset 0 -3px 0 color-mix(in oklch, var(--skip), white 15%);
 }
 
 .toolbar__row--ean {
@@ -406,7 +440,7 @@ h3 {
 }
 
 .segment--connector {
-  stroke: #64748b;
+  stroke: var(--connector);
 }
 
 .segment--skip {
@@ -443,12 +477,77 @@ h3 {
   fill: var(--rope);
 }
 
+.segment-arrow--station {
+  fill: var(--service);
+}
+
+.segment-arrow--connector {
+  fill: var(--connector);
+}
+
 .segment-arrow--service {
   fill: var(--service);
 }
 
 .segment-arrow--skip {
   fill: var(--skip);
+}
+
+.line-view__track-halo,
+.line-view__track {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+
+.line-view__track-halo {
+  stroke: rgba(255, 255, 255, 0.96);
+  stroke-width: 16;
+}
+
+.line-view__track {
+  stroke: var(--service);
+  stroke-width: 7;
+}
+
+.line-view-station circle {
+  fill: #fff;
+  stroke: var(--service);
+  stroke-width: 2.4;
+  vector-effect: non-scaling-stroke;
+}
+
+.line-view-station--terminal circle {
+  fill: #edf5ff;
+  stroke: #253345;
+}
+
+.line-view-station text {
+  fill: #17202b;
+  font-size: 13px;
+  font-weight: 820;
+  letter-spacing: 0;
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: rgba(255, 255, 255, 0.86);
+  stroke-width: 5px;
+}
+
+.line-view-demand rect {
+  fill: #fff7ed;
+  stroke: rgba(217, 121, 37, 0.38);
+  vector-effect: non-scaling-stroke;
+}
+
+.line-view-demand text {
+  fill: #8a4b12;
+  font-size: 11px;
+  font-weight: 820;
+  letter-spacing: 0;
+  text-anchor: middle;
+  paint-order: normal;
+  stroke: none;
 }
 
 .discrete-segment-halo {
@@ -570,7 +669,7 @@ h3 {
 }
 
 .segment-label rect {
-  fill: rgba(255, 255, 255, 0.88);
+  fill: rgba(255, 255, 255, 0.7);
   stroke: rgba(101, 113, 127, 0.25);
   vector-effect: non-scaling-stroke;
 }
@@ -617,7 +716,15 @@ h3 {
   fill: #f5f7ff;
 }
 
-.node text {
+.node.is-selected {
+  filter: drop-shadow(0 0 0.18rem rgba(40, 90, 168, 0.5));
+}
+
+.node-label {
+  pointer-events: none;
+}
+
+.node-label text {
   fill: #17202b;
   font-size: 12px;
   font-weight: 760;
@@ -729,9 +836,13 @@ h3 {
 
 .side-panel {
   min-width: 0;
+  min-height: 0;
   display: grid;
   align-content: start;
   gap: 12px;
+  overflow-y: auto;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
 .panel {
@@ -1615,23 +1726,6 @@ h3 {
 .speed-buttons button.is-active {
   border-color: color-mix(in oklch, var(--accent), white 35%);
   box-shadow: inset 0 -3px 0 color-mix(in oklch, var(--accent), white 20%);
-}
-
-.timeline-reserve {
-  display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  padding: 11px 14px;
-  color: var(--muted);
-  font-size: 0.82rem;
-  font-weight: 750;
-}
-
-.timeline-reserve__track {
-  height: 8px;
-  border: 1px solid var(--line);
-  background: repeating-linear-gradient(90deg, #dfe6e5 0 16px, #f7f9f8 16px 32px);
 }
 
 .load-state {

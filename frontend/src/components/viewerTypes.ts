@@ -26,10 +26,13 @@ export interface ViewerToggles {
   serviceRoutes: boolean;
   skipRoutes: boolean;
   demand: boolean;
-  parameters: boolean;
+  nodeLabels: boolean;
+  arcLabels: boolean;
 }
 
 export type DiscreteOverlayMode = "selected" | "neighborhood";
+export type ScenarioDisplayMode = "physical" | "line";
+export type ArcColorMode = "type" | "speed";
 export type ViewerMode = "scenario" | "graph" | "metrics" | "replay" | "ean" | "ean_metrics" | "ean_replay";
 
 export interface AvailableViewerModes {

@@ -191,11 +191,11 @@ def build_three_station_scenario() -> Scenario:
     physical_nodes = (
         PhysicalNode(id="L_entry_rl", kind=PhysicalNodeKind.ENTRY_SWITCH, station_id="L"),
         PhysicalNode(id="L_platform_entry", kind=PhysicalNodeKind.PLATFORM, station_id="L"),
-        PhysicalNode(id="L_platform_exit", kind=PhysicalNodeKind.PLATFORM, station_id="L", allows_waiting=True),
+        PhysicalNode(id="L_platform_exit", kind=PhysicalNodeKind.PLATFORM, station_id="L"),
         PhysicalNode(id="L_exit_lr", kind=PhysicalNodeKind.EXIT_SWITCH, station_id="L"),
         PhysicalNode(id="R_entry_lr", kind=PhysicalNodeKind.ENTRY_SWITCH, station_id="R"),
         PhysicalNode(id="R_platform_entry", kind=PhysicalNodeKind.PLATFORM, station_id="R"),
-        PhysicalNode(id="R_platform_exit", kind=PhysicalNodeKind.PLATFORM, station_id="R", allows_waiting=True),
+        PhysicalNode(id="R_platform_exit", kind=PhysicalNodeKind.PLATFORM, station_id="R"),
         PhysicalNode(id="R_exit_rl", kind=PhysicalNodeKind.EXIT_SWITCH, station_id="R"),
         PhysicalNode(id="M_entry_lr", kind=PhysicalNodeKind.ENTRY_SWITCH, station_id="M"),
         PhysicalNode(id="M_service_approach_lr", kind=PhysicalNodeKind.CONNECTOR, station_id="M"),

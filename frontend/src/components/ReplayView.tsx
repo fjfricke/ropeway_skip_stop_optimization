@@ -1,5 +1,5 @@
 import { CircleAlert, FastForward, Pause, Play, SkipBack, SkipForward } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { cumulativeDemandQueues, demandArrivalsAtStep, totalDemandCount, type DemandArrivalRow, type DemandQueueRow } from "../replayDemand";
 import { layoutForScenario } from "../scenarioLayout";
 import type {
@@ -15,7 +15,8 @@ import type {
 } from "../types";
 import { DemandSummaryPanel, type DemandSummaryRow } from "./DemandSummaryPanel";
 import { NetworkSvg, type ReplayCabinMarker, type ReplayStationQueueMarker } from "./NetworkSvg";
-import type { DiscreteViewerToggles, ViewerToggles } from "./viewerTypes";
+import { useNetworkPanelContentHeight } from "./useNetworkPanelContentHeight";
+import type { ArcColorMode, DiscreteViewerToggles, ViewerToggles } from "./viewerTypes";
 
 interface ReplayViewProps {
   scenario: Scenario;
@@ -24,14 +25,9 @@ interface ReplayViewProps {
   passengerReplay: PassengerReplayResult | null;
   movementPlanWarning: string | null;
   passengerReplayWarning: string | null;
+  toggles: ViewerToggles;
+  arcColorMode: ArcColorMode;
 }
-
-const REPLAY_TOGGLES: ViewerToggles = {
-  serviceRoutes: true,
-  skipRoutes: false,
-  demand: false,
-  parameters: false,
-};
 
 const REPLAY_DISCRETE_TOGGLES: DiscreteViewerToggles = {
   enabled: false,
@@ -51,7 +47,11 @@ export function ReplayView({
   passengerReplay,
   movementPlanWarning,
   passengerReplayWarning,
+  toggles,
+  arcColorMode,
 }: ReplayViewProps) {
+  const networkPanelRef = useRef<HTMLDivElement | null>(null);
+  const sidePanelMaxHeight = useNetworkPanelContentHeight(networkPanelRef);
   const layout = useMemo(() => layoutForScenario(scenario), [scenario]);
   const [timeStep, setTimeStep] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -121,7 +121,7 @@ export function ReplayView({
 
   return (
     <section className="replay-view">
-      <div className="network-panel replay-network">
+      <div className="network-panel replay-network" ref={networkPanelRef}>
         <div className="network-panel__header">
           <div>
             <h2>Cabin Replay</h2>
@@ -138,7 +138,8 @@ export function ReplayView({
           layout={layout}
           selected={null}
           hovered={null}
-          toggles={REPLAY_TOGGLES}
+          toggles={toggles}
+          arcColorMode={arcColorMode}
           discreteMode="selected"
           discreteToggles={REPLAY_DISCRETE_TOGGLES}
           replayCabins={currentPositions}
@@ -150,7 +151,7 @@ export function ReplayView({
         />
       </div>
 
-      <aside className="side-panel replay-side">
+      <aside className="side-panel replay-side" style={sidePanelMaxHeight === null ? undefined : { maxHeight: sidePanelMaxHeight }}>
         <section className="panel replay-controls">
           <header className="panel__header">
             <Play size={17} />

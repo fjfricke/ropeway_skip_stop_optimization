@@ -1,5 +1,5 @@
 import { CircleAlert, FastForward, Pause, Play, SkipBack, SkipForward, Waypoints } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { layoutForScenario } from "../scenarioLayout";
 import type { LayoutPoint, ScenarioLayout } from "../scenarioLayout";
 import type {
@@ -14,7 +14,8 @@ import type {
 import { DemandSummaryPanel, type DemandSummaryRow } from "./DemandSummaryPanel";
 import { NetworkSvg, type ReplayCabinMarker } from "./NetworkSvg";
 import type { ReplayStationQueueMarker } from "./NetworkSvg";
-import type { DiscreteViewerToggles, ViewerToggles } from "./viewerTypes";
+import { useNetworkPanelContentHeight } from "./useNetworkPanelContentHeight";
+import type { ArcColorMode, DiscreteViewerToggles, ViewerToggles } from "./viewerTypes";
 
 interface EanReplayViewProps {
   scenario: Scenario;
@@ -22,6 +23,8 @@ interface EanReplayViewProps {
   eanPassengerService: EanPassengerServiceResult | null;
   eanReplayWarning: string | null;
   eanPassengerServiceWarning: string | null;
+  toggles: ViewerToggles;
+  arcColorMode: ArcColorMode;
 }
 
 interface EanPassengerEvent {
@@ -41,13 +44,6 @@ interface EanPassengerState {
   onboardCount: number;
 }
 
-const REPLAY_TOGGLES: ViewerToggles = {
-  serviceRoutes: true,
-  skipRoutes: true,
-  demand: false,
-  parameters: false,
-};
-
 const REPLAY_DISCRETE_TOGGLES: DiscreteViewerToggles = {
   enabled: false,
   showMoveArcs: false,
@@ -66,7 +62,11 @@ export function EanReplayView({
   eanPassengerService,
   eanReplayWarning,
   eanPassengerServiceWarning,
+  toggles,
+  arcColorMode,
 }: EanReplayViewProps) {
+  const networkPanelRef = useRef<HTMLDivElement | null>(null);
+  const sidePanelMaxHeight = useNetworkPanelContentHeight(networkPanelRef);
   const layout = useMemo(() => layoutForScenario(scenario), [scenario]);
   const [timeSeconds, setTimeSeconds] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
@@ -121,7 +121,7 @@ export function EanReplayView({
 
   return (
     <section className="replay-view">
-      <div className="network-panel replay-network">
+      <div className="network-panel replay-network" ref={networkPanelRef}>
         <div className="network-panel__header">
           <div>
             <h2>EAN Cabin Replay</h2>
@@ -138,7 +138,8 @@ export function EanReplayView({
           layout={layout}
           selected={null}
           hovered={null}
-          toggles={REPLAY_TOGGLES}
+          toggles={toggles}
+          arcColorMode={arcColorMode}
           discreteMode="selected"
           discreteToggles={REPLAY_DISCRETE_TOGGLES}
           replayCabins={markers}
@@ -150,7 +151,7 @@ export function EanReplayView({
         />
       </div>
 
-      <aside className="side-panel replay-side">
+      <aside className="side-panel replay-side" style={sidePanelMaxHeight === null ? undefined : { maxHeight: sidePanelMaxHeight }}>
         <section className="panel replay-controls">
           <header className="panel__header">
             <Play size={17} />
