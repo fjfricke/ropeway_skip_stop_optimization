@@ -17,18 +17,10 @@ export function LineViewLayer({
   demandByStation: Map<string, number>;
   inverseZoom: number;
 }) {
-  const stations = scenario.stations.filter((station) => station.kind === "terminal" || station.kind === "service");
+  const stations = lineViewStations(scenario);
   if (stations.length === 0) return null;
 
-  const marginX = Math.min(150, viewBox.width * 0.14);
-  const y = viewBox.y + viewBox.height * 0.52;
-  const usableWidth = viewBox.width - 2 * marginX;
-  const step = stations.length > 1 ? usableWidth / (stations.length - 1) : 0;
-  const points = stations.map((station, index) => ({
-    station,
-    x: viewBox.x + marginX + step * index,
-    y,
-  }));
+  const points = lineViewPoints(scenario, viewBox);
   const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${round(point.x)} ${round(point.y)}`).join(" ");
 
   return (
@@ -53,6 +45,31 @@ export function LineViewLayer({
       ))}
     </g>
   );
+}
+
+export function lineViewStations(scenario: Scenario) {
+  return scenario.stations.filter((station) => station.kind === "terminal" || station.kind === "service");
+}
+
+export function lineViewPoints(scenario: Scenario, viewBox: ViewBoxState) {
+  const stations = lineViewStations(scenario);
+  const marginX = Math.min(150, viewBox.width * 0.14);
+  const y = viewBox.y + viewBox.height * 0.52;
+  const usableWidth = viewBox.width - 2 * marginX;
+  const step = stations.length > 1 ? usableWidth / (stations.length - 1) : 0;
+  return stations.map((station, index) => ({
+    station,
+    x: viewBox.x + marginX + step * index,
+    y,
+  }));
+}
+
+export function lineArcId(leftStationId: string, rightStationId: string) {
+  return `${leftStationId}__${rightStationId}`;
+}
+
+export function stationLabel(station: Station) {
+  return station.name?.trim() || station.id;
 }
 
 function LineViewStation({
@@ -93,8 +110,4 @@ function LineViewStation({
       ) : null}
     </g>
   );
-}
-
-function stationLabel(station: Station) {
-  return station.name?.trim() || station.id;
 }

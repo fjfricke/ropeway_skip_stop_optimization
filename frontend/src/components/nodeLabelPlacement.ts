@@ -2,33 +2,40 @@ import type { ScenarioLayout } from "../scenarioLayout";
 import type { PhysicalNode, TrackSegment } from "../types";
 import { clamp, pointOnSegment } from "./networkGeometry";
 import type { NodeLabelPlacement, ViewBoxState } from "./networkTypes";
+import { estimateTextSize, physicalNodeRadius, type NodeLabelPlacementMetrics } from "./scenarioFigureMetrics";
 
-export function buildNodeLabelPlacements(
-  nodes: PhysicalNode[],
-  visibleSegments: TrackSegment[],
-  layout: ScenarioLayout,
-  viewBox: ViewBoxState,
-  labelScale: number,
-): Map<string, NodeLabelPlacement> {
+export function buildNodeLabelPlacements({
+  nodes,
+  visibleSegments,
+  layout,
+  viewBox,
+  metrics,
+}: {
+  nodes: PhysicalNode[];
+  visibleSegments: TrackSegment[];
+  layout: ScenarioLayout;
+  viewBox: ViewBoxState;
+  metrics: NodeLabelPlacementMetrics;
+}): Map<string, NodeLabelPlacement> {
   const nodePoints = nodes
     .map((node) => {
       const point = layout.nodes[node.id];
-      return point ? { node, point, radius: nodeRadius(node) } : null;
+      return point ? { node, point, radius: physicalNodeRadius(node, metrics) } : null;
     })
     .filter((item): item is { node: PhysicalNode; point: { x: number; y: number }; radius: number } => item !== null)
     .sort((left, right) => left.point.y - right.point.y || left.point.x - right.point.x);
   const segmentSamples = visibleSegments.flatMap((segment) => sampleSegment(segment, layout));
   const labelItems = nodePoints.map((item) => {
-    const labelSize = estimateLabelSize(item.node.id.replaceAll("_", " "));
+    const labelSize = estimateLabelSize(item.node.id.replaceAll("_", " "), metrics);
     return {
       ...item,
       labelSize,
-      candidates: nodeLabelCandidates(item.radius, labelSize),
+      candidates: nodeLabelCandidates(item.radius, labelSize, metrics),
     };
   });
   const orderedItems = [...labelItems].sort((left, right) => {
-    const leftValid = staticValidCandidateCount(left, nodePoints, segmentSamples, viewBox, labelScale);
-    const rightValid = staticValidCandidateCount(right, nodePoints, segmentSamples, viewBox, labelScale);
+    const leftValid = staticValidCandidateCount(left, nodePoints, segmentSamples, viewBox, metrics);
+    const rightValid = staticValidCandidateCount(right, nodePoints, segmentSamples, viewBox, metrics);
     return leftValid - rightValid || left.point.y - right.point.y || left.point.x - right.point.x;
   });
   const placements = new Map<string, NodeLabelPlacement>();
@@ -41,17 +48,17 @@ export function buildNodeLabelPlacements(
       segmentSamples,
       placedLabelRects: Array.from(placedLabelRects.values()),
       viewBox,
-      labelScale,
+      metrics,
     });
     placements.set(item.node.id, { dx: best.dx, dy: best.dy });
-    placedLabelRects.set(item.node.id, nodeLabelRect(item.point, best, item.labelSize, labelScale));
+    placedLabelRects.set(item.node.id, nodeLabelRect(item.point, best, item.labelSize, metrics));
   }
 
   for (let pass = 0; pass < 3; pass += 1) {
     let changed = false;
     for (const item of orderedItems) {
       const currentRect = placedLabelRects.get(item.node.id);
-      if (!currentRect || labelCollisionCount(currentRect, item.node.id, placedLabelRects, labelScale) === 0) continue;
+      if (!currentRect || labelCollisionCount(currentRect, item.node.id, placedLabelRects, metrics) === 0) continue;
       const otherLabelRects = Array.from(placedLabelRects.entries())
         .filter(([nodeId]) => nodeId !== item.node.id)
         .map(([, rect]) => rect);
@@ -61,12 +68,12 @@ export function buildNodeLabelPlacements(
         segmentSamples,
         placedLabelRects: otherLabelRects,
         viewBox,
-        labelScale,
+        metrics,
       });
       const current = placements.get(item.node.id);
       if (current && current.dx === best.dx && current.dy === best.dy) continue;
       placements.set(item.node.id, { dx: best.dx, dy: best.dy });
-      placedLabelRects.set(item.node.id, nodeLabelRect(item.point, best, item.labelSize, labelScale));
+      placedLabelRects.set(item.node.id, nodeLabelRect(item.point, best, item.labelSize, metrics));
       changed = true;
     }
     if (!changed) break;
@@ -98,20 +105,26 @@ type Rect = {
   height: number;
 };
 
-function estimateLabelSize(label: string) {
-  return {
-    width: Math.max(42, label.length * 8.4),
-    height: 18,
-  };
+export function estimateNodeLabelSize(label: string, metrics: NodeLabelPlacementMetrics) {
+  return estimateTextSize(label, {
+    fontSize: metrics.fontSize,
+    minWidth: metrics.minWidth,
+    charWidthFactor: metrics.charWidthFactor,
+    lineHeightFactor: metrics.lineHeightFactor,
+  });
 }
 
-function nodeLabelCandidates(radius: number, labelSize: { width: number; height: number }): NodeLabelCandidate[] {
-  return [5, 3, 1, 0, -3, -6, -9, -12].flatMap((gap) => {
+function estimateLabelSize(label: string, metrics: NodeLabelPlacementMetrics) {
+  return estimateNodeLabelSize(label, metrics);
+}
+
+function nodeLabelCandidates(radius: number, labelSize: { width: number; height: number }, metrics: NodeLabelPlacementMetrics): NodeLabelCandidate[] {
+  return metrics.gaps.flatMap((gap, index) => {
     const horizontal = radius + gap + labelSize.width / 2;
     const vertical = radius + gap + labelSize.height / 2;
     const diagonalX = radius + gap + labelSize.width / 2;
     const diagonalY = radius + gap + labelSize.height / 2;
-    const gapPenalty = (5 - gap) * 20;
+    const gapPenalty = index * 20;
     return [
       { position: "t", dx: 0, dy: -vertical, bias: gapPenalty, gap },
       { position: "lt", dx: -diagonalX, dy: -diagonalY, bias: gapPenalty + 1, gap },
@@ -130,20 +143,20 @@ function staticValidCandidateCount(
   nodePoints: { node: PhysicalNode; point: { x: number; y: number }; radius: number }[],
   segmentSamples: { x: number; y: number }[],
   viewBox: ViewBoxState,
-  labelScale: number,
+  metrics: NodeLabelPlacementMetrics,
 ) {
   return item.candidates.filter((candidate) => {
-    const rect = nodeLabelRect(item.point, candidate, item.labelSize, labelScale);
-    const score = nodeLabelScore(rect, item.node.id, nodePoints, segmentSamples, [], viewBox, labelScale);
+    const rect = nodeLabelRect(item.point, candidate, item.labelSize, metrics);
+    const score = nodeLabelScore(rect, item.node.id, nodePoints, segmentSamples, [], viewBox, metrics);
     return score.ownershipViolations + score.nodeCollisions + score.segmentCollisions + score.boundsCollisions === 0;
   }).length;
 }
 
-function labelCollisionCount(rect: Rect, ownNodeId: string, placedLabelRects: Map<string, Rect>, labelScale: number) {
+function labelCollisionCount(rect: Rect, ownNodeId: string, placedLabelRects: Map<string, Rect>, metrics: NodeLabelPlacementMetrics) {
   let collisions = 0;
   for (const [nodeId, otherRect] of placedLabelRects.entries()) {
     if (nodeId === ownNodeId) continue;
-    if (rectsOverlap(expandRect(rect, 5 * labelScale), expandRect(otherRect, 5 * labelScale))) collisions += 1;
+    if (rectsOverlap(expandRect(rect, metrics.labelCollisionPadding * metrics.scale), expandRect(otherRect, metrics.labelCollisionPadding * metrics.scale))) collisions += 1;
   }
   return collisions;
 }
@@ -154,21 +167,21 @@ function chooseNodeLabelCandidate({
   segmentSamples,
   placedLabelRects,
   viewBox,
-  labelScale,
+  metrics,
 }: {
   item: NodeLabelItem;
   nodePoints: { node: PhysicalNode; point: { x: number; y: number }; radius: number }[];
   segmentSamples: { x: number; y: number }[];
   placedLabelRects: Rect[];
   viewBox: ViewBoxState;
-  labelScale: number;
+  metrics: NodeLabelPlacementMetrics;
 }) {
   let best = item.candidates[0];
   let bestScore: NodeLabelScore | null = null;
 
   for (const candidate of item.candidates) {
-    const rect = nodeLabelRect(item.point, candidate, item.labelSize, labelScale);
-    const score = nodeLabelScore(rect, item.node.id, nodePoints, segmentSamples, placedLabelRects, viewBox, labelScale);
+    const rect = nodeLabelRect(item.point, candidate, item.labelSize, metrics);
+    const score = nodeLabelScore(rect, item.node.id, nodePoints, segmentSamples, placedLabelRects, viewBox, metrics);
     if (!bestScore || compareNodeLabelScores(score, candidate, bestScore, best) < 0) {
       best = candidate;
       bestScore = score;
@@ -212,13 +225,13 @@ function nodeLabelRect(
   point: { x: number; y: number },
   candidate: { dx: number; dy: number },
   labelSize: { width: number; height: number },
-  labelScale: number,
+  metrics: NodeLabelPlacementMetrics,
 ): Rect {
   return {
-    x: point.x + candidate.dx * labelScale - (labelSize.width * labelScale) / 2,
-    y: point.y + candidate.dy * labelScale - (labelSize.height * labelScale) / 2,
-    width: labelSize.width * labelScale,
-    height: labelSize.height * labelScale,
+    x: point.x + candidate.dx * metrics.scale - (labelSize.width * metrics.scale) / 2,
+    y: point.y + candidate.dy * metrics.scale - (labelSize.height * metrics.scale) / 2,
+    width: labelSize.width * metrics.scale,
+    height: labelSize.height * metrics.scale,
   };
 }
 
@@ -229,7 +242,7 @@ function nodeLabelScore(
   segmentSamples: { x: number; y: number }[],
   placedLabelRects: Rect[],
   viewBox: ViewBoxState,
-  labelScale: number,
+  metrics: NodeLabelPlacementMetrics,
 ): NodeLabelScore {
   let ownershipViolations = 0;
   let ownershipPenalty = 0;
@@ -240,10 +253,10 @@ function nodeLabelScore(
   let softCost = 0;
   let minNodeCornerClearance = Number.POSITIVE_INFINITY;
   const ownNode = nodePoints.find((item) => item.node.id === ownNodeId);
-  const ownClearance = ownNode ? rectClearanceToCircle(rect, ownNode.point, ownNode.radius * labelScale) : Number.POSITIVE_INFINITY;
-  const paddedRect = expandRect(rect, 4 * labelScale);
+  const ownClearance = ownNode ? rectClearanceToCircle(rect, ownNode.point, ownNode.radius * metrics.scale) : Number.POSITIVE_INFINITY;
+  const paddedRect = expandRect(rect, metrics.segmentCollisionPadding * metrics.scale);
   for (const item of nodePoints) {
-    const scaledRadius = item.radius * labelScale;
+    const scaledRadius = item.radius * metrics.scale;
     if (item.node.id !== ownNodeId) {
       const otherClearance = rectClearanceToCircle(rect, item.point, scaledRadius);
       const violation = ownClearance - otherClearance;
@@ -253,7 +266,7 @@ function nodeLabelScore(
       }
       minNodeCornerClearance = Math.min(minNodeCornerClearance, rectCornerClearanceToCircle(rect, item.point, scaledRadius));
     }
-    if (item.node.id !== ownNodeId && rectOverlapsCircle(paddedRect, item.point, scaledRadius + 4 * labelScale)) nodeCollisions += 1;
+    if (item.node.id !== ownNodeId && rectOverlapsCircle(paddedRect, item.point, scaledRadius + metrics.nodeCollisionPadding * metrics.scale)) nodeCollisions += 1;
   }
   for (const point of segmentSamples) {
     if (pointInsideRect(point, paddedRect)) {
@@ -262,7 +275,7 @@ function nodeLabelScore(
     }
   }
   for (const label of placedLabelRects) {
-    if (rectsOverlap(expandRect(rect, 5 * labelScale), expandRect(label, 5 * labelScale))) labelCollisions += 1;
+    if (rectsOverlap(expandRect(rect, metrics.labelCollisionPadding * metrics.scale), expandRect(label, metrics.labelCollisionPadding * metrics.scale))) labelCollisions += 1;
   }
   if (rect.x < viewBox.x) {
     boundsCollisions += 1;
@@ -299,10 +312,6 @@ function sampleSegment(segment: TrackSegment, layout: ScenarioLayout) {
     if (point) points.push(point);
   }
   return points;
-}
-
-function nodeRadius(node: PhysicalNode) {
-  return node.kind === "platform" ? 12 : 9;
 }
 
 function expandRect(rect: Rect, amount: number): Rect {

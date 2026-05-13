@@ -1,4 +1,4 @@
-import { Maximize2, Move, ZoomIn, ZoomOut } from "lucide-react";
+import { Download, Maximize2, Move, ZoomIn, ZoomOut } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { MouseEvent, PointerEvent } from "react";
 import type { ScenarioLayout } from "../scenarioLayout";
@@ -18,6 +18,7 @@ import {
 } from "./networkGeometry";
 import type { NodeLabelPlacement, ReplayCabinMarker, ReplayStationQueueMarker, SegmentRouteInfo, SpeedDomain, ViewBoxState } from "./networkTypes";
 import { ReplayCabinLayer, ReplayStationQueueLayer } from "./ReplayLayers";
+import { screenNodeLabelPlacementMetrics } from "./scenarioFigureMetrics";
 import type { ArcColorMode, DiscreteOverlayMode, DiscreteViewerToggles, ScenarioDisplayMode, ViewerToggles } from "./viewerTypes";
 
 export type { ReplayCabinMarker, ReplayStationQueueMarker } from "./networkTypes";
@@ -36,6 +37,7 @@ interface NetworkSvgProps {
   replayCabins?: ReplayCabinMarker[];
   replayStationQueues?: ReplayStationQueueMarker[];
   selectedCabinId?: number | null;
+  onExportClick?: () => void;
   onSelect: (selection: Selection | null) => void;
   onHover: (selection: Selection | null) => void;
   onCabinSelect?: (cabinId: number) => void;
@@ -72,6 +74,7 @@ export function NetworkSvg({
   replayCabins = [],
   replayStationQueues = [],
   selectedCabinId = null,
+  onExportClick,
   onSelect,
   onHover,
   onCabinSelect,
@@ -197,7 +200,7 @@ export function NetworkSvg({
         visibleSegments,
         layout,
         viewBox: baseViewBox,
-        labelScale: labelPlacementScale,
+        metrics: screenNodeLabelPlacementMetrics(labelPlacementScale),
       });
     });
 
@@ -471,6 +474,12 @@ export function NetworkSvg({
         <Move size={14} />
         Drag to pan · wheel to zoom
       </div>
+      {onExportClick ? (
+        <button type="button" className="network-export-button" onClick={onExportClick}>
+          <Download size={15} />
+          Export
+        </button>
+      ) : null}
     </div>
   );
 }

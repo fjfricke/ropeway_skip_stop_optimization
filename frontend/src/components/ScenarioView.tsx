@@ -20,6 +20,7 @@ interface ScenarioViewProps {
   arcColorMode: ArcColorMode;
   discreteMode: DiscreteOverlayMode;
   discreteToggles: DiscreteViewerToggles;
+  onExportClick: () => void;
   onSelect: (selection: Selection | null) => void;
   onHover: (selection: Selection | null) => void;
 }
@@ -35,6 +36,7 @@ export function ScenarioView({
   arcColorMode,
   discreteMode,
   discreteToggles,
+  onExportClick,
   onSelect,
   onHover,
 }: ScenarioViewProps) {
@@ -74,6 +76,7 @@ export function ScenarioView({
           arcColorMode={arcColorMode}
           discreteMode={discreteMode}
           discreteToggles={discreteToggles}
+          onExportClick={onExportClick}
           onSelect={onSelect}
           onHover={onHover}
         />

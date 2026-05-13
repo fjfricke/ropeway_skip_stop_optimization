@@ -6,10 +6,12 @@ import { EanView } from "./EanView";
 import { GraphSlackView } from "./GraphSlackView";
 import { MetricsView } from "./MetricsView";
 import { ReplayView } from "./ReplayView";
+import { ScenarioExportModal } from "./ScenarioExportModal";
 import { NetworkContextToggles, ScenarioToolbar } from "./ScenarioToolbar";
 import { ScenarioView } from "./ScenarioView";
 import { ViewerHeader } from "./ViewerHeader";
 import { OptimizationModeTabs, ViewerModeTabs } from "./ViewerModeTabs";
+import { layoutForScenario } from "../scenarioLayout";
 import type {
   ArtifactSelectionControl,
   ArcColorMode,
@@ -108,6 +110,7 @@ export function ScenarioViewer({
   const [eanReplayToggles, setEanReplayToggles] = useState<ViewerToggles>(EAN_REPLAY_TOGGLES);
   const [eanReplayArcColorMode, setEanReplayArcColorMode] = useState<ArcColorMode>("type");
   const [discreteMode, setDiscreteMode] = useState<DiscreteOverlayMode>("neighborhood");
+  const [isExportOpen, setIsExportOpen] = useState(false);
   const [discreteToggles, setDiscreteToggles] = useState<DiscreteViewerToggles>({
     enabled: true,
     showMoveArcs: true,
@@ -119,6 +122,7 @@ export function ScenarioViewer({
 
   const selectedBackend = artifactSelection.selectedBackend;
   const visibleDiscreteScenario = selectedBackend === "discrete" ? discreteScenario : null;
+  const scenarioLayout = useMemo(() => layoutForScenario(scenario), [scenario]);
   const counts = useMemo(
     () => ({
       stations: scenario.stations.length,
@@ -245,9 +249,20 @@ export function ScenarioViewer({
             arcColorMode={arcColorMode}
             discreteMode={discreteMode}
             discreteToggles={discreteToggles}
+            onExportClick={() => setIsExportOpen(true)}
             onSelect={handleSelect}
             onHover={setHovered}
           />
+          {isExportOpen ? (
+            <ScenarioExportModal
+              scenario={scenario}
+              layout={scenarioLayout}
+              displayMode={scenarioDisplayMode}
+              toggles={toggles}
+              arcColorMode={arcColorMode}
+              onClose={() => setIsExportOpen(false)}
+            />
+          ) : null}
         </>
       ) : (
         <>
