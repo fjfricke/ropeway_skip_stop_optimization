@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { DiscreteOverlayToolbar } from "./DiscreteOverlayToolbar";
 import { EanMetricsView } from "./EanMetricsView";
+import { EanReplayExportModal } from "./EanReplayExportModal";
 import { EanReplayView } from "./EanReplayView";
 import { EanView } from "./EanView";
 import { GraphSlackView } from "./GraphSlackView";
@@ -111,6 +112,7 @@ export function ScenarioViewer({
   const [eanReplayArcColorMode, setEanReplayArcColorMode] = useState<ArcColorMode>("type");
   const [discreteMode, setDiscreteMode] = useState<DiscreteOverlayMode>("neighborhood");
   const [isExportOpen, setIsExportOpen] = useState(false);
+  const [eanReplayExportTime, setEanReplayExportTime] = useState<number | null>(null);
   const [discreteToggles, setDiscreteToggles] = useState<DiscreteViewerToggles>({
     enabled: true,
     showMoveArcs: true,
@@ -329,15 +331,30 @@ export function ScenarioViewer({
               eanPassengerServiceWarning={eanPassengerServiceWarning}
             />
           ) : viewerMode === "ean_replay" ? (
-            <EanReplayView
-              scenario={scenario}
-              eanReplay={eanReplay}
-              eanPassengerService={eanPassengerService}
-              eanReplayWarning={eanReplayWarning}
-              eanPassengerServiceWarning={eanPassengerServiceWarning}
-              toggles={eanReplayToggles}
-              arcColorMode={eanReplayArcColorMode}
-            />
+            <>
+              <EanReplayView
+                scenario={scenario}
+                eanReplay={eanReplay}
+                eanPassengerService={eanPassengerService}
+                eanReplayWarning={eanReplayWarning}
+                eanPassengerServiceWarning={eanPassengerServiceWarning}
+                toggles={eanReplayToggles}
+                arcColorMode={eanReplayArcColorMode}
+                onExportClick={(timeSeconds) => setEanReplayExportTime(timeSeconds)}
+              />
+              {eanReplayExportTime !== null && eanReplay ? (
+                <EanReplayExportModal
+                  scenario={scenario}
+                  layout={scenarioLayout}
+                  eanReplay={eanReplay}
+                  eanPassengerService={eanPassengerService}
+                  toggles={eanReplayToggles}
+                  arcColorMode={eanReplayArcColorMode}
+                  initialTimeSeconds={eanReplayExportTime}
+                  onClose={() => setEanReplayExportTime(null)}
+                />
+              ) : null}
+            </>
           ) : (
             <ReplayView
               scenario={scenario}

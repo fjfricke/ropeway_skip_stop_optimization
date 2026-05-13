@@ -16,12 +16,12 @@ import {
   segmentPath,
   zoomViewBox,
 } from "./networkGeometry";
-import type { NodeLabelPlacement, ReplayCabinMarker, ReplayStationQueueMarker, SegmentRouteInfo, SpeedDomain, ViewBoxState } from "./networkTypes";
-import { ReplayCabinLayer, ReplayStationQueueLayer } from "./ReplayLayers";
+import type { NodeLabelPlacement, ReplayCabinMarker, ReplayCollisionMarker, ReplayStationQueueMarker, SegmentRouteInfo, SpeedDomain, ViewBoxState } from "./networkTypes";
+import { ReplayCabinLayer, ReplayCollisionLayer, ReplayStationQueueLayer } from "./ReplayLayers";
 import { screenNodeLabelPlacementMetrics } from "./scenarioFigureMetrics";
 import type { ArcColorMode, DiscreteOverlayMode, DiscreteViewerToggles, ScenarioDisplayMode, ViewerToggles } from "./viewerTypes";
 
-export type { ReplayCabinMarker, ReplayStationQueueMarker } from "./networkTypes";
+export type { ReplayCabinMarker, ReplayCollisionMarker, ReplayStationQueueMarker } from "./networkTypes";
 
 interface NetworkSvgProps {
   scenario: Scenario;
@@ -35,6 +35,7 @@ interface NetworkSvgProps {
   discreteMode: DiscreteOverlayMode;
   discreteToggles: DiscreteViewerToggles;
   replayCabins?: ReplayCabinMarker[];
+  replayCollisionMarkers?: ReplayCollisionMarker[];
   replayStationQueues?: ReplayStationQueueMarker[];
   selectedCabinId?: number | null;
   onExportClick?: () => void;
@@ -72,6 +73,7 @@ export function NetworkSvg({
   discreteMode,
   discreteToggles,
   replayCabins = [],
+  replayCollisionMarkers = [],
   replayStationQueues = [],
   selectedCabinId = null,
   onExportClick,
@@ -469,6 +471,7 @@ export function NetworkSvg({
             onCabinSelect={onCabinSelect}
           />
         ) : null}
+        {replayCollisionMarkers.length > 0 ? <ReplayCollisionLayer collisions={replayCollisionMarkers} inverseZoom={inverseZoom} /> : null}
       </svg>
       <div className="network-pan-hint">
         <Move size={14} />

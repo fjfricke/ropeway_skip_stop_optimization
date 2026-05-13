@@ -5,10 +5,25 @@ export interface ReplayCabinMarker {
   nodeId: string;
   x?: number;
   y?: number;
+  physicalNodeId?: string | null;
+  segmentId?: string | null;
+  positionM?: number | null;
+  fromNodeId?: string | null;
+  toNodeId?: string | null;
+  segmentLengthM?: number | null;
+  resourceId?: string | null;
   incomingArcId?: string | null;
   loadCount?: number;
   capacity?: number;
   destinationLoads?: { destination: string; count: number }[];
+}
+
+export interface ReplayCollisionMarker {
+  id: string;
+  x: number;
+  y: number;
+  cabinIds: number[];
+  distanceM: number;
 }
 
 export interface ReplayStationQueueMarker {

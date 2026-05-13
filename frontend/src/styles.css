@@ -552,6 +552,7 @@ h3 {
 }
 
 .export-preview__canvas--selector {
+  position: relative;
   background: #fbfcfb;
 }
 
@@ -698,6 +699,76 @@ h3 {
 
 .export-preview__error {
   color: var(--danger);
+}
+
+.replay-export-frame-list {
+  display: grid;
+  gap: 6px;
+  max-height: 150px;
+  overflow: auto;
+}
+
+.replay-export-frame-list p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 740;
+}
+
+.replay-export-frame-list button {
+  min-height: 34px;
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font-weight: 800;
+  text-align: left;
+}
+
+.replay-export-frame-list em {
+  color: var(--muted);
+  font-style: normal;
+  font-size: 0.78rem;
+  font-weight: 760;
+}
+
+.replay-export-selector-controls {
+  position: absolute;
+  z-index: 2;
+  top: 12px;
+  left: 12px;
+  right: 12px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: var(--shadow-soft);
+}
+
+.replay-export-selector-controls button,
+.replay-export-selector-controls select {
+  min-height: 32px;
+  border: 1px solid var(--line);
+  background: #fff;
+  color: var(--ink);
+  font-weight: 800;
+}
+
+.replay-export-selector-controls button.is-active {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.replay-export-selector-controls strong {
+  margin-left: auto;
+  color: var(--ink);
+  font-size: 0.9rem;
 }
 
 .workspace {
@@ -1222,6 +1293,25 @@ h3 {
 .replay-cabin.is-selected .replay-cabin__shell {
   stroke: #17202b;
   stroke-width: 4;
+}
+
+.replay-collision-marker {
+  pointer-events: none;
+  filter: drop-shadow(0 6px 12px rgba(148, 24, 24, 0.35));
+}
+
+.replay-collision-marker circle {
+  fill: #d82020;
+  stroke: #fff;
+  stroke-width: 3.2;
+}
+
+.replay-collision-marker text {
+  fill: #fff;
+  font-size: 28px;
+  font-weight: 950;
+  text-anchor: middle;
+  pointer-events: none;
 }
 
 .station-queue {
@@ -2082,7 +2172,7 @@ h3 {
 
 .replay-buttons {
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) 42px;
+  grid-template-columns: 42px minmax(0, 1fr) 42px 42px;
   gap: 8px;
 }
 
@@ -2106,6 +2196,10 @@ h3 {
   border-color: var(--accent);
 }
 
+.replay-buttons .replay-direction {
+  margin-left: 8px;
+}
+
 .replay-slider {
   width: 100%;
   margin: 14px 0 10px;
@@ -2117,6 +2211,7 @@ h3 {
   grid-template-columns: auto 1fr;
   gap: 3px 8px;
   align-items: baseline;
+  font-variant-numeric: tabular-nums;
 }
 
 .replay-time strong {

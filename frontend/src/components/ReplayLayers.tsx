@@ -1,7 +1,7 @@
 import type { ScenarioLayout } from "../scenarioLayout";
 import type { DiscreteScenario, Scenario, TrackSegment } from "../types";
 import { discreteNodePoint, pointOnSegment, round } from "./networkGeometry";
-import type { ReplayCabinMarker, ReplayStationQueueMarker, ViewBoxState } from "./networkTypes";
+import type { ReplayCabinMarker, ReplayCollisionMarker, ReplayStationQueueMarker, ViewBoxState } from "./networkTypes";
 
 export function ReplayStationQueueLayer({
   queues,
@@ -314,6 +314,7 @@ export function ReplayCabinLayer({
   layout,
   inverseZoom,
   selectedCabinId,
+  showFill = true,
   onCabinSelect,
 }: {
   cabins: ReplayCabinMarker[];
@@ -322,6 +323,7 @@ export function ReplayCabinLayer({
   layout: ScenarioLayout;
   inverseZoom: number;
   selectedCabinId: number | null;
+  showFill?: boolean;
   onCabinSelect?: (cabinId: number) => void;
 }) {
   const segmentById = new Map(scenario.track_segments.map((segment) => [segment.id, segment]));
@@ -353,7 +355,7 @@ export function ReplayCabinLayer({
           >
             <circle className="replay-cabin__shell" r={radius} />
             <circle className="replay-cabin__empty" r={radius - 2.2} />
-            {capacity > 0 ? (
+            {showFill && capacity > 0 ? (
               <g className="replay-cabin__pie">
                 {cabinPieSlices(cabin.destinationLoads ?? [], capacity, radius - 2.2).map((slice) => (
                   <path key={slice.key} className={`replay-cabin__slice replay-cabin__slice--${destinationClass(slice.destination)}`} d={slice.d} />
@@ -367,6 +369,31 @@ export function ReplayCabinLayer({
           </g>
         );
       })}
+    </g>
+  );
+}
+
+export function ReplayCollisionLayer({
+  collisions,
+  inverseZoom,
+}: {
+  collisions: ReplayCollisionMarker[];
+  inverseZoom: number;
+}) {
+  if (collisions.length === 0) return null;
+  return (
+    <g className="layer layer--replay-collisions" aria-label="Replay collision warnings">
+      {collisions.map((collision) => (
+        <g key={collision.id} className="replay-collision-marker" transform={`translate(${collision.x} ${collision.y}) scale(${inverseZoom})`}>
+          <circle r="17" />
+          <text x="0" y="2" dominantBaseline="central">
+            !
+          </text>
+          <title>
+            Cabin spacing violation: C{collision.cabinIds.join(", C")} · {collision.distanceM.toFixed(2)}m
+          </title>
+        </g>
+      ))}
     </g>
   );
 }

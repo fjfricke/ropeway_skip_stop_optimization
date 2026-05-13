@@ -9,6 +9,7 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "fflate": "^0.8.2",
     "lucide-react": "^0.468.0",
     "react": "^19.2.1",
     "react-dom": "^19.2.1"

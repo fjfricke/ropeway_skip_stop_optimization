@@ -1,4 +1,4 @@
-import { CircleAlert, FastForward, Pause, Play, SkipBack, SkipForward, Waypoints } from "lucide-react";
+import { CircleAlert, FastForward, Pause, Play, RotateCcw, RotateCw, SkipBack, SkipForward, Waypoints } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { layoutForScenario } from "../scenarioLayout";
 import type { LayoutPoint, ScenarioLayout } from "../scenarioLayout";
@@ -13,7 +13,7 @@ import type {
   TrackSegment,
 } from "../types";
 import { DemandSummaryPanel, type DemandSummaryRow } from "./DemandSummaryPanel";
-import { NetworkSvg, type ReplayCabinMarker } from "./NetworkSvg";
+import { NetworkSvg, type ReplayCabinMarker, type ReplayCollisionMarker } from "./NetworkSvg";
 import type { ReplayStationQueueMarker } from "./NetworkSvg";
 import { useNetworkPanelContentHeight } from "./useNetworkPanelContentHeight";
 import type { ArcColorMode, DiscreteViewerToggles, ViewerToggles } from "./viewerTypes";
@@ -26,9 +26,10 @@ interface EanReplayViewProps {
   eanPassengerServiceWarning: string | null;
   toggles: ViewerToggles;
   arcColorMode: ArcColorMode;
+  onExportClick?: (timeSeconds: number) => void;
 }
 
-interface EanPassengerEvent {
+export interface EanPassengerEvent {
   kind: "boarding" | "alighting";
   ride: EanServedRideGroup;
   timeSeconds: number;
@@ -36,7 +37,7 @@ interface EanPassengerEvent {
   destination: string;
 }
 
-interface EanPassengerState {
+export interface EanPassengerState {
   cabinLoadsById: Map<number, { loadCount: number; destinationLoads: { destination: string; count: number }[] }>;
   queueMarkers: ReplayStationQueueMarker[];
   demandRows: DemandSummaryRow[];
@@ -44,6 +45,21 @@ interface EanPassengerState {
   waitingCount: number;
   onboardCount: number;
 }
+
+type EanCabinPosition = {
+  nodeId: string;
+  x: number;
+  y: number;
+  physicalNodeId?: string | null;
+  segmentId?: string | null;
+  positionM?: number | null;
+  fromNodeId?: string | null;
+  toNodeId?: string | null;
+  segmentLengthM?: number | null;
+  resourceId?: string | null;
+};
+
+export type PlaybackDirection = -1 | 1;
 
 const REPLAY_DISCRETE_TOGGLES: DiscreteViewerToggles = {
   enabled: false,
@@ -54,10 +70,11 @@ const REPLAY_DISCRETE_TOGGLES: DiscreteViewerToggles = {
   showMultiSegmentHeadway: false,
 };
 
-const SPEED_OPTIONS = [1, 2, 5, 10];
-const MANUAL_STEP_SECONDS = 0.5;
+export const SPEED_OPTIONS = [1, 2, 5, 10];
+export const MANUAL_STEP_SECONDS = 0.5;
 const SLIDER_STEP_SECONDS = 0.1;
-const EVENT_TOLERANCE_SECONDS = 0.25;
+export const EVENT_TOLERANCE_SECONDS = 0.25;
+const HEADWAY_WARNING_EPSILON_M = 1e-6;
 
 export function EanReplayView({
   scenario,
@@ -67,6 +84,7 @@ export function EanReplayView({
   eanPassengerServiceWarning,
   toggles,
   arcColorMode,
+  onExportClick,
 }: EanReplayViewProps) {
   const networkPanelRef = useRef<HTMLDivElement | null>(null);
   const sidePanelMaxHeight = useNetworkPanelContentHeight(networkPanelRef);
@@ -74,6 +92,7 @@ export function EanReplayView({
   const [timeSeconds, setTimeSeconds] = useState(0);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
+  const [playbackDirection, setPlaybackDirection] = useState<PlaybackDirection>(1);
   const [selectedCabinId, setSelectedCabinId] = useState<number | null>(eanReplay?.events[0]?.cabin_id ?? null);
 
   const timeBounds = useMemo(() => eanReplayTimeBounds(eanReplay), [eanReplay]);
@@ -87,6 +106,7 @@ export function EanReplayView({
     () => eanCabinMarkersAtTime(scenario, layout, eventsByCabin, timeSeconds, passengerState.cabinLoadsById),
     [eventsByCabin, layout, passengerState.cabinLoadsById, scenario, timeSeconds],
   );
+  const collisionMarkers = useMemo(() => eanReplayCollisionMarkers(scenario, markers), [markers, scenario]);
   const selectedMarker = markers.find((marker) => marker.cabinId === selectedCabinId) ?? markers[0] ?? null;
   const selectedEvent = selectedMarker ? latestEventAtOrBefore(eventsByCabin.get(selectedMarker.cabinId) ?? [], timeSeconds) : null;
   const currentEvents = useMemo(
@@ -109,14 +129,18 @@ export function EanReplayView({
     const animate = (frameMs: number) => {
       if (previousFrameMs !== null) {
         const elapsedSeconds = (frameMs - previousFrameMs) / 1000;
-        setTimeSeconds((current) => advanceReplayTime(current, elapsedSeconds * playbackSpeed, timeBounds.min, timeBounds.max));
+        setTimeSeconds((current) => {
+          const next = advanceReplayTime(current, elapsedSeconds * playbackSpeed * playbackDirection, timeBounds.min, timeBounds.max);
+          if (isReplayBoundary(next, playbackDirection, timeBounds.min, timeBounds.max)) setIsPlaying(false);
+          return next;
+        });
       }
       previousFrameMs = frameMs;
       frameId = window.requestAnimationFrame(animate);
     };
     frameId = window.requestAnimationFrame(animate);
     return () => window.cancelAnimationFrame(frameId);
-  }, [eanReplay, isPlaying, playbackSpeed, timeBounds.max, timeBounds.min]);
+  }, [eanReplay, isPlaying, playbackDirection, playbackSpeed, timeBounds.max, timeBounds.min]);
 
   if (!eanReplay) {
     return (
@@ -151,8 +175,10 @@ export function EanReplayView({
           discreteMode="selected"
           discreteToggles={REPLAY_DISCRETE_TOGGLES}
           replayCabins={markers}
+          replayCollisionMarkers={collisionMarkers}
           replayStationQueues={passengerState.queueMarkers}
           selectedCabinId={selectedMarker?.cabinId ?? selectedCabinId}
+          onExportClick={onExportClick ? () => onExportClick(timeSeconds) : undefined}
           onSelect={() => undefined}
           onHover={() => undefined}
           onCabinSelect={setSelectedCabinId}
@@ -166,15 +192,45 @@ export function EanReplayView({
             <h2>Timeline</h2>
           </header>
           <div className="replay-buttons">
-            <button onClick={() => setTimeSeconds((current) => Math.max(timeBounds.min, current - MANUAL_STEP_SECONDS))} aria-label="Previous time">
+            <button
+              onClick={() => {
+                setIsPlaying(false);
+                setTimeSeconds((current) => Math.max(timeBounds.min, current - MANUAL_STEP_SECONDS));
+              }}
+              aria-label="Previous time"
+            >
               <SkipBack size={16} />
             </button>
-            <button className="replay-play" onClick={() => setIsPlaying((current) => !current)}>
+            <button
+              className="replay-play"
+              onClick={() => {
+                if (isPlaying) {
+                  setIsPlaying(false);
+                  return;
+                }
+                setTimeSeconds((current) => replayStartTimeForDirection(current, playbackDirection, timeBounds.min, timeBounds.max));
+                setIsPlaying(true);
+              }}
+            >
               {isPlaying ? <Pause size={16} /> : <Play size={16} />}
               {isPlaying ? "Pause" : "Play"}
             </button>
-            <button onClick={() => setTimeSeconds((current) => Math.min(timeBounds.max, current + MANUAL_STEP_SECONDS))} aria-label="Next time">
+            <button
+              onClick={() => {
+                setIsPlaying(false);
+                setTimeSeconds((current) => Math.min(timeBounds.max, current + MANUAL_STEP_SECONDS));
+              }}
+              aria-label="Next time"
+            >
               <SkipForward size={16} />
+            </button>
+            <button
+              className="replay-direction"
+              onClick={() => setPlaybackDirection((current) => (current === 1 ? -1 : 1))}
+              aria-label={playbackDirection === 1 ? "Playback direction forward" : "Playback direction backward"}
+              title={playbackDirection === 1 ? "Forward playback" : "Backward playback"}
+            >
+              {playbackDirection === 1 ? <RotateCw size={17} /> : <RotateCcw size={17} />}
             </button>
           </div>
           <input
@@ -339,7 +395,7 @@ export function EanReplayView({
   );
 }
 
-function eanCabinMarkersAtTime(
+export function eanCabinMarkersAtTime(
   scenario: Scenario,
   layout: ScenarioLayout,
   eventsByCabin: Map<number, EanPhysicalEvent[]>,
@@ -355,6 +411,13 @@ function eanCabinMarkersAtTime(
       nodeId: position.nodeId,
       x: position.x,
       y: position.y,
+      physicalNodeId: position.physicalNodeId,
+      segmentId: position.segmentId,
+      positionM: position.positionM,
+      fromNodeId: position.fromNodeId,
+      toNodeId: position.toNodeId,
+      segmentLengthM: position.segmentLengthM,
+      resourceId: position.resourceId,
       loadCount: load?.loadCount ?? 0,
       capacity: scenario.operating.cabin_capacity,
       destinationLoads: load?.destinationLoads ?? [],
@@ -362,7 +425,91 @@ function eanCabinMarkersAtTime(
   });
 }
 
-function buildEanPassengerState(
+export function eanReplayCollisionMarkers(scenario: Scenario, markers: ReplayCabinMarker[]): ReplayCollisionMarker[] {
+  const requiredSpacingM = scenario.operating.cabin_length_m + scenario.operating.min_clearance_m;
+  if (requiredSpacingM <= 0) return [];
+  const collisions: ReplayCollisionMarker[] = [];
+
+  for (let leftIndex = 0; leftIndex < markers.length; leftIndex += 1) {
+    const left = markers[leftIndex];
+    if (left.x === undefined || left.y === undefined) continue;
+    for (let rightIndex = leftIndex + 1; rightIndex < markers.length; rightIndex += 1) {
+      const right = markers[rightIndex];
+      if (right.x === undefined || right.y === undefined) continue;
+      const distanceM = cabinSpacingDistanceM(left, right);
+      if (distanceM === null || distanceM >= requiredSpacingM - HEADWAY_WARNING_EPSILON_M) continue;
+      addCollisionMarker(collisions, {
+        id: `collision-${left.cabinId}-${right.cabinId}`,
+        x: (left.x + right.x) / 2,
+        y: (left.y + right.y) / 2,
+        cabinIds: [left.cabinId, right.cabinId],
+        distanceM,
+      });
+    }
+  }
+
+  return collisions;
+}
+
+function cabinSpacingDistanceM(left: ReplayCabinMarker, right: ReplayCabinMarker) {
+  if (left.physicalNodeId && right.physicalNodeId && left.physicalNodeId === right.physicalNodeId) return 0;
+
+  if (hasSegmentPosition(left) && hasSegmentPosition(right)) {
+    if (left.segmentId === right.segmentId) return Math.abs(left.positionM - right.positionM);
+    if (left.fromNodeId === right.fromNodeId && left.toNodeId === right.toNodeId) return Math.abs(left.positionM - right.positionM);
+    if (left.fromNodeId === right.toNodeId && left.toNodeId === right.fromNodeId) {
+      return Math.abs(left.positionM - (right.segmentLengthM - right.positionM));
+    }
+
+    const sharedNodeIds = [left.fromNodeId, left.toNodeId].filter((nodeId) => nodeId === right.fromNodeId || nodeId === right.toNodeId);
+    if (sharedNodeIds.length > 0) {
+      return Math.min(...sharedNodeIds.map((nodeId) => distanceToSegmentEndpointM(left, nodeId) + distanceToSegmentEndpointM(right, nodeId)));
+    }
+  }
+
+  if (left.physicalNodeId && hasSegmentPosition(right)) return distanceToSegmentEndpointM(right, left.physicalNodeId);
+  if (right.physicalNodeId && hasSegmentPosition(left)) return distanceToSegmentEndpointM(left, right.physicalNodeId);
+  return null;
+}
+
+function hasSegmentPosition(marker: ReplayCabinMarker): marker is ReplayCabinMarker & {
+  segmentId: string;
+  positionM: number;
+  fromNodeId: string;
+  toNodeId: string;
+  segmentLengthM: number;
+} {
+  return (
+    typeof marker.segmentId === "string"
+    && typeof marker.positionM === "number"
+    && typeof marker.fromNodeId === "string"
+    && typeof marker.toNodeId === "string"
+    && typeof marker.segmentLengthM === "number"
+  );
+}
+
+function distanceToSegmentEndpointM(
+  marker: ReplayCabinMarker & { positionM: number; fromNodeId: string; toNodeId: string; segmentLengthM: number },
+  nodeId: string,
+) {
+  if (nodeId === marker.fromNodeId) return marker.positionM;
+  if (nodeId === marker.toNodeId) return marker.segmentLengthM - marker.positionM;
+  return Number.POSITIVE_INFINITY;
+}
+
+function addCollisionMarker(collisions: ReplayCollisionMarker[], marker: ReplayCollisionMarker) {
+  const existing = collisions.find((collision) => Math.hypot(collision.x - marker.x, collision.y - marker.y) < 16);
+  if (!existing) {
+    collisions.push(marker);
+    return;
+  }
+  existing.cabinIds = [...new Set([...existing.cabinIds, ...marker.cabinIds])].sort((left, right) => left - right);
+  existing.distanceM = Math.min(existing.distanceM, marker.distanceM);
+  existing.x = (existing.x + marker.x) / 2;
+  existing.y = (existing.y + marker.y) / 2;
+}
+
+export function buildEanPassengerState(
   scenario: Scenario,
   passengerPlan: EanPassengerServicePlan | null,
   timeSeconds: number,
@@ -493,7 +640,7 @@ function eanCabinPositionAtTime(
   layout: ScenarioLayout,
   events: EanPhysicalEvent[],
   timeSeconds: number,
-): { nodeId: string; x: number; y: number } | null {
+): EanCabinPosition | null {
   const first = events[0];
   if (!first || timeSeconds < first.time_seconds) return null;
 
@@ -527,7 +674,7 @@ function pointAlongSegmentsAtTime(
   segmentIds: string[],
   elapsedSeconds: number,
   eventDurationSeconds: number,
-): { nodeId: string; x: number; y: number } | null {
+): EanCabinPosition | null {
   const segmentById = new Map(scenario.track_segments.map((segment) => [segment.id, segment]));
   const segments = segmentIds.map((segmentId) => segmentById.get(segmentId)).filter((segment): segment is TrackSegment => segment !== undefined);
   if (segments.length === 0) return null;
@@ -542,7 +689,7 @@ function pointAlongSegmentsAtTime(
   if (targetElapsedSeconds <= 0) {
     const first = segments[0];
     const point = pointOnSegment(first, layout, 0);
-    return point ? { ...point, nodeId: first.from_node_id } : null;
+    return point ? positionOnSegment(first, point, 0) : null;
   }
 
   for (let index = 0; index < segments.length; index += 1) {
@@ -551,32 +698,32 @@ function pointAlongSegmentsAtTime(
     if (targetElapsedSeconds <= segmentDurationSeconds) {
       const distanceM = travelDistanceAtTime(segment.length_m, segment.speed_profile, targetElapsedSeconds, segmentDurationSeconds);
       const point = pointOnSegment(segment, layout, segment.length_m === 0 ? 1 : distanceM / segment.length_m);
-      return point ? { ...point, nodeId: segment.id } : null;
+      return point ? positionOnSegment(segment, point, distanceM) : null;
     }
     targetElapsedSeconds -= segmentDurationSeconds;
   }
   const last = segments[segments.length - 1];
   const point = pointOnSegment(last, layout, 1);
-  return point ? { ...point, nodeId: last.to_node_id } : null;
+  return point ? positionOnSegment(last, point, last.length_m) : null;
 }
 
 function pointAlongSegmentsByDistance(
   layout: ScenarioLayout,
   segments: TrackSegment[],
   rawRatio: number,
-): { nodeId: string; x: number; y: number } | null {
+): EanCabinPosition | null {
   const totalLength = segments.reduce((sum, segment) => sum + segment.length_m, 0);
   let targetDistance = clamp(rawRatio, 0, 1) * totalLength;
   for (const segment of segments) {
     if (targetDistance <= segment.length_m) {
       const point = pointOnSegment(segment, layout, segment.length_m === 0 ? 1 : targetDistance / segment.length_m);
-      return point ? { ...point, nodeId: segment.id } : null;
+      return point ? positionOnSegment(segment, point, targetDistance) : null;
     }
     targetDistance -= segment.length_m;
   }
   const last = segments[segments.length - 1];
   const point = pointOnSegment(last, layout, 1);
-  return point ? { ...point, nodeId: last.to_node_id } : null;
+  return point ? positionOnSegment(last, point, last.length_m) : null;
 }
 
 function travelSecondsForSegment(segment: TrackSegment) {
@@ -605,7 +752,21 @@ function travelDistanceAtTime(lengthM: number, profile: SpeedProfile | null, ela
 
 function pointAtNode(layout: ScenarioLayout, nodeId: string) {
   const point = layout.nodes[nodeId];
-  return point ? { nodeId, x: point.x, y: point.y } : null;
+  return point ? { nodeId, physicalNodeId: nodeId, x: point.x, y: point.y } : null;
+}
+
+function positionOnSegment(segment: TrackSegment, point: LayoutPoint, positionM: number): EanCabinPosition {
+  return {
+    nodeId: segment.id,
+    x: point.x,
+    y: point.y,
+    segmentId: segment.id,
+    positionM: clamp(positionM, 0, segment.length_m),
+    fromNodeId: segment.from_node_id,
+    toNodeId: segment.to_node_id,
+    segmentLengthM: segment.length_m,
+    resourceId: segment.resource_id,
+  };
 }
 
 function pointOnSegment(segment: TrackSegment, layout: ScenarioLayout, rawT: number): LayoutPoint | null {
@@ -632,7 +793,7 @@ function pointOnSegment(segment: TrackSegment, layout: ScenarioLayout, rawT: num
   };
 }
 
-function groupEventsByCabin(events: EanPhysicalEvent[]) {
+export function groupEventsByCabin(events: EanPhysicalEvent[]) {
   const result = new Map<number, EanPhysicalEvent[]>();
   for (const event of events) {
     const cabinEvents = result.get(event.cabin_id) ?? [];
@@ -658,7 +819,7 @@ function eventsNearTime(events: EanPhysicalEvent[], timeSeconds: number, toleran
   return events.filter((event) => event.time_seconds >= 0 && Math.abs(event.time_seconds - timeSeconds) <= toleranceSeconds);
 }
 
-function eanReplayTimeBounds(replay: EanPhysicalReplay | null) {
+export function eanReplayTimeBounds(replay: EanPhysicalReplay | null) {
   if (!replay || replay.events.length === 0) return { min: 0, max: 0 };
   return {
     min: 0,
@@ -666,12 +827,21 @@ function eanReplayTimeBounds(replay: EanPhysicalReplay | null) {
   };
 }
 
-function advanceReplayTime(current: number, deltaSeconds: number, min: number, max: number) {
+export function advanceReplayTime(current: number, deltaSeconds: number, min: number, max: number) {
   if (max <= min) return min;
   const next = current + deltaSeconds;
-  if (next <= max) return Math.max(min, next);
-  const duration = max - min;
-  return min + ((next - min) % duration);
+  return clamp(next, min, max);
+}
+
+export function isReplayBoundary(timeSeconds: number, direction: PlaybackDirection, min: number, max: number) {
+  if (max <= min) return true;
+  return direction === 1 ? timeSeconds >= max : timeSeconds <= min;
+}
+
+function replayStartTimeForDirection(timeSeconds: number, direction: PlaybackDirection, min: number, max: number) {
+  if (direction === 1 && timeSeconds >= max) return min;
+  if (direction === -1 && timeSeconds <= min) return max;
+  return timeSeconds;
 }
 
 function eventOrder(event: EanPhysicalEvent) {
@@ -692,26 +862,26 @@ function timeOfDaySeconds(value: string) {
   return hours * 3600 + minutes * 60 + seconds;
 }
 
-function clockLabel(startTime: string, secondsAfterStart: number) {
+export function clockLabel(startTime: string, secondsAfterStart: number) {
   const [hours = 0, minutes = 0, seconds = 0] = startTime.split(":").map(Number);
   const totalSeconds = hours * 3600 + minutes * 60 + seconds + secondsAfterStart;
-  const normalized = ((totalSeconds % 86400) + 86400) % 86400;
-  const wholeSeconds = Math.floor(normalized);
-  const fraction = normalized - wholeSeconds;
+  const totalTenths = Math.round((((totalSeconds % 86400) + 86400) % 86400) * 10) % (86400 * 10);
+  const wholeSeconds = Math.floor(totalTenths / 10);
+  const tenths = totalTenths % 10;
   const hh = Math.floor(wholeSeconds / 3600);
   const mm = Math.floor((wholeSeconds % 3600) / 60);
   const ss = wholeSeconds % 60;
   const base = `${pad2(hh)}:${pad2(mm)}:${pad2(ss)}`;
-  if (fraction < 0.001) return base;
-  return `${base}.${Math.round(fraction * 10)}`;
+  if (tenths === 0) return base;
+  return `${base}.${tenths}`;
 }
 
 function pad2(value: number) {
   return String(value).padStart(2, "0");
 }
 
-function formatSeconds(seconds: number) {
-  return `${Math.round(seconds * 10) / 10}s`;
+export function formatSeconds(seconds: number) {
+  return `${seconds.toFixed(1)}s`;
 }
 
 function formatOptionalSeconds(value: number | null | undefined) {

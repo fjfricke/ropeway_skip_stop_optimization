@@ -4,7 +4,8 @@ import type { PhysicalNode, Scenario, Station, TrackSegment } from "../types";
 import { SegmentSpeedGradient, segmentSpeedColor, segmentSpeedStroke, speedDomainForSegments, speedProfileLabel } from "./arcColor";
 import { lineViewPoints, stationLabel } from "./LineViewLayer";
 import { pointOnSegment, round } from "./networkGeometry";
-import type { SegmentRouteInfo, SpeedDomain } from "./networkTypes";
+import type { ReplayCabinMarker, ReplayCollisionMarker, ReplayStationQueueMarker, SegmentRouteInfo, SpeedDomain } from "./networkTypes";
+import { ReplayCabinLayer, ReplayCollisionLayer, ReplayStationQueueLayer } from "./ReplayLayers";
 import {
   aggregateDemandByStation,
   exportSegmentArrowPlacement,
@@ -21,16 +22,26 @@ interface ScenarioExportSvgProps {
   layout: ScenarioLayout;
   config: ScenarioExportConfig;
   renderPlan: ScenarioExportRenderPlan;
+  replayCabins?: ReplayCabinMarker[];
+  replayCollisionMarkers?: ReplayCollisionMarker[];
+  replayStationQueues?: ReplayStationQueueMarker[];
+  showCabinFill?: boolean;
 }
 
 export const ScenarioExportSvg = forwardRef<SVGSVGElement, ScenarioExportSvgProps>(function ScenarioExportSvg(
-  { scenario, layout, config, renderPlan },
+  { scenario, layout, config, renderPlan, replayCabins = [], replayCollisionMarkers = [], replayStationQueues = [], showCabinFill = true },
   ref,
 ) {
   const baseViewBox = useMemo(() => parseViewBox(layout.viewBox), [layout.viewBox]);
   const metrics = renderPlan.metrics;
   const speedDomain = useMemo(() => speedDomainForSegments(scenario.track_segments), [scenario.track_segments]);
   const demandByStation = useMemo(() => aggregateDemandByStation(scenario), [scenario]);
+  const exportedReplayCabins = useMemo(() => replayCabinsForRenderPlan(replayCabins, renderPlan), [replayCabins, renderPlan]);
+  const exportedReplayCabinIds = useMemo(() => new Set(exportedReplayCabins.map((cabin) => cabin.cabinId)), [exportedReplayCabins]);
+  const exportedReplayCollisions = useMemo(
+    () => replayCollisionMarkers.filter((collision) => collision.cabinIds.every((cabinId) => exportedReplayCabinIds.has(cabinId))),
+    [exportedReplayCabinIds, replayCollisionMarkers],
+  );
 
   return (
     <svg
@@ -66,9 +77,39 @@ export const ScenarioExportSvg = forwardRef<SVGSVGElement, ScenarioExportSvgProp
       ) : (
         <ExportPhysicalLayer scenario={scenario} layout={layout} renderPlan={renderPlan} config={config} speedDomain={speedDomain} metrics={metrics} />
       )}
+      {config.displayMode === "physical" && config.toggles.demand && replayStationQueues.length > 0 ? (
+        <ReplayStationQueueLayer queues={replayStationQueues} scenario={scenario} layout={layout} viewBox={renderPlan.viewBox} inverseZoom={metrics.shapeScale} />
+      ) : null}
+      {config.displayMode === "physical" && exportedReplayCabins.length > 0 ? (
+        <ReplayCabinLayer
+          cabins={exportedReplayCabins}
+          discreteScenario={null}
+          scenario={scenario}
+          layout={layout}
+          inverseZoom={metrics.shapeScale}
+          selectedCabinId={null}
+          showFill={showCabinFill}
+        />
+      ) : null}
+      {config.displayMode === "physical" && exportedReplayCollisions.length > 0 ? (
+        <ReplayCollisionLayer collisions={exportedReplayCollisions} inverseZoom={metrics.shapeScale} />
+      ) : null}
     </svg>
   );
 });
+
+function replayCabinsForRenderPlan(cabins: ReplayCabinMarker[], renderPlan: ScenarioExportRenderPlan) {
+  return cabins.filter((cabin) => {
+    if (cabin.physicalNodeId) return renderPlan.physicalNodes.has(cabin.physicalNodeId);
+    if (!cabin.segmentId) return false;
+    const segmentRender = renderPlan.physicalSegments.find((current) => current.segment.id === cabin.segmentId);
+    if (!segmentRender) return false;
+    if (segmentRender.mode === "full") return true;
+    if (typeof cabin.positionM !== "number" || typeof cabin.segmentLengthM !== "number" || cabin.segmentLengthM <= 0) return true;
+    const t = cabin.positionM / cabin.segmentLengthM;
+    return segmentRender.mode === "from_start" ? t <= 0.5 : t >= 0.5;
+  });
+}
 
 function ExportLineLayer({
   scenario,
@@ -398,4 +439,19 @@ export const SCENARIO_EXPORT_SVG_STYLE = `
 .node--entry_switch circle,.node--entry_switch path,.node--exit_switch circle,.node--exit_switch path{fill:#fff2df;stroke:#d97925}
 .node-label{pointer-events:none}
 .node-label text{fill:#17202b;font-weight:600;letter-spacing:0;paint-order:stroke;stroke:rgba(255,255,255,.8)}
+.replay-cabin__shell{fill:#253345;stroke:#fff;stroke-width:2}
+.replay-cabin__empty{fill:#f7faf9;stroke:rgba(23,32,43,.24);stroke-width:1}
+.replay-cabin__slice{stroke:rgba(255,255,255,.9);stroke-width:.7}
+.replay-cabin__slice--l,.station-queue__bar--l{fill:#285aa8}
+.replay-cabin__slice--m,.station-queue__bar--m{fill:#1c8c74}
+.replay-cabin__slice--r,.station-queue__bar--r{fill:#d97925}
+.replay-cabin text{fill:#fff;font-size:8px;font-weight:850;text-anchor:middle;paint-order:stroke;stroke:rgba(23,32,43,.62);stroke-width:2.2px}
+.replay-cabin:not(.has-load) text{fill:#17202b;stroke:rgba(255,255,255,.92)}
+.replay-collision-marker{pointer-events:none;filter:drop-shadow(0 6px 12px rgba(148,24,24,.35))}
+.replay-collision-marker circle{fill:#d82020;stroke:#fff;stroke-width:3.2}
+.replay-collision-marker text{fill:#fff;font-size:28px;font-weight:950;text-anchor:middle}
+.station-queue{pointer-events:none}
+.station-queue__label{fill:#17202b;font-size:11px;font-weight:850;paint-order:stroke;stroke:rgba(255,255,255,.86);stroke-width:3px}
+.station-queue__bar{stroke:rgba(255,255,255,.92);stroke-width:.7}
+.station-queue text{fill:#253345;font-size:10px;font-weight:760}
 `;
