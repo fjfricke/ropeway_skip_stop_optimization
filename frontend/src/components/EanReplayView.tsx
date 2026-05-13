@@ -9,6 +9,7 @@ import type {
   EanPhysicalReplay,
   EanServedRideGroup,
   Scenario,
+  SpeedProfile,
   TrackSegment,
 } from "../types";
 import { DemandSummaryPanel, type DemandSummaryRow } from "./DemandSummaryPanel";
@@ -53,8 +54,10 @@ const REPLAY_DISCRETE_TOGGLES: DiscreteViewerToggles = {
   showMultiSegmentHeadway: false,
 };
 
-const SPEED_OPTIONS = [0.5, 1, 2, 5];
-const SLIDER_STEP_SECONDS = 0.5;
+const SPEED_OPTIONS = [1, 2, 5, 10];
+const MANUAL_STEP_SECONDS = 0.5;
+const SLIDER_STEP_SECONDS = 0.1;
+const EVENT_TOLERANCE_SECONDS = 0.25;
 
 export function EanReplayView({
   scenario,
@@ -77,7 +80,7 @@ export function EanReplayView({
   const eventsByCabin = useMemo(() => groupEventsByCabin(eanReplay?.events ?? []), [eanReplay]);
   const passengerPlan = eanPassengerService?.passenger_plan ?? null;
   const passengerState = useMemo(
-    () => buildEanPassengerState(scenario, passengerPlan, timeSeconds, SLIDER_STEP_SECONDS / 2),
+    () => buildEanPassengerState(scenario, passengerPlan, timeSeconds, EVENT_TOLERANCE_SECONDS),
     [passengerPlan, scenario, timeSeconds],
   );
   const markers = useMemo(
@@ -87,7 +90,7 @@ export function EanReplayView({
   const selectedMarker = markers.find((marker) => marker.cabinId === selectedCabinId) ?? markers[0] ?? null;
   const selectedEvent = selectedMarker ? latestEventAtOrBefore(eventsByCabin.get(selectedMarker.cabinId) ?? [], timeSeconds) : null;
   const currentEvents = useMemo(
-    () => (eanReplay ? eventsNearTime(eanReplay.events, timeSeconds, SLIDER_STEP_SECONDS / 2) : []),
+    () => (eanReplay ? eventsNearTime(eanReplay.events, timeSeconds, EVENT_TOLERANCE_SECONDS) : []),
     [eanReplay, timeSeconds],
   );
 
@@ -101,14 +104,19 @@ export function EanReplayView({
 
   useEffect(() => {
     if (!isPlaying || !eanReplay) return;
-    const interval = window.setInterval(() => {
-      setTimeSeconds((current) => {
-        const next = current + SLIDER_STEP_SECONDS * playbackSpeed;
-        return next > timeBounds.max ? timeBounds.min : next;
-      });
-    }, 120);
-    return () => window.clearInterval(interval);
-  }, [eanReplay, isPlaying, playbackSpeed, timeBounds]);
+    let frameId = 0;
+    let previousFrameMs: number | null = null;
+    const animate = (frameMs: number) => {
+      if (previousFrameMs !== null) {
+        const elapsedSeconds = (frameMs - previousFrameMs) / 1000;
+        setTimeSeconds((current) => advanceReplayTime(current, elapsedSeconds * playbackSpeed, timeBounds.min, timeBounds.max));
+      }
+      previousFrameMs = frameMs;
+      frameId = window.requestAnimationFrame(animate);
+    };
+    frameId = window.requestAnimationFrame(animate);
+    return () => window.cancelAnimationFrame(frameId);
+  }, [eanReplay, isPlaying, playbackSpeed, timeBounds.max, timeBounds.min]);
 
   if (!eanReplay) {
     return (
@@ -158,14 +166,14 @@ export function EanReplayView({
             <h2>Timeline</h2>
           </header>
           <div className="replay-buttons">
-            <button onClick={() => setTimeSeconds((current) => Math.max(timeBounds.min, current - SLIDER_STEP_SECONDS))} aria-label="Previous time">
+            <button onClick={() => setTimeSeconds((current) => Math.max(timeBounds.min, current - MANUAL_STEP_SECONDS))} aria-label="Previous time">
               <SkipBack size={16} />
             </button>
             <button className="replay-play" onClick={() => setIsPlaying((current) => !current)}>
               {isPlaying ? <Pause size={16} /> : <Play size={16} />}
               {isPlaying ? "Pause" : "Play"}
             </button>
-            <button onClick={() => setTimeSeconds((current) => Math.min(timeBounds.max, current + SLIDER_STEP_SECONDS))} aria-label="Next time">
+            <button onClick={() => setTimeSeconds((current) => Math.min(timeBounds.max, current + MANUAL_STEP_SECONDS))} aria-label="Next time">
               <SkipForward size={16} />
             </button>
           </div>
@@ -504,20 +512,59 @@ function eanCabinPositionAtTime(
   if (next.time_seconds <= previous.time_seconds) return pointAtNode(layout, next.physical_node_id);
   if (next.source_segment_ids.length === 0) return pointAtNode(layout, previous.physical_node_id);
 
-  const ratio = (timeSeconds - previous.time_seconds) / (next.time_seconds - previous.time_seconds);
-  return pointAlongSegments(scenario, layout, next.source_segment_ids, ratio) ?? pointAtNode(layout, previous.physical_node_id);
+  return pointAlongSegmentsAtTime(
+    scenario,
+    layout,
+    next.source_segment_ids,
+    timeSeconds - previous.time_seconds,
+    next.time_seconds - previous.time_seconds,
+  ) ?? pointAtNode(layout, previous.physical_node_id);
 }
 
-function pointAlongSegments(
+function pointAlongSegmentsAtTime(
   scenario: Scenario,
   layout: ScenarioLayout,
   segmentIds: string[],
-  rawRatio: number,
+  elapsedSeconds: number,
+  eventDurationSeconds: number,
 ): { nodeId: string; x: number; y: number } | null {
   const segmentById = new Map(scenario.track_segments.map((segment) => [segment.id, segment]));
   const segments = segmentIds.map((segmentId) => segmentById.get(segmentId)).filter((segment): segment is TrackSegment => segment !== undefined);
   if (segments.length === 0) return null;
 
+  const segmentDurations = segments.map(travelSecondsForSegment);
+  const totalTravelSeconds = segmentDurations.reduce((sum, seconds) => sum + seconds, 0);
+  const progressRatio = eventDurationSeconds <= 0 ? 1 : clamp(elapsedSeconds / eventDurationSeconds, 0, 1);
+  if (totalTravelSeconds <= 0) return pointAlongSegmentsByDistance(layout, segments, progressRatio);
+
+  let targetElapsedSeconds = progressRatio * totalTravelSeconds;
+
+  if (targetElapsedSeconds <= 0) {
+    const first = segments[0];
+    const point = pointOnSegment(first, layout, 0);
+    return point ? { ...point, nodeId: first.from_node_id } : null;
+  }
+
+  for (let index = 0; index < segments.length; index += 1) {
+    const segment = segments[index];
+    const segmentDurationSeconds = segmentDurations[index];
+    if (targetElapsedSeconds <= segmentDurationSeconds) {
+      const distanceM = travelDistanceAtTime(segment.length_m, segment.speed_profile, targetElapsedSeconds, segmentDurationSeconds);
+      const point = pointOnSegment(segment, layout, segment.length_m === 0 ? 1 : distanceM / segment.length_m);
+      return point ? { ...point, nodeId: segment.id } : null;
+    }
+    targetElapsedSeconds -= segmentDurationSeconds;
+  }
+  const last = segments[segments.length - 1];
+  const point = pointOnSegment(last, layout, 1);
+  return point ? { ...point, nodeId: last.to_node_id } : null;
+}
+
+function pointAlongSegmentsByDistance(
+  layout: ScenarioLayout,
+  segments: TrackSegment[],
+  rawRatio: number,
+): { nodeId: string; x: number; y: number } | null {
   const totalLength = segments.reduce((sum, segment) => sum + segment.length_m, 0);
   let targetDistance = clamp(rawRatio, 0, 1) * totalLength;
   for (const segment of segments) {
@@ -530,6 +577,30 @@ function pointAlongSegments(
   const last = segments[segments.length - 1];
   const point = pointOnSegment(last, layout, 1);
   return point ? { ...point, nodeId: last.to_node_id } : null;
+}
+
+function travelSecondsForSegment(segment: TrackSegment) {
+  const profile = segment.speed_profile;
+  if (!profile || segment.length_m <= 0) return 0;
+  if (profile.kind === "constant") {
+    const speed = profile.speed_m_per_s ?? 0;
+    return speed > 0 ? segment.length_m / speed : 0;
+  }
+  const startSpeed = profile.start_speed_m_per_s ?? 0;
+  const endSpeed = profile.end_speed_m_per_s ?? 0;
+  const averageSpeed = (startSpeed + endSpeed) / 2;
+  return averageSpeed > 0 ? segment.length_m / averageSpeed : 0;
+}
+
+function travelDistanceAtTime(lengthM: number, profile: SpeedProfile | null, elapsedSeconds: number, totalSeconds: number) {
+  if (!profile || totalSeconds <= 0) return lengthM;
+  if (profile.kind === "constant") {
+    return clamp((profile.speed_m_per_s ?? 0) * elapsedSeconds, 0, lengthM);
+  }
+  const startSpeed = profile.start_speed_m_per_s ?? 0;
+  const endSpeed = profile.end_speed_m_per_s ?? 0;
+  const acceleration = (endSpeed - startSpeed) / totalSeconds;
+  return clamp(startSpeed * elapsedSeconds + 0.5 * acceleration * elapsedSeconds * elapsedSeconds, 0, lengthM);
 }
 
 function pointAtNode(layout: ScenarioLayout, nodeId: string) {
@@ -593,6 +664,14 @@ function eanReplayTimeBounds(replay: EanPhysicalReplay | null) {
     min: 0,
     max: replay.model_end_seconds,
   };
+}
+
+function advanceReplayTime(current: number, deltaSeconds: number, min: number, max: number) {
+  if (max <= min) return min;
+  const next = current + deltaSeconds;
+  if (next <= max) return Math.max(min, next);
+  const duration = max - min;
+  return min + ((next - min) % duration);
 }
 
 function eventOrder(event: EanPhysicalEvent) {
