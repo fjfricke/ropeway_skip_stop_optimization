@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { DiscreteOverlayToolbar } from "./DiscreteOverlayToolbar";
 import { EanMetricsView } from "./EanMetricsView";
+import { EanReplayExportJobHost, type EanReplayVideoExportJob } from "./EanReplayExportJobHost";
 import { EanReplayExportModal } from "./EanReplayExportModal";
 import { EanReplayView } from "./EanReplayView";
 import { EanView } from "./EanView";
@@ -113,6 +114,7 @@ export function ScenarioViewer({
   const [discreteMode, setDiscreteMode] = useState<DiscreteOverlayMode>("neighborhood");
   const [isExportOpen, setIsExportOpen] = useState(false);
   const [eanReplayExportTime, setEanReplayExportTime] = useState<number | null>(null);
+  const [eanReplayExportJob, setEanReplayExportJob] = useState<EanReplayVideoExportJob | null>(null);
   const [discreteToggles, setDiscreteToggles] = useState<DiscreteViewerToggles>({
     enabled: true,
     showMoveArcs: true,
@@ -200,6 +202,10 @@ export function ScenarioViewer({
     const nextMode = firstOptimizationMode(selectedBackend, availableModes);
     if (nextMode) setViewerMode(nextMode);
   }
+
+  const handleDismissEanReplayExportJob = useCallback((jobId: number) => {
+    setEanReplayExportJob((current) => (current?.id === jobId ? null : current));
+  }, []);
 
   return (
     <main className="viewer-shell">
@@ -351,6 +357,19 @@ export function ScenarioViewer({
                   toggles={eanReplayToggles}
                   arcColorMode={eanReplayArcColorMode}
                   initialTimeSeconds={eanReplayExportTime}
+                  isVideoExportRunning={eanReplayExportJob !== null}
+                  onStartVideoExport={(config, format) => {
+                    if (eanReplayExportJob !== null) return;
+                    setEanReplayExportJob({
+                      id: Date.now(),
+                      scenario,
+                      layout: scenarioLayout,
+                      eanReplay,
+                      eanPassengerService,
+                      config,
+                      format,
+                    });
+                  }}
                   onClose={() => setEanReplayExportTime(null)}
                 />
               ) : null}
@@ -369,6 +388,10 @@ export function ScenarioViewer({
           )}
         </>
       )}
+      <EanReplayExportJobHost
+        job={eanReplayExportJob}
+        onDismiss={handleDismissEanReplayExportJob}
+      />
     </main>
   );
 }

@@ -46,7 +46,7 @@ export function ReplayStationQueueLayer({
   );
 }
 
-type Rect = {
+export type ReplayLayerRect = {
   x: number;
   y: number;
   width: number;
@@ -60,7 +60,7 @@ const STATION_QUEUE_GAP = 18;
 const STATION_BOX_PADDING = 18;
 const STATION_NODE_RADIUS = 12;
 
-function stationQueueSize(queue: ReplayStationQueueMarker, maxQueue: number) {
+export function stationQueueSize(queue: ReplayStationQueueMarker, maxQueue: number) {
   const labelWidth = `${queue.totalCount} waiting`.length * 7.4;
   const rowWidth = queue.destinationQueues.reduce((width, item) => {
     const barWidth = 18 + (item.count / maxQueue) * 54;
@@ -73,7 +73,7 @@ function stationQueueSize(queue: ReplayStationQueueMarker, maxQueue: number) {
   };
 }
 
-function stationQueuePlacement(
+export function stationQueuePlacement(
   stationId: string,
   scenario: Scenario,
   layout: ScenarioLayout,
@@ -99,7 +99,7 @@ function stationQueuePlacement(
   return { x: point.x - size.width / 2, y: point.y - size.height - STATION_QUEUE_GAP * inverseZoom };
 }
 
-function stationPlatformBoxes(stationId: string, scenario: Scenario, layout: ScenarioLayout): Rect[] {
+function stationPlatformBoxes(stationId: string, scenario: Scenario, layout: ScenarioLayout): ReplayLayerRect[] {
   const nodeById = new Map(scenario.physical_nodes.map((node) => [node.id, node]));
   return scenario.track_segments.flatMap((segment) => {
     if (segment.kind !== "station" || !segment.id.includes("platform")) return [];
@@ -122,8 +122,8 @@ function stationPlatformBoxes(stationId: string, scenario: Scenario, layout: Sce
   });
 }
 
-function farthestBoxPair(boxes: Rect[]): [Rect, Rect] {
-  let best: [Rect, Rect] = [boxes[0], boxes[1]];
+function farthestBoxPair(boxes: ReplayLayerRect[]): [ReplayLayerRect, ReplayLayerRect] {
+  let best: [ReplayLayerRect, ReplayLayerRect] = [boxes[0], boxes[1]];
   let bestDistance = -1;
   for (let leftIndex = 0; leftIndex < boxes.length; leftIndex += 1) {
     for (let rightIndex = leftIndex + 1; rightIndex < boxes.length; rightIndex += 1) {
@@ -139,7 +139,7 @@ function farthestBoxPair(boxes: Rect[]): [Rect, Rect] {
   return best;
 }
 
-function betweenStationBoxes([first, second]: [Rect, Rect], size: { width: number; height: number }) {
+function betweenStationBoxes([first, second]: [ReplayLayerRect, ReplayLayerRect], size: { width: number; height: number }) {
   const firstCenter = rectCenter(first);
   const secondCenter = rectCenter(second);
   const verticalGap = Math.abs(firstCenter.y - secondCenter.y) >= Math.abs(firstCenter.x - secondCenter.x);
@@ -163,8 +163,8 @@ function betweenStationBoxes([first, second]: [Rect, Rect], size: { width: numbe
 }
 
 function clippedTwoBoxPlacement(
-  pair: [Rect, Rect],
-  viewBox: Rect,
+  pair: [ReplayLayerRect, ReplayLayerRect],
+  viewBox: ReplayLayerRect,
   size: { width: number; height: number },
   stationId: string,
   scenario: Scenario,
@@ -184,12 +184,12 @@ function clippedTwoBoxPlacement(
 }
 
 function besideSingleStationBox(
-  box: Rect,
+  box: ReplayLayerRect,
   size: { width: number; height: number },
   stationId: string,
   scenario: Scenario,
   layout: ScenarioLayout,
-  viewBox: Rect,
+  viewBox: ReplayLayerRect,
   inverseZoom: number,
 ) {
   const gap = STATION_QUEUE_GAP * inverseZoom;
@@ -231,13 +231,13 @@ function stationQueueObstacles(stationId: string, scenario: Scenario, layout: Sc
 }
 
 function stationQueueCandidateScore(
-  rect: Rect,
+  rect: ReplayLayerRect,
   obstacles: {
     nodes: { point: { x: number; y: number }; radius: number }[];
     segments: { x: number; y: number }[];
-    stationBoxes: Rect[];
+    stationBoxes: ReplayLayerRect[];
   },
-  viewBox: Rect,
+  viewBox: ReplayLayerRect,
 ) {
   let clearance = Number.POSITIVE_INFINITY;
   for (const node of obstacles.nodes) {
@@ -263,29 +263,29 @@ function segmentSamplePoints(segment: TrackSegment, layout: ScenarioLayout) {
   return points;
 }
 
-function rectClearanceToPoint(rect: Rect, point: { x: number; y: number }) {
+function rectClearanceToPoint(rect: ReplayLayerRect, point: { x: number; y: number }) {
   const dx = Math.max(rect.x - point.x, 0, point.x - (rect.x + rect.width));
   const dy = Math.max(rect.y - point.y, 0, point.y - (rect.y + rect.height));
   return Math.hypot(dx, dy);
 }
 
-function rectClearanceToRect(left: Rect, right: Rect) {
+function rectClearanceToRect(left: ReplayLayerRect, right: ReplayLayerRect) {
   const dx = Math.max(right.x - (left.x + left.width), left.x - (right.x + right.width), 0);
   const dy = Math.max(right.y - (left.y + left.height), left.y - (right.y + right.height), 0);
   return Math.hypot(dx, dy);
 }
 
-function rectContainsRect(container: Rect, rect: Rect) {
+function rectContainsRect(container: ReplayLayerRect, rect: ReplayLayerRect) {
   return rect.x >= container.x && rect.y >= container.y && rect.x + rect.width <= container.x + container.width && rect.y + rect.height <= container.y + container.height;
 }
 
-function visibleAreaRatio(rect: Rect, viewBox: Rect) {
+function visibleAreaRatio(rect: ReplayLayerRect, viewBox: ReplayLayerRect) {
   const intersectionWidth = Math.max(0, Math.min(rect.x + rect.width, viewBox.x + viewBox.width) - Math.max(rect.x, viewBox.x));
   const intersectionHeight = Math.max(0, Math.min(rect.y + rect.height, viewBox.y + viewBox.height) - Math.max(rect.y, viewBox.y));
   return (intersectionWidth * intersectionHeight) / (rect.width * rect.height);
 }
 
-function rectCenter(rect: Rect) {
+function rectCenter(rect: ReplayLayerRect) {
   return {
     x: rect.x + rect.width / 2,
     y: rect.y + rect.height / 2,
@@ -299,7 +299,7 @@ function centeredAt(point: { x: number; y: number }, size: { width: number; heig
   };
 }
 
-function rectFromViewBox(value: ViewBoxState): Rect {
+function rectFromViewBox(value: ViewBoxState): ReplayLayerRect {
   return value;
 }
 

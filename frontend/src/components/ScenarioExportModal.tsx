@@ -34,7 +34,7 @@ export function ScenarioExportModal({ scenario, layout, displayMode, toggles, ar
     basis: "a4_width",
     percentage: DEFAULT_PERCENTAGE,
   }));
-  const [activePane, setActivePane] = useState<ExportPane>("preview");
+  const [activePane, setActivePane] = useState<ExportPane>("selector");
   const [downloadError, setDownloadError] = useState<string | null>(null);
   const exportSvgRef = useRef<SVGSVGElement | null>(null);
   const previewCanvasRef = useRef<HTMLDivElement | null>(null);
@@ -253,13 +253,13 @@ export function ScenarioExportModal({ scenario, layout, displayMode, toggles, ar
               </div>
               <div className="export-preview__actions">
                 <div className="export-pane-tabs" aria-label="Export panel">
-                  <button type="button" className={activePane === "preview" ? "is-active" : ""} onClick={() => setActivePane("preview")}>
-                    <Eye size={16} />
-                    Preview
-                  </button>
                   <button type="button" className={activePane === "selector" ? "is-active" : ""} onClick={() => setActivePane("selector")}>
                     <MousePointer2 size={16} />
                     Selector
+                  </button>
+                  <button type="button" className={activePane === "preview" ? "is-active" : ""} onClick={() => setActivePane("preview")}>
+                    <Eye size={16} />
+                    Preview
                   </button>
                 </div>
                 <button type="button" onClick={handleDownload}>

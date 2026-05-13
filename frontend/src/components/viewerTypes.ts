@@ -33,6 +33,7 @@ export interface ViewerToggles {
 export type ScenarioExportScope = "all" | "custom";
 export type ScenarioExportBasis = "a4_width" | "a4_height";
 export type ReplayExportMode = "video" | "frames";
+export type ReplayVideoExportFormat = "webm" | "mp4";
 export type DiscreteOverlayMode = "selected" | "neighborhood";
 export type ScenarioDisplayMode = "physical" | "line";
 export type ArcColorMode = "type" | "speed";
@@ -51,9 +52,9 @@ export interface ScenarioExportConfig {
 
 export interface ReplayExportConfig extends ScenarioExportConfig {
   exportMode: ReplayExportMode;
+  videoResolutionHeight: number;
   videoStartSeconds: number;
   videoEndSeconds: number;
-  fps: number;
   exportSpeed: number;
   selectedFrameTimes: number[];
   showCabinFill: boolean;

@@ -15,7 +15,8 @@ import {
   segmentPath,
   zoomViewBox,
 } from "./networkGeometry";
-import type { NodeLabelPlacement, SegmentRouteInfo, SpeedDomain, ViewBoxState } from "./networkTypes";
+import type { NodeLabelPlacement, ReplayCabinMarker, ReplayCollisionMarker, ReplayStationQueueMarker, SegmentRouteInfo, SpeedDomain, ViewBoxState } from "./networkTypes";
+import { ReplayCabinLayer, ReplayCollisionLayer, ReplayStationQueueLayer } from "./ReplayLayers";
 import { aggregateDemandByStation, isSegmentEnabled, routeInfoBySegment } from "./scenarioExportGeometry";
 import { screenNodeLabelPlacementMetrics } from "./scenarioFigureMetrics";
 import type { ScenarioExportConfig } from "./viewerTypes";
@@ -26,6 +27,10 @@ interface ScenarioExportSelectorSvgProps {
   config: ScenarioExportConfig;
   selectedNodeIds: Set<string>;
   selectedArcIds: Set<string>;
+  replayCabins?: ReplayCabinMarker[];
+  replayCollisionMarkers?: ReplayCollisionMarker[];
+  replayStationQueues?: ReplayStationQueueMarker[];
+  showCabinFill?: boolean;
   onNodeToggle: (id: string) => void;
   onArcToggle: (id: string) => void;
 }
@@ -52,6 +57,10 @@ export function ScenarioExportSelectorSvg({
   config,
   selectedNodeIds,
   selectedArcIds,
+  replayCabins = [],
+  replayCollisionMarkers = [],
+  replayStationQueues = [],
+  showCabinFill = true,
   onNodeToggle,
   onArcToggle,
 }: ScenarioExportSelectorSvgProps) {
@@ -296,6 +305,23 @@ export function ScenarioExportSelectorSvg({
             onArcToggle={onArcToggle}
           />
         )}
+        {config.displayMode === "physical" && config.toggles.demand && replayStationQueues.length > 0 ? (
+          <ReplayStationQueueLayer queues={replayStationQueues} scenario={scenario} layout={layout} viewBox={viewBox} inverseZoom={inverseZoom} />
+        ) : null}
+        {config.displayMode === "physical" && replayCabins.length > 0 ? (
+          <ReplayCabinLayer
+            cabins={replayCabins}
+            discreteScenario={null}
+            scenario={scenario}
+            layout={layout}
+            inverseZoom={inverseZoom}
+            selectedCabinId={null}
+            showFill={showCabinFill}
+          />
+        ) : null}
+        {config.displayMode === "physical" && replayCollisionMarkers.length > 0 ? (
+          <ReplayCollisionLayer collisions={replayCollisionMarkers} inverseZoom={inverseZoom} />
+        ) : null}
       </svg>
     </div>
   );
