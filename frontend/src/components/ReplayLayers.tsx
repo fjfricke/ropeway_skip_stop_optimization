@@ -2,6 +2,7 @@ import type { ScenarioLayout } from "../scenarioLayout";
 import type { DiscreteScenario, Scenario, TrackSegment } from "../types";
 import { discreteNodePoint, pointOnSegment, round } from "./networkGeometry";
 import type { ReplayCabinMarker, ReplayCollisionMarker, ReplayStationQueueMarker, ViewBoxState } from "./networkTypes";
+import { stationVisualColor } from "./stationColors";
 
 export function ReplayStationQueueLayer({
   queues,
@@ -32,7 +33,7 @@ export function ReplayStationQueueLayer({
               const width = 18 + (item.count / maxQueue) * 54;
               return (
                 <g key={item.destination} transform={`translate(0 ${22 + index * STATION_QUEUE_ROW_HEIGHT})`}>
-                  <rect className={`station-queue__bar station-queue__bar--${destinationClass(item.destination)}`} width={width} height="9" rx="2" />
+                  <rect className="station-queue__bar" width={width} height="9" rx="2" fill={stationVisualColor(item.destination, scenario.stations).base} />
                   <text x={width + 5} y="8">
                     {item.destination}:{item.count}
                   </text>
@@ -358,7 +359,7 @@ export function ReplayCabinLayer({
             {showFill && capacity > 0 ? (
               <g className="replay-cabin__pie">
                 {cabinPieSlices(cabin.destinationLoads ?? [], capacity, radius - 2.2).map((slice) => (
-                  <path key={slice.key} className={`replay-cabin__slice replay-cabin__slice--${destinationClass(slice.destination)}`} d={slice.d} />
+                  <path key={slice.key} className="replay-cabin__slice" d={slice.d} fill={stationVisualColor(slice.destination, scenario.stations).base} />
                 ))}
               </g>
             ) : null}
@@ -442,10 +443,6 @@ function polarPoint(radius: number, degrees: number) {
     x: radius * Math.cos(radians),
     y: radius * Math.sin(radians),
   };
-}
-
-function destinationClass(destination: string) {
-  return destination.toLowerCase().replace(/[^a-z0-9_-]/g, "");
 }
 
 function stationQueueAnchor(stationId: string, layout: ScenarioLayout) {

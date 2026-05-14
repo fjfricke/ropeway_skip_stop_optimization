@@ -442,9 +442,6 @@ export const SCENARIO_EXPORT_SVG_STYLE = `
 .replay-cabin__shell{fill:#253345;stroke:#fff;stroke-width:2}
 .replay-cabin__empty{fill:#f7faf9;stroke:rgba(23,32,43,.24);stroke-width:1}
 .replay-cabin__slice{stroke:rgba(255,255,255,.9);stroke-width:.7}
-.replay-cabin__slice--l,.station-queue__bar--l{fill:#285aa8}
-.replay-cabin__slice--m,.station-queue__bar--m{fill:#1c8c74}
-.replay-cabin__slice--r,.station-queue__bar--r{fill:#d97925}
 .replay-cabin text{fill:#fff;font-size:8px;font-weight:850;text-anchor:middle;paint-order:stroke;stroke:rgba(23,32,43,.62);stroke-width:2.2px}
 .replay-cabin:not(.has-load) text{fill:#17202b;stroke:rgba(255,255,255,.92)}
 .replay-collision-marker{pointer-events:none;filter:drop-shadow(0 6px 12px rgba(148,24,24,.35))}

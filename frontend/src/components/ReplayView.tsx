@@ -1,5 +1,6 @@
 import { CircleAlert, FastForward, Pause, Play, SkipBack, SkipForward } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { cumulativeDemandQueues, demandArrivalsAtStep, totalDemandCount, type DemandArrivalRow, type DemandQueueRow } from "../replayDemand";
 import { layoutForScenario } from "../scenarioLayout";
 import type {
@@ -15,6 +16,7 @@ import type {
 } from "../types";
 import { DemandSummaryPanel, type DemandSummaryRow } from "./DemandSummaryPanel";
 import { NetworkSvg, type ReplayCabinMarker, type ReplayStationQueueMarker } from "./NetworkSvg";
+import { stationVisualColor } from "./stationColors";
 import { useNetworkPanelContentHeight } from "./useNetworkPanelContentHeight";
 import type { ArcColorMode, DiscreteViewerToggles, ViewerToggles } from "./viewerTypes";
 
@@ -201,6 +203,7 @@ export function ReplayView({
           rows={demandQueueRows}
           emptyMessage="No waiting passengers"
           className="replay-demand-panel"
+          stations={scenario.stations}
         >
           <DemandArrivalList
             arrivals={demandArrivals}
@@ -234,7 +237,7 @@ export function ReplayView({
                 <span>incoming</span>
                 <strong>{selectedPosition.incomingArcId ?? "none"}</strong>
               </div>
-              <CabinLoadRows load={selectedCabinLoad} capacity={discreteScenario.cabin_capacity} />
+              <CabinLoadRows load={selectedCabinLoad} capacity={discreteScenario.cabin_capacity} stations={scenario.stations} />
               {selectedNode ? <ReplayNodeRows node={selectedNode} /> : null}
             </div>
           ) : (
@@ -330,7 +333,7 @@ function PassengerEventList({
   );
 }
 
-function CabinLoadRows({ load, capacity }: { load: CabinLoadState | null; capacity: number }) {
+function CabinLoadRows({ load, capacity, stations }: { load: CabinLoadState | null; capacity: number; stations: Scenario["stations"] }) {
   const loadCount = load ? load.onboard_groups.reduce((sum, group) => sum + group.count, 0) : 0;
   return (
     <>
@@ -343,7 +346,11 @@ function CabinLoadRows({ load, capacity }: { load: CabinLoadState | null; capaci
       {load?.onboard_groups.length ? (
         <div className="onboard-list">
           {load.onboard_groups.map((group) => (
-            <div className="onboard-row" key={`${group.batch_id}-${group.boarded_step}-${group.destination}`}>
+            <div
+              className="onboard-row"
+              key={`${group.batch_id}-${group.boarded_step}-${group.destination}`}
+              style={{ "--demand-destination-color": stationVisualColor(group.destination, stations).base } as CSSProperties}
+            >
               <span>
                 {group.origin} {"->"} {group.destination}
               </span>

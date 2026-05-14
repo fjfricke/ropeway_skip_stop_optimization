@@ -63,6 +63,7 @@ const DISCRETE_REPLAY_TOGGLES: ViewerToggles = {
   serviceRoutes: true,
   skipRoutes: false,
   demand: true,
+  stationZones: true,
   nodeLabels: true,
   arcLabels: false,
 };
@@ -71,6 +72,7 @@ const EAN_REPLAY_TOGGLES: ViewerToggles = {
   serviceRoutes: true,
   skipRoutes: true,
   demand: true,
+  stationZones: true,
   nodeLabels: true,
   arcLabels: false,
 };
@@ -102,6 +104,7 @@ export function ScenarioViewer({
     serviceRoutes: true,
     skipRoutes: true,
     demand: true,
+    stationZones: true,
     nodeLabels: true,
     arcLabels: false,
   });

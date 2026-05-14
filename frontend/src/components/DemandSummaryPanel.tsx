@@ -1,5 +1,8 @@
 import { Users } from "lucide-react";
 import type { ReactNode } from "react";
+import type { CSSProperties } from "react";
+import type { Station } from "../types";
+import { stationVisualColor } from "./stationColors";
 
 export interface DemandSummaryRow {
   id: string;
@@ -15,6 +18,7 @@ interface DemandSummaryPanelProps {
   rows: DemandSummaryRow[];
   emptyMessage?: string;
   className?: string;
+  stations?: Station[];
   children?: ReactNode;
 }
 
@@ -24,6 +28,7 @@ export function DemandSummaryPanel({
   rows,
   emptyMessage = "No demand",
   className,
+  stations,
   children,
 }: DemandSummaryPanelProps) {
   return (
@@ -38,15 +43,22 @@ export function DemandSummaryPanel({
         <div className="empty-panel empty-panel--compact">{emptyMessage}</div>
       ) : (
         <div className="demand-list">
-          {rows.map((row) => (
-            <div className="demand-row" key={row.id}>
-              <span className="od">
-                {row.origin} {"->"} {row.destination}
-              </span>
-              <strong>{row.count}</strong>
-              <small>{row.detail}</small>
-            </div>
-          ))}
+          {rows.map((row) => {
+            const color = stationVisualColor(row.destination, stations);
+            return (
+              <div
+                className="demand-row"
+                key={row.id}
+                style={{ "--demand-destination-color": color.base, "--demand-destination-fill": color.haloFill } as CSSProperties}
+              >
+                <span className="od">
+                  {row.origin} {"->"} {row.destination}
+                </span>
+                <strong>{row.count}</strong>
+                <small>{row.detail}</small>
+              </div>
+            );
+          })}
         </div>
       )}
     </section>

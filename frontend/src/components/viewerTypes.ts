@@ -26,6 +26,7 @@ export interface ViewerToggles {
   serviceRoutes: boolean;
   skipRoutes: boolean;
   demand: boolean;
+  stationZones: boolean;
   nodeLabels: boolean;
   arcLabels: boolean;
 }

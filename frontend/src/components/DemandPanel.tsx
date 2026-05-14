@@ -10,7 +10,7 @@ export function DemandPanel({ scenario }: DemandPanelProps) {
   const rows = useMemo(() => aggregateDemand(scenario), [scenario]);
   const total = rows.reduce((sum, row) => sum + row.count, 0);
 
-  return <DemandSummaryPanel total={total} rows={rows} />;
+  return <DemandSummaryPanel total={total} rows={rows} stations={scenario.stations} />;
 }
 
 function aggregateDemand(scenario: Scenario): DemandSummaryRow[] {

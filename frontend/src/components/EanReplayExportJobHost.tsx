@@ -157,7 +157,7 @@ async function runVideoExport(
   canvas.height = Number(staticSvg.getAttribute("height")) || renderPlan.outputHeight;
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Canvas export unavailable");
-  const spriteCache = createReplayVideoSpriteCache(canvas, renderPlan, job.config.showCabinFill);
+  const spriteCache = createReplayVideoSpriteCache(canvas, renderPlan, job.config.showCabinFill, job.scenario.stations);
 
   const { BufferTarget, CanvasSource, getFirstEncodableVideoCodec, Mp4OutputFormat, Output, QUALITY_HIGH, WebMOutputFormat } = await import("mediabunny");
   const codecCandidates = job.format === "mp4" ? ["avc"] as const : ["vp8", "vp9"] as const;

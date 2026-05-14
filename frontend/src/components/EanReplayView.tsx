@@ -1,5 +1,6 @@
 import { CircleAlert, FastForward, Pause, Play, RotateCcw, RotateCw, SkipBack, SkipForward, Waypoints } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import { layoutForScenario } from "../scenarioLayout";
 import type { LayoutPoint, ScenarioLayout } from "../scenarioLayout";
 import type {
@@ -15,6 +16,7 @@ import type {
 import { DemandSummaryPanel, type DemandSummaryRow } from "./DemandSummaryPanel";
 import { NetworkSvg, type ReplayCabinMarker, type ReplayCollisionMarker } from "./NetworkSvg";
 import type { ReplayStationQueueMarker } from "./NetworkSvg";
+import { stationVisualColor } from "./stationColors";
 import { useNetworkPanelContentHeight } from "./useNetworkPanelContentHeight";
 import type { ArcColorMode, DiscreteViewerToggles, ViewerToggles } from "./viewerTypes";
 
@@ -268,6 +270,7 @@ export function EanReplayView({
             rows={passengerState.demandRows}
             emptyMessage="No waiting passengers"
             className="replay-demand-panel"
+            stations={scenario.stations}
           >
             <EanPassengerEventList events={passengerState.currentEvents} />
           </DemandSummaryPanel>
@@ -334,7 +337,11 @@ export function EanReplayView({
               {selectedMarker.destinationLoads?.length ? (
                 <div className="onboard-list">
                   {selectedMarker.destinationLoads.map((load) => (
-                    <div className="onboard-row" key={load.destination}>
+                    <div
+                      className="onboard-row"
+                      key={load.destination}
+                      style={{ "--demand-destination-color": stationVisualColor(load.destination, scenario.stations).base } as CSSProperties}
+                    >
                       <span>to {load.destination}</span>
                       <strong>{load.count}</strong>
                     </div>

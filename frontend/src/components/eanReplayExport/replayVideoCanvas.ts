@@ -1,8 +1,9 @@
 import type { ScenarioLayout } from "../../scenarioLayout";
-import type { Scenario } from "../../types";
+import type { Scenario, Station } from "../../types";
 import type { ReplayCabinMarker, ReplayCollisionMarker } from "../networkTypes";
 import { stationQueuePlacement, stationQueueSize } from "../ReplayLayers";
 import type { ScenarioExportRenderPlan } from "../scenarioExportGeometry";
+import { stationVisualColor } from "../stationColors";
 import type { ReplayVideoFrame } from "./replayFrameModel";
 
 const STATION_QUEUE_ROW_HEIGHT = 14;
@@ -20,6 +21,7 @@ export type ReplayVideoSpriteCache = {
   renderPlan: ScenarioExportRenderPlan;
   scale: number;
   showCabinFill: boolean;
+  stations: Station[];
 };
 
 export function drawReplayVideoFrame(
@@ -51,13 +53,19 @@ export function drawReplayVideoFrame(
   }
 }
 
-export function createReplayVideoSpriteCache(canvas: HTMLCanvasElement, renderPlan: ScenarioExportRenderPlan, showCabinFill: boolean): ReplayVideoSpriteCache {
+export function createReplayVideoSpriteCache(
+  canvas: HTMLCanvasElement,
+  renderPlan: ScenarioExportRenderPlan,
+  showCabinFill: boolean,
+  stations: Station[],
+): ReplayVideoSpriteCache {
   return {
     cabinSprites: new Map(),
     queueSprites: new Map(),
     renderPlan,
     scale: exportScaleToCanvas(canvas, renderPlan),
     showCabinFill,
+    stations,
   };
 }
 
@@ -111,7 +119,7 @@ function replayCabinSprite(cache: ReplayVideoSpriteCache, cabin: ReplayCabinMark
     return fallback;
   }
   context.translate(size / 2, size / 2);
-  drawReplayCabinShape(context, cabin, radius, cache.renderPlan, cache.scale, cache.showCabinFill);
+  drawReplayCabinShape(context, cabin, radius, cache.renderPlan, cache.scale, cache.showCabinFill, cache.stations);
   const sprite = { source: spriteCanvas, offsetX: size / 2, offsetY: size / 2 };
   cache.cabinSprites.set(key, sprite);
   return sprite;
@@ -124,6 +132,7 @@ function drawReplayCabinShape(
   renderPlan: ScenarioExportRenderPlan,
   scale: number,
   showCabinFill: boolean,
+  stations: Station[],
 ) {
   const innerRadius = Math.max(1, radius - 2.2 * renderPlan.metrics.shapeScale * scale);
   const capacity = cabin.capacity ?? 0;
@@ -146,7 +155,7 @@ function drawReplayCabinShape(
   context.stroke();
 
   if (showCabinFill && capacity > 0) {
-    drawCabinPieSlices(context, cabin.destinationLoads ?? [], capacity, innerRadius);
+    drawCabinPieSlices(context, cabin.destinationLoads ?? [], capacity, innerRadius, stations);
   }
 
   const fontSize = Math.max(5, 8 * renderPlan.metrics.shapeScale * scale);
@@ -225,7 +234,7 @@ function replayQueueSprite(cache: ReplayVideoSpriteCache, queue: ReplayVideoFram
     const barWidth = 18 + (item.count / maxQueue) * 54;
     context.beginPath();
     roundedRectPath(context, 0, y, barWidth, 9, 2);
-    context.fillStyle = destinationColor(item.destination);
+    context.fillStyle = stationVisualColor(item.destination, cache.stations).base;
     context.fill();
     context.strokeStyle = "rgba(255,255,255,.92)";
     context.lineWidth = 1;
@@ -262,7 +271,13 @@ function roundedRectPath(context: CanvasRenderingContext2D, x: number, y: number
   context.quadraticCurveTo(x, y, x + safeRadius, y);
 }
 
-function drawCabinPieSlices(context: CanvasRenderingContext2D, destinationLoads: { destination: string; count: number }[], capacity: number, radius: number) {
+function drawCabinPieSlices(
+  context: CanvasRenderingContext2D,
+  destinationLoads: { destination: string; count: number }[],
+  capacity: number,
+  radius: number,
+  stations: Station[],
+) {
   let cursor = -Math.PI / 2;
   for (const item of destinationLoads) {
     if (item.count <= 0) continue;
@@ -272,7 +287,7 @@ function drawCabinPieSlices(context: CanvasRenderingContext2D, destinationLoads:
     context.moveTo(0, 0);
     context.arc(0, 0, radius, cursor, end);
     context.closePath();
-    context.fillStyle = destinationColor(item.destination);
+    context.fillStyle = stationVisualColor(item.destination, stations).base;
     context.fill();
     context.strokeStyle = "rgba(255,255,255,.9)";
     context.lineWidth = Math.max(0.5, radius * 0.07);
@@ -316,15 +331,4 @@ function exportPointToCanvas(x: number, y: number, canvas: HTMLCanvasElement, re
 
 function exportScaleToCanvas(canvas: HTMLCanvasElement, renderPlan: ScenarioExportRenderPlan) {
   return canvas.width / renderPlan.viewBox.width;
-}
-
-function destinationColor(destination: string) {
-  const key = destination.toLowerCase();
-  if (key === "l") return "#285aa8";
-  if (key === "m") return "#1c8c74";
-  if (key === "r") return "#d97925";
-  const palette = ["#285aa8", "#1c8c74", "#d97925", "#7b5fc9", "#c6476b", "#607d2f"];
-  let hash = 0;
-  for (const char of key) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
-  return palette[hash % palette.length];
 }
