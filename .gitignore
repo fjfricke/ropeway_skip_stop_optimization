@@ -14,6 +14,7 @@ frontend/dist/
 
 # Manifest-driven generated frontend artifacts.
 frontend/public/generated/
+frontend-generated-examples.tar.gz
 
 # Accidental generated exports when commands are run from the package source tree.
 src/ropeway_skip_stop_optimization/frontend/
