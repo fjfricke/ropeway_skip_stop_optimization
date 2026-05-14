@@ -49,6 +49,17 @@ interface ArtifactSelectionState {
   artifactSetId: string;
 }
 
+interface ChunkedJsonDescriptor {
+  __chunked_json__: true;
+  encoding: string;
+  size_bytes: number;
+  chunks: Array<{
+    path: string;
+    size_bytes: number;
+    sha256?: string;
+  }>;
+}
+
 export default function App() {
   const [manifest, setManifest] = useState<ExportManifest | null>(null);
   const [selection, setSelection] = useState<ArtifactSelectionState | null>(null);
@@ -218,7 +229,57 @@ async function fetchRequired<T>(url: string): Promise<T> {
   if (!response.ok) {
     throw new Error(`Failed to load ${url}: ${response.status}`);
   }
-  return (await response.json()) as T;
+  const json = await response.json();
+  return isChunkedJsonDescriptor(json) ? fetchChunkedJson<T>(json, response.url || url) : json as T;
+}
+
+async function fetchChunkedJson<T>(descriptor: ChunkedJsonDescriptor, descriptorUrl: string): Promise<T> {
+  const chunks = await Promise.all(
+    descriptor.chunks.map(async (chunk) => {
+      const chunkUrl = new URL(chunk.path, descriptorUrl).toString();
+      const response = await fetch(chunkUrl);
+      if (!response.ok) {
+        throw new Error(`Failed to load ${chunkUrl}: ${response.status}`);
+      }
+      const buffer = await response.arrayBuffer();
+      if (buffer.byteLength !== chunk.size_bytes) {
+        throw new Error(
+          `Chunk size mismatch for ${chunkUrl}: expected ${chunk.size_bytes}, got ${buffer.byteLength}`,
+        );
+      }
+      return new Uint8Array(buffer);
+    }),
+  );
+
+  const totalBytes = chunks.reduce((sum, chunk) => sum + chunk.byteLength, 0);
+  if (totalBytes !== descriptor.size_bytes) {
+    throw new Error(`Chunked JSON size mismatch for ${descriptorUrl}: expected ${descriptor.size_bytes}, got ${totalBytes}`);
+  }
+
+  const combined = new Uint8Array(totalBytes);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+
+  return JSON.parse(new TextDecoder(descriptor.encoding || "utf-8").decode(combined)) as T;
+}
+
+function isChunkedJsonDescriptor(value: unknown): value is ChunkedJsonDescriptor {
+  if (!value || typeof value !== "object") {
+    return false;
+  }
+  const candidate = value as Partial<ChunkedJsonDescriptor>;
+  return candidate.__chunked_json__ === true
+    && typeof candidate.encoding === "string"
+    && typeof candidate.size_bytes === "number"
+    && Array.isArray(candidate.chunks)
+    && candidate.chunks.every((chunk) => (
+      Boolean(chunk)
+      && typeof chunk.path === "string"
+      && typeof chunk.size_bytes === "number"
+    ));
 }
 
 async function loadArtifactSet(

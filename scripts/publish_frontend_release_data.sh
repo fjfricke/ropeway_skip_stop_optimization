@@ -13,6 +13,8 @@ generated_dir="$repo_root/frontend/public/generated"
 examples_dir="$generated_dir/examples"
 archive_name="frontend-generated-examples.tar.gz"
 tmp_dir="$(mktemp -d)"
+staged_parent="$tmp_dir/staged"
+staged_generated_dir="$staged_parent/generated"
 
 cleanup() {
   rm -rf "$tmp_dir"
@@ -32,8 +34,21 @@ fi
 
 archive_path="$tmp_dir/$archive_name"
 
-echo "Creating $archive_name from $generated_dir"
-tar -czf "$archive_path" -C "$repo_root/frontend/public" generated
+echo "Staging generated frontend data"
+python3 "$script_dir/stage_frontend_release_data.py" \
+  --source "$generated_dir" \
+  --output "$staged_generated_dir"
+
+echo "Checking staged file sizes"
+oversized_files="$(find "$staged_generated_dir" -type f -size +99M -print)"
+if [[ -n "$oversized_files" ]]; then
+  echo "Staged files still exceed Vercel's 100 MB file limit:" >&2
+  echo "$oversized_files" >&2
+  exit 1
+fi
+
+echo "Creating $archive_name from staged generated data"
+tar -czf "$archive_path" -C "$staged_parent" generated
 
 echo "Archive:"
 ls -lh "$archive_path"

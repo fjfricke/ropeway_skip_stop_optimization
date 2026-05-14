@@ -10,22 +10,31 @@ Deploy the frontend demo to Vercel from the latest GitHub Release, not from ever
 2. `frontend-generated-examples.tar.gz` is ignored.
 3. Added `scripts/publish_frontend_release_data.sh`.
    - Packages `frontend/public/generated`.
+   - Stages generated data before archiving.
+   - Replaces large JSON files with chunk descriptors plus `<file>.chunks/*.part` files below Vercel's 100 MB file limit.
    - Uploads it as a GitHub Release asset.
    - Prints archive size and SHA-256 checksum.
-4. Added `.github/workflows/deploy_frontend_release.yml`.
+4. Added `scripts/stage_frontend_release_data.py`.
+   - Copies generated data into a staging directory.
+   - Chunks generated JSON files larger than 50 MB.
+   - Writes chunk descriptors at the original JSON paths so manifest paths stay stable.
+5. Added chunked JSON support in the frontend loader.
+   - Normal JSON files still load directly.
+   - Chunk descriptors are resolved by loading all parts, concatenating bytes, decoding UTF-8, and parsing JSON.
+6. Added `.github/workflows/deploy_frontend_release.yml`.
    - Runs on `release: published`.
    - Downloads the generated data release asset.
    - Builds the frontend.
    - Deploys with the Vercel CLI.
-5. Added `frontend/middleware.ts`.
+7. Added `frontend/middleware.ts`.
    - Protects all Vercel requests with Basic Auth.
    - Also protects direct access to generated JSON files.
    - Uses `BASIC_AUTH_USER` and `BASIC_AUTH_PASSWORD`.
-6. Linked the local frontend directory to a Vercel project.
+8. Linked the local frontend directory to a Vercel project.
    - Project name: `ropeway-skip-stop-optimization-frontend`.
    - Vercel created `frontend/.vercel/project.json` locally.
    - `frontend/.vercel/` is ignored through `frontend/.gitignore`.
-7. Added the required GitHub Action secrets.
+9. Added the required GitHub Action secrets.
    - `VERCEL_TOKEN`
    - `VERCEL_ORG_ID`
    - `VERCEL_PROJECT_ID`
@@ -50,8 +59,10 @@ Commit these files:
 - `.gitignore`
 - `.github/workflows/deploy_frontend_release.yml`
 - `scripts/publish_frontend_release_data.sh`
+- `scripts/stage_frontend_release_data.py`
 - `frontend/.gitignore`
 - `frontend/middleware.ts`
+- `frontend/src/App.tsx`
 - this plan file
 
 ### 3. Prepare Release Data
