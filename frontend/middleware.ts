@@ -1,5 +1,9 @@
 const REALM = "ropeway-demo";
 
+declare const process: {
+  env: Record<string, string | undefined>;
+};
+
 function unauthorized(): Response {
   return new Response("Authentication required.", {
     status: 401,
@@ -72,4 +76,3 @@ export default function middleware(request: Request): Response | undefined {
 
   return undefined;
 }
-
