@@ -1233,6 +1233,20 @@ h3 {
   opacity: 0.7;
 }
 
+.station-zone-fringe {
+  stroke: none;
+  pointer-events: none;
+}
+
+.station-name-label {
+  fill: #17202b;
+  font-weight: 850;
+  letter-spacing: 0;
+  paint-order: stroke;
+  stroke: rgba(255, 255, 255, 0.82);
+  pointer-events: none;
+}
+
 .segment {
   fill: none;
   stroke-width: 5;
@@ -1799,8 +1813,15 @@ h3 {
   gap: 4px 10px;
   align-items: center;
   border: 1px solid var(--line);
-  border-left: 4px solid var(--demand-destination-color, var(--line));
-  background: linear-gradient(90deg, var(--demand-destination-fill, rgba(255, 255, 255, 0)) 0%, #fff 46%);
+  border-left: 4px solid var(--demand-source-color, var(--line));
+  background:
+    linear-gradient(
+      90deg,
+      var(--demand-source-fill, rgba(255, 255, 255, 0)) 0%,
+      rgba(255, 255, 255, 0.78) 50%,
+      var(--demand-destination-fill, rgba(255, 255, 255, 0)) 100%
+    ),
+    #fff;
   padding: 9px;
 }
 

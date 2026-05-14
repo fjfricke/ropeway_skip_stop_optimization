@@ -1,4 +1,4 @@
-import { Download, Tags, Users, WholeWord, X } from "lucide-react";
+import { Download, MapPinned, Tags, Users, WholeWord, X } from "lucide-react";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import type { ScenarioLayout } from "../scenarioLayout";
@@ -33,6 +33,7 @@ export function ScenarioExportModal({ scenario, layout, displayMode, toggles, ar
     selectedNodeIds: nodeOptions.map((option) => option.id),
     selectedArcIds: arcOptions.map((option) => option.id),
     toggles: { ...toggles },
+    stationNames: false,
     arcColorMode,
     basis: "a4_width",
     percentage: DEFAULT_EXPORT_PERCENTAGE,
@@ -147,8 +148,8 @@ export function ScenarioExportModal({ scenario, layout, displayMode, toggles, ar
                 {displayMode === "line" ? (
                   <>
                     <button type="button" className={config.toggles.nodeLabels ? "is-active" : ""} onClick={() => toggleExportLayer("nodeLabels")}>
-                      <WholeWord size={16} />
-                      Node Labels
+                      <MapPinned size={16} />
+                      Station Names
                     </button>
                     <button type="button" className={config.toggles.demand ? "is-active" : ""} onClick={() => toggleExportLayer("demand")}>
                       <Users size={16} />
@@ -162,6 +163,14 @@ export function ScenarioExportModal({ scenario, layout, displayMode, toggles, ar
                     </button>
                     <button type="button" className={config.toggles.skipRoutes ? "is-active" : ""} onClick={() => toggleExportLayer("skipRoutes")}>
                       Skip
+                    </button>
+                    <button type="button" className={config.toggles.stationZones ? "is-active" : ""} onClick={() => toggleExportLayer("stationZones")}>
+                      <MapPinned size={16} />
+                      Station Zones
+                    </button>
+                    <button type="button" className={config.stationNames ? "is-active" : ""} onClick={() => updateConfig((current) => ({ ...current, stationNames: !current.stationNames }))}>
+                      <MapPinned size={16} />
+                      Station Names
                     </button>
                     <button type="button" className={config.toggles.nodeLabels ? "is-active" : ""} onClick={() => toggleExportLayer("nodeLabels")}>
                       <WholeWord size={16} />

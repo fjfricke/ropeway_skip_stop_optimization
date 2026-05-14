@@ -1,8 +1,9 @@
 import type { ScenarioLayout } from "../../scenarioLayout";
 import type { Scenario, Station } from "../../types";
 import type { ReplayCabinMarker, ReplayCollisionMarker } from "../networkTypes";
-import { stationQueuePlacement, stationQueueSize } from "../ReplayLayers";
+import { stationQueueSize } from "../ReplayLayers";
 import type { ScenarioExportRenderPlan } from "../scenarioExportGeometry";
+import { stationContentPlacement } from "../stationPlacement";
 import { stationVisualColor } from "../stationColors";
 import type { ReplayVideoFrame } from "./replayFrameModel";
 
@@ -183,7 +184,7 @@ function drawReplayQueues(
   const maxQueue = Math.max(1, ...queues.map((queue) => queue.totalCount));
   for (const queue of queues) {
     const localSize = stationQueueSize(queue, maxQueue);
-    const placement = stationQueuePlacement(queue.stationId, scenario, layout, renderPlan.viewBox, localSize, renderPlan.metrics.shapeScale);
+    const placement = stationContentPlacement(queue.stationId, scenario, layout, renderPlan.viewBox, localSize, renderPlan.metrics.shapeScale);
     if (!placement) continue;
     const point = exportPointToCanvas(placement.x, placement.y, canvas, renderPlan);
     const sprite = replayQueueSprite(spriteCache, queue, maxQueue);

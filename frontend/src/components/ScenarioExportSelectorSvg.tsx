@@ -17,9 +17,12 @@ import {
   zoomViewBox,
 } from "./networkGeometry";
 import type { NodeLabelPlacement, ReplayCabinMarker, ReplayCollisionMarker, ReplayStationQueueMarker, SegmentRouteInfo, SpeedDomain, ViewBoxState } from "./networkTypes";
+import { stationIdsForPhysicalContent } from "./physicalStationSelection";
 import { ReplayCabinLayer, ReplayCollisionLayer, ReplayStationQueueLayer } from "./ReplayLayers";
 import { aggregateDemandByStation, isSegmentEnabled, routeInfoBySegment } from "./scenarioExportGeometry";
 import { screenNodeLabelPlacementMetrics } from "./scenarioFigureMetrics";
+import { StationNameLayer } from "./StationNameLayer";
+import { StationZoneLayer } from "./StationZoneLayer";
 import type { ScenarioExportConfig } from "./export/exportTypes";
 
 interface ScenarioExportSelectorSvgProps {
@@ -230,22 +233,46 @@ export function ScenarioExportSelectorSvg({
             onArcToggle={onArcToggle}
           />
         ) : (
-          <SelectorPhysicalLayer
-            scenario={scenario}
-            layout={layout}
-            segments={visibleSegments}
-            routeBySegment={routeBySegment}
-            selectedNodeIds={selectedNodeIds}
-            selectedArcIds={selectedArcIds}
-            arcColorMode={config.arcColorMode}
-            speedDomain={speedDomain}
-            showNodeLabels={config.toggles.nodeLabels}
-            showArcLabels={config.toggles.arcLabels}
-            nodeLabelPlacements={nodeLabelPlacements}
-            inverseZoom={inverseZoom}
-            onNodeToggle={onNodeToggle}
-            onArcToggle={onArcToggle}
-          />
+          <>
+            {config.toggles.stationZones ? (
+              <StationZoneLayer
+                scenario={scenario}
+                layout={layout}
+                scale={inverseZoom}
+                stationIds={physicalStationIdsForSelection(scenario, selectedNodeIds, selectedArcIds)}
+                renderMode="stacked"
+              />
+            ) : null}
+            <SelectorPhysicalLayer
+              scenario={scenario}
+              layout={layout}
+              segments={visibleSegments}
+              routeBySegment={routeBySegment}
+              selectedNodeIds={selectedNodeIds}
+              selectedArcIds={selectedArcIds}
+              arcColorMode={config.arcColorMode}
+              speedDomain={speedDomain}
+              showNodeLabels={config.toggles.nodeLabels}
+              showArcLabels={config.toggles.arcLabels}
+              nodeLabelPlacements={nodeLabelPlacements}
+              inverseZoom={inverseZoom}
+              onNodeToggle={onNodeToggle}
+              onArcToggle={onArcToggle}
+            />
+            {config.stationNames ? (
+              <StationNameLayer
+                scenario={scenario}
+                layout={layout}
+                viewBox={viewBox}
+                stationIds={physicalStationIdsForSelection(scenario, selectedNodeIds, selectedArcIds)}
+                scale={inverseZoom}
+                fontSize={13 * inverseZoom}
+                strokeWidth={4 * inverseZoom}
+                charWidthFactor={0.62}
+                lineHeightFactor={1.35}
+              />
+            ) : null}
+          </>
         )}
         {config.displayMode === "physical" && config.toggles.demand && replayStationQueues.length > 0 ? (
           <ReplayStationQueueLayer queues={replayStationQueues} scenario={scenario} layout={layout} viewBox={viewBox} inverseZoom={inverseZoom} />
@@ -267,6 +294,14 @@ export function ScenarioExportSelectorSvg({
       </svg>
     </div>
   );
+}
+
+function physicalStationIdsForSelection(scenario: Scenario, selectedNodeIds: Set<string>, selectedArcIds: Set<string>) {
+  return stationIdsForPhysicalContent({
+    scenario,
+    nodeIds: selectedNodeIds,
+    segments: scenario.track_segments.filter((segment) => selectedArcIds.has(segment.id)),
+  });
 }
 
 function shouldStartSelectorPan(target: EventTarget) {

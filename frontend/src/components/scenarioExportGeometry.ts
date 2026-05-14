@@ -5,6 +5,7 @@ import { lineArcId, lineViewPoints, lineViewStations, stationLabel } from "./Lin
 import { buildNodeLabelPlacements, estimateNodeLabelSize } from "./nodeLabelPlacement";
 import { pointOnSegment, round, segmentPath } from "./networkGeometry";
 import type { NodeLabelPlacement, SegmentRouteInfo, ViewBoxState } from "./networkTypes";
+import { stationIdsForPhysicalContent } from "./physicalStationSelection";
 import {
   A4_PORTRAIT_300_DPI,
   estimateTextSize,
@@ -12,7 +13,9 @@ import {
   REPORT_TEXT_WIDTH_300_DPI,
   type ScenarioExportVisualMetrics,
 } from "./scenarioFigureMetrics";
+import { stationZoneBounds } from "./stationZoneGeometry";
 import type { ScenarioExportConfig } from "./export/exportTypes";
+import { stationNameFontSize, stationNamePlacements } from "./stationNamePlacement";
 
 export type ExportArcRenderMode = "full" | "from_start" | "from_end";
 
@@ -95,6 +98,7 @@ export function buildScenarioExportRenderPlan({
       config,
       renderPlan,
       baseViewBox,
+      viewBox,
       metrics,
       physicalNodeLabelPlacements,
     });
@@ -179,6 +183,7 @@ function visualBoundsForRenderPlan({
   config,
   renderPlan,
   baseViewBox,
+  viewBox,
   metrics,
   physicalNodeLabelPlacements,
 }: {
@@ -187,6 +192,7 @@ function visualBoundsForRenderPlan({
   config: ScenarioExportConfig;
   renderPlan: PrimitiveRenderPlan;
   baseViewBox: ViewBoxState;
+  viewBox: ViewBoxState;
   metrics: ScenarioExportVisualMetrics;
   physicalNodeLabelPlacements: Map<string, NodeLabelPlacement>;
 }) {
@@ -194,7 +200,7 @@ function visualBoundsForRenderPlan({
   if (config.displayMode === "line") {
     includeLineVisualBounds(bounds, scenario, baseViewBox, renderPlan, config, metrics);
   } else {
-    includePhysicalVisualBounds(bounds, scenario, layout, renderPlan, config, metrics, physicalNodeLabelPlacements);
+    includePhysicalVisualBounds(bounds, scenario, layout, renderPlan, config, metrics, physicalNodeLabelPlacements, viewBox);
   }
   return bounds;
 }
@@ -248,7 +254,14 @@ function includePhysicalVisualBounds(
   config: ScenarioExportConfig,
   metrics: ScenarioExportVisualMetrics,
   physicalNodeLabelPlacements: Map<string, NodeLabelPlacement>,
+  viewBox: ViewBoxState,
 ) {
+  if (config.toggles.stationZones) {
+    includeStationZoneBounds(bounds, scenario, layout, renderPlan, metrics);
+  }
+  if (config.stationNames) {
+    includeStationNameBounds(bounds, scenario, layout, renderPlan, metrics, viewBox);
+  }
   for (const segmentRender of renderPlan.physicalSegments) {
     includeSegmentBounds(bounds, segmentRender.segment, layout, segmentRender.mode);
     const arrow = exportSegmentArrowPlacement(segmentRender.segment, layout, segmentRender.mode);
@@ -292,6 +305,67 @@ function includePhysicalVisualBounds(
   }
   const strokePadding = Math.max(metrics.segmentStrokeWidth, metrics.lineTrackHaloWidth, metrics.nodeStrokeWidth) / 2;
   expandBoundsInPlace(bounds, strokePadding);
+}
+
+function includeStationNameBounds(
+  bounds: Bounds,
+  scenario: Scenario,
+  layout: ScenarioLayout,
+  renderPlan: PrimitiveRenderPlan,
+  metrics: ScenarioExportVisualMetrics,
+  viewBox: ViewBoxState,
+) {
+  const stationIds = physicalStationIdsForPrimitivePlan(scenario, renderPlan);
+  const placements = stationNamePlacements({
+    scenario,
+    layout,
+    viewBox,
+    stationIds,
+    scale: metrics.shapeScale,
+    fontSize: stationNameFontSize(metrics),
+    charWidthFactor: metrics.textCharWidthFactor,
+    lineHeightFactor: metrics.lineHeightFactor,
+  });
+  const strokePadding = metrics.stationLabelStrokeWidth / 2;
+  for (const placement of placements) {
+    includeRect(bounds, {
+      x: placement.x - strokePadding,
+      y: placement.y - strokePadding,
+      width: placement.width + strokePadding * 2,
+      height: placement.height + strokePadding * 2,
+    });
+  }
+}
+
+function includeStationZoneBounds(
+  bounds: Bounds,
+  scenario: Scenario,
+  layout: ScenarioLayout,
+  renderPlan: PrimitiveRenderPlan,
+  metrics: ScenarioExportVisualMetrics,
+) {
+  const stationIds = physicalStationIdsForPrimitivePlan(scenario, renderPlan);
+  const paddingX = 34 * metrics.shapeScale;
+  const paddingY = 28 * metrics.shapeScale;
+  const blurPadding = 24 * metrics.shapeScale;
+  for (const stationId of stationIds) {
+    const stationBounds = stationZoneBounds(stationId, scenario, layout);
+    if (!stationBounds) continue;
+    includeRect(bounds, {
+      x: stationBounds.minX - paddingX - blurPadding,
+      y: stationBounds.minY - paddingY - blurPadding,
+      width: stationBounds.maxX - stationBounds.minX + (paddingX + blurPadding) * 2,
+      height: stationBounds.maxY - stationBounds.minY + (paddingY + blurPadding) * 2,
+    });
+  }
+}
+
+function physicalStationIdsForPrimitivePlan(scenario: Scenario, renderPlan: PrimitiveRenderPlan) {
+  return stationIdsForPhysicalContent({
+    scenario,
+    nodeIds: renderPlan.physicalNodes,
+    segments: renderPlan.physicalSegments.map(({ segment }) => segment),
+  });
 }
 
 function buildLineRenderPlan(scenario: Scenario, baseViewBox: ViewBoxState, config: ScenarioExportConfig) {

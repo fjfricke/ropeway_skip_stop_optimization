@@ -44,12 +44,18 @@ export function DemandSummaryPanel({
       ) : (
         <div className="demand-list">
           {rows.map((row) => {
-            const color = stationVisualColor(row.destination, stations);
+            const originColor = stationVisualColor(row.origin, stations);
+            const destinationColor = stationVisualColor(row.destination, stations);
             return (
               <div
                 className="demand-row"
                 key={row.id}
-                style={{ "--demand-destination-color": color.base, "--demand-destination-fill": color.haloFill } as CSSProperties}
+                style={{
+                  "--demand-source-color": originColor.base,
+                  "--demand-source-fill": originColor.haloFill,
+                  "--demand-destination-color": destinationColor.base,
+                  "--demand-destination-fill": destinationColor.haloFill,
+                } as CSSProperties}
               >
                 <span className="od">
                   {row.origin} {"->"} {row.destination}

@@ -1,4 +1,4 @@
-import { Download, Film, Images, Pause, Play, Plus, RotateCcw, RotateCw, SkipBack, SkipForward, Tags, Trash2, Users, WholeWord, X } from "lucide-react";
+import { Download, Film, Images, MapPinned, Pause, Play, Plus, RotateCcw, RotateCw, SkipBack, SkipForward, Tags, Trash2, Users, WholeWord, X } from "lucide-react";
 import { zipSync, strToU8 } from "fflate";
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
@@ -90,6 +90,7 @@ export function EanReplayExportModal({
     selectedNodeIds: nodeOptions.map((option) => option.id),
     selectedArcIds: arcOptions.map((option) => option.id),
     toggles: { ...toggles },
+    stationNames: false,
     arcColorMode,
     basis: "a4_width",
     percentage: DEFAULT_EXPORT_PERCENTAGE,
@@ -358,6 +359,14 @@ export function EanReplayExportModal({
               <div className="export-toggle-grid">
                 <button type="button" className={config.toggles.serviceRoutes ? "is-active" : ""} onClick={() => toggleExportLayer("serviceRoutes")}>Service</button>
                 <button type="button" className={config.toggles.skipRoutes ? "is-active" : ""} onClick={() => toggleExportLayer("skipRoutes")}>Skip</button>
+                <button type="button" className={config.toggles.stationZones ? "is-active" : ""} onClick={() => toggleExportLayer("stationZones")}>
+                  <MapPinned size={16} />
+                  Station Zones
+                </button>
+                <button type="button" className={config.stationNames ? "is-active" : ""} onClick={() => updateConfig((current) => ({ ...current, stationNames: !current.stationNames }))}>
+                  <MapPinned size={16} />
+                  Station Names
+                </button>
                 <button type="button" className={config.toggles.nodeLabels ? "is-active" : ""} onClick={() => toggleExportLayer("nodeLabels")}>
                   <WholeWord size={16} />
                   Node Labels

@@ -9,6 +9,7 @@ export interface ScenarioExportConfig {
   selectedNodeIds: string[];
   selectedArcIds: string[];
   toggles: ViewerToggles;
+  stationNames: boolean;
   arcColorMode: ArcColorMode;
   basis: ScenarioExportBasis;
   percentage: number;

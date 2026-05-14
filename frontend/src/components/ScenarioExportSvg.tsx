@@ -5,6 +5,7 @@ import { SegmentSpeedGradient, segmentSpeedColor, segmentSpeedStroke, speedDomai
 import { lineViewPoints, stationLabel } from "./LineViewLayer";
 import { pointOnSegment, round } from "./networkGeometry";
 import type { ReplayCabinMarker, ReplayCollisionMarker, ReplayStationQueueMarker, SegmentRouteInfo, SpeedDomain } from "./networkTypes";
+import { stationIdsForPhysicalContent } from "./physicalStationSelection";
 import { ReplayCabinLayer, ReplayCollisionLayer, ReplayStationQueueLayer } from "./ReplayLayers";
 import {
   aggregateDemandByStation,
@@ -15,6 +16,9 @@ import {
   type ScenarioExportRenderPlan,
 } from "./scenarioExportGeometry";
 import { estimateTextSize, type ScenarioExportVisualMetrics } from "./scenarioFigureMetrics";
+import { StationNameLayer } from "./StationNameLayer";
+import { StationZoneLayer } from "./StationZoneLayer";
+import { stationNameFontSize } from "./stationNamePlacement";
 import type { ScenarioExportConfig } from "./export/exportTypes";
 
 interface ScenarioExportSvgProps {
@@ -75,7 +79,31 @@ export const ScenarioExportSvg = forwardRef<SVGSVGElement, ScenarioExportSvgProp
           metrics={metrics}
         />
       ) : (
-        <ExportPhysicalLayer scenario={scenario} layout={layout} renderPlan={renderPlan} config={config} speedDomain={speedDomain} metrics={metrics} />
+        <>
+          {config.toggles.stationZones ? (
+            <StationZoneLayer
+              scenario={scenario}
+              layout={layout}
+              scale={metrics.shapeScale}
+              stationIds={physicalStationIdsForRenderPlan(scenario, renderPlan)}
+              renderMode="stacked"
+            />
+          ) : null}
+          <ExportPhysicalLayer scenario={scenario} layout={layout} renderPlan={renderPlan} config={config} speedDomain={speedDomain} metrics={metrics} />
+          {config.stationNames ? (
+            <StationNameLayer
+              scenario={scenario}
+              layout={layout}
+              viewBox={renderPlan.viewBox}
+              stationIds={physicalStationIdsForRenderPlan(scenario, renderPlan)}
+              scale={metrics.shapeScale}
+              fontSize={stationNameFontSize(metrics)}
+              strokeWidth={metrics.stationLabelStrokeWidth}
+              charWidthFactor={metrics.textCharWidthFactor}
+              lineHeightFactor={metrics.lineHeightFactor}
+            />
+          ) : null}
+        </>
       )}
       {config.displayMode === "physical" && config.toggles.demand && replayStationQueues.length > 0 ? (
         <ReplayStationQueueLayer queues={replayStationQueues} scenario={scenario} layout={layout} viewBox={renderPlan.viewBox} inverseZoom={metrics.shapeScale} />
@@ -108,6 +136,14 @@ function replayCabinsForRenderPlan(cabins: ReplayCabinMarker[], renderPlan: Scen
     if (typeof cabin.positionM !== "number" || typeof cabin.segmentLengthM !== "number" || cabin.segmentLengthM <= 0) return true;
     const t = cabin.positionM / cabin.segmentLengthM;
     return segmentRender.mode === "from_start" ? t <= 0.5 : t >= 0.5;
+  });
+}
+
+function physicalStationIdsForRenderPlan(scenario: Scenario, renderPlan: ScenarioExportRenderPlan) {
+  return stationIdsForPhysicalContent({
+    scenario,
+    nodeIds: renderPlan.physicalNodes,
+    segments: renderPlan.physicalSegments.map(({ segment }) => segment),
   });
 }
 
@@ -437,6 +473,9 @@ export const SCENARIO_EXPORT_SVG_STYLE = `
 .node circle,.node path{fill:#fff;stroke:#253345}
 .node--platform circle,.node--platform path{fill:#e5f4ee;stroke:#1c8c74}
 .node--entry_switch circle,.node--entry_switch path,.node--exit_switch circle,.node--exit_switch path{fill:#fff2df;stroke:#d97925}
+.station-zone{fill:var(--station-zone-fill);stroke:none;pointer-events:none;opacity:.7}
+.station-zone-fringe{stroke:none;pointer-events:none}
+.station-name-label{fill:#17202b;font-weight:850;letter-spacing:0;paint-order:stroke;stroke:rgba(255,255,255,.82);pointer-events:none}
 .node-label{pointer-events:none}
 .node-label text{fill:#17202b;font-weight:600;letter-spacing:0;paint-order:stroke;stroke:rgba(255,255,255,.8)}
 .replay-cabin__shell{fill:#253345;stroke:#fff;stroke-width:2}

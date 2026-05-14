@@ -1,4 +1,4 @@
-import { GitBranch, Map, Network, Palette, Route, Tags, Users, WholeWord, MapPinned } from "lucide-react";
+import { GitBranch, Map, MapPinned, Network, Palette, Route, Tags, Users, WholeWord } from "lucide-react";
 import type { ArcColorMode, ScenarioDisplayMode, ViewerToggles } from "./viewerTypes";
 
 interface ScenarioToolbarProps {
@@ -37,8 +37,8 @@ export function ScenarioToolbar({
         ) : (
           <>
             <button className={toggles.nodeLabels ? "is-active" : ""} onClick={() => onToggle("nodeLabels")}>
-              <WholeWord size={17} />
-              Node Labels
+              <MapPinned size={17} />
+              Station Names
             </button>
             <button className={toggles.demand ? "is-active" : ""} onClick={() => onToggle("demand")}>
               <Users size={17} />

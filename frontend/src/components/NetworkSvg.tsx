@@ -1,6 +1,6 @@
 import { Download, Maximize2, Move, ZoomIn, ZoomOut } from "lucide-react";
-import { useEffect, useId, useMemo, useRef, useState } from "react";
-import type { CSSProperties, MouseEvent, PointerEvent } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { MouseEvent, PointerEvent } from "react";
 import type { ScenarioLayout } from "../scenarioLayout";
 import type { DiscreteScenario, Scenario, Selection, TrackSegment } from "../types";
 import { SegmentSpeedGradient, segmentSpeedColor, segmentSpeedStroke, speedDomainForSegments, speedProfileLabel } from "./arcColor";
@@ -20,7 +20,7 @@ import {
 import type { NodeLabelPlacement, ReplayCabinMarker, ReplayCollisionMarker, ReplayStationQueueMarker, SegmentRouteInfo, SpeedDomain, ViewBoxState } from "./networkTypes";
 import { ReplayCabinLayer, ReplayCollisionLayer, ReplayStationQueueLayer } from "./ReplayLayers";
 import { screenNodeLabelPlacementMetrics } from "./scenarioFigureMetrics";
-import { stationVisualColor } from "./stationColors";
+import { StationZoneLayer } from "./StationZoneLayer";
 import type { ArcColorMode, DiscreteOverlayMode, DiscreteViewerToggles, ScenarioDisplayMode, ViewerToggles } from "./viewerTypes";
 
 export type { ReplayCabinMarker, ReplayCollisionMarker, ReplayStationQueueMarker } from "./networkTypes";
@@ -294,7 +294,7 @@ export function NetworkSvg({
           />
         ) : (
           <>
-            {toggles.stationZones ? <StationZoneLayer scenario={scenario} layout={layout} inverseZoom={inverseZoom} /> : null}
+            {toggles.stationZones ? <StationZoneLayer scenario={scenario} layout={layout} scale={inverseZoom} /> : null}
 
             <g className="layer layer--infrastructure">
               {visibleSegments.map((segment) => (
@@ -435,67 +435,6 @@ export function NetworkSvg({
 function shouldStartPan(target: EventTarget) {
   if (!(target instanceof Element)) return true;
   return !target.closest(".segment, .node, .discrete-node, .discrete-constraint, .replay-cabin");
-}
-
-function StationZoneLayer({ scenario, layout, inverseZoom }: { scenario: Scenario; layout: ScenarioLayout; inverseZoom: number }) {
-  const filterId = `station-zone-blur-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
-  const blurRadius = 12 * inverseZoom;
-
-  return (
-    <g className="layer layer--station-zones" aria-hidden="true">
-      <defs>
-        <filter id={filterId} x="-30%" y="-30%" width="160%" height="160%">
-          <feGaussianBlur stdDeviation={blurRadius} />
-        </filter>
-      </defs>
-      {scenario.stations.map((station) => {
-        const bounds = stationBounds(station.id, scenario, layout);
-        if (!bounds) return null;
-        const paddingX = 34 * inverseZoom;
-        const paddingY = 28 * inverseZoom;
-        const color = stationVisualColor(station.id, scenario.stations);
-        return (
-          <rect
-            key={station.id}
-            className="station-zone"
-            x={bounds.minX - paddingX}
-            y={bounds.minY - paddingY}
-            width={bounds.maxX - bounds.minX + paddingX * 2}
-            height={bounds.maxY - bounds.minY + paddingY * 2}
-            rx={18 * inverseZoom}
-            filter={`url(#${filterId})`}
-            style={{ "--station-zone-fill": color.haloFill, "--station-zone-stroke": color.haloStroke } as CSSProperties}
-            vectorEffect="non-scaling-stroke"
-          />
-        );
-      })}
-    </g>
-  );
-}
-
-function stationBounds(stationId: string, scenario: Scenario, layout: ScenarioLayout) {
-  const stationNodeIds = new Set(scenario.physical_nodes.filter((node) => node.station_id === stationId).map((node) => node.id));
-  for (const route of scenario.station_routes) {
-    if (route.station_id !== stationId) continue;
-    for (const segmentId of route.segment_ids) {
-      const segment = scenario.track_segments.find((current) => current.id === segmentId);
-      if (!segment) continue;
-      stationNodeIds.add(segment.from_node_id);
-      stationNodeIds.add(segment.to_node_id);
-    }
-  }
-
-  const points = [...stationNodeIds].flatMap((nodeId) => {
-    const point = layout.nodes[nodeId];
-    return point ? [point] : [];
-  });
-  if (points.length === 0) return null;
-  return {
-    minX: Math.min(...points.map((point) => point.x)),
-    minY: Math.min(...points.map((point) => point.y)),
-    maxX: Math.max(...points.map((point) => point.x)),
-    maxY: Math.max(...points.map((point) => point.y)),
-  };
 }
 
 function SegmentPath({
