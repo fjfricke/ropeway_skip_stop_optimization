@@ -9,7 +9,7 @@ Run one EAN passenger benchmark:
 uv run python benchmarks/run_ean_passenger_benchmark.py \
   --example three_station_v0 \
   --artifact-set ean_passenger_journey_time \
-  --ean-solver-policy quick_good_solution \
+  --ean-solver-policy exact_optimality \
   --time-limit 300 \
   --ean-optimizations all \
   --sample-interval 5
@@ -22,6 +22,7 @@ active optimizations:
 candidate_horizon_pruning
 single_ring_dominated_ride_pruning
 slot_time_relaxation_strengthening
+tight_big_m_bounds
 ```
 
 Default output layout:
