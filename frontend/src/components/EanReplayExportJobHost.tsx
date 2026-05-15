@@ -5,7 +5,7 @@ import type { EanPassengerServiceResult, EanPhysicalReplay, Scenario } from "../
 import { groupEventsByCabin } from "./EanReplayView";
 import { downloadBlob, loadSvgImage, nextAnimationFrame } from "./export/exportDom";
 import type { ReplayExportConfig, ReplayVideoExportFormat } from "./export/exportTypes";
-import { exportRenderConfig, normalizeRange, VIDEO_EXPORT_FPS } from "./eanReplayExport/replayExportConfig";
+import { DEFAULT_VIDEO_EXPORT_FPS, exportRenderConfig, normalizeRange } from "./eanReplayExport/replayExportConfig";
 import { createReplayVideoFrameBuilder } from "./eanReplayExport/replayFrameModel";
 import { createReplayVideoSpriteCache, drawReplayVideoFrame } from "./eanReplayExport/replayVideoCanvas";
 import { ScenarioExportSvg } from "./ScenarioExportSvg";
@@ -133,7 +133,8 @@ async function runVideoExport(
   const videoRange = normalizeRange(job.config.videoStartSeconds, job.config.videoEndSeconds);
   const modelDurationSeconds = Math.max(0.1, videoRange.end - videoRange.start);
   const videoDurationSeconds = Math.max(0.1, modelDurationSeconds / Math.max(0.1, job.config.exportSpeed));
-  const frameCount = Math.max(2, Math.ceil(videoDurationSeconds * VIDEO_EXPORT_FPS));
+  const videoFps = job.config.videoFps || DEFAULT_VIDEO_EXPORT_FPS;
+  const frameCount = Math.max(2, Math.ceil(videoDurationSeconds * videoFps));
   const eventsByCabin = groupEventsByCabin(job.eanReplay.events);
   const passengerPlan = job.eanPassengerService?.passenger_plan ?? null;
   const videoFrameBuilder = createReplayVideoFrameBuilder({
@@ -182,12 +183,12 @@ async function runVideoExport(
     latencyMode: "quality",
   });
   output.addVideoTrack(videoSource, {
-    frameRate: VIDEO_EXPORT_FPS,
+    frameRate: videoFps,
     maximumPacketCount: frameCount,
   });
   await output.start();
 
-  const frameDurationSeconds = 1 / VIDEO_EXPORT_FPS;
+  const frameDurationSeconds = 1 / videoFps;
   const statusStride = Math.max(1, Math.floor(frameCount / 120));
   try {
     for (let index = 0; index < frameCount; index += 1) {
@@ -203,7 +204,7 @@ async function runVideoExport(
         });
       }
       drawReplayVideoFrame(context, canvas, staticImage, frame, renderPlan, spriteCache, job.config.toggles.demand, job.scenario, job.layout);
-      await videoSource.add(index * frameDurationSeconds, frameDurationSeconds, { keyFrame: index % (VIDEO_EXPORT_FPS * 2) === 0 });
+      await videoSource.add(index * frameDurationSeconds, frameDurationSeconds, { keyFrame: index % (videoFps * 2) === 0 });
     }
   } finally {
     videoSource.close();

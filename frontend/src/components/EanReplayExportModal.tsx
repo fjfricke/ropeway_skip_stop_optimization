@@ -24,11 +24,13 @@ import { computeArtboardSize, DEFAULT_EXPORT_PERCENTAGE, clampNumber } from "./e
 import { ExportSizeControls } from "./export/ExportSizeControls";
 import type { ReplayExportConfig, ReplayVideoExportFormat } from "./export/exportTypes";
 import {
+  DEFAULT_VIDEO_EXPORT_FPS,
   DEFAULT_VIDEO_RESOLUTION_HEIGHT,
   exportRenderConfig,
   normalizeRange,
   replayStartTimeForDirection,
   roundFrameTime,
+  VIDEO_EXPORT_FPS_OPTIONS,
   VIDEO_RESOLUTION_PRESETS,
 } from "./eanReplayExport/replayExportConfig";
 import { replayFrameAtTime } from "./eanReplayExport/replayFrameModel";
@@ -98,6 +100,7 @@ export function EanReplayExportModal({
     videoResolutionHeight: DEFAULT_VIDEO_RESOLUTION_HEIGHT,
     videoStartSeconds: initialStartTime,
     videoEndSeconds: initialEndTime,
+    videoFps: DEFAULT_VIDEO_EXPORT_FPS,
     exportSpeed: 1,
     selectedFrameTimes: [roundFrameTime(initialTime)],
     showCabinFill: true,
@@ -426,6 +429,21 @@ export function EanReplayExportModal({
                         onClick={() => updateConfig((current) => ({ ...current, exportSpeed: speed }))}
                       >
                         {speed}x
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div className="replay-export-speed-control">
+                  <span>FPS</span>
+                  <div className="export-toggle-grid">
+                    {VIDEO_EXPORT_FPS_OPTIONS.map((fps) => (
+                      <button
+                        key={fps}
+                        type="button"
+                        className={config.videoFps === fps ? "is-active" : ""}
+                        onClick={() => updateConfig((current) => ({ ...current, videoFps: fps }))}
+                      >
+                        {fps}
                       </button>
                     ))}
                   </div>

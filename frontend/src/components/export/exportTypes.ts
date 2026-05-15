@@ -20,6 +20,7 @@ export interface ReplayExportConfig extends ScenarioExportConfig {
   videoResolutionHeight: number;
   videoStartSeconds: number;
   videoEndSeconds: number;
+  videoFps: number;
   exportSpeed: number;
   selectedFrameTimes: number[];
   showCabinFill: boolean;
