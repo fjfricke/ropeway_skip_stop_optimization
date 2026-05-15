@@ -9,6 +9,7 @@
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
+    "culori": "^4.0.2",
     "fflate": "^0.8.2",
     "lucide-react": "^0.468.0",
     "mediabunny": "^1.45.0",
@@ -16,6 +17,7 @@
     "react-dom": "^19.2.1"
   },
   "devDependencies": {
+    "@types/culori": "^4.0.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.1",
