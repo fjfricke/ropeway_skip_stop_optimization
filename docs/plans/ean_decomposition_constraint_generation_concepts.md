@@ -647,3 +647,538 @@ Both concepts require careful metadata and tests to avoid diverging from the
 current integrated MILP semantics.
 ```
 
+## Concept 3: Progressive Wait plus Delayed Cuts
+
+### Core Idea
+
+Use a no-wait or limited-wait model only as a warm-start generator, then solve
+the full-wait problem with delayed headway generation and, later, passenger-flow
+Benders cuts.
+
+This concept separates three roles:
+
+```text
+progressive wait:
+  creates good incumbent starts
+
+delayed headway generation:
+  adds selected physical headway constraints only when violated
+
+passenger-flow/Benders:
+  evaluates or approximates passenger assignment cost for fixed movement plans
+```
+
+The no-wait stage must not permanently fix orderings or constraints in the
+full-wait model. It only provides start values for compatible variables.
+
+### Motivation
+
+Waiting makes many ordering relations decision-dependent. A static
+preprocessing classifier can therefore become conservative quickly, because a
+pair that is fixed in the no-wait model may become invertible once station
+waiting is allowed.
+
+A progressive solve keeps the useful part of the no-wait model:
+
+```text
+good stop/skip pattern
+reasonable event times
+reasonable passenger assignment
+reasonable initial ordering values
+```
+
+but restores the complete full-wait feasible region before certification.
+
+### Phase 0: No-Wait Warm Start
+
+Build and solve a restricted model:
+
+```text
+wait variables fixed to zero, or no-wait station mode
+station/platform headways eager
+passenger assignment integrated or approximated
+target gap/time limit chosen for fast incumbent generation
+```
+
+Export only start values that remain meaningful in the full-wait model:
+
+```text
+stop/skip variables
+event-time variables
+passenger assignment variables when ids are compatible
+order variables derived from the resulting event times
+```
+
+Do not export no-wait-specific fixed-order assumptions as constraints.
+
+### Phase 1: Full-Wait Master with Delayed Headways
+
+Build the full-wait movement/passenger model:
+
+```text
+wait variables enabled
+wait-specific platform-exit headway resources enabled
+station/platform headways eager
+selected exit-switch or rope-merge headways delayed
+```
+
+Load the Phase 0 solution as a partial MIP start:
+
+```text
+set compatible stop/skip starts
+set compatible event-time starts
+set compatible passenger assignment starts
+set wait starts to zero
+set order starts from the Phase 0 event-time order where possible
+ignore variables that do not exist in both models
+```
+
+Then solve with an external delayed-headway loop:
+
+```text
+1. solve current full-wait model
+2. inspect the incumbent movement plan
+3. detect delayed exit-switch or rope-merge headway violations
+4. add exact missing headway disjunctions for violated pairs
+5. re-solve
+6. stop only when no delayed headway violation remains
+```
+
+This phase is exact only after all delayed headway violations are eliminated.
+Intermediate MIP gaps refer to the current relaxation, not to the fully verified
+model.
+
+### Phase 2: Passenger Flow or Final Integrated Proof
+
+There are two possible certification paths.
+
+Pragmatic path:
+
+```text
+use the headway-verified full-wait incumbent as a MIP start
+solve the complete integrated MILP with all required constraints
+report the final Gurobi gap only for this full model
+```
+
+Decomposition path:
+
+```text
+master keeps movement, stop/skip, timing, wait, and generated headways
+passenger-flow subproblem evaluates Q(y)
+theta represents passenger cost in the master
+passenger optimality cuts tighten theta
+```
+
+The decomposition path should check delayed headways before passenger flow:
+
+```text
+1. solve master
+2. verify delayed headways
+3. if violated, add headway constraints and re-solve
+4. if physically verified, solve passenger-flow subproblem
+5. add passenger optimality cuts
+6. repeat until both physical constraints and passenger cuts are satisfied
+```
+
+Passenger-flow costs for physically invalid movement plans are less useful,
+because such plans will be removed by delayed headway constraints anyway.
+
+### Exactness Conditions
+
+The final solution is certified for the full-wait problem only if:
+
+```text
+full-wait variables and constraints are active
+no delayed headway violation remains
+all generated headway disjunctions are included
+passenger assignment is either integrated or passenger-flow cuts make theta tight
+the reported bound/gap belongs to the final generated model state
+```
+
+Phase 0 alone does not provide a valid bound for the full-wait problem. It is a
+warm-start heuristic.
+
+### Bound Monotonicity with Wait Limits
+
+For a minimization objective, increasing the maximum allowed waiting time
+expands the feasible set:
+
+```text
+W_i < W_j  =>  F(W_i) subset F(W_j)
+```
+
+Therefore the true optimal objective is monotone nonincreasing:
+
+```text
+z*(W_j) <= z*(W_i)
+```
+
+A feasible solution from the smaller-wait model remains feasible for the
+larger-wait model. It can therefore be used as a MIP start and provides a valid
+incumbent upper bound for the larger-wait model.
+
+The opposite is not true for lower bounds. A solver lower bound obtained for
+the smaller-wait model is not automatically a valid lower bound for the
+larger-wait model, because the larger-wait optimum may be lower. Progressive
+wait primarily helps with incumbents and warm starts, not with certifying the
+final lower bound of the full-wait problem.
+
+### Upper-Bound and Lower-Bound Roles
+
+The progressive workflow should keep the roles of incumbents and cuts separate.
+
+Progressive wait mainly improves the primal side:
+
+```text
+restricted wait solve -> feasible solution for larger wait model
+                     -> MIP start
+                     -> incumbent upper bound
+```
+
+If Gurobi accepts the MIP start, an additional objective upper-bound constraint
+is usually unnecessary. The incumbent already gives the solver a valid upper
+bound and a complete solution structure.
+
+Lower bounds for the full-wait problem must come from the formulation and cuts:
+
+```text
+LP relaxation of the current model
+Gurobi cuts
+slot-time relaxation strengthening
+tight Big-M bounds
+Benders passenger optimality cuts
+generated delayed headway constraints
+other valid inequalities
+```
+
+In the Benders variant, passenger cuts are lower-bound cuts on the passenger
+cost approximation:
+
+```text
+theta >= valid lower approximation of Q(y)
+```
+
+They prevent the master from assigning an unrealistically low passenger cost to
+movement plans. This strengthens the master lower bound.
+
+Delayed headway constraints also tighten the relaxation once generated, but
+their bound is only a bound for the currently generated model. A reported gap is
+meaningful for the full problem only after the delayed headway verifier finds no
+remaining violations.
+
+The intended division is:
+
+```text
+progressive wait and MIP starts -> better upper bounds
+strengthening and cuts          -> better lower bounds
+final certification             -> both bounds on the verified full model
+```
+
+### Implementation Notes
+
+Prefer an external solve loop before callbacks.
+
+Reasons:
+
+```text
+delayed headway violations may need new ordering binaries
+adding variables inside callbacks is awkward and solver-restricted
+an external loop keeps model mutation explicit and easier to test
+partial MIP starts can be rebuilt between iterations
+```
+
+The MIP-start loader should be tolerant:
+
+```text
+set values only for variables that exist in the current model
+ignore missing variables from the no-wait model
+initialize new wait and platform-exit variables conservatively
+log loaded, skipped, and rejected start values
+```
+
+### Suggested Roadmap
+
+```text
+1. Implement no-wait -> full-wait partial MIP-start transfer.
+2. Benchmark full-wait solves with and without the no-wait warm start.
+3. Add delayed exit-switch headway generation without passenger-flow Benders.
+4. Validate that delayed-headway final solutions match the eager model on small
+   instances.
+5. Build fixed-movement passenger-flow LP as an evaluator.
+6. Only then combine delayed headways with passenger-flow/Benders cuts.
+```
+
+### Main Risks
+
+MIP-start incompatibility:
+
+```text
+No-wait and full-wait artifacts can contain different headway checkpoints,
+pairs, and variables. The transfer must be partial and name/id based.
+```
+
+Weak relaxed iterations:
+
+```text
+If too many headway constraints are delayed, the master may find unrealistically
+good but physically invalid incumbents and require many iterations.
+```
+
+Misleading progress metrics:
+
+```text
+The no-wait objective, relaxed delayed-headway gap, and final full-wait gap are
+not the same quantity and must be reported separately.
+```
+
+### Progressive Wait-Cap Selection Rules
+
+The progressive wait workflow needs a rule for selecting the next waiting cap
+\(W_{k+1}\) after solving a stage with cap \(W_k\). The rules below are ordered
+from simplest to most structure-aware.
+
+All rules are heuristic stage-selection policies. Exactness comes only from the
+final full-wait solve.
+
+#### Rule A: Fixed Geometric Schedule
+
+Use a short, predetermined sequence:
+
+```text
+0s -> 30s -> 120s -> full
+```
+
+or a finer sequence:
+
+```text
+0s -> 15s -> 30s -> 60s -> 120s -> full
+```
+
+Derivation:
+
+```text
+small caps change the feasible ordering structure strongly
+large caps mostly add escape room for difficult local conflicts
+geometric growth reaches the full model quickly without too many stages
+```
+
+This rule is easy to debug and gives reproducible benchmark stages. It is not
+instance-aware.
+
+#### Rule B: Headway-Scaled Schedule
+
+Choose caps from station headway scales:
+
+```text
+0
+h_station
+2 * h_station
+4 * h_station
+full
+```
+
+where `h_station` can be the maximum or a robust representative station
+headway in the instance.
+
+Derivation:
+
+```text
+waiting below one station headway mostly repairs local timing
+waiting around two to four headways allows limited local reordering
+larger waits should be left to the final full-wait model
+```
+
+This is more physical than fixed seconds and transfers better across instances
+with different station speeds or cabin spacing requirements.
+
+#### Rule C: Result-Adaptive Schedule
+
+After solving a stage with cap \(W_k\), inspect how the cap was used.
+
+Useful metrics:
+
+```text
+max_used_wait
+p95_used_wait
+share_wait_at_cap
+objective_improvement_from_previous_stage
+delayed_headway_violations
+delayed_headway_constraints_added
+accepted_mip_start_quality
+```
+
+Example rule:
+
+```text
+if W_k == 0:
+    W_{k+1} = 30s
+elif share_wait_at_cap > 10%:
+    W_{k+1} = min(2 * W_k, full)
+elif p95_used_wait > 0.7 * W_k:
+    W_{k+1} = min(2 * W_k, full)
+elif objective_improvement_from_previous_stage > 2%:
+    W_{k+1} = min(2 * W_k, full)
+else:
+    W_{k+1} = full
+```
+
+Derivation:
+
+```text
+if many waits hit the cap, the current cap is probably binding
+if the objective still improves substantially, extra wait is likely useful
+if the cap is rarely used and improvement is small, intermediate stages are
+less likely to produce a better incumbent
+```
+
+This rule adapts to demand and headway tightness. It controls incumbent
+generation, but it does not directly control model complexity.
+
+#### Rule D: Complexity-Budget Schedule
+
+Select the next cap by estimated growth in headway-ordering complexity.
+
+Let \(\eta\) index headway resources and let \(P_\eta(W)\) be the set of
+checkpoint candidates that can be relevant at resource \(\eta\) under wait cap
+\(W\). A conservative pair-count proxy is:
+
+```text
+H_pair(W) = sum_eta binom(|P_eta(W)|, 2)
+```
+
+If a headway-pair classifier exists, use the more relevant count:
+
+```text
+H_var(W) = number of variable-order headway pairs under wait cap W
+```
+
+`H_var(W)` is a better proxy because fixed-order pairs do not require ordering
+binaries.
+
+Choose the largest candidate cap whose estimated growth stays within a budget:
+
+```text
+W_{k+1} = max { W > W_k :
+                H_var(W) <= alpha * H_var(W_k) + beta }
+```
+
+Fallback when no classifier exists:
+
+```text
+W_{k+1} = max { W > W_k :
+                H_pair(W) <= alpha * H_pair(W_k) + beta }
+```
+
+Example parameters:
+
+```text
+alpha = 1.5
+beta  = 25,000 variable-order pairs
+```
+
+Derivation:
+
+```text
+headway ordering is a main MILP complexity driver
+each variable-order headway pair usually adds one binary ordering variable
+and two disjunctive timing constraints
+larger wait caps widen time windows and make more order inversions possible
+therefore wait caps can be interpreted as controlled expansion of the
+headway-ordering search space
+```
+
+The monotonic relationship is conceptual:
+
+```text
+W_i < W_j  =>  feasible set expands
+larger W can make more headway pairs potentially relevant or variable
+```
+
+The actual Gurobi runtime is not guaranteed to be monotone in this proxy.
+Presolve, heuristics, and branching can make a larger model solve faster in
+individual cases. The proxy is still useful because it tracks an explicit
+source of binary decisions.
+
+#### Rule E: Combined Result and Complexity Schedule
+
+Use complexity as a hard budget and result metrics as a reason to spend more or
+less of that budget.
+
+Example:
+
+```text
+candidate_grid = [0, 10, 20, 30, 45, 60, 90, 120, 180, full]
+
+if share_wait_at_cap > 10% or objective_improvement > 2%:
+    alpha = 2.0
+else:
+    alpha = 1.3
+
+choose largest W in candidate_grid with:
+    H_var(W) <= alpha * H_var(W_k) + beta
+
+if no intermediate W satisfies the rule:
+    go to full
+```
+
+Derivation:
+
+```text
+result metrics indicate whether more wait is operationally useful
+complexity metrics limit how much additional ordering search space is opened
+the final full-wait stage still restores the complete feasible region
+```
+
+This is the preferred research variant once a cheap headway-metadata estimator
+or pair classifier exists.
+
+#### Required Estimator
+
+The complexity-budget rules require an estimator that is much cheaper than a
+full MILP solve.
+
+Minimum estimator:
+
+```text
+build EAN headway metadata for candidate W
+count checkpoints, candidates, and all headway pairs
+do not build the Gurobi model
+```
+
+Improved estimator:
+
+```text
+run conservative headway-pair classifier
+count fixed-order, variable-order, and redundant pairs
+estimate ordering binaries from variable-order pairs
+```
+
+Diagnostics to log per candidate \(W\):
+
+```text
+wait_cap_seconds
+headway_candidates
+headway_pairs_total
+headway_pairs_fixed
+headway_pairs_variable
+headway_pairs_redundant
+estimated_ordering_binaries
+estimated_added_ordering_binaries
+selected_next_wait_cap
+selection_rule
+```
+
+#### Recommendation
+
+Implement progressively:
+
+```text
+1. fixed geometric schedule for debugging
+2. result-adaptive rule using actual wait usage
+3. complexity-budget rule once pair classification or metadata estimation is
+   available
+4. combined result-and-complexity rule for benchmarks
+```
+
+The full-wait final stage is mandatory in every schedule if the result is meant
+to certify the original model.
