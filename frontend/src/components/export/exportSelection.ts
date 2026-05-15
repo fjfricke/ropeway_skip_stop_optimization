@@ -1,5 +1,5 @@
 import type { Scenario, TrackSegment } from "../../types";
-import { lineArcId, lineViewStations, stationLabel } from "../LineViewLayer";
+import { lineViewLinks, lineViewStations, stationLabel } from "../LineViewLayer";
 import type { ScenarioDisplayMode } from "../viewerTypes";
 
 export type ExportItemOption = {
@@ -22,14 +22,10 @@ export function exportNodeOptions(scenario: Scenario, displayMode: ScenarioDispl
 
 export function exportArcOptions(scenario: Scenario, displayMode: ScenarioDisplayMode): ExportItemOption[] {
   if (displayMode === "line") {
-    const stations = lineViewStations(scenario);
-    return stations.slice(0, -1).map((station, index) => {
-      const next = stations[index + 1];
-      return {
-        id: lineArcId(station.id, next.id),
-        label: `${stationLabel(station)} -> ${stationLabel(next)}`,
-      };
-    });
+    return lineViewLinks(scenario, { x: 0, y: 0, width: 1, height: 1 }).map(({ id, from, to }) => ({
+      id,
+      label: `${stationLabel(from.station)} -> ${stationLabel(to.station)}`,
+    }));
   }
   return scenario.track_segments.map((segment) => ({
     id: segment.id,

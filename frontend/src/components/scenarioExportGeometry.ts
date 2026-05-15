@@ -1,7 +1,7 @@
 import type { ScenarioLayout } from "../scenarioLayout";
 import type { Scenario, Station, TrackSegment } from "../types";
 import { speedProfileLabel } from "./arcColor";
-import { lineArcId, lineViewPoints, lineViewStations, stationLabel } from "./LineViewLayer";
+import { lineViewLinks, lineViewPoints, lineViewStations, stationLabel } from "./LineViewLayer";
 import { buildNodeLabelPlacements, estimateNodeLabelSize } from "./nodeLabelPlacement";
 import { pointOnSegment, round, segmentPath } from "./networkGeometry";
 import type { NodeLabelPlacement, SegmentRouteInfo, ViewBoxState } from "./networkTypes";
@@ -383,10 +383,8 @@ function buildLineRenderPlan(scenario: Scenario, baseViewBox: ViewBoxState, conf
     }
   }
 
-  for (let index = 0; index < points.length - 1; index += 1) {
-    const from = points[index];
-    const to = points[index + 1];
-    const id = lineArcId(from.station.id, to.station.id);
+  for (const link of lineViewLinks(scenario, baseViewBox)) {
+    const { id, from, to } = link;
     if (!selectedArcs.has(id)) continue;
     const fromSelected = exportedStations.has(from.station.id);
     const toSelected = exportedStations.has(to.station.id);

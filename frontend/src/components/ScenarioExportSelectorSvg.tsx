@@ -5,7 +5,7 @@ import type { ScenarioLayout } from "../scenarioLayout";
 import type { Scenario, TrackSegment } from "../types";
 import { SegmentSpeedGradient, segmentSpeedColor, segmentSpeedStroke, speedDomainForSegments, speedProfileLabel } from "./arcColor";
 import { useNodeLabelPlacements } from "./hooks/useNodeLabelPlacements";
-import { lineArcId, lineViewPoints, stationLabel } from "./LineViewLayer";
+import { lineViewLinks, lineViewPoints, stationLabel } from "./LineViewLayer";
 import {
   clampViewBox,
   clientToViewBoxPoint,
@@ -333,21 +333,21 @@ function SelectorLineLayer({
   onArcToggle: (id: string) => void;
 }) {
   const points = lineViewPoints(scenario, viewBox);
+  const links = lineViewLinks(scenario, viewBox);
   return (
     <g className="line-view scenario-selector-line" aria-label="Schematic station line selector">
-      {points.slice(0, -1).map((point, index) => {
-        const next = points[index + 1];
-        const id = lineArcId(point.station.id, next.station.id);
-        const path = `M ${point.x} ${point.y} L ${next.x} ${next.y}`;
+      {links.map(({ id, from, to }) => {
+        const path = `M ${from.x} ${from.y} L ${to.x} ${to.y}`;
         const selected = selectedArcIds.has(id);
-        const hitX = Math.min(point.x, next.x);
-        const hitY = Math.min(point.y, next.y) - 14 * inverseZoom;
-        const hitWidth = Math.max(1, Math.abs(next.x - point.x));
+        const hitX = Math.min(from.x, to.x) - 14 * inverseZoom;
+        const hitY = Math.min(from.y, to.y) - 14 * inverseZoom;
+        const hitWidth = Math.max(1, Math.abs(to.x - from.x)) + 28 * inverseZoom;
+        const hitHeight = Math.max(1, Math.abs(to.y - from.y)) + 28 * inverseZoom;
         return (
           <g key={id} className={selected ? "" : "is-export-muted"} onClick={() => onArcToggle(id)}>
             <path className="line-view__track-halo" d={path} />
             <path className="line-view__track scenario-selector__arc" d={path} />
-            <rect className="scenario-selector__line-hit-arc" x={hitX} y={hitY} width={hitWidth} height={28 * inverseZoom} />
+            <rect className="scenario-selector__line-hit-arc" x={hitX} y={hitY} width={hitWidth} height={hitHeight} />
           </g>
         );
       })}
