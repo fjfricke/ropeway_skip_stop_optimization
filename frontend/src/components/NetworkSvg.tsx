@@ -98,6 +98,7 @@ export function NetworkSvg({
 
   const segmentById = useMemo(() => new Map(scenario.track_segments.map((segment) => [segment.id, segment])), [scenario.track_segments]);
   const isLineView = displayMode === "line";
+  const isCircleScenario = scenario.scenario_id.startsWith("five_station_circle_cw");
 
   const visibleSegments = useMemo(
     () =>
@@ -265,7 +266,11 @@ export function NetworkSvg({
         className={`network-svg ${isPanning ? "is-panning" : ""}`}
         viewBox={formatViewBox(viewBox)}
         role="img"
-        aria-label={isLineView ? "Schematic ropeway station line" : "Physical ropeway scenario network"}
+        aria-label={
+          isLineView
+            ? `Schematic ropeway station ${isCircleScenario ? "circle" : "line"}`
+            : "Physical ropeway scenario network"
+        }
         data-testid="network-svg"
         onPointerDown={handlePointerDown}
         onPointerMove={handlePointerMove}

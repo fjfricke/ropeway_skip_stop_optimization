@@ -47,6 +47,7 @@ export function ScenarioView({
     .filter((station) => station.kind === "terminal" || station.kind === "service")
     .map((station) => station.id)
     .join("-");
+  const isCircleScenario = scenario.scenario_id.startsWith("five_station_circle_cw");
 
   return (
     <section className="workspace">
@@ -56,8 +57,10 @@ export function ScenarioView({
             <h2>{displayMode === "line" ? "Line View" : "Physical Scenario"}</h2>
             <p>
               {displayMode === "line"
-                ? `Schematic ${stationLine} station line`
-                : `Circulating ${stationLine} line with terminal turnarounds and skip branches at service stations`}
+                ? `Schematic ${stationLine} station ${isCircleScenario ? "circle" : "line"}`
+                : isCircleScenario
+                  ? `Clockwise ${stationLine} circle with skip branches at service stations`
+                  : `Circulating ${stationLine} line with terminal turnarounds and skip branches at service stations`}
             </p>
           </div>
           <div className="status-pill">

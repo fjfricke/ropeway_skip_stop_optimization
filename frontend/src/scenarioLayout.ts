@@ -63,6 +63,9 @@ export function layoutForScenario(scenario: Scenario): ScenarioLayout {
   if (scenario.scenario_id === "three_station_v0" || scenario.scenario_id.startsWith("three_station_")) {
     return threeStationLayout;
   }
+  if (scenario.scenario_id.startsWith("five_station_circle_cw")) {
+    return circularSkipStopLayout(scenario);
+  }
   return linearSkipStopLayout(scenario);
 }
 
@@ -180,4 +183,84 @@ function addTerminalSegmentHints(segments: Record<string, SegmentStyleHint>, sta
   segments[`${stationId}_turnaround_decelerate`] = { labelDx: 36 * sign, labelDy: side === "left" ? 20 : -18 };
   segments[`${stationId}_turnaround_platform`] = { labelDx: 50 * sign, labelDy: 0 };
   segments[`${stationId}_turnaround_accelerate`] = { labelDx: 36 * sign, labelDy: side === "left" ? -18 : 20 };
+}
+
+function circularSkipStopLayout(scenario: Scenario): ScenarioLayout {
+  const stations = scenario.stations.filter((station) => station.kind === "service");
+  if (stations.length < 3) return linearSkipStopLayout(scenario);
+
+  const width = 900;
+  const height = 760;
+  const center = { x: width / 2, y: height / 2 };
+  const radius = 250;
+  const nodes: Record<string, LayoutPoint> = {};
+  const segments: Record<string, SegmentStyleHint> = {};
+
+  stations.forEach((station, index) => {
+    const angle = -Math.PI / 2 + (2 * Math.PI * index) / stations.length;
+    addCircularStation(nodes, station, center, radius, angle);
+    segments[`${station.id}_cw_skip_bypass`] = { curve: -36, labelDx: 0, labelDy: -34 };
+  });
+
+  for (const segment of scenario.track_segments) {
+    if (segment.kind !== "rope") continue;
+    segments[segment.id] = { labelDx: 0, labelDy: -16 };
+  }
+
+  return {
+    viewBox: `0 0 ${width} ${height}`,
+    nodes,
+    segments,
+  };
+}
+
+function addCircularStation(
+  nodes: Record<string, LayoutPoint>,
+  station: Station,
+  center: { x: number; y: number },
+  radius: number,
+  angle: number,
+) {
+  const radial = { x: Math.cos(angle), y: Math.sin(angle) };
+  const tangent = { x: -Math.sin(angle), y: Math.cos(angle) };
+  const inward = { x: -radial.x, y: -radial.y };
+  const base = {
+    x: center.x + radial.x * radius,
+    y: center.y + radial.y * radius,
+  };
+  const labelDx = radial.x * 34;
+  const labelDy = radial.y * 34;
+
+  nodes[`${station.id}_entry_cw`] = {
+    x: base.x - tangent.x * 72,
+    y: base.y - tangent.y * 72,
+    labelDx,
+    labelDy,
+  };
+  nodes[`${station.id}_service_approach_cw`] = {
+    x: base.x - tangent.x * 44 + inward.x * 24,
+    y: base.y - tangent.y * 44 + inward.y * 24,
+  };
+  nodes[`${station.id}_platform_entry_cw`] = {
+    x: base.x - tangent.x * 18 + inward.x * 54,
+    y: base.y - tangent.y * 18 + inward.y * 54,
+    labelDx,
+    labelDy,
+  };
+  nodes[`${station.id}_platform_exit_cw`] = {
+    x: base.x + tangent.x * 18 + inward.x * 54,
+    y: base.y + tangent.y * 18 + inward.y * 54,
+    labelDx,
+    labelDy,
+  };
+  nodes[`${station.id}_service_accelerate_cw`] = {
+    x: base.x + tangent.x * 44 + inward.x * 24,
+    y: base.y + tangent.y * 44 + inward.y * 24,
+  };
+  nodes[`${station.id}_exit_cw`] = {
+    x: base.x + tangent.x * 72,
+    y: base.y + tangent.y * 72,
+    labelDx,
+    labelDy,
+  };
 }

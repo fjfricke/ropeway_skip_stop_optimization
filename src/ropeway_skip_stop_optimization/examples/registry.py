@@ -1,6 +1,12 @@
 from __future__ import annotations
 
 from ropeway_skip_stop_optimization.examples.base import ScenarioExample
+from ropeway_skip_stop_optimization.examples.circular_skip_stop import (
+    FiveStationCircleCwFullNoSkipNoWaitExample,
+    FiveStationCircleCwHalfNoSkipNoWaitExample,
+    FiveStationCircleCwHalfSkipNoWaitExample,
+    FiveStationCircleCwHalfSkipWaitExample,
+)
 from ropeway_skip_stop_optimization.examples.linear_skip_stop import (
     FiveStationExample,
     FiveStationHalfNoSkipNoWaitExample,
@@ -20,6 +26,10 @@ EXAMPLES: dict[str, ScenarioExample] = {
     FiveStationExample.metadata.id: FiveStationExample(),
     FiveStationNoWaitExample.metadata.id: FiveStationNoWaitExample(),
     FiveStationHalfNoSkipNoWaitExample.metadata.id: FiveStationHalfNoSkipNoWaitExample(),
+    FiveStationCircleCwFullNoSkipNoWaitExample.metadata.id: FiveStationCircleCwFullNoSkipNoWaitExample(),
+    FiveStationCircleCwHalfNoSkipNoWaitExample.metadata.id: FiveStationCircleCwHalfNoSkipNoWaitExample(),
+    FiveStationCircleCwHalfSkipNoWaitExample.metadata.id: FiveStationCircleCwHalfSkipNoWaitExample(),
+    FiveStationCircleCwHalfSkipWaitExample.metadata.id: FiveStationCircleCwHalfSkipWaitExample(),
 }
 
 

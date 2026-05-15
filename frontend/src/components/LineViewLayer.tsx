@@ -21,10 +21,10 @@ export function LineViewLayer({
   if (stations.length === 0) return null;
 
   const points = lineViewPoints(scenario, viewBox);
-  const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${round(point.x)} ${round(point.y)}`).join(" ");
+  const path = lineViewPath(scenario, points);
 
   return (
-    <g className="line-view" aria-label="Schematic station line">
+    <g className="line-view" aria-label={isCircleScenario(scenario) ? "Schematic station circle" : "Schematic station line"}>
       {points.length > 1 ? (
         <>
           <path className="line-view__track-halo" d={path} />
@@ -53,6 +53,22 @@ export function lineViewStations(scenario: Scenario) {
 
 export function lineViewPoints(scenario: Scenario, viewBox: ViewBoxState) {
   const stations = lineViewStations(scenario);
+  if (isCircleScenario(scenario)) {
+    const center = {
+      x: viewBox.x + viewBox.width / 2,
+      y: viewBox.y + viewBox.height / 2,
+    };
+    const radius = Math.min(viewBox.width, viewBox.height) * 0.34;
+    return stations.map((station, index) => {
+      const angle = -Math.PI / 2 + (2 * Math.PI * index) / stations.length;
+      return {
+        station,
+        x: center.x + Math.cos(angle) * radius,
+        y: center.y + Math.sin(angle) * radius,
+      };
+    });
+  }
+
   const marginX = Math.min(150, viewBox.width * 0.14);
   const y = viewBox.y + viewBox.height * 0.52;
   const usableWidth = viewBox.width - 2 * marginX;
@@ -62,6 +78,20 @@ export function lineViewPoints(scenario: Scenario, viewBox: ViewBoxState) {
     x: viewBox.x + marginX + step * index,
     y,
   }));
+}
+
+export function lineViewLinks(scenario: Scenario, viewBox: ViewBoxState) {
+  const points = lineViewPoints(scenario, viewBox);
+  const linkCount = isCircleScenario(scenario) ? points.length : Math.max(0, points.length - 1);
+  return Array.from({ length: linkCount }, (_, index) => {
+    const from = points[index];
+    const to = points[(index + 1) % points.length];
+    return {
+      id: lineArcId(from.station.id, to.station.id),
+      from,
+      to,
+    };
+  });
 }
 
 export function lineArcId(leftStationId: string, rightStationId: string) {
@@ -110,4 +140,16 @@ function LineViewStation({
       ) : null}
     </g>
   );
+}
+
+function isCircleScenario(scenario: Scenario) {
+  return scenario.scenario_id.startsWith("five_station_circle_cw");
+}
+
+function lineViewPath(
+  scenario: Scenario,
+  points: { station: Station; x: number; y: number }[],
+) {
+  const path = points.map((point, index) => `${index === 0 ? "M" : "L"} ${round(point.x)} ${round(point.y)}`).join(" ");
+  return isCircleScenario(scenario) && points.length > 2 ? `${path} Z` : path;
 }
