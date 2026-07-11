@@ -14,6 +14,7 @@ from ropeway_skip_stop_optimization.examples.three_station import ThreeStationEx
 from ropeway_skip_stop_optimization.exports.artifacts import (
     ArtifactSet,
     DiscreteScenarioArtifactBuilder,
+    ExportContext,
     PhysicalScenarioArtifactBuilder,
 )
 from ropeway_skip_stop_optimization.exports.runner import build_artifact_set, export_artifact_set
@@ -24,6 +25,10 @@ from ropeway_skip_stop_optimization.optimization.discrete_time import MilpV0Vari
 from ropeway_skip_stop_optimization.optimization.ean import (
     DeterministicPhysicalNodeToSwitchStartBuilder,
     EanConfig,
+    EanOptimizationConfig,
+    EanPassengerServiceMetadata,
+    EanPassengerServiceObjective,
+    EanPassengerServiceResult,
     RingEanBuildArtifactBuilder,
     StationEanConfig,
     StationWaitingMode,
@@ -187,6 +192,36 @@ def test_exports_ean_skip_stop_feasibility_json(tmp_path: Path) -> None:
     assert decisions == {"skip", "stop"}
     assert len(plan_payload["trajectories"]) == 4
     assert replay_payload["events"]
+
+
+def test_export_context_auto_injects_per_objective_ean_progress_recorders(monkeypatch: pytest.MonkeyPatch) -> None:
+    captured_recorders: dict[EanPassengerServiceObjective, object] = {}
+
+    def fake_solve_ean_passenger_service(scenario: object, artifact: object, config: object) -> EanPassengerServiceResult:
+        objective = config.objective
+        captured_recorders[objective] = config.progress_recorder
+        return _fake_ean_passenger_service_result(objective)
+
+    monkeypatch.setattr(
+        "ropeway_skip_stop_optimization.exports.artifacts.solve_ean_passenger_service",
+        fake_solve_ean_passenger_service,
+    )
+    context = ExportContext(
+        example=ThreeStationExample(),
+        progress=ProgressReporter(enabled=False),
+    )
+    context._scenario = build_three_station_scenario()
+    context._ean_artifact = object()
+
+    context.ean_passenger_service_result(EanPassengerServiceObjective.WAITING_TIME)
+    context.ean_passenger_service_result(EanPassengerServiceObjective.JOURNEY_TIME)
+
+    assert captured_recorders[EanPassengerServiceObjective.WAITING_TIME] is not None
+    assert captured_recorders[EanPassengerServiceObjective.JOURNEY_TIME] is not None
+    assert (
+        captured_recorders[EanPassengerServiceObjective.WAITING_TIME]
+        is not captured_recorders[EanPassengerServiceObjective.JOURNEY_TIME]
+    )
 
 
 def test_discrete_export_requires_discrete_example_capability(tmp_path: Path) -> None:
@@ -484,6 +519,40 @@ def _manifest_variant(manifest: dict, family_id: str, variant_id: str) -> dict:
 def _manifest_artifact_set(manifest: dict, family_id: str, variant_id: str, artifact_set_id: str) -> dict:
     variant = _manifest_variant(manifest, family_id, variant_id)
     return next(artifact_set for artifact_set in variant["artifact_sets"] if artifact_set["id"] == artifact_set_id)
+
+
+def _fake_ean_passenger_service_result(objective: EanPassengerServiceObjective) -> EanPassengerServiceResult:
+    return EanPassengerServiceResult(
+        movement_plan=object(),
+        passenger_plan=object(),
+        metadata=EanPassengerServiceMetadata(
+            status="optimal",
+            solver_status="OPTIMAL",
+            objective_kind=objective,
+            objective_value_seconds=1.0,
+            objective_passenger_hours=1.0 / 3600.0,
+            best_bound=1.0,
+            mip_gap=0.0,
+            runtime_seconds=0.1,
+            node_count=0.0,
+            solution_count=1,
+            mip_gap_target=0.0,
+            time_limit_seconds=None,
+            demand_group_count=0,
+            ride_candidate_count=0,
+            slot_variable_count=0,
+            served_passenger_count=0,
+            unserved_passenger_count=0,
+            variable_count=0,
+            constraint_count=0,
+            skipped_visit_count=0,
+            visible_skipped_visit_count=0,
+            checkpoint_read_path=None,
+            checkpoint_solution_file_prefix=None,
+            checkpoint_final_solution_path=None,
+            optimization_config=EanOptimizationConfig(),
+        ),
+    )
 
 
 class _PhysicalOnlyExample(ScenarioExample):

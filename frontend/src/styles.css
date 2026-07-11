@@ -2170,6 +2170,74 @@ h3 {
   stroke-width: 2;
 }
 
+.progress-line--incumbent {
+  stroke: #285aa8;
+}
+
+.progress-line--bound {
+  stroke: #1c8c74;
+}
+
+.progress-line--gap {
+  stroke: #c6476b;
+  stroke-dasharray: 6 5;
+  stroke-width: 2;
+}
+
+.progress-events circle {
+  fill: #fff;
+  stroke: #285aa8;
+  stroke-width: 2.4;
+}
+
+.metrics-grid .progress-axis-title {
+  fill: var(--muted);
+  font-size: 12px;
+  font-weight: 820;
+}
+
+.metrics-grid .progress-axis-title--left {
+  text-anchor: start;
+}
+
+.metrics-grid .progress-axis-title--right {
+  text-anchor: end;
+  fill: #7c3aed;
+}
+
+.progress-legend {
+  display: grid;
+  gap: 10px;
+}
+
+.progress-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--ink);
+  font-size: 0.85rem;
+  font-weight: 760;
+}
+
+.progress-legend__swatch {
+  width: 26px;
+  height: 0;
+  border-top: 3px solid var(--ink);
+}
+
+.progress-legend__swatch--incumbent {
+  border-color: #285aa8;
+}
+
+.progress-legend__swatch--bound {
+  border-color: #1c8c74;
+}
+
+.progress-legend__swatch--gap {
+  border-color: #c6476b;
+  border-top-style: dashed;
+}
+
 .metrics-axis {
   stroke: rgba(23, 32, 43, 0.42);
   stroke-width: 1.2;
@@ -2544,10 +2612,15 @@ h3 {
 
 .replay-time {
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 3px 8px;
-  align-items: baseline;
+  gap: 3px;
   font-variant-numeric: tabular-nums;
+}
+
+.replay-time__range {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  min-width: 0;
 }
 
 .replay-time strong {
@@ -2558,10 +2631,6 @@ h3 {
   color: var(--muted);
   font-size: 0.84rem;
   font-weight: 760;
-}
-
-.replay-time span:last-child {
-  grid-column: 1 / -1;
 }
 
 .speed-buttons {

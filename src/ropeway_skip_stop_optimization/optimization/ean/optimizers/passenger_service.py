@@ -52,6 +52,7 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.solver_policy im
     GurobiSolverPolicy,
     apply_gurobi_solver_policy,
 )
+from ropeway_skip_stop_optimization.optimization.solver_progress import GurobiMipProgressSample
 
 
 LOGGER = logging.getLogger(__name__)
@@ -134,6 +135,7 @@ class EanPassengerServiceMetadata:
     checkpoint_solution_file_prefix: str | None
     checkpoint_final_solution_path: str | None
     optimization_config: EanOptimizationConfig
+    progress_samples: tuple[GurobiMipProgressSample, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -344,9 +346,15 @@ def solve_ean_passenger_service(
             config.solver_policy,
             ",".join(sorted({station_config.waiting_mode.value for station_config in artifact.config.station_configs})),
         )
+    progress_sample_start = 0
     if config.progress_recorder is None:
         model.optimize()
     else:
+        begin_run = getattr(config.progress_recorder, "begin_run", None)
+        if callable(begin_run):
+            progress_sample_start = int(begin_run())
+        else:
+            progress_sample_start = len(config.progress_recorder.samples)
         model.optimize(
             lambda callback_model, where: config.progress_recorder.record_callback(
                 callback_model,
@@ -360,7 +368,11 @@ def solve_ean_passenger_service(
 
     solver_diagnostics = _solver_diagnostics(model, GRB, config.solver_policy)
     checkpoint_diagnostics = _checkpoint_diagnostics(config.checkpoint)
-    status = solver_diagnostics["status"]
+    progress_samples = (
+        tuple(config.progress_recorder.samples[progress_sample_start:])
+        if config.progress_recorder is not None
+        else ()
+    )
     if model.SolCount <= 0:
         return EanPassengerServiceResult(
             movement_plan=None,
@@ -381,6 +393,7 @@ def solve_ean_passenger_service(
                 visible_skipped_visit_count=0,
                 **checkpoint_diagnostics,
                 optimization_config=config.optimization_config,
+                progress_samples=progress_samples,
             ),
         )
 
@@ -440,6 +453,7 @@ def solve_ean_passenger_service(
             visible_skipped_visit_count=visible_skipped_visit_count,
             **checkpoint_diagnostics,
             optimization_config=config.optimization_config,
+            progress_samples=progress_samples,
         ),
     )
 

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DiscreteOverlayToolbar } from "./DiscreteOverlayToolbar";
 import { EanMetricsView } from "./EanMetricsView";
+import { EanProgressView } from "./EanProgressView";
 import { EanReplayExportJobHost, type EanReplayVideoExportJob } from "./EanReplayExportJobHost";
 import { EanReplayExportModal } from "./EanReplayExportModal";
 import { EanReplayView } from "./EanReplayView";
@@ -186,6 +187,7 @@ export function ScenarioViewer({
       metrics: selectedBackend === "discrete" && replayMetrics !== null,
       replay: visibleDiscreteScenario !== null && movementPlan !== null,
       ean: selectedBackend === "ean" && (eanInput !== null || eanResult !== null || eanReplay !== null || eanPassengerService !== null),
+      ean_progress: selectedBackend === "ean" && (eanPassengerService?.metadata.progress_samples?.length ?? 0) > 0,
       ean_metrics: selectedBackend === "ean" && eanPassengerService?.passenger_plan !== null && eanPassengerService?.passenger_plan !== undefined,
       ean_replay: selectedBackend === "ean" && eanReplay !== null,
     }),
@@ -333,6 +335,11 @@ export function ScenarioViewer({
               eanReplayWarning={eanReplayWarning}
               eanPassengerServiceWarning={eanPassengerServiceWarning}
             />
+          ) : viewerMode === "ean_progress" ? (
+            <EanProgressView
+              eanPassengerService={eanPassengerService}
+              eanPassengerServiceWarning={eanPassengerServiceWarning}
+            />
           ) : viewerMode === "ean_metrics" ? (
             <EanMetricsView
               scenario={scenario}
@@ -410,6 +417,7 @@ function isViewerModeAvailable(mode: ViewerMode, availableModes: AvailableViewer
 function firstOptimizationMode(selectedBackend: ExportArtifactSetBackend, availableModes: AvailableViewerModes): ViewerMode | null {
   if (selectedBackend === "ean") {
     if (availableModes.ean) return "ean";
+    if (availableModes.ean_progress) return "ean_progress";
     if (availableModes.ean_metrics) return "ean_metrics";
     if (availableModes.ean_replay) return "ean_replay";
     return null;

@@ -34,7 +34,7 @@ export interface ViewerToggles {
 export type DiscreteOverlayMode = "selected" | "neighborhood";
 export type ScenarioDisplayMode = "physical" | "line";
 export type ArcColorMode = "type" | "speed";
-export type ViewerMode = "scenario" | "graph" | "metrics" | "replay" | "ean" | "ean_metrics" | "ean_replay";
+export type ViewerMode = "scenario" | "graph" | "metrics" | "replay" | "ean" | "ean_progress" | "ean_metrics" | "ean_replay";
 
 export interface AvailableViewerModes {
   scenario: true;
@@ -42,6 +42,7 @@ export interface AvailableViewerModes {
   metrics: boolean;
   replay: boolean;
   ean: boolean;
+  ean_progress: boolean;
   ean_metrics: boolean;
   ean_replay: boolean;
 }

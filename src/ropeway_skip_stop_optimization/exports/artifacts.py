@@ -42,6 +42,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     solve_ean_skip_stop_feasibility,
     validate_ean_movement_plan_against_artifact,
 )
+from ropeway_skip_stop_optimization.optimization.solver_progress import GurobiMipProgressRecorder
 from ropeway_skip_stop_optimization.progress import ProgressReporter
 from ropeway_skip_stop_optimization.replay import build_replay_metrics, replay_passenger_boarding
 from ropeway_skip_stop_optimization.validation import validate_scenario
@@ -96,6 +97,9 @@ class ExportContext:
     _ean_skip_stop_replay: EanPhysicalReplay | None = None
     _ean_passenger_service_results: dict[EanPassengerServiceObjective, EanPassengerServiceResult] = field(default_factory=dict)
     _ean_passenger_service_replays: dict[EanPassengerServiceObjective, EanPhysicalReplay] = field(default_factory=dict)
+    _ean_passenger_service_progress_recorders: dict[EanPassengerServiceObjective, GurobiMipProgressRecorder] = field(
+        default_factory=dict
+    )
 
     def scenario(self) -> Scenario:
         if self._scenario is None:
@@ -208,7 +212,7 @@ class ExportContext:
                         log_to_console=self.progress.enabled,
                         checkpoint=self.ean_checkpoint_config,
                         optimization_config=self.ean_optimization_config,
-                        progress_recorder=self.ean_progress_recorder,
+                        progress_recorder=self._ean_progress_recorder(objective),
                         progress_sample_interval_seconds=self.ean_progress_sample_interval_seconds,
                     ),
                 )
@@ -219,6 +223,13 @@ class ExportContext:
                     )
                 self._ean_passenger_service_results[objective] = result
         return self._ean_passenger_service_results[objective]
+
+    def _ean_progress_recorder(self, objective: EanPassengerServiceObjective) -> object:
+        if self.ean_progress_recorder is not None:
+            return self.ean_progress_recorder
+        if objective not in self._ean_passenger_service_progress_recorders:
+            self._ean_passenger_service_progress_recorders[objective] = GurobiMipProgressRecorder()
+        return self._ean_passenger_service_progress_recorders[objective]
 
     def ean_passenger_service_replay(
         self,

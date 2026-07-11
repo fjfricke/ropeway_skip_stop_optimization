@@ -546,6 +546,18 @@ export interface EanPassengerServiceMetadata {
   constraint_count: number;
   skipped_visit_count: number;
   visible_skipped_visit_count: number;
+  progress_samples?: EanSolverProgressSample[];
+}
+
+export interface EanSolverProgressSample {
+  runtime_seconds: number;
+  node_count?: number | null;
+  incumbent_objective?: number | null;
+  best_bound?: number | null;
+  mip_gap?: number | null;
+  solution_count?: number | null;
+  work?: number | null;
+  event?: string;
 }
 
 export interface EanPassengerServiceResult {

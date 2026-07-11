@@ -1,4 +1,4 @@
-import { BarChart3, GitBranch, LineChart, Network, PlayCircle, RadioTower } from "lucide-react";
+import { Activity, BarChart3, GitBranch, LineChart, Network, PlayCircle, RadioTower } from "lucide-react";
 import type { ExportArtifactSetBackend } from "../types";
 import type { AvailableViewerModes, ViewerMode } from "./viewerTypes";
 
@@ -57,6 +57,12 @@ export function OptimizationModeTabs({ viewerMode, selectedBackend, availableMod
           <button className={viewerMode === "ean" ? "is-active" : ""} onClick={() => onViewerModeChange("ean")}>
             <GitBranch size={17} />
             View
+          </button>
+        ) : null}
+        {availableModes.ean_progress ? (
+          <button className={viewerMode === "ean_progress" ? "is-active" : ""} onClick={() => onViewerModeChange("ean_progress")}>
+            <Activity size={17} />
+            Progress
           </button>
         ) : null}
         {availableModes.ean_metrics ? (

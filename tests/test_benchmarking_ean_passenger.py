@@ -3,10 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from ropeway_skip_stop_optimization.benchmarking.ean_passenger import (
-    GurobiMipProgressRecorder,
-)
 from ropeway_skip_stop_optimization.benchmarking.plots import PlotBuilder, collect_result_paths
+from ropeway_skip_stop_optimization.optimization.solver_progress import (
+    GurobiMipProgressRecorder,
+    GurobiMipProgressSample,
+)
 
 
 def test_gurobi_mip_progress_recorder_samples_intervals_and_incumbents() -> None:
@@ -55,6 +56,30 @@ def test_gurobi_mip_progress_recorder_samples_intervals_and_incumbents() -> None
     assert recorder.samples[1].runtime_seconds == 5.1
     assert recorder.samples[1].mip_gap == 0.2
     assert recorder.samples[2].incumbent_objective == 78.0
+
+
+def test_gurobi_mip_progress_recorder_begin_run_resets_sampling_state() -> None:
+    recorder = GurobiMipProgressRecorder()
+    recorder.samples.append(
+        GurobiMipProgressSample(
+            runtime_seconds=10.0,
+            node_count=1.0,
+            incumbent_objective=100.0,
+            best_bound=90.0,
+            mip_gap=0.1,
+            solution_count=1,
+        )
+    )
+    recorder._last_interval_runtime = 10.0
+    recorder._last_solution_count = 1
+    recorder._last_incumbent_objective = 100.0
+
+    sample_start = recorder.begin_run()
+
+    assert sample_start == 1
+    assert recorder._last_interval_runtime is None
+    assert recorder._last_solution_count is None
+    assert recorder._last_incumbent_objective is None
 
 
 def test_gurobi_mip_progress_recorder_records_final_model_state() -> None:
