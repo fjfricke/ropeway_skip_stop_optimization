@@ -107,6 +107,66 @@ implemented in passenger_service.py
 covered by tests/test_optimization_ean_passenger_service.py
 ```
 
+### Priority 1 Follow-Up: Candidate Earliest Board-Time Bound
+
+Status: **planned**
+
+The implemented slot-time strengthening is not sufficient for waiting-time
+instances where many demand groups have `release_time_seconds = 0`. In that
+case this constraint is valid but weak:
+
+```text
+slot_board_time >= release_time * slot
+```
+
+For fractional LP solutions it still allows active passenger slots to carry
+almost no waiting-time cost, even though the assigned cabin cannot physically
+reach the origin platform at time zero. This is visible in five-station
+waiting-time runs where the incumbent improves, but the root/best lower bound
+stays close to zero for a long time.
+
+Add a candidate-specific physical lower bound:
+
+```text
+slot_board_time >= earliest_physical_board_time(candidate) * slot
+```
+
+Equivalently for the waiting-time objective:
+
+```text
+slot_board_time - release_time * slot
+    >= max(0, earliest_physical_board_time(candidate) - release_time) * slot
+```
+
+The bound should be derived conservatively from the candidate's cabin, origin
+visit index, route timing, and platform entry/exit timing. It must never exceed
+the earliest time at which this cabin could actually board passengers at the
+candidate origin. If computed conservatively, this preserves every integer
+feasible solution and only cuts fractional relaxation slack.
+
+Expected effect:
+
+- stronger root and early best bounds for waiting-time objectives
+- especially helpful when releases are at `0s`
+- no change to the feasible integer model
+- clearer MIP gap progression in the optimization progress view
+
+Likely files:
+
+```text
+src/ropeway_skip_stop_optimization/optimization/ean/optimizers/passenger_service.py
+tests/test_optimization_ean_passenger_service.py
+```
+
+Implementation notes:
+
+- Reuse or mirror the earliest-visit timing logic from passenger candidate
+  generation where possible.
+- Keep the bound independent from solver parameters.
+- Add tests that prove the integer optimum is unchanged on a small instance and
+  that the generated strengthening bound is positive when release time is zero
+  but the candidate cabin reaches the origin later.
+
 ## Priority 2: Exact Ride Candidate Pruning
 
 Status: **implemented**

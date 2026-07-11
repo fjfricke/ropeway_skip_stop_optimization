@@ -1182,3 +1182,134 @@ Implement progressively:
 
 The full-wait final stage is mandatory in every schedule if the result is meant
 to certify the original model.
+
+## Remarks on the Passenger Flow Problem
+
+For fixed cabin movements, the passenger part should be treated separately from
+the full stop/skip/timing problem. Once the movement plan is fixed, all cabin
+visits, service decisions, event times, and cabin intervals are known. The
+remaining question is passenger assignment:
+
+```text
+which demand boards which cabin visit
+which cabin intervals are occupied
+where passengers alight
+which passengers remain unserved
+```
+
+This fixed-movement passenger assignment is flow-like, but not a plain
+single-commodity min-cost-flow problem. A single unlabeled flow cannot preserve
+OD semantics: it can match total origins and total destinations without ensuring
+that passengers starting at origin \(o\) end at their requested destination
+\(d\).
+
+A compact exact structure is a destination-layered event-expanded flow:
+
+```text
+commodity/layer d = all passengers whose destination is station d
+sources          = demand origins with demand to d
+sink             = destination d
+unserved arcs    = demand can remain unserved with a horizon-based penalty
+```
+
+The layers share cabin capacities:
+
+```text
+sum_d flow[cabin_interval, d] <= cabin_capacity
+```
+
+This shared-capacity coupling makes the model a multi-commodity flow problem
+rather than a collection of independent min-cost-flow problems. It is still a
+much smaller and cleaner problem than the full integrated MILP because movement,
+headway, stop/skip, and timing binaries are no longer present.
+
+Recommended implementation path:
+
+```text
+1. Build a fixed-movement destination-layered passenger-flow LP.
+2. Solve the LP and decompose positive flows into passenger paths.
+3. Check whether all path and arc flows are integral.
+4. If integral, the passenger assignment is complete.
+5. If fractional, solve a restricted integer repair model on active arcs/paths.
+6. Only if this is insufficient, move to path-based column generation or
+   branch-and-price(-and-cut).
+```
+
+This keeps the first implementation testable and useful even before Benders
+cuts are attempted. The LP can serve as:
+
+```text
+fixed-movement passenger evaluator
+passenger-path diagnostic tool
+incumbent repair step
+MIP-start generator for the integrated model
+future Benders subproblem
+```
+
+For exact integer passenger paths, the final result must be integral. The
+continuous LP may already be integral on many aggregate instances, but this is
+not guaranteed because shared multi-commodity capacities generally destroy the
+pure network-flow integrality property. Therefore integrality diagnostics and a
+restricted integer repair path should be part of the first passenger-flow
+prototype.
+
+### Benchmark-Oriented Algorithm Choice
+
+The fixed-movement passenger assignment should not be benchmarked first as a
+plain max-flow or single-commodity min-cost-flow problem. Those algorithms are
+useful baselines only for simplified cases where passenger destination identity
+or shared multi-commodity cabin capacity is ignored.
+
+For the actual passenger problem, the most relevant benchmark sequence is:
+
+```text
+1. Arc-based destination-layered LP in Gurobi.
+2. LP integrality diagnostics and flow-to-path decomposition.
+3. Restricted integer repair if the LP solution is fractional.
+4. Path-based column generation if the arc-based LP becomes too large.
+5. Branch-and-price(-and-cut) only if exact integer paths remain hard after
+   restricted repair and column generation.
+```
+
+This sequence matches the usual algorithmic hierarchy for multi-commodity
+network-flow style problems:
+
+```text
+continuous multi-commodity LP:
+  good first evaluator and lower/assignment bound
+
+path-based column generation:
+  preferred when the full arc/path formulation becomes too large
+
+branch-and-price-and-cut:
+  exact integer method, but substantially more complex
+```
+
+The first benchmark should answer empirical questions before committing to a
+heavier algorithm:
+
+```text
+How large is the arc-based destination-layered LP?
+How fast does it solve for fixed movement plans?
+How often is the LP solution already integral?
+How many passenger paths are produced after decomposition?
+Where do fractional flows appear?
+How fast is restricted integer repair on active arcs or paths?
+```
+
+Decision rule:
+
+```text
+if LP is fast and integral often:
+    keep arc-based LP as the passenger evaluator
+elif LP is fast but fractional:
+    add restricted integer repair
+elif LP is too large:
+    prototype path-based column generation
+else if exact integer repair remains hard:
+    consider branch-and-price(-and-cut)
+```
+
+This benchmark order keeps the first implementation small while still leaving a
+clear path to the algorithms commonly used for larger multi-commodity passenger
+flow problems.
