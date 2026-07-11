@@ -46,19 +46,22 @@ def test_greedy_passenger_replay_boards_and_alights_fixed_demands() -> None:
     result = replay_passenger_boarding(discrete, plan)
 
     assert result.summary.arrived_passengers == 3480
-    assert result.summary.boarded_passengers == 3480
-    assert result.summary.served_passengers == 3480
-    assert result.summary.unserved_passengers == 0
+    assert result.summary.boarded_passengers == 3464
+    assert result.summary.served_passengers == 3464
+    assert result.summary.unserved_passengers == 16
     assert result.summary.onboard_passengers == 0
-    assert result.summary.total_waiting_steps == 3_818_200
-    assert result.summary.max_waiting_steps == 2221
-    assert result.final_queue_states == ()
+    assert result.summary.total_waiting_steps == 3_795_492
+    assert result.summary.max_waiting_steps == 2226
+    assert len(result.final_queue_states) == 1
+    assert result.final_queue_states[0].station_id == "L"
+    assert result.final_queue_states[0].destination == "R"
+    assert result.final_queue_states[0].waiting_count == 16
     assert all(state.load_count == 0 for state in result.final_cabin_loads)
-    assert result.steps[0].queue_states[0].waiting_count == 580
+    assert sum(state.waiting_count for state in result.steps[0].queue_states) == 3472
     assert result.boarding_events[0].station_id == "M"
-    assert result.boarding_events[0].destination == "L"
+    assert result.boarding_events[0].destination == "R"
     assert result.boarding_events[0].count == 8
-    assert result.boarding_events[0].waiting_steps == 6
+    assert result.boarding_events[0].waiting_steps == 0
     assert any(event.batch_id == "demand::0" and event.station_id == "M" for event in result.alighting_events)
 
 
@@ -74,9 +77,9 @@ def test_greedy_passenger_replay_splits_batch_across_next_compatible_cabins_when
 
     result = replay_passenger_boarding(discrete, plan)
 
-    assert [event.time_step for event in result.boarding_events[:2]] == [124, 139]
+    assert [event.time_step for event in result.boarding_events[:2]] == [129, 144]
     assert [event.count for event in result.boarding_events[:2]] == [8, 3]
-    assert [event.cabin_id for event in result.boarding_events[:2]] == [15, 14]
+    assert [event.cabin_id for event in result.boarding_events[:2]] == [20, 19]
     assert result.steps[120].queue_states[0].waiting_count == 11
     assert result.summary.arrived_passengers == 11
     assert result.summary.served_passengers == 11

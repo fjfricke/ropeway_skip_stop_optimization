@@ -40,9 +40,9 @@ def test_ring_ean_build_artifact_builder_builds_three_station_artifact() -> None
 
     starts_by_cabin = {start.cabin_id: start for start in artifact.cabin_starts}
     assert starts_by_cabin[0].first_switch_id == "M_entry_lr"
-    assert starts_by_cabin[0].kind is EanCabinStartKind.EARLIEST
+    assert starts_by_cabin[0].kind is EanCabinStartKind.FIXED
     assert starts_by_cabin[1].first_switch_id == "M_entry_rl"
-    assert starts_by_cabin[1].kind is EanCabinStartKind.EARLIEST
+    assert starts_by_cabin[1].kind is EanCabinStartKind.FIXED
 
     waiting_mode_by_station_id = {
         station_config.station_id: station_config.waiting_mode

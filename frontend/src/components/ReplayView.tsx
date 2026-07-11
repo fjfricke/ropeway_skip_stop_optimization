@@ -181,8 +181,10 @@ export function ReplayView({
             onChange={(event) => setTimeStep(Number(event.target.value))}
           />
           <div className="replay-time">
-            <strong>{timeStep}</strong>
-            <span>/ {maxStep} steps</span>
+            <div className="replay-time__range">
+              <strong>{timeStep}</strong>
+              <span>/ {maxStep} steps</span>
+            </div>
             <span>{clockLabel(scenario.service_start_time, timeStep, discreteScenario.delta_seconds)}</span>
           </div>
           <div className="speed-buttons" aria-label="Playback speed">

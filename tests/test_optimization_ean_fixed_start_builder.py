@@ -38,11 +38,11 @@ def test_deterministic_physical_start_builder_maps_three_station_starts() -> Non
 
     starts_by_cabin = {start.cabin_id: start for start in starts}
     assert starts_by_cabin[0].first_switch_id == "M_entry_lr"
-    assert starts_by_cabin[0].kind is EanCabinStartKind.EARLIEST
+    assert starts_by_cabin[0].kind is EanCabinStartKind.FIXED
     assert starts_by_cabin[0].time_seconds == pytest.approx(3 / 2.75 + 150 / 5)
 
     assert starts_by_cabin[1].first_switch_id == "M_entry_rl"
-    assert starts_by_cabin[1].kind is EanCabinStartKind.EARLIEST
+    assert starts_by_cabin[1].kind is EanCabinStartKind.FIXED
     assert starts_by_cabin[1].time_seconds == pytest.approx(3 / 2.75 + 150 / 5)
 
     assert starts_by_cabin[2].first_switch_id == "M_entry_lr"

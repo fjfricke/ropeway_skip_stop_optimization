@@ -28,7 +28,7 @@ def test_all_stop_cycle_path_is_closed_and_excludes_skips() -> None:
 
     path.validate(discrete)
 
-    assert len(path.arc_ids) == 352
+    assert len(path.arc_ids) == 432
     assert len(path.node_ids) == len(path.arc_ids)
     assert path.source_segment_ids == ALL_STOP_SEGMENT_IDS
     assert "M_lr_skip_bypass" not in path.source_segment_ids
@@ -94,14 +94,14 @@ def test_maximal_greedy_circulation_plan_uses_all_feasible_cycle_slots() -> None
     plan = build_maximal_greedy_all_stop_circulation_plan(discrete, horizon_steps=len(path.arc_ids))
 
     plan.validate(discrete)
-    assert len(placements) == 23
+    assert len(placements) == 28
     assert len(plan.trajectories) == len(placements)
-    assert tuple(trajectory.cabin_id for trajectory in plan.trajectories) == tuple(range(23))
+    assert tuple(trajectory.cabin_id for trajectory in plan.trajectories) == tuple(range(28))
     assert plan.paths[0].source_segment_ids == ALL_STOP_SEGMENT_IDS
     assert "M_lr_skip_bypass" not in plan.paths[0].source_segment_ids
     assert "M_rl_skip_bypass" not in plan.paths[0].source_segment_ids
-    with pytest.raises(ValueError, match="could not greedily place cabin 23"):
-        greedy_place_cabins_on_cycle(discrete, path.node_ids, tuple(range(24)))
+    with pytest.raises(ValueError, match="could not greedily place cabin 28"):
+        greedy_place_cabins_on_cycle(discrete, path.node_ids, tuple(range(29)))
 
 
 def test_movement_plan_validation_rejects_conflicting_occupancy() -> None:

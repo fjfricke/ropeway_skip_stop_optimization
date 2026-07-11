@@ -8,11 +8,9 @@ export function segmentPath(segment: TrackSegment, layout: ScenarioLayout) {
   const from = layout.nodes[segment.from_node_id];
   const to = layout.nodes[segment.to_node_id];
   if (!from || !to) return "";
-  const curve = layout.segments[segment.id]?.curve ?? 0;
-  if (curve === 0) return `M ${from.x} ${from.y} L ${to.x} ${to.y}`;
-  const midX = (from.x + to.x) / 2;
-  const midY = (from.y + to.y) / 2 + curve;
-  return `M ${from.x} ${from.y} Q ${midX} ${midY} ${to.x} ${to.y}`;
+  const control = segmentControlPoint(segment, layout);
+  if (!control) return `M ${from.x} ${from.y} L ${to.x} ${to.y}`;
+  return `M ${from.x} ${from.y} Q ${control.x} ${control.y} ${to.x} ${to.y}`;
 }
 
 export function discreteNodePoint(
@@ -34,18 +32,13 @@ export function pointOnSegment(segment: TrackSegment, layout: ScenarioLayout, ra
   const to = layout.nodes[segment.to_node_id];
   const t = clamp(rawT, 0, 1);
   if (!from || !to) return null;
-  const curve = layout.segments[segment.id]?.curve ?? 0;
-  if (curve === 0) {
+  const control = segmentControlPoint(segment, layout);
+  if (!control) {
     return {
       x: from.x + (to.x - from.x) * t,
       y: from.y + (to.y - from.y) * t,
     };
   }
-
-  const control = {
-    x: (from.x + to.x) / 2,
-    y: (from.y + to.y) / 2 + curve,
-  };
   const oneMinusT = 1 - t;
   return {
     x: oneMinusT * oneMinusT * from.x + 2 * oneMinusT * t * control.x + t * t * to.x,
@@ -58,15 +51,10 @@ export function segmentTangentAngle(segment: TrackSegment, layout: ScenarioLayou
   const to = layout.nodes[segment.to_node_id];
   const t = clamp(rawT, 0, 1);
   if (!from || !to) return 0;
-  const curve = layout.segments[segment.id]?.curve ?? 0;
-  if (curve === 0) {
+  const control = segmentControlPoint(segment, layout);
+  if (!control) {
     return radiansToDegrees(Math.atan2(to.y - from.y, to.x - from.x));
   }
-
-  const control = {
-    x: (from.x + to.x) / 2,
-    y: (from.y + to.y) / 2 + curve,
-  };
   const oneMinusT = 1 - t;
   const dx = 2 * oneMinusT * (control.x - from.x) + 2 * t * (to.x - control.x);
   const dy = 2 * oneMinusT * (control.y - from.y) + 2 * t * (to.y - control.y);
@@ -90,25 +78,35 @@ export function segmentArrowPlacement(segment: TrackSegment, layout: ScenarioLay
   const from = layout.nodes[segment.from_node_id];
   const to = layout.nodes[segment.to_node_id];
   if (!from || !to) return null;
-  const curve = layout.segments[segment.id]?.curve ?? 0;
+  const control = segmentControlPoint(segment, layout);
   const t = 0.7;
-  if (curve === 0) {
+  if (!control) {
     const x = from.x + (to.x - from.x) * t;
     const y = from.y + (to.y - from.y) * t;
     const angleDeg = radiansToDegrees(Math.atan2(to.y - from.y, to.x - from.x));
     return { x, y, angleDeg, t };
   }
-
-  const control = {
-    x: (from.x + to.x) / 2,
-    y: (from.y + to.y) / 2 + curve,
-  };
   const oneMinusT = 1 - t;
   const x = oneMinusT * oneMinusT * from.x + 2 * oneMinusT * t * control.x + t * t * to.x;
   const y = oneMinusT * oneMinusT * from.y + 2 * oneMinusT * t * control.y + t * t * to.y;
   const dx = 2 * oneMinusT * (control.x - from.x) + 2 * t * (to.x - control.x);
   const dy = 2 * oneMinusT * (control.y - from.y) + 2 * t * (to.y - control.y);
   return { x, y, angleDeg: radiansToDegrees(Math.atan2(dy, dx)), t };
+}
+
+export function segmentControlPoint(segment: TrackSegment, layout: ScenarioLayout) {
+  const from = layout.nodes[segment.from_node_id];
+  const to = layout.nodes[segment.to_node_id];
+  if (!from || !to) return null;
+  const hint = layout.segments[segment.id];
+  const curve = hint?.curve ?? 0;
+  const controlDx = hint?.controlDx ?? 0;
+  const controlDy = hint?.controlDy ?? 0;
+  if (curve === 0 && controlDx === 0 && controlDy === 0) return null;
+  return {
+    x: (from.x + to.x) / 2 + controlDx,
+    y: (from.y + to.y) / 2 + curve + controlDy,
+  };
 }
 
 export function parseViewBox(value: string): ViewBoxState {

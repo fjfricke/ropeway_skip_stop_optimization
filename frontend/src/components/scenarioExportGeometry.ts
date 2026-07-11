@@ -3,7 +3,7 @@ import type { Scenario, Station, TrackSegment } from "../types";
 import { speedProfileLabel } from "./arcColor";
 import { lineViewLinks, lineViewPoints, lineViewStations, stationLabel } from "./LineViewLayer";
 import { buildNodeLabelPlacements, estimateNodeLabelSize } from "./nodeLabelPlacement";
-import { pointOnSegment, round, segmentPath } from "./networkGeometry";
+import { pointOnSegment, round, segmentControlPoint, segmentPath } from "./networkGeometry";
 import type { NodeLabelPlacement, SegmentRouteInfo, ViewBoxState } from "./networkTypes";
 import { stationIdsForPhysicalContent } from "./physicalStationSelection";
 import {
@@ -597,13 +597,9 @@ function segmentPathRange(segment: TrackSegment, layout: ScenarioLayout, startT:
   const start = pointOnSegment(segment, layout, startT);
   const end = pointOnSegment(segment, layout, endT);
   if (!start || !end) return "";
-  const curve = layout.segments[segment.id]?.curve ?? 0;
-  if (curve === 0) return `M ${round(start.x)} ${round(start.y)} L ${round(end.x)} ${round(end.y)}`;
+  const control = segmentControlPoint(segment, layout);
+  if (!control) return `M ${round(start.x)} ${round(start.y)} L ${round(end.x)} ${round(end.y)}`;
 
-  const control = {
-    x: (from.x + to.x) / 2,
-    y: (from.y + to.y) / 2 + curve,
-  };
   const [left, right] = splitQuadratic(from, control, to, startT);
   const remainingT = startT === 1 ? 1 : (endT - startT) / (1 - startT);
   const [part] = splitQuadratic(left[2], right[1], right[2], remainingT);
@@ -629,12 +625,8 @@ function segmentTangentAt(segment: TrackSegment, layout: ScenarioLayout, t: numb
   const from = layout.nodes[segment.from_node_id];
   const to = layout.nodes[segment.to_node_id];
   if (!from || !to) return null;
-  const curve = layout.segments[segment.id]?.curve ?? 0;
-  if (curve === 0) return radiansToDegrees(Math.atan2(to.y - from.y, to.x - from.x));
-  const control = {
-    x: (from.x + to.x) / 2,
-    y: (from.y + to.y) / 2 + curve,
-  };
+  const control = segmentControlPoint(segment, layout);
+  if (!control) return radiansToDegrees(Math.atan2(to.y - from.y, to.x - from.x));
   const dx = 2 * (1 - t) * (control.x - from.x) + 2 * t * (to.x - control.x);
   const dy = 2 * (1 - t) * (control.y - from.y) + 2 * t * (to.y - control.y);
   return radiansToDegrees(Math.atan2(dy, dx));

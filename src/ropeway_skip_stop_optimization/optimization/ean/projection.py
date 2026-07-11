@@ -250,7 +250,7 @@ def _events_for_visit(
                 switch_id=visit.switch_id,
                 station_id=visit.station_id,
                 physical_node_id=route.platform_exit_node_id,
-                source_segment_ids=route.station_segment_ids,
+                source_segment_ids=() if visit.wait_seconds > 0 else route.station_segment_ids,
             )
         )
         events.append(

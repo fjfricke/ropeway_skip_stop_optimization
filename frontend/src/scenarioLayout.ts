@@ -9,6 +9,8 @@ export interface LayoutPoint {
 
 export interface SegmentStyleHint {
   curve?: number;
+  controlDx?: number;
+  controlDy?: number;
   labelDx?: number;
   labelDy?: number;
 }
@@ -198,8 +200,13 @@ function circularSkipStopLayout(scenario: Scenario): ScenarioLayout {
 
   stations.forEach((station, index) => {
     const angle = -Math.PI / 2 + (2 * Math.PI * index) / stations.length;
-    addCircularStation(nodes, station, center, radius, angle);
-    segments[`${station.id}_cw_skip_bypass`] = { curve: -36, labelDx: 0, labelDy: -34 };
+    const stationGeometry = addCircularStation(nodes, station, center, radius, angle);
+    segments[`${station.id}_cw_skip_bypass`] = {
+      controlDx: stationGeometry.radial.x * 46,
+      controlDy: stationGeometry.radial.y * 46,
+      labelDx: stationGeometry.radial.x * 22,
+      labelDy: stationGeometry.radial.y * 22,
+    };
   });
 
   for (const segment of scenario.track_segments) {
@@ -263,4 +270,6 @@ function addCircularStation(
     labelDx,
     labelDy,
   };
+
+  return { radial, tangent, inward, base };
 }

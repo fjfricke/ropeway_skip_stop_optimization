@@ -125,6 +125,12 @@ def test_ean_projection_emits_platform_exit_wait_events_for_end_wait() -> None:
     assert all(event.physical_node_id == "M_platform_exit_lr" for event in wait_events)
     assert wait_events[0].time_seconds == pytest.approx(visit.platform_exit_time_seconds)
     assert wait_events[1].time_seconds == pytest.approx(waited_visit.platform_exit_time_seconds)
+    exit_platform_event = next(
+        event
+        for event in first_visit_events
+        if event.event_kind is EanPhysicalEventKind.EXIT_PLATFORM
+    )
+    assert exit_platform_event.source_segment_ids == ()
 
 
 def test_ean_projection_rejects_fifo_waits_until_position_traces_exist() -> None:

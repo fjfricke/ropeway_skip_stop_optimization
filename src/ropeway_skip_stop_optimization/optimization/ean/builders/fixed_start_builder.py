@@ -4,6 +4,7 @@ import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from datetime import datetime, time
+from typing import TYPE_CHECKING
 
 from ropeway_skip_stop_optimization.mapping.physical_to_discrete import travel_seconds_for_segment
 from ropeway_skip_stop_optimization.models import (
@@ -17,6 +18,12 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanCabinStartKind,
     EanConfig,
 )
+
+if TYPE_CHECKING:
+    from ropeway_skip_stop_optimization.optimization.ean.builders.headway_duration_builder import (
+        HeadwayDurations,
+    )
+    from ropeway_skip_stop_optimization.optimization.ean.models import SkipStopTiming
 
 
 class EanCabinStartBuilder(ABC):

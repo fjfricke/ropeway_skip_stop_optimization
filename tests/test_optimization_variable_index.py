@@ -31,9 +31,9 @@ def test_dense_variable_index_matches_cartesian_variable_counts() -> None:
         config.horizon_steps,
     )
 
-    assert len(variable_index.x_keys) == 23 * 61 * 406
-    assert len(variable_index.y_keys) == 23 * 60 * 410
-    assert len(variable_index.x_keys) + len(variable_index.y_keys) == 1_135_418
+    assert len(variable_index.x_keys) == 23 * 61 * 446
+    assert len(variable_index.y_keys) == 23 * 60 * 448
+    assert len(variable_index.x_keys) + len(variable_index.y_keys) == 1_243_978
 
 
 def test_dense_variable_index_has_full_node_and_arc_sets_for_each_cabin_time() -> None:

@@ -16,6 +16,7 @@ import type {
 import { DemandSummaryPanel, type DemandSummaryRow } from "./DemandSummaryPanel";
 import { NetworkSvg, type ReplayCabinMarker, type ReplayCollisionMarker } from "./NetworkSvg";
 import type { ReplayStationQueueMarker } from "./NetworkSvg";
+import { pointOnSegment } from "./networkGeometry";
 import { stationVisualColor } from "./stationColors";
 import { useNetworkPanelContentHeight } from "./useNetworkPanelContentHeight";
 import type { ArcColorMode, DiscreteViewerToggles, ViewerToggles } from "./viewerTypes";
@@ -246,8 +247,10 @@ export function EanReplayView({
             onChange={(event) => setTimeSeconds(Number(event.target.value))}
           />
           <div className="replay-time">
-            <strong>{formatSeconds(timeSeconds)}</strong>
-            <span>/ {formatSeconds(timeBounds.max)}</span>
+            <div className="replay-time__range">
+              <strong>{formatSeconds(timeSeconds)}</strong>
+              <span>/ {formatSeconds(timeBounds.max)}</span>
+            </div>
             <span>{clockLabel(scenario.service_start_time, timeSeconds)}</span>
           </div>
           <div className="speed-buttons" aria-label="Playback speed">
@@ -664,6 +667,7 @@ function eanCabinPositionAtTime(
 
   if (!next) return pointAtNode(layout, previous.physical_node_id);
   if (next.time_seconds <= previous.time_seconds) return pointAtNode(layout, next.physical_node_id);
+  if (next.physical_node_id === previous.physical_node_id) return pointAtNode(layout, previous.physical_node_id);
   if (next.source_segment_ids.length === 0) return pointAtNode(layout, previous.physical_node_id);
 
   return pointAlongSegmentsAtTime(
@@ -773,30 +777,6 @@ function positionOnSegment(segment: TrackSegment, point: LayoutPoint, positionM:
     toNodeId: segment.to_node_id,
     segmentLengthM: segment.length_m,
     resourceId: segment.resource_id,
-  };
-}
-
-function pointOnSegment(segment: TrackSegment, layout: ScenarioLayout, rawT: number): LayoutPoint | null {
-  const from = layout.nodes[segment.from_node_id];
-  const to = layout.nodes[segment.to_node_id];
-  const t = clamp(rawT, 0, 1);
-  if (!from || !to) return null;
-  const curve = layout.segments[segment.id]?.curve ?? 0;
-  if (curve === 0) {
-    return {
-      x: from.x + (to.x - from.x) * t,
-      y: from.y + (to.y - from.y) * t,
-    };
-  }
-
-  const control = {
-    x: (from.x + to.x) / 2,
-    y: (from.y + to.y) / 2 + curve,
-  };
-  const oneMinusT = 1 - t;
-  return {
-    x: oneMinusT * oneMinusT * from.x + 2 * oneMinusT * t * control.x + t * t * to.x,
-    y: oneMinusT * oneMinusT * from.y + 2 * oneMinusT * t * control.y + t * t * to.y,
   };
 }
 

@@ -19,22 +19,29 @@ def test_replay_metrics_aggregate_near_capacity_replay() -> None:
 
     assert len(metrics.steps) == discrete.horizon_steps + 1
     assert metrics.steps[0].arrivals_count == 3480
-    assert metrics.steps[0].waiting_count == 3480
-    assert metrics.steps[0].cumulative_waiting_passenger_hours == pytest.approx(1740.0 / 3600)
+    assert metrics.steps[0].waiting_count == 3472
+    assert metrics.steps[0].boarding_count == 8
+    assert metrics.steps[0].onboard_count == 8
+    assert metrics.steps[0].cumulative_waiting_passenger_hours == pytest.approx(1736.0 / 3600)
     assert [(metric.station_id, metric.count) for metric in metrics.steps[0].waiting_by_station] == [
         ("L", 1160),
-        ("M", 1160),
+        ("M", 1152),
         ("R", 1160),
     ]
     assert metrics.steps[6].boarding_count == 8
-    assert metrics.steps[6].onboard_count == 8
-    assert [(metric.origin, metric.destination, metric.count) for metric in metrics.steps[6].onboard_by_od] == [
-        ("M", "L", 8),
+    assert metrics.steps[6].onboard_count == 24
+    assert [(metric.origin, metric.destination, metric.count) for metric in metrics.steps[0].onboard_by_od] == [
+        ("M", "R", 8),
     ]
     assert metrics.steps[-1].waiting_count == replay.summary.unserved_passengers
     assert metrics.steps[-1].onboard_count == replay.summary.onboard_passengers
     assert metrics.steps[-1].cumulative_waiting_passenger_hours == pytest.approx(
-        replay.summary.total_waiting_steps * discrete.delta_seconds / 3600
+        (
+            replay.summary.total_waiting_steps
+            + replay.summary.unserved_passengers * (discrete.horizon_steps + 1)
+        )
+        * discrete.delta_seconds
+        / 3600
     )
 
 
