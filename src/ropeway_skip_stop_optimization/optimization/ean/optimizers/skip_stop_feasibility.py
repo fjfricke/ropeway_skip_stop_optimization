@@ -2,10 +2,18 @@ from __future__ import annotations
 
 import math
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
+from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
+    HORIZON_ACTIVATION_EPSILON_SECONDS,
+    EanHorizonFormulation,
+)
+from ropeway_skip_stop_optimization.optimization.ean.horizon import (
+    add_visit_horizon_activation,
+    visit_is_active_in_solution,
+)
 from ropeway_skip_stop_optimization.optimization.ean.headway_semantics import (
     PLATFORM_EXIT_WAIT_OCCUPANCY_SEMANTICS,
     POINT_HEADWAY_SEMANTICS,
@@ -27,6 +35,13 @@ from ropeway_skip_stop_optimization.optimization.ean.plan import (
     EanMovementPlan,
     EanRouteDecision,
 )
+from ropeway_skip_stop_optimization.optimization.ean.optimization_config import (
+    EanOptimizationConfig,
+)
+from ropeway_skip_stop_optimization.optimization.ean.time_bounds import (
+    EanModelTimeBounds,
+    build_ean_model_time_bounds,
+)
 from ropeway_skip_stop_optimization.optimization.ean.validation import (
     validate_ean_movement_plan_against_artifact,
 )
@@ -41,6 +56,7 @@ class EanSkipStopFeasibilityConfig:
 
     time_limit_seconds: float | None = None
     log_to_console: bool = False
+    optimization_config: EanOptimizationConfig = field(default_factory=EanOptimizationConfig)
 
     def validate(self) -> None:
         if self.time_limit_seconds is not None and self.time_limit_seconds <= 0:
@@ -54,6 +70,7 @@ class EanSkipStopFeasibilityMetadata:
     variable_count: int
     constraint_count: int
     skipped_visit_count: int
+    optimization_config: EanOptimizationConfig
 
 
 @dataclass(frozen=True)
@@ -98,7 +115,11 @@ def solve_ean_skip_stop_feasibility(
     starts_by_cabin_id = {start.cabin_id: start for start in artifact.cabin_starts}
     checkpoint_by_id = {checkpoint.id: checkpoint for checkpoint in artifact.headway_checkpoints}
     candidate_by_id = {candidate.id: candidate for candidate in artifact.headway_candidates}
-    time_upper_bound = _time_upper_bound(artifact)
+    model_time_bounds = build_ean_model_time_bounds(
+        artifact,
+        config.optimization_config.formulation.time_bounds,
+    )
+    time_upper_bound = model_time_bounds.global_upper
     big_m = time_upper_bound + _max_headway_seconds(artifact) + 1.0
 
     model = gp.Model("ean_skip_stop_feasibility")
@@ -112,15 +133,45 @@ def solve_ean_skip_stop_feasibility(
     stop: dict[tuple[int, int], Any] = {}
 
     for key, visit in visits_by_key.items():
-        switch_time[key] = model.addVar(lb=0.0, ub=time_upper_bound, vtype=GRB.CONTINUOUS, name=f"t_{key[0]}_{key[1]}")
-        exit_switch_time[key] = model.addVar(lb=0.0, ub=time_upper_bound, vtype=GRB.CONTINUOUS, name=f"x_{key[0]}_{key[1]}")
-        wait_time[key] = model.addVar(lb=0.0, ub=time_upper_bound, vtype=GRB.CONTINUOUS, name=f"w_{key[0]}_{key[1]}")
+        bounds = model_time_bounds.by_visit[key]
+        switch_time[key] = model.addVar(
+            lb=bounds.switch_lower,
+            ub=bounds.switch_upper,
+            vtype=GRB.CONTINUOUS,
+            name=f"t_{key[0]}_{key[1]}",
+        )
+        exit_switch_time[key] = model.addVar(
+            lb=bounds.exit_lower,
+            ub=bounds.exit_upper,
+            vtype=GRB.CONTINUOUS,
+            name=f"x_{key[0]}_{key[1]}",
+        )
+        wait_time[key] = model.addVar(
+            lb=0.0,
+            ub=bounds.wait_upper,
+            vtype=GRB.CONTINUOUS,
+            name=f"w_{key[0]}_{key[1]}",
+        )
         stop[key] = model.addVar(vtype=GRB.BINARY, name=f"stop_{key[0]}_{key[1]}")
-        timing = timing_by_switch_id[visit.switch_id]
-        if not timing.skip_allowed:
-            model.addConstr(stop[key] == 1, name=f"force_stop_{key[0]}_{key[1]}")
 
     model.update()
+
+    visit_active = add_visit_horizon_activation(
+        model=model,
+        binary_vtype=GRB.BINARY,
+        artifact=artifact,
+        formulation=config.optimization_config.formulation.horizon,
+        switch_time=switch_time,
+        visits_by_cabin_id=visits_by_cabin_id,
+        selected_time_bounds=model_time_bounds,
+        big_m=big_m,
+    )
+    for key, visit in visits_by_key.items():
+        timing = timing_by_switch_id[visit.switch_id]
+        if timing.skip_allowed:
+            model.addConstr(stop[key] <= visit_active[key], name=f"stop_only_active_{key[0]}_{key[1]}")
+        else:
+            model.addConstr(stop[key] == visit_active[key], name=f"force_stop_if_active_{key[0]}_{key[1]}")
 
     _add_start_constraints(model, switch_time, starts_by_cabin_id, visits_by_cabin_id)
     _add_timing_constraints(
@@ -132,10 +183,19 @@ def solve_ean_skip_stop_feasibility(
         visits_by_key,
         timing_by_switch_id,
         station_config_by_id,
-        time_upper_bound,
+        model_time_bounds,
+        big_m,
+        visit_active,
+    )
+    _add_chain_constraints(
+        model,
+        switch_time,
+        exit_switch_time,
+        visits_by_cabin_id,
+        timing_by_switch_id,
+        visit_active,
         big_m,
     )
-    _add_chain_constraints(model, switch_time, exit_switch_time, visits_by_cabin_id, timing_by_switch_id)
     _add_headway_constraints(
         model=model,
         switch_time=switch_time,
@@ -149,6 +209,8 @@ def solve_ean_skip_stop_feasibility(
         visits_by_key=visits_by_key,
         timing_by_switch_id=timing_by_switch_id,
         big_m=big_m,
+        visit_active=visit_active,
+        horizon_formulation=config.optimization_config.formulation.horizon,
     )
 
     model.setObjective(0.0, GRB.MINIMIZE)
@@ -174,6 +236,7 @@ def solve_ean_skip_stop_feasibility(
                 variable_count=model.NumVars,
                 constraint_count=model.NumConstrs,
                 skipped_visit_count=0,
+                optimization_config=config.optimization_config,
             ),
         )
 
@@ -185,8 +248,20 @@ def solve_ean_skip_stop_feasibility(
         exit_switch_time=exit_switch_time,
         wait_time=wait_time,
         stop=stop,
+        visit_active=visit_active,
+        horizon_formulation=config.optimization_config.formulation.horizon,
     )
-    validate_ean_movement_plan_against_artifact(artifact, plan).raise_for_errors()
+    validation_tolerance_seconds = (
+        1e-5
+        if config.optimization_config.formulation.horizon
+        is EanHorizonFormulation.EXACT_TIME_ACTIVATION
+        else 1e-6
+    )
+    validate_ean_movement_plan_against_artifact(
+        artifact,
+        plan,
+        tolerance_seconds=validation_tolerance_seconds,
+    ).raise_for_errors()
     skipped_visit_count = sum(
         1
         for trajectory in plan.trajectories
@@ -202,6 +277,7 @@ def solve_ean_skip_stop_feasibility(
             variable_count=model.NumVars,
             constraint_count=model.NumConstrs,
             skipped_visit_count=skipped_visit_count,
+            optimization_config=config.optimization_config,
         ),
     )
 
@@ -230,12 +306,15 @@ def _add_timing_constraints(
     visits_by_key: dict[tuple[int, int], SwitchVisitDefinition],
     timing_by_switch_id: dict[str, Any],
     station_config_by_id: dict[str, StationEanConfig],
-    time_upper_bound: float,
+    model_time_bounds: EanModelTimeBounds,
     big_m: float,
+    visit_active: dict[tuple[int, int], Any],
 ) -> None:
     for key, visit in visits_by_key.items():
         timing = timing_by_switch_id[visit.switch_id]
         station_config = station_config_by_id[timing.station_id]
+        bounds = model_time_bounds.by_visit[key]
+        active = visit_active[key]
         service_seconds = (
             timing.entry_to_platform_entry_seconds
             + timing.min_platform_entry_to_platform_exit_seconds
@@ -246,26 +325,33 @@ def _add_timing_constraints(
         if station_config.waiting_mode is StationWaitingMode.NO_WAITING:
             model.addConstr(wait_time[key] == 0.0, name=f"no_wait_{key[0]}_{key[1]}")
         elif station_config.waiting_mode is StationWaitingMode.END_OF_PLATFORM_WAIT:
-            model.addConstr(wait_time[key] <= time_upper_bound * stop[key], name=f"wait_only_stop_{key[0]}_{key[1]}")
+            model.addConstr(
+                wait_time[key] <= bounds.wait_upper * stop[key],
+                name=f"wait_only_active_stop_{key[0]}_{key[1]}",
+            )
         else:
             raise NotImplementedError(
                 f"unsupported EAN skip/stop waiting mode: {station_config.waiting_mode.value}"
             )
 
         model.addConstr(
-            exit_switch_time[key] - switch_time[key] - service_seconds - wait_time[key] <= big_m * (1 - stop[key]),
+            exit_switch_time[key] - switch_time[key] - service_seconds - wait_time[key]
+            <= big_m * (2 - stop[key] - active),
             name=f"service_exit_ub_{key[0]}_{key[1]}",
         )
         model.addConstr(
-            exit_switch_time[key] - switch_time[key] - service_seconds - wait_time[key] >= -big_m * (1 - stop[key]),
+            exit_switch_time[key] - switch_time[key] - service_seconds - wait_time[key]
+            >= -big_m * (2 - stop[key] - active),
             name=f"service_exit_lb_{key[0]}_{key[1]}",
         )
         model.addConstr(
-            exit_switch_time[key] - switch_time[key] - skip_seconds <= big_m * stop[key],
+            exit_switch_time[key] - switch_time[key] - skip_seconds
+            <= big_m * (stop[key] + 1 - active),
             name=f"skip_exit_ub_{key[0]}_{key[1]}",
         )
         model.addConstr(
-            exit_switch_time[key] - switch_time[key] - skip_seconds >= -big_m * stop[key],
+            exit_switch_time[key] - switch_time[key] - skip_seconds
+            >= -big_m * (stop[key] + 1 - active),
             name=f"skip_exit_lb_{key[0]}_{key[1]}",
         )
 
@@ -276,15 +362,26 @@ def _add_chain_constraints(
     exit_switch_time: dict[tuple[int, int], Any],
     visits_by_cabin_id: dict[int, tuple[SwitchVisitDefinition, ...]],
     timing_by_switch_id: dict[str, Any],
+    visit_active: dict[tuple[int, int], Any],
+    big_m: float,
 ) -> None:
     for cabin_id, visits in visits_by_cabin_id.items():
         for previous, current in zip(visits, visits[1:]):
             previous_key = (cabin_id, previous.visit_index)
             current_key = (cabin_id, current.visit_index)
             timing = timing_by_switch_id[previous.switch_id]
+            difference = (
+                switch_time[current_key]
+                - exit_switch_time[previous_key]
+                - timing.rope_to_next_switch_seconds
+            )
             model.addConstr(
-                switch_time[current_key] == exit_switch_time[previous_key] + timing.rope_to_next_switch_seconds,
-                name=f"chain_{cabin_id}_{previous.visit_index}_{current.visit_index}",
+                difference <= big_m * (1 - visit_active[previous_key]),
+                name=f"chain_ub_{cabin_id}_{previous.visit_index}_{current.visit_index}",
+            )
+            model.addConstr(
+                difference >= -big_m * (1 - visit_active[previous_key]),
+                name=f"chain_lb_{cabin_id}_{previous.visit_index}_{current.visit_index}",
             )
 
 
@@ -301,38 +398,66 @@ def _add_headway_constraints(
     visits_by_key: dict[tuple[int, int], SwitchVisitDefinition],
     timing_by_switch_id: dict[str, Any],
     big_m: float,
+    visit_active: dict[tuple[int, int], Any],
+    horizon_formulation: EanHorizonFormulation,
 ) -> None:
+    candidate_times_by_id: dict[str, HeadwayTimeExpressions] = {}
+    candidate_inactive_by_id: dict[str, Any] = {}
+    candidate_within_horizon: dict[str, Any] = {}
+    for candidate in artifact.headway_candidates:
+        checkpoint = checkpoint_by_id[candidate.checkpoint_id]
+        station_config = station_config_by_id.get(checkpoint.station_id)
+        times = _headway_time_expressions(
+            candidate=candidate,
+            checkpoint=checkpoint,
+            station_config=station_config,
+            switch_time=switch_time,
+            exit_switch_time=exit_switch_time,
+            wait_time=wait_time,
+            visits_by_key=visits_by_key,
+            timing_by_switch_id=timing_by_switch_id,
+        )
+        path_inactive = _candidate_inactive_expr(
+            candidate,
+            checkpoint=checkpoint,
+            stop=stop,
+            visit_active=visit_active,
+        )
+        candidate_times_by_id[candidate.id] = times
+        candidate_inactive_by_id[candidate.id] = path_inactive
+        if horizon_formulation is EanHorizonFormulation.EXACT_TIME_ACTIVATION:
+            within = model.addVar(vtype="B", name=f"checkpoint_within_horizon_{candidate.id}")
+            candidate_within_horizon[candidate.id] = within
+            model.addConstr(
+                within <= 1 - path_inactive,
+                name=f"checkpoint_within_requires_active_path_{candidate.id}",
+            )
+            model.addConstr(
+                times.follower_enter_time
+                <= artifact.config.operational_end_seconds + big_m * (1 - within),
+                name=f"checkpoint_before_horizon_if_active_{candidate.id}",
+            )
+            model.addConstr(
+                times.follower_enter_time
+                >= artifact.config.operational_end_seconds
+                + HORIZON_ACTIVATION_EPSILON_SECONDS
+                - big_m * (within + path_inactive),
+                name=f"checkpoint_after_horizon_if_inactive_{candidate.id}",
+            )
+
     for pair in artifact.headway_pairs:
         first_candidate = candidate_by_id[pair.first_candidate_id]
         second_candidate = candidate_by_id[pair.second_candidate_id]
-        checkpoint = checkpoint_by_id[pair.checkpoint_id]
         first_key = (first_candidate.cabin_id, first_candidate.visit_index)
         second_key = (second_candidate.cabin_id, second_candidate.visit_index)
-        station_config = station_config_by_id.get(checkpoint.station_id)
-
-        first_times = _headway_time_expressions(
-            candidate=first_candidate,
-            checkpoint=checkpoint,
-            station_config=station_config,
-            switch_time=switch_time,
-            exit_switch_time=exit_switch_time,
-            wait_time=wait_time,
-            visits_by_key=visits_by_key,
-            timing_by_switch_id=timing_by_switch_id,
-        )
-        second_times = _headway_time_expressions(
-            candidate=second_candidate,
-            checkpoint=checkpoint,
-            station_config=station_config,
-            switch_time=switch_time,
-            exit_switch_time=exit_switch_time,
-            wait_time=wait_time,
-            visits_by_key=visits_by_key,
-            timing_by_switch_id=timing_by_switch_id,
-        )
+        first_times = candidate_times_by_id[first_candidate.id]
+        second_times = candidate_times_by_id[second_candidate.id]
         semantics_label = first_times.semantics_label
-        first_inactive = _candidate_inactive_expr(first_candidate, checkpoint, stop)
-        second_inactive = _candidate_inactive_expr(second_candidate, checkpoint, stop)
+        first_inactive = candidate_inactive_by_id[first_candidate.id]
+        second_inactive = candidate_inactive_by_id[second_candidate.id]
+        if horizon_formulation is EanHorizonFormulation.EXACT_TIME_ACTIVATION:
+            first_inactive += 1 - candidate_within_horizon[first_candidate.id]
+            second_inactive += 1 - candidate_within_horizon[second_candidate.id]
         order = model.addVar(vtype="B", name=f"order_{pair.id}")
 
         model.addConstr(
@@ -439,19 +564,20 @@ def _candidate_inactive_expr(
     candidate: HeadwayCandidate,
     checkpoint: HeadwayCheckpointDefinition,
     stop: dict[tuple[int, int], Any],
+    visit_active: dict[tuple[int, int], Any],
 ) -> Any:
     key = (candidate.cabin_id, candidate.visit_index)
     if candidate.activation_reference is EanActivationReference.SERVE:
         return 1 - stop[key]
     if candidate.activation_reference is EanActivationReference.SKIP:
-        return stop[key]
+        return stop[key] + 1 - visit_active[key]
     if candidate.activation_reference is EanActivationReference.ACTIVE:
         if checkpoint.applies_to_serve and checkpoint.applies_to_skip:
-            return 0
+            return 1 - visit_active[key]
         if checkpoint.applies_to_serve:
             return 1 - stop[key]
         if checkpoint.applies_to_skip:
-            return stop[key]
+            return stop[key] + 1 - visit_active[key]
     raise ValueError(f"unsupported candidate activation reference: {candidate.activation_reference}")
 
 
@@ -463,16 +589,31 @@ def _extract_plan(
     exit_switch_time: dict[tuple[int, int], Any],
     wait_time: dict[tuple[int, int], Any],
     stop: dict[tuple[int, int], Any],
+    visit_active: dict[tuple[int, int], Any],
+    horizon_formulation: EanHorizonFormulation,
 ) -> EanMovementPlan:
     trajectories: list[EanCabinTrajectory] = []
     for cabin_id in sorted(visits_by_cabin_id):
         cabin_visits: list[EanCabinVisit] = []
-        for visit in visits_by_cabin_id[cabin_id]:
+        active_visits = tuple(
+            visit
+            for visit in visits_by_cabin_id[cabin_id]
+            if visit_is_active_in_solution(
+                visit_active[(visit.cabin_id, visit.visit_index)]
+            )
+        )
+        for active_index, visit in enumerate(active_visits):
             key = (visit.cabin_id, visit.visit_index)
             timing = timing_by_switch_id[visit.switch_id]
             switch_seconds = _value(switch_time[key])
             exit_seconds = _value(exit_switch_time[key])
-            next_seconds = exit_seconds + timing.rope_to_next_switch_seconds
+            if active_index + 1 < len(active_visits):
+                next_visit = active_visits[active_index + 1]
+                next_seconds = _value(
+                    switch_time[(next_visit.cabin_id, next_visit.visit_index)]
+                )
+            else:
+                next_seconds = exit_seconds + timing.rope_to_next_switch_seconds
             is_stop = _value(stop[key]) >= 0.5
             wait_seconds = _value(wait_time[key]) if is_stop else 0.0
 
@@ -507,6 +648,7 @@ def _extract_plan(
         horizon_seconds=artifact.config.horizon_seconds,
         model_end_seconds=artifact.config.model_end_seconds,
         trajectories=tuple(trajectories),
+        horizon_formulation=horizon_formulation,
     )
     plan.validate()
     return plan

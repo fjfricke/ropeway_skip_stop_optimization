@@ -28,6 +28,8 @@ internal import paths.
 Potential improvements:
 
 - automate repeated benchmark matrices and aggregate statistics;
+- generate benchmark matrices from typed formulation categories plus
+  independently enabled exact reductions;
 - expose a stable experiment preset API around existing local scripts;
 - record solver seed and repeated-run variance;
 - add optional CSV/table generation from benchmark JSON;

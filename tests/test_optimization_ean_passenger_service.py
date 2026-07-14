@@ -22,11 +22,23 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanBuildArtifact,
     EanTimeReference,
     EanOptimizationConfig,
+    EanFormulationConfig,
+    EanHorizonFormulation,
+    EanTimeBoundFormulation,
     EanPassengerServiceConfig,
     EanPassengerServiceObjective,
     EanRideCandidate,
     GurobiSolverPolicy,
     solve_ean_passenger_service,
+)
+from ropeway_skip_stop_optimization.optimization.ean.time_bounds import (
+    build_ean_model_time_bounds,
+)
+from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
+    HORIZON_ACTIVATION_EPSILON_SECONDS,
+)
+from ropeway_skip_stop_optimization.optimization.ean.horizon import (
+    add_visit_horizon_activation,
 )
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.passenger_service import (
     StopSkipBigMBounds,
@@ -191,6 +203,123 @@ def test_ean_passenger_service_tight_big_m_bounds_preserves_minimal_solution() -
         baseline.passenger_plan.unserved_counts_by_demand_group_id
     )
     assert tightened.metadata.optimization_config.enable_tight_big_m_bounds
+
+
+@pytest.mark.parametrize(
+    "horizon_formulation",
+    (
+        EanHorizonFormulation.CONSERVATIVE_FREE_SUFFIX,
+        EanHorizonFormulation.EXACT_TIME_ACTIVATION,
+    ),
+)
+def test_ean_passenger_service_extracts_only_operational_visit_prefix(
+    horizon_formulation: EanHorizonFormulation,
+) -> None:
+    pytest.importorskip("gurobipy")
+    scenario = _minimal_scenario(
+        demands=(Demand(arrival_time=time(8, 0), origin="A", destination="B", count=1),),
+    )
+    artifact = _minimal_artifact(cabin_capacity=2, cycle_count=3)
+    config = EanOptimizationConfig(
+        formulation=EanFormulationConfig(
+            horizon=horizon_formulation,
+            time_bounds=EanTimeBoundFormulation.DERIVED_VISIT_BOUNDS,
+        )
+    )
+
+    result = solve_ean_passenger_service(
+        scenario,
+        artifact,
+        EanPassengerServiceConfig(
+            objective=EanPassengerServiceObjective.JOURNEY_TIME,
+            optimization_config=config,
+        ),
+    )
+
+    assert result.metadata.status == "optimal"
+    assert result.metadata.objective_value_seconds == pytest.approx(9.0)
+    assert result.movement_plan is not None
+    assert result.movement_plan.horizon_formulation is horizon_formulation
+    assert tuple(
+        visit.visit_index
+        for visit in result.movement_plan.trajectories[0].visits
+    ) == (0, 1, 2)
+
+
+def test_derived_visit_bounds_allow_waiting_beyond_legacy_ten_second_slack() -> None:
+    artifact = _minimal_artifact(
+        cabin_capacity=2,
+        cycle_count=2,
+        station_waiting_modes={"A": StationWaitingMode.END_OF_PLATFORM_WAIT},
+    )
+
+    bounds = build_ean_model_time_bounds(
+        artifact,
+        EanTimeBoundFormulation.DERIVED_VISIT_BOUNDS,
+    )
+
+    assert bounds.by_visit[(0, 0)].wait_upper == pytest.approx(
+        artifact.config.operational_end_seconds
+    )
+    assert bounds.by_visit[(0, 0)].wait_upper > 10.0
+    assert bounds.by_visit[(0, 1)].switch_upper > bounds.by_visit[(0, 0)].switch_upper
+
+
+def test_derived_visit_bounds_allow_earliest_start_after_operational_horizon() -> None:
+    artifact = _artifact_with_earliest_start(
+        _minimal_artifact(cabin_capacity=2)
+    )
+
+    bounds = build_ean_model_time_bounds(
+        artifact,
+        EanTimeBoundFormulation.DERIVED_VISIT_BOUNDS,
+    )
+
+    assert bounds.by_visit[(0, 0)].switch_upper > (
+        artifact.config.operational_end_seconds
+    )
+
+
+def test_exact_horizon_activation_allows_empty_earliest_start_prefix() -> None:
+    gp = pytest.importorskip("gurobipy")
+    artifact = _artifact_with_earliest_start(_minimal_artifact(cabin_capacity=2))
+    bounds = build_ean_model_time_bounds(
+        artifact,
+        EanTimeBoundFormulation.DERIVED_VISIT_BOUNDS,
+    )
+    visits = tuple(
+        sorted(artifact.switch_visits, key=lambda visit: visit.visit_index)
+    )
+    model = gp.Model()
+    model.Params.OutputFlag = 0
+    switch_time = {
+        (visit.cabin_id, visit.visit_index): model.addVar(
+            lb=bounds.by_visit[(visit.cabin_id, visit.visit_index)].switch_lower,
+            ub=bounds.by_visit[(visit.cabin_id, visit.visit_index)].switch_upper,
+        )
+        for visit in visits
+    }
+    active = add_visit_horizon_activation(
+        model=model,
+        binary_vtype=gp.GRB.BINARY,
+        artifact=artifact,
+        formulation=EanHorizonFormulation.EXACT_TIME_ACTIVATION,
+        switch_time=switch_time,
+        visits_by_cabin_id={0: visits},
+        selected_time_bounds=bounds,
+        big_m=bounds.global_upper + 1.0,
+    )
+    model.addConstr(
+        switch_time[(0, 0)]
+        >= artifact.config.operational_end_seconds
+        + HORIZON_ACTIVATION_EPSILON_SECONDS
+    )
+
+    model.optimize()
+
+    assert model.Status == gp.GRB.OPTIMAL
+    assert active[(0, 0)].X == pytest.approx(0.0)
+    assert active[(0, 1)].X == pytest.approx(0.0)
 
 
 def test_slot_release_big_m_can_use_release_time_when_tightened() -> None:
@@ -483,6 +612,30 @@ def _minimal_artifact(
             ),
         ),
         headway_pairs=(),
+    )
+
+
+def _artifact_with_earliest_start(
+    artifact: EanBuildArtifact,
+) -> EanBuildArtifact:
+    return EanBuildArtifact(
+        scenario_id=artifact.scenario_id,
+        config=artifact.config,
+        switch_cycle=artifact.switch_cycle,
+        timings=artifact.timings,
+        cabin_starts=(
+            EanCabinStart(
+                cabin_id=0,
+                first_switch_id="A_entry",
+                kind=EanCabinStartKind.EARLIEST,
+                time_seconds=0.0,
+            ),
+        ),
+        switch_visits=artifact.switch_visits,
+        switch_transitions=artifact.switch_transitions,
+        headway_checkpoints=artifact.headway_checkpoints,
+        headway_candidates=artifact.headway_candidates,
+        headway_pairs=artifact.headway_pairs,
     )
 
 

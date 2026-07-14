@@ -74,6 +74,7 @@ class BenchmarkRunResult:
     solver_policy: dict[str, Any]
     ean_optimizations: tuple[str, ...]
     ean_optimization_config: dict[str, Any]
+    ean_formulation_config: dict[str, Any]
     model_variable_count: int | None
     model_constraint_count: int | None
     demand_group_count: int | None
@@ -150,6 +151,7 @@ def run_ean_passenger_benchmark(config: BenchmarkRunConfig) -> tuple[BenchmarkRu
         solver_policy=to_jsonable(solver_policy),
         ean_optimizations=tuple(name.value for name in config.ean_optimization_config.enabled_names()),
         ean_optimization_config=to_jsonable(config.ean_optimization_config),
+        ean_formulation_config=to_jsonable(config.ean_optimization_config.formulation),
         model_variable_count=metadata.get("variable_count"),
         model_constraint_count=metadata.get("constraint_count"),
         demand_group_count=metadata.get("demand_group_count"),

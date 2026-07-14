@@ -9,6 +9,10 @@ from ropeway_skip_stop_optimization.optimization.ean.headway_semantics import (
     headway_semantics_label,
     uses_platform_exit_wait_occupancy,
 )
+from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
+    EanHorizonFormulation,
+    EanTimeBoundFormulation,
+)
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanActivationReference,
     EanCabinStart,
@@ -26,6 +30,9 @@ from ropeway_skip_stop_optimization.optimization.ean.plan import (
     EanCabinVisit,
     EanMovementPlan,
     EanRouteDecision,
+)
+from ropeway_skip_stop_optimization.optimization.ean.time_bounds import (
+    build_ean_model_time_bounds,
 )
 from ropeway_skip_stop_optimization.validation import (
     ValidationIssue,
@@ -64,8 +71,12 @@ def validate_ean_movement_plan_against_artifact(
     starts_by_cabin_id = _starts_by_cabin_id(artifact.cabin_starts)
     timing_by_switch_id = _timings_by_switch_id(artifact.timings)
     station_config_by_id = _station_config_by_id(artifact.config.station_configs)
-    expected_visit_by_key = _expected_visit_by_key(artifact.switch_visits)
     visit_by_key = _plan_visit_by_key(plan.trajectories, issues)
+    expected_visit_by_key = _expected_plan_visit_by_key(
+        artifact,
+        plan.horizon_formulation,
+        actual_keys=set(visit_by_key),
+    )
     checkpoint_by_id = _checkpoint_by_id(artifact.headway_checkpoints)
     candidate_by_id = _candidate_by_id(artifact.headway_candidates)
 
@@ -75,6 +86,8 @@ def validate_ean_movement_plan_against_artifact(
         expected_visit_by_key=expected_visit_by_key,
         timing_by_switch_id=timing_by_switch_id,
         station_config_by_id=station_config_by_id,
+        horizon_formulation=plan.horizon_formulation,
+        model_end_seconds=artifact.config.model_end_seconds,
         issues=issues,
         tolerance_seconds=tolerance_seconds,
     )
@@ -89,6 +102,7 @@ def validate_ean_movement_plan_against_artifact(
         timing_by_switch_id=timing_by_switch_id,
         visit_by_key=visit_by_key,
         model_end_seconds=artifact.config.model_end_seconds,
+        horizon_formulation=plan.horizon_formulation,
         issues=issues,
         tolerance_seconds=tolerance_seconds,
     )
@@ -151,6 +165,8 @@ def _validate_visits_against_artifact(
     expected_visit_by_key: dict[tuple[int, int], SwitchVisitDefinition],
     timing_by_switch_id: dict[str, SkipStopTiming],
     station_config_by_id: dict[str, StationEanConfig],
+    horizon_formulation: EanHorizonFormulation,
+    model_end_seconds: float,
     issues: list[ValidationIssue],
     tolerance_seconds: float,
 ) -> None:
@@ -200,6 +216,18 @@ def _validate_visits_against_artifact(
         if station_config is None:
             continue
         _validate_visit_decision_and_timing(visit, timing, station_config, issues, tolerance_seconds)
+        if (
+            horizon_formulation is EanHorizonFormulation.EXACT_TIME_ACTIVATION
+            and visit.switch_time_seconds > model_end_seconds + tolerance_seconds
+        ):
+            _add_issue(
+                issues,
+                "EAN_VISIT_AFTER_OPERATIONAL_HORIZON",
+                f"active visit {key!r} starts at {visit.switch_time_seconds}, "
+                f"after operational horizon {model_end_seconds}",
+                "ean_visit",
+                _visit_entity_id(key),
+            )
 
 
 def _validate_visit_decision_and_timing(
@@ -385,6 +413,7 @@ def _validate_headways(
     timing_by_switch_id: dict[str, SkipStopTiming],
     visit_by_key: dict[tuple[int, int], EanCabinVisit],
     model_end_seconds: float,
+    horizon_formulation: EanHorizonFormulation,
     issues: list[ValidationIssue],
     tolerance_seconds: float,
 ) -> None:
@@ -422,11 +451,12 @@ def _validate_headways(
         )
         if first_times is None or second_times is None:
             continue
-        if (
-            first_times.leader_clear_time > model_end_seconds + tolerance_seconds
-            or second_times.leader_clear_time > model_end_seconds + tolerance_seconds
-        ):
-            continue
+        if horizon_formulation is EanHorizonFormulation.EXACT_TIME_ACTIVATION:
+            if (
+                first_times.follower_enter_time > model_end_seconds + tolerance_seconds
+                or second_times.follower_enter_time > model_end_seconds + tolerance_seconds
+            ):
+                continue
         forward_gap = second_times.follower_enter_time - first_times.leader_clear_time
         reverse_gap = first_times.follower_enter_time - second_times.leader_clear_time
         if max(forward_gap, reverse_gap) + tolerance_seconds < pair.headway_seconds:
@@ -538,10 +568,36 @@ def _station_config_by_id(station_configs: tuple[StationEanConfig, ...]) -> dict
     return {station_config.station_id: station_config for station_config in station_configs}
 
 
-def _expected_visit_by_key(
-    visits: tuple[SwitchVisitDefinition, ...],
+def _expected_plan_visit_by_key(
+    artifact: EanBuildArtifact,
+    horizon_formulation: EanHorizonFormulation,
+    *,
+    actual_keys: set[tuple[int, int]],
 ) -> dict[tuple[int, int], SwitchVisitDefinition]:
-    return {(visit.cabin_id, visit.visit_index): visit for visit in visits}
+    all_visits = {
+        (visit.cabin_id, visit.visit_index): visit
+        for visit in artifact.switch_visits
+    }
+    if horizon_formulation is EanHorizonFormulation.LEGACY:
+        return all_visits
+    if horizon_formulation is EanHorizonFormulation.CONSERVATIVE_FREE_SUFFIX:
+        earliest_bounds = build_ean_model_time_bounds(
+            artifact,
+            EanTimeBoundFormulation.DERIVED_VISIT_BOUNDS,
+        )
+        return {
+            key: visit
+            for key, visit in all_visits.items()
+            if earliest_bounds.by_visit[key].switch_lower
+            <= artifact.config.operational_end_seconds
+        }
+    if horizon_formulation is EanHorizonFormulation.EXACT_TIME_ACTIVATION:
+        return {
+            key: visit
+            for key, visit in all_visits.items()
+            if key in actual_keys
+        }
+    raise ValueError(f"unsupported EAN horizon formulation: {horizon_formulation}")
 
 
 def _plan_visit_by_key(

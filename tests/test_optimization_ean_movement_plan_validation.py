@@ -16,6 +16,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanCabinTrajectory,
     EanCabinVisit,
     EanConfig,
+    EanHorizonFormulation,
     EanMovementPlan,
     EanRouteDecision,
     EanTimeReference,
@@ -200,6 +201,14 @@ def test_ean_movement_plan_validator_checks_platform_exit_wait_occupancy() -> No
     assert "follower_enter_time" in report.issues[0].message
 
 
+def test_exact_horizon_validates_occupancy_clearing_after_horizon() -> None:
+    artifact, plan = _horizon_crossing_headway_artifact_and_plan()
+
+    report = validate_ean_movement_plan_against_artifact(artifact, plan)
+
+    assert "EAN_HEADWAY_VIOLATION" in _error_codes(report)
+
+
 def _artifact_and_plan() -> tuple[EanBuildArtifact, EanMovementPlan]:
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
@@ -336,6 +345,44 @@ def _platform_exit_wait_occupancy_artifact_and_plan() -> tuple[EanBuildArtifact,
                     ),
                 ),
             ),
+        ),
+    )
+    return artifact, plan
+
+
+def _horizon_crossing_headway_artifact_and_plan() -> tuple[EanBuildArtifact, EanMovementPlan]:
+    artifact, plan = _platform_exit_wait_occupancy_artifact_and_plan()
+    cabin_0_visit = replace(
+        plan.trajectories[0].visits[0],
+        switch_time_seconds=98.0,
+        platform_entry_time_seconds=99.0,
+        platform_exit_time_seconds=105.0,
+        exit_switch_time_seconds=106.0,
+        next_switch_time_seconds=111.0,
+        wait_seconds=5.0,
+    )
+    cabin_1_visit = replace(
+        plan.trajectories[1].visits[0],
+        switch_time_seconds=99.0,
+        platform_entry_time_seconds=100.0,
+        platform_exit_time_seconds=103.0,
+        exit_switch_time_seconds=104.0,
+        next_switch_time_seconds=109.0,
+        wait_seconds=2.0,
+    )
+    artifact = replace(
+        artifact,
+        cabin_starts=(
+            replace(artifact.cabin_starts[0], time_seconds=98.0),
+            replace(artifact.cabin_starts[1], time_seconds=99.0),
+        ),
+    )
+    plan = replace(
+        plan,
+        horizon_formulation=EanHorizonFormulation.EXACT_TIME_ACTIVATION,
+        trajectories=(
+            replace(plan.trajectories[0], visits=(cabin_0_visit,)),
+            replace(plan.trajectories[1], visits=(cabin_1_visit,)),
         ),
     )
     return artifact, plan

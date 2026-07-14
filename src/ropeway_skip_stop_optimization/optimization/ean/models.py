@@ -63,23 +63,47 @@ class SkipStopTiming:
 
 @dataclass(frozen=True)
 class StationEanConfig:
+    """EAN station behavior.
+
+    `max_wait_seconds` is a physical per-visit limit for
+    `END_OF_PLATFORM_WAIT`. When it is omitted, finite-horizon formulations may
+    use the operational horizon as a conservative terminal waiting cap. It is
+    not used by the legacy time-bound formulation.
+    """
+
     station_id: str
     waiting_mode: StationWaitingMode
     fifo_capacity: int | None = None
+    max_wait_seconds: float | None = None
 
     def validate(self) -> None:
         _require_id("station EAN config station_id", self.station_id)
         if self.waiting_mode is StationWaitingMode.STATION_FIFO_BUFFER:
             if self.fifo_capacity is None or self.fifo_capacity <= 0:
                 raise ValueError("STATION_FIFO_BUFFER stations need a positive fifo_capacity")
+            if self.max_wait_seconds is not None:
+                raise ValueError("max_wait_seconds is only valid for END_OF_PLATFORM_WAIT stations")
             return
 
         if self.fifo_capacity is not None:
             raise ValueError("fifo_capacity is only valid for STATION_FIFO_BUFFER stations")
+        if self.waiting_mode is StationWaitingMode.NO_WAITING:
+            if self.max_wait_seconds is not None:
+                raise ValueError("max_wait_seconds is only valid for END_OF_PLATFORM_WAIT stations")
+            return
+        if self.max_wait_seconds is not None:
+            _require_positive("station EAN config max_wait_seconds", self.max_wait_seconds)
 
 
 @dataclass(frozen=True)
 class EanConfig:
+    """Physical and finite-horizon EAN configuration.
+
+    `horizon_seconds` is the passenger service cutoff `T`. `tail_seconds`
+    extends physical operation without allowing later passenger service. The
+    resulting `model_end_seconds` is the operational certification horizon `H`.
+    """
+
     horizon_seconds: float
     tail_seconds: float
     cabin_capacity: int
@@ -88,6 +112,16 @@ class EanConfig:
     @property
     def model_end_seconds(self) -> float:
         return self.horizon_seconds + self.tail_seconds
+
+    @property
+    def passenger_service_end_seconds(self) -> float:
+        """Passenger boarding and alighting cutoff `T`."""
+        return self.horizon_seconds
+
+    @property
+    def operational_end_seconds(self) -> float:
+        """Finite physical-operation certification horizon `H`."""
+        return self.model_end_seconds
 
     def validate(self) -> None:
         _require_positive("horizon_seconds", self.horizon_seconds)

@@ -180,7 +180,10 @@ class ExportContext:
             with self.progress.phase("export.context.ean_skip_stop_plan"):
                 result = solve_ean_skip_stop_feasibility(
                     self.ean_artifact(),
-                    EanSkipStopFeasibilityConfig(log_to_console=self.progress.enabled),
+                    EanSkipStopFeasibilityConfig(
+                        log_to_console=self.progress.enabled,
+                        optimization_config=self.ean_optimization_config,
+                    ),
                 )
                 if result.movement_plan is None:
                     raise ValueError(f"EAN skip/stop optimizer did not produce a plan; status={result.metadata.status}")

@@ -26,6 +26,9 @@ path with passenger-service objectives.
 - A polished public API around solver experiment presets.
 - Long-running benchmark automation beyond local scripts.
 
+Project decisions and supervision-oriented daily progress are recorded in
+`docs/progress/development_log.md`.
+
 ## Example Scenario
 
 `build_three_station_scenario()` creates a ring-like `L <-> M <-> R` ropeway:
@@ -87,11 +90,43 @@ Useful EAN export options:
 
 ```text
 --ean-solver-policy default|debug_short|quick_good_solution|paper_benchmark|exact_optimality
---ean-optimizations all|none|candidate_horizon_pruning,single_ring_dominated_ride_pruning,slot_time_relaxation_strengthening,tight_big_m_bounds
+--ean-optimizations all|none|<comma-separated selections>
 --ean-checkpoint-dir <path>
 --ean-resume-checkpoint <file.sol-or-file.mst>
 --ean-resume-latest-checkpoint
 ```
+
+The single `--ean-optimizations` list accepts independently combinable
+optimizations and at most one value from each formulation category:
+
+| Kind | Selections |
+|---|---|
+| Independent optimizations | `candidate_horizon_pruning`, `single_ring_dominated_ride_pruning`, `slot_time_relaxation_strengthening`, `tight_big_m_bounds` |
+| Horizon formulation | `horizon_legacy`, `horizon_conservative_free_suffix`, `horizon_exact_time_activation` |
+| Time-bound formulation | `time_bounds_legacy_plus_10`, `time_bounds_derived_visit_bounds` |
+
+`all` means the current default optimization set with the legacy formulation
+categories; it does not select every mutually exclusive formulation.
+`none` means no optional optimization and the same legacy formulation defaults.
+In an explicit list, omitted optimizations are disabled and omitted formulation
+categories use their legacy defaults.
+
+The horizon cases have different finite-horizon meanings:
+
+- `horizon_legacy` gives every generated safety visit normal route and headway
+  decisions.
+- `horizon_conservative_free_suffix` retains every visit that could start by
+  the operational horizon under conservative earliest times. The retained
+  suffix remains fully constrained even when its realized events occur later.
+- `horizon_exact_time_activation` activates visits and checkpoint entries from
+  their optimized times. A visit entering by the closed operational horizon is
+  completed, including resource occupancy that clears after the horizon; later
+  visits receive no route decision.
+
+The legacy time bound uses the longest no-wait chain plus ten seconds as one
+global bound. Derived visit bounds propagate per-visit lower and upper bounds
+and use an explicit station maximum wait when configured, otherwise one
+operational horizon as a finite terminal waiting cap.
 
 Checkpoint resume loads a prior incumbent solution as a Gurobi MIP start. It
 does not resume the previous branch-and-bound tree.

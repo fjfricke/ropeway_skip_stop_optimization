@@ -11,7 +11,7 @@ from ropeway_skip_stop_optimization.benchmarking.ean_passenger import (
 from ropeway_skip_stop_optimization.benchmarking.plots import PlotBuilder, load_benchmark_result_dicts
 from ropeway_skip_stop_optimization.exports.runner import DEFAULT_OUTPUT_ROOT
 from ropeway_skip_stop_optimization.optimization.ean import (
-    ALL_EAN_OPTIMIZATION_NAMES,
+    ALL_EAN_SELECTION_NAMES,
     EanOptimizationConfig,
     GurobiSolverPolicyPreset,
 )
@@ -67,8 +67,10 @@ def _parse_args() -> argparse.Namespace:
         "--ean-optimizations",
         default="all",
         help=(
-            "'all' for the current default set, 'none', or comma-separated active optimizations: "
-            + ", ".join(name.value for name in ALL_EAN_OPTIMIZATION_NAMES)
+            "'all' for the current default set, 'none', or comma-separated "
+            "optimization and formulation selections; choose at most one "
+            "horizon_* and one time_bounds_* value: "
+            + ", ".join(ALL_EAN_SELECTION_NAMES)
         ),
     )
     parser.add_argument("--label", default=None)

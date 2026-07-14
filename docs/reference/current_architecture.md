@@ -44,6 +44,44 @@ Implemented default optimizations:
 Tight passenger and stop/skip Big-M bounds are implemented behind the opt-in
 `tight_big_m_bounds` selection.
 
+## EAN Finite-Horizon Formulations
+
+`EanConfig.horizon_seconds` is the passenger service cutoff \(T\).
+`EanConfig.model_end_seconds`, equal to the horizon plus the configured tail,
+is the operational certification horizon \(H\). Passengers may board and
+alight only through \(T\); movement and resource safety are modeled according
+to the selected horizon formulation through \(H\).
+
+The single EAN selection list combines independent optimizations with one value
+from each mutually exclusive formulation category. The implemented horizon
+cases are:
+
+- `horizon_legacy`: all generated safety visits receive route and headway
+  decisions.
+- `horizon_conservative_free_suffix`: all visits whose propagated earliest
+  switch entry is at or before \(H\) remain fully constrained. Their realized
+  times may form a conservative post-\(H\) suffix.
+- `horizon_exact_time_activation`: binary visit activation forms a prefix
+  based on optimized switch-entry times. A visit entering by \(H\) keeps its
+  route clearance and boundary switch time; later visits have no route
+  decision. Headway occurrences are activated by follower-entry time, so a
+  leader may clear a resource after \(H\) while still constraining a follower
+  that enters by \(H\).
+
+The implemented time-bound cases are:
+
+- `time_bounds_legacy_plus_10`: one historical global bound equal to the
+  longest generated no-wait chain plus ten seconds.
+- `time_bounds_derived_visit_bounds`: per-visit earliest and latest bounds
+  propagated along each cabin sequence. A waiting station uses
+  `max_wait_seconds` when configured; otherwise one operational horizon is
+  used as a finite terminal waiting cap.
+
+The horizon cases are semantic alternatives, not same-model performance
+toggles. The legacy time bound is retained for reproducible comparison because
+its ten-second residual slack can constrain cumulative waiting on the longest
+cabin chain.
+
 ## Validation, Replay, and Frontend
 
 EAN output is converted to typed movement and passenger plans, validated

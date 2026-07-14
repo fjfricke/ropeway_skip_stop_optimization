@@ -28,85 +28,92 @@ Changes that preserve only the objective value but remove dominated optimal
 solutions must be identified explicitly. Changes that alter horizon or
 post-horizon semantics are correctness decisions, not benchmark toggles.
 
-## Phase 0: Resolve Horizon and Waiting Semantics
+## Change and Experiment Policy
 
-Before benchmarking structural reformulations, align the implementation with
-one documented interpretation of three separate boundaries:
+Classify work before implementation:
+
+### Direct Fix
+
+Implement directly when the current code contradicts an already selected
+model contract, applies an invalid bound, disagrees with validation, or has a
+small implementation defect. Add focused tests. A temporary legacy benchmark
+case may be retained to measure the performance effect, but the invalid model
+must not remain a supported production option.
+
+### Exact Reformulation
+
+Use a selectable benchmark case when a change is intended to preserve the
+integer feasible set and objective but materially changes variables,
+constraints, or the LP relaxation. Verify exact small instances before
+performance comparison. Promote the reformulation only after correctness and
+resource effects are established.
+
+### Semantic Alternative
+
+Use an explicit model-policy category when alternatives intentionally define
+different feasible sets, such as finite-horizon activation, conservative
+continuation, depot return, or cyclic operation. Performance numbers may be
+reported, but they must not be interpreted as speedups for the same model.
+
+### Solver/Search Alternative
+
+Keep MIP starts, solver policies, and search settings separate from model
+formulations so that formulation and search effects can be measured
+independently.
+
+## Composable Experiment Configuration
+
+The typed configuration and the horizon/time-bound categories are implemented.
+Future structural experiments should extend the same pattern with one value
+per mutually exclusive category:
 
 ```text
-T: passenger service cutoff
-H: operational safety/certification horizon
-B: minimum post-H boundary context needed to close modeled transitions
+EanFormulationConfig
+  stop_skip_timing: one StopSkipTimingFormulation
+  slot_activation: one SlotActivationFormulation
+  board_time: one BoardTimeFormulation
+  cabin_timing: one CabinTimingFormulation
+  headway_precedence: one HeadwayPrecedenceFormulation
+
+EanOptimizationConfig
+  enabled exact reductions: a set of EanOptimizationName
 ```
 
-The current implementation derives a global time upper bound from the longest
-no-wait visit chains and adds ten seconds. All switch, exit, and wait variables
-use that bound. For the cabin defining the maximum chain, cumulative waiting
-therefore has only ten seconds of slack unless faster skip choices create
-additional time. This can unintentionally couple waiting feasibility to
-skipping.
-
-The current builder also creates safety visits after `model_end_seconds`.
-Optimizer headway constraints include those visits, while movement validation
-ignores headway pairs once either leader-clear time is after the model end.
-
-### Immediate Finite-Horizon Contract
-
-Use the existing configuration fields as:
+Future category candidates are:
 
 ```text
-T = horizon_seconds
-H = horizon_seconds + tail_seconds
+stop_skip_timing:
+  big_m
+  affine
+
+slot_activation:
+  per_slot_implications
+  first_slot_implications
+
+board_time:
+  explicit
+  projected_journey_time
+
+cabin_timing:
+  explicit_exit_and_wait
+  transition_only
+
+headway_precedence:
+  per_checkpoint_pair
+  shared_physical_precedence
 ```
 
-The interval `[0, T]` is passenger service. The interval `(T, H]` is a
-passenger-free operational or recovery tail. Stop, skip, wait, and physical
-ordering decisions remain free in that tail; do not impose an all-stop,
-no-wait, or other fixed recovery policy.
+Configurations may combine one value from each category with any compatible
+set of independent reductions. Configuration validation must reject invalid
+combinations, for example `tight_big_m_bounds` with a formulation that has
+removed the corresponding Big-M rows, or projected board times for the
+waiting-time objective.
 
-This contract certifies safety only through `H`. It prevents the passenger
-cutoff at `T` from also acting as an abrupt physical cutoff, but it does not
-claim that the resulting state can continue safely forever.
+Keep the existing single list-style CLI and structured benchmark metadata.
+Every new category value receives a unique selection name, omitted categories
+use their defaults, and incompatible cross-category combinations are rejected.
 
-Classify generated visits by their conservative time windows:
-
-- visits that may use a checkpoint by `H` remain operational;
-- no passenger may board or alight after `T`;
-- a visit proven to start after `H` is boundary context only;
-- boundary context retains only the times needed to close the preceding
-  operational transition;
-- it receives no independent passenger, stop, skip, wait, or headway decision.
-
-A headway pair may be omitted only when conservative timing proves that both
-checkpoint entries are after `H`. A leader-clear time after `H` is not by
-itself a reason to omit or skip the pair: a follower can enter before `H` while
-the leader still occupies the resource. Optimizer generation and movement
-validation must use the same rule.
-
-Replace the global no-wait-chain-plus-ten-seconds bound. The selected
-finite-horizon formulation must provide explicit, explainable bounds for:
-
-- station waiting;
-- operational switch and exit times;
-- boundary closure times;
-- headway implications.
-
-An explicit physical maximum wait per waiting station permits valid
-visit-specific cumulative time bounds, but it does not by itself decide whether
-a visit delayed across `H` is operational. For exact finite-horizon semantics,
-activate visit and checkpoint constraints according to whether their modeled
-times lie within `H`, and represent resource occupancy that crosses the
-boundary without creating a fresh post-`H` service decision.
-
-A simpler first implementation may conservatively keep every visit that could
-start by `H` under its earliest timing and require a freely optimized
-continuation for that finite suffix. This is not a pure finite-horizon model:
-it can constrain some events whose realized times are after `H`. If selected,
-document it as a conservative extension requirement and benchmark its effect
-separately. Do not silently approximate unbounded waiting with a small global
-constant.
-
-### Full-Day Terminal Designs
+## Future Full-Day Terminal Designs
 
 The finite-horizon contract is not the final full-day boundary model. Keep the
 following exact terminal designs available for later implementation.
@@ -194,27 +201,7 @@ extendability certificate. Skip and wait choices can support more cabins on
 the line than that fixed policy, so such a certificate can remove physically
 valid solutions.
 
-### Phase 0 Checklist
-
-- [ ] Document `T`, `H`, and boundary-context semantics in `EanConfig`.
-- [ ] Choose and expose physical station-wait semantics: an explicit maximum
-      wait or a horizon-clamped terminal-occupancy representation.
-- [ ] Replace `_time_upper_bound` in both EAN optimizers with derived
-      visit-specific bounds.
-- [ ] Choose exact time-based visit activation or explicitly adopt and label
-      the conservative free-continuation suffix.
-- [ ] Classify operational and boundary-context visits consistently in the
-      builder.
-- [ ] Keep passenger decisions within `T` and unrestricted passenger-free
-      recovery decisions through `H`.
-- [ ] Align optimizer and validator headway inclusion at the horizon.
-- [ ] Add a case where a leader clears after `H` but a follower enters before
-      `H`.
-- [ ] Add a case that waits for more than ten seconds without requiring a skip.
-- [ ] Recompute post-horizon visit and headway-pair counts.
-- [ ] Record that finite-horizon solutions are certified only through `H`.
-
-Deferred full-day work:
+Open terminal work:
 
 - [ ] Design explicit depot resources and inventory flow.
 - [ ] Add `return_to_depot` as an exact terminal mode.
@@ -222,22 +209,65 @@ Deferred full-day work:
 - [ ] Extend cyclic matching to the hybrid line/depot state.
 - [ ] Add a multi-day supercycle only when daily fleet counts must differ.
 
-Acceptance evidence for the immediate contract:
+## Optional Exact-Activation Time-Domain Refinement
 
-- a small instance can wait for more than ten seconds without requiring a skip;
-- optimizer and validator agree on horizon-crossing headways;
-- waiting and no-waiting variants have documented finite time bounds;
-- passenger-free recovery does not force all-stop or no-wait operation;
-- exact small-instance objectives remain unchanged under the selected
-  finite-horizon semantics.
+This work is not required for the current model default. The legacy horizon
+with `time_bounds_legacy_plus_10` remains the selected operational formulation
+and performed best in the current five-minute benchmark matrix. Keep the
+following work deferred unless exact event-time horizon activation is needed
+for its finite-horizon semantics.
 
-The minimum boundary context should still follow these implementation rules:
+The current `time_bounds_derived_visit_bounds` fallback permits up to one full
+operational horizon of waiting at every waiting-enabled visit. Propagating that
+allowance through every generated visit creates a very large terminal time
+domain. On `three_station_v0`, the global upper bound grows from about 1,596
+seconds to about 19,586 seconds. This weakens the legacy and conservative
+horizon formulations, although the propagated visit bounds are currently
+necessary to make `horizon_exact_time_activation` computationally usable.
 
-- retain the boundary switch time when it is needed to define the preceding
-  visit's exit time;
-- do not attach a fresh route decision to context that is proven to begin
-  after `H`;
-- define finite local bounds without an arbitrary cumulative-wait allowance.
+Investigate an exact-activation-specific domain that distinguishes:
+
+```text
+active prefix:
+  visits whose optimized switch entry is at or before H
+
+boundary clearance:
+  completion and resource release of the last active visit after H
+
+inactive suffix:
+  generated visits that receive no route decision after H
+```
+
+The formulation should:
+
+- bound active switch-entry times by the operational horizon \(H\);
+- preserve the complete route, occupancy, and crossing headways of every visit
+  entering by \(H\);
+- provide only the post-\(H\) clearance range required by the last active
+  visit instead of accumulating a full-horizon wait allowance at every later
+  generated visit;
+- avoid detailed timing domains for an inactive suffix when those variables
+  can be projected out or represented by a compact boundary state;
+- retain enough finite domain for an `EARLIEST` cabin start to have an empty
+  active prefix;
+- use an explicit `StationEanConfig.max_wait_seconds` only when it represents
+  a justified operational rule, not as an artificial solver bound;
+- remain valid for both no-waiting and end-of-platform waiting.
+
+Possible implementation approaches are:
+
+1. Derive conditional upper bounds for active visits and separate bounds for
+   the first inactive visit.
+2. Remove timing and route variables for the provably inactive suffix and keep
+   only the boundary-clearance expressions needed by headways.
+3. Introduce a compact terminal-state representation instead of propagating
+   every generated post-\(H\) visit.
+
+Do not silently replace `time_bounds_derived_visit_bounds`. Add a separate
+formulation case while evaluating the alternatives so the current six-case
+matrix remains reproducible. Verification must compare exact small-instance
+objectives, extracted prefixes, crossing headways, and empty-prefix cabin
+starts before performance benchmarking.
 
 ## Phase 1: Affine Stop/Skip Timing
 
@@ -404,12 +434,12 @@ linearly from the current and next switch times.
 
 The final safety visit of each cabin should preferably act as the boundary
 switch time for the previous operational visit. It should not receive its own
-route decision if Phase 0 proves that it is outside the modeled movement
-horizon.
+route decision when the selected exact horizon formulation classifies it as
+post-horizon boundary context.
 
 This phase is more invasive because extraction, MIP starts, headway expressions,
 and checkpoint files currently reference explicit exit and wait variables.
-Benchmark it only after Phases 0 to 3 are stable.
+Benchmark it only after Phases 1 to 3 are stable.
 
 ## Phase 5: Headway Structure
 
@@ -424,8 +454,8 @@ current examples, the initial analysis found:
 | `three_station_v0` | 5,040 |
 | `five_station_v0` | 12,803 |
 
-These numbers are planning estimates and must be recomputed after Phase 0
-changes visit and horizon semantics.
+These numbers are planning estimates and must be recomputed for each implemented
+horizon formulation before this reduction is benchmarked.
 
 ### Shared Physical Precedence
 
@@ -507,14 +537,16 @@ only three dominated rows for `three_station_v0` and twelve for
 
 ## Implementation and Benchmark Order
 
-1. Resolve horizon and waiting semantics.
-2. Add and validate affine stop/skip timing.
-3. Remove redundant unary-slot rows.
-4. Project board-slot variables out of journey-time models.
-5. Evaluate transition-only timing.
-6. Add guaranteed post-horizon headway pruning.
-7. Prove and benchmark shared physical precedence.
-8. Consider the lower-priority experiments independently.
+1. Keep the legacy horizon and time bounds as the current default.
+2. Refine exact-activation time domains only if exact finite-horizon activation
+   becomes a priority.
+3. Add and validate affine stop/skip timing.
+4. Remove redundant unary-slot rows.
+5. Project board-slot variables out of journey-time models.
+6. Evaluate transition-only timing.
+7. Add guaranteed post-horizon headway pruning.
+8. Prove and benchmark shared physical precedence.
+9. Consider the lower-priority experiments independently.
 
 Do not combine unvalidated phases in the first benchmark. Each phase needs a
 separate optimization toggle until objective equivalence and performance are

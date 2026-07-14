@@ -4,6 +4,13 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Iterable
 
+from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
+    ALL_EAN_FORMULATION_SELECTION_NAMES,
+    EanFormulationConfig,
+    EanHorizonFormulation,
+    EanTimeBoundFormulation,
+)
+
 
 class EanOptimizationName(StrEnum):
     CANDIDATE_HORIZON_PRUNING = "candidate_horizon_pruning"
@@ -13,6 +20,10 @@ class EanOptimizationName(StrEnum):
 
 
 ALL_EAN_OPTIMIZATION_NAMES: tuple[EanOptimizationName, ...] = tuple(EanOptimizationName)
+ALL_EAN_SELECTION_NAMES: tuple[str, ...] = (
+    *(name.value for name in ALL_EAN_OPTIMIZATION_NAMES),
+    *ALL_EAN_FORMULATION_SELECTION_NAMES,
+)
 DEFAULT_EAN_OPTIMIZATION_NAMES: tuple[EanOptimizationName, ...] = (
     EanOptimizationName.CANDIDATE_HORIZON_PRUNING,
     EanOptimizationName.SINGLE_RING_DOMINATED_RIDE_PRUNING,
@@ -22,10 +33,18 @@ DEFAULT_EAN_OPTIMIZATION_NAMES: tuple[EanOptimizationName, ...] = (
 
 @dataclass(frozen=True)
 class EanOptimizationConfig:
+    """Independent reductions plus mutually exclusive formulation choices.
+
+    `from_selection` preserves one CLI list: optimization names are freely
+    combinable, while at most one `horizon_*` and one `time_bounds_*` value may
+    occur. Omitted formulation categories use their legacy defaults.
+    """
+
     enable_candidate_horizon_pruning: bool = True
     enable_single_ring_dominated_ride_pruning: bool = True
     enable_slot_time_relaxation_strengthening: bool = True
     enable_tight_big_m_bounds: bool = False
+    formulation: EanFormulationConfig = EanFormulationConfig()
 
     @classmethod
     def all(cls) -> EanOptimizationConfig:
@@ -38,10 +57,16 @@ class EanOptimizationConfig:
             enable_single_ring_dominated_ride_pruning=False,
             enable_slot_time_relaxation_strengthening=False,
             enable_tight_big_m_bounds=False,
+            formulation=EanFormulationConfig(),
         )
 
     @classmethod
-    def from_enabled_names(cls, names: Iterable[EanOptimizationName | str]) -> EanOptimizationConfig:
+    def from_enabled_names(
+        cls,
+        names: Iterable[EanOptimizationName | str],
+        *,
+        formulation: EanFormulationConfig | None = None,
+    ) -> EanOptimizationConfig:
         enabled = {EanOptimizationName(name) for name in names}
         return cls(
             enable_candidate_horizon_pruning=EanOptimizationName.CANDIDATE_HORIZON_PRUNING in enabled,
@@ -52,6 +77,7 @@ class EanOptimizationConfig:
                 EanOptimizationName.SLOT_TIME_RELAXATION_STRENGTHENING in enabled
             ),
             enable_tight_big_m_bounds=EanOptimizationName.TIGHT_BIG_M_BOUNDS in enabled,
+            formulation=formulation or EanFormulationConfig(),
         )
 
     @classmethod
@@ -64,7 +90,27 @@ class EanOptimizationConfig:
         names = [item.strip() for item in normalized.split(",") if item.strip()]
         if not names:
             raise ValueError("EAN optimization selection must be 'all', 'none', or a comma-separated list")
-        return cls.from_enabled_names(names)
+        unknown = sorted(set(names) - set(ALL_EAN_SELECTION_NAMES))
+        if unknown:
+            raise ValueError(f"unknown EAN configuration selections: {', '.join(unknown)}")
+
+        horizon_values = [EanHorizonFormulation(name) for name in names if name in EanHorizonFormulation]
+        time_bound_values = [EanTimeBoundFormulation(name) for name in names if name in EanTimeBoundFormulation]
+        if len(horizon_values) > 1:
+            raise ValueError("select at most one EAN horizon formulation")
+        if len(time_bound_values) > 1:
+            raise ValueError("select at most one EAN time-bound formulation")
+
+        formulation = EanFormulationConfig(
+            horizon=horizon_values[0] if horizon_values else EanHorizonFormulation.LEGACY,
+            time_bounds=(
+                time_bound_values[0]
+                if time_bound_values
+                else EanTimeBoundFormulation.LEGACY_PLUS_10
+            ),
+        )
+        optimization_names = [name for name in names if name in EanOptimizationName]
+        return cls.from_enabled_names(optimization_names, formulation=formulation)
 
     def enabled_names(self) -> tuple[EanOptimizationName, ...]:
         names: list[EanOptimizationName] = []
@@ -80,8 +126,9 @@ class EanOptimizationConfig:
 
     def selection_label(self) -> str:
         enabled = self.enabled_names()
-        if enabled == DEFAULT_EAN_OPTIMIZATION_NAMES:
+        formulation_names = self.formulation.selection_names()
+        if enabled == DEFAULT_EAN_OPTIMIZATION_NAMES and not formulation_names:
             return "all"
-        if not enabled:
+        if not enabled and not formulation_names:
             return "none"
-        return ",".join(name.value for name in enabled)
+        return ",".join((*[name.value for name in enabled], *formulation_names))

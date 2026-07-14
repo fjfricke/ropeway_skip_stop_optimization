@@ -3,6 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
+    EanHorizonFormulation,
+)
+
 
 class EanRouteDecision(Enum):
     STOP = "stop"
@@ -67,8 +71,6 @@ class EanCabinTrajectory:
 
     def validate(self) -> None:
         _require_nonnegative_int("EAN cabin trajectory cabin_id", self.cabin_id)
-        if not self.visits:
-            raise ValueError("EAN cabin trajectory needs at least one visit")
 
         expected_visit_indices = tuple(range(len(self.visits)))
         actual_visit_indices = tuple(visit.visit_index for visit in self.visits)
@@ -87,10 +89,13 @@ class EanCabinTrajectory:
 
 @dataclass(frozen=True)
 class EanMovementPlan:
+    """Extracted EAN movement prefix and its finite-horizon interpretation."""
+
     scenario_id: str
     horizon_seconds: float
     model_end_seconds: float
     trajectories: tuple[EanCabinTrajectory, ...]
+    horizon_formulation: EanHorizonFormulation = EanHorizonFormulation.LEGACY
 
     def validate(self) -> None:
         _require_id("EAN movement plan scenario_id", self.scenario_id)
@@ -104,6 +109,14 @@ class EanMovementPlan:
         cabin_ids: list[int] = []
         for trajectory in self.trajectories:
             trajectory.validate()
+            if (
+                not trajectory.visits
+                and self.horizon_formulation
+                is not EanHorizonFormulation.EXACT_TIME_ACTIVATION
+            ):
+                raise ValueError(
+                    "empty EAN cabin trajectories require exact horizon activation"
+                )
             cabin_ids.append(trajectory.cabin_id)
 
         duplicate_cabin_ids = _duplicates(cabin_ids)

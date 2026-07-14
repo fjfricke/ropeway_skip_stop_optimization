@@ -13,9 +13,8 @@ Each plan must:
 
 Current plans:
 
-- `ean_structural_reformulation.md`: finite-horizon and future full-day
-  terminal semantics plus exact structural reductions of the integrated EAN
-  passenger MILP.
+- `ean_structural_reformulation.md`: exact structural reductions of the
+  integrated EAN passenger MILP and future full-day terminal semantics.
 - `ean_formulation_and_search.md`: exact formulation and MIP search improvements.
 - `ean_decomposition.md`: passenger decomposition and delayed constraint concepts.
 - `discrete_time_backlog.md`: low-priority discrete prototype work.

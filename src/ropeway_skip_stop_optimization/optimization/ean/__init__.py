@@ -55,8 +55,15 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
     SwitchVisitBuildResult,
     SwitchVisitDefinition,
 )
+from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
+    ALL_EAN_FORMULATION_SELECTION_NAMES,
+    EanFormulationConfig,
+    EanHorizonFormulation,
+    EanTimeBoundFormulation,
+)
 from ropeway_skip_stop_optimization.optimization.ean.optimization_config import (
     ALL_EAN_OPTIMIZATION_NAMES,
+    ALL_EAN_SELECTION_NAMES,
     EanOptimizationConfig,
     EanOptimizationName,
 )
@@ -99,6 +106,8 @@ from ropeway_skip_stop_optimization.optimization.ean.validation import (
 __all__ = [
     "AllPairsHeadwayPairBuilder",
     "ALL_EAN_OPTIMIZATION_NAMES",
+    "ALL_EAN_FORMULATION_SELECTION_NAMES",
+    "ALL_EAN_SELECTION_NAMES",
     "ContinuousAllStopMaxCabinStartBuilder",
     "DeterministicPhysicalNodeToSwitchStartBuilder",
     "EarliestAllStopEanMovementPlanBuilder",
@@ -112,6 +121,8 @@ __all__ = [
     "EanCabinVisit",
     "EanConfig",
     "EanDemandGroup",
+    "EanFormulationConfig",
+    "EanHorizonFormulation",
     "EanMovementPlan",
     "EanMovementPlanBuilder",
     "EanOptimizationConfig",
@@ -134,6 +145,7 @@ __all__ = [
     "EanSkipStopFeasibilityMetadata",
     "EanSkipStopFeasibilityResult",
     "EanTimeReference",
+    "EanTimeBoundFormulation",
     "GurobiSolverPolicy",
     "GurobiSolverPolicyPreset",
     "HeadwayCandidateBuilder",

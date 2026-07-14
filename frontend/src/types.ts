@@ -358,6 +358,10 @@ export type EanCabinStartKind = "fixed" | "earliest";
 export type EanVisitDecision = "stop" | "skip";
 export type EanHeadwayCheckpointKind = "platform_entry" | "exit_switch";
 export type EanHeadwayCandidateActivationReference = "serve" | "skip" | "active";
+export type EanHorizonFormulation =
+  | "horizon_legacy"
+  | "horizon_conservative_free_suffix"
+  | "horizon_exact_time_activation";
 export type EanHeadwayCandidateTimeReference =
   | "switch_time"
   | "platform_entry_time"
@@ -377,6 +381,7 @@ export interface EanStationConfig {
   station_id: string;
   waiting_mode: EanStationWaitingMode;
   fifo_capacity: number | null;
+  max_wait_seconds: number | null;
 }
 
 export interface EanConfig {
@@ -481,6 +486,7 @@ export interface EanMovementPlan {
   scenario_id: string;
   horizon_seconds: number;
   model_end_seconds: number;
+  horizon_formulation: EanHorizonFormulation;
   trajectories: EanCabinTrajectory[];
 }
 

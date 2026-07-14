@@ -6,7 +6,7 @@ from pathlib import Path
 from ropeway_skip_stop_optimization.exports.runner import DEFAULT_OUTPUT_ROOT, export_artifact_set, known_artifact_set_ids
 from ropeway_skip_stop_optimization.optimization.discrete_time import MilpV0VariableStrategy
 from ropeway_skip_stop_optimization.optimization.ean import (
-    ALL_EAN_OPTIMIZATION_NAMES,
+    ALL_EAN_SELECTION_NAMES,
     EanOptimizationConfig,
     GurobiSolverPolicyPreset,
 )
@@ -59,8 +59,10 @@ def main() -> None:
         "--ean-optimizations",
         default="all",
         help=(
-            "'all' for the current default set, 'none', or comma-separated active optimizations: "
-            + ", ".join(name.value for name in ALL_EAN_OPTIMIZATION_NAMES)
+            "'all' for the current default set, 'none', or comma-separated "
+            "optimization and formulation selections; choose at most one "
+            "horizon_* and one time_bounds_* value: "
+            + ", ".join(ALL_EAN_SELECTION_NAMES)
         ),
     )
     parser.add_argument(

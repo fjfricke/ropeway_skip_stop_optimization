@@ -41,6 +41,8 @@ def test_ean_config_validates_station_configs_and_model_end() -> None:
     config.validate()
 
     assert config.model_end_seconds == 720.0
+    assert config.passenger_service_end_seconds == 600.0
+    assert config.operational_end_seconds == 720.0
 
 
 def test_station_fifo_capacity_is_required_only_for_fifo_waiting() -> None:
@@ -54,6 +56,28 @@ def test_station_fifo_capacity_is_required_only_for_fifo_waiting() -> None:
         StationEanConfig(
             station_id="M",
             waiting_mode=StationWaitingMode.STATION_FIFO_BUFFER,
+        ).validate()
+
+
+def test_station_max_wait_is_optional_only_for_end_of_platform_waiting() -> None:
+    StationEanConfig(
+        station_id="M",
+        waiting_mode=StationWaitingMode.END_OF_PLATFORM_WAIT,
+        max_wait_seconds=90.0,
+    ).validate()
+
+    with pytest.raises(ValueError, match="max_wait_seconds"):
+        StationEanConfig(
+            station_id="M",
+            waiting_mode=StationWaitingMode.NO_WAITING,
+            max_wait_seconds=90.0,
+        ).validate()
+
+    with pytest.raises(ValueError, match="positive"):
+        StationEanConfig(
+            station_id="M",
+            waiting_mode=StationWaitingMode.END_OF_PLATFORM_WAIT,
+            max_wait_seconds=0.0,
         ).validate()
 
     with pytest.raises(ValueError, match="only valid"):

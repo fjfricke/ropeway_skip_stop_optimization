@@ -216,3 +216,86 @@ toggle, but do not include it in `all` yet.
 
 The benchmark runner should continue to expose `--ean-optimizations` so future
 formulation changes can be compared against `all` and `none`.
+
+## Horizon and Time-Bound Formulation Matrix
+
+Date: 2026-07-14
+
+Implementation baseline:
+
+```text
+git commit: 8c4b248cb36ce8c2f81306776a31a9c4648cc176
+worktree: dirty with the horizon/time-bound implementation under evaluation
+```
+
+The six runs used the same Three-Station journey-time setup, 300-second time
+limit, five-second progress interval, and the three default independent
+optimizations. The matrix varied one horizon formulation and one time-bound
+formulation:
+
+```text
+horizon:
+  horizon_legacy
+  horizon_conservative_free_suffix
+  horizon_exact_time_activation
+
+time bounds:
+  time_bounds_legacy_plus_10
+  time_bounds_derived_visit_bounds
+```
+
+These horizon alternatives define different finite feasible sets. Their
+objective values must therefore not be interpreted as same-model performance
+deltas.
+
+| Horizon | Time bounds | Vars | Constraints | Objective (h) | Best bound (s) | Gap | Nodes | Served | Skips |
+|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| legacy | legacy + 10 | 82,398 | 233,193 | 751.303 | 2,528,472 | 6.52% | 574 | 2,428 | 57 |
+| legacy | derived visit bounds | 82,398 | 233,193 | 751.802 | 2,499,307 | 7.66% | 1 | 2,400 | 31 |
+| conservative free suffix | legacy + 10 | 82,398 | 233,193 | 751.331 | 2,528,219 | 6.53% | 782 | 2,424 | 51 |
+| conservative free suffix | derived visit bounds | 82,398 | 233,193 | 751.572 | 2,500,681 | 7.58% | 1 | 2,429 | 52 |
+| exact time activation | legacy + 10 | 83,908 | 237,723 | 954.240 | 1,381,005 | 59.80% | 1 | 1,353 | 0 |
+| exact time activation | derived visit bounds | 83,908 | 237,723 | 751.508 | 2,491,525 | 7.91% | 208 | 2,432 | 23 |
+
+The legacy and conservative horizon cases behave almost identically when they
+use the historical time domain. Their final objectives differ by about 102
+passenger-seconds and their gaps differ by 0.01 percentage points. This is
+evidence that the conservative free suffix is computationally viable on this
+instance, although it does not establish equivalence of the different horizon
+semantics.
+
+The derived visit bounds are not a general relaxation improvement in their
+current form. With either the legacy or conservative horizon, they reduce the
+five-minute best bound by about 28,000 seconds, leave the solver at one
+processed node, and worsen the final gap from about 6.52% to about 7.6%.
+The fallback of one complete operational horizon of waiting per eligible visit
+creates a much larger propagated global domain than the historical cumulative
+ten-second allowance. On this artifact, the global upper bound grows from
+1,595.82 seconds to 19,585.82 seconds because each waiting-enabled visit may
+add up to the 1,200-second operational horizon. The visit-specific lower and
+upper bounds do not compensate for that larger domain in these two
+formulations.
+
+Exact time activation has the opposite interaction. With the historical
+all-visits global domain, the activation binaries have a very weak relaxation:
+after five minutes the solver has found only two solutions, no skip, a 59.80%
+gap, and an incumbent close to the initial MIP start. With propagated visit
+bounds, the same activation formulation reaches a normal-quality incumbent
+after about 108 seconds, crosses 8% gap after about 153 seconds, and processes
+208 nodes. The propagated lower bounds expose which prefixes can reach the
+operational horizon and give presolve substantially more structure around the
+activation variables.
+
+The combined exact/derived case is still weaker on the proof side than the
+legacy baseline: its final best bound is about 36,947 seconds lower and its gap
+is 1.39 percentage points larger. Its incumbent is nevertheless close to the
+other usable runs and serves the largest number of passengers in this matrix.
+This confirms that exact activation is functioning, but not that it is ready
+to replace the current default.
+
+The matrix supports retaining `horizon_legacy` with
+`time_bounds_legacy_plus_10` as the default. Neither
+`time_bounds_derived_visit_bounds` nor `horizon_exact_time_activation` is
+promoted by this experiment. The exact activation formulation should be
+evaluated only together with meaningful propagated event bounds; the
+historical global domain is an unsuitable companion formulation.

@@ -5,6 +5,7 @@ import pytest
 from ropeway_skip_stop_optimization.optimization.ean import (
     EanCabinTrajectory,
     EanCabinVisit,
+    EanHorizonFormulation,
     EanMovementPlan,
     EanRouteDecision,
 )
@@ -79,6 +80,26 @@ def test_ean_movement_plan_validates_duplicate_cabins_and_horizon() -> None:
             horizon_seconds=120.0,
             model_end_seconds=119.0,
             trajectories=(EanCabinTrajectory(cabin_id=0, visits=(_stop_visit(cabin_id=0),)),),
+        ).validate()
+
+
+def test_empty_ean_trajectory_requires_exact_horizon_activation() -> None:
+    trajectory = EanCabinTrajectory(cabin_id=0, visits=())
+
+    EanMovementPlan(
+        scenario_id="scenario",
+        horizon_seconds=10.0,
+        model_end_seconds=10.0,
+        trajectories=(trajectory,),
+        horizon_formulation=EanHorizonFormulation.EXACT_TIME_ACTIVATION,
+    ).validate()
+
+    with pytest.raises(ValueError, match="exact horizon activation"):
+        EanMovementPlan(
+            scenario_id="scenario",
+            horizon_seconds=10.0,
+            model_end_seconds=10.0,
+            trajectories=(trajectory,),
         ).validate()
 
     with pytest.raises(ValueError, match="duplicate cabin"):
