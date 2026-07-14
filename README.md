@@ -195,7 +195,8 @@ frontend/
   public/generated ignored generated JSON artifacts
 
 benchmarks/        benchmark entry points and ignored local outputs
-docs/findings/     benchmark findings and experiment writeups
-docs/plans/        design notes and implementation plans
+docs/findings/     dated empirical and structural observations
+docs/plans/        future work and research roadmaps
+docs/reference/    concise documentation of the current implementation
 tests/             Python regression tests
 ```

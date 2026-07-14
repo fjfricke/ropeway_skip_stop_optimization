@@ -2,6 +2,13 @@
 
 Date: 2026-05-13
 
+Relevant implementation commits:
+
+```text
+86094dd Add benchmark optimization toggles
+1c1ac54 Fix EAN platform-exit wait headways
+```
+
 ## Setup
 
 Benchmark command shape:
@@ -209,16 +216,3 @@ toggle, but do not include it in `all` yet.
 
 The benchmark runner should continue to expose `--ean-optimizations` so future
 formulation changes can be compared against `all` and `none`.
-
-## Next Step
-
-Run repeated or longer benchmarks for:
-
-```text
-all
-all + tight_big_m_bounds
-```
-
-The key question is whether the stronger Phase-2 bound eventually translates
-into equal or better incumbent quality at 10-15 minutes, or whether it should
-remain a proof/diagnostic toggle only.
