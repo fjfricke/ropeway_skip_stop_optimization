@@ -79,6 +79,21 @@ class EanSlotActivationFormulation(StrEnum):
     FIRST_SLOT_IMPLICATIONS = "slot_activation_first_slot"
 
 
+class EanBoardTimeFormulation(StrEnum):
+    """Representation of selected boarding times in passenger objectives.
+
+    `EXPLICIT` keeps one selected boarding-time variable per passenger slot.
+    It is required for the waiting-time objective.
+
+    `PROJECTED_JOURNEY_TIME` removes those variables for the journey-time
+    objective through the exact Fourier--Motzkin projection of their
+    linearization and minimum-trip-time constraints.
+    """
+
+    EXPLICIT = "board_time_explicit"
+    PROJECTED_JOURNEY_TIME = "board_time_projected_journey_time"
+
+
 @dataclass(frozen=True)
 class EanFormulationConfig:
     """Mutually exclusive EAN formulation choices.
@@ -93,6 +108,7 @@ class EanFormulationConfig:
     time_bounds: EanTimeBoundFormulation = EanTimeBoundFormulation.LEGACY_PLUS_10
     stop_skip_timing: EanStopSkipTimingFormulation = EanStopSkipTimingFormulation.BIG_M
     slot_activation: EanSlotActivationFormulation = EanSlotActivationFormulation.PER_SLOT_IMPLICATIONS
+    board_time: EanBoardTimeFormulation = EanBoardTimeFormulation.EXPLICIT
 
     def selection_names(self) -> tuple[str, ...]:
         names: list[str] = []
@@ -104,6 +120,8 @@ class EanFormulationConfig:
             names.append(self.stop_skip_timing.value)
         if self.slot_activation is not EanSlotActivationFormulation.PER_SLOT_IMPLICATIONS:
             names.append(self.slot_activation.value)
+        if self.board_time is not EanBoardTimeFormulation.EXPLICIT:
+            names.append(self.board_time.value)
         return tuple(names)
 
 
@@ -112,4 +130,5 @@ ALL_EAN_FORMULATION_SELECTION_NAMES: tuple[str, ...] = (
     *(value.value for value in EanTimeBoundFormulation),
     *(value.value for value in EanStopSkipTimingFormulation),
     *(value.value for value in EanSlotActivationFormulation),
+    *(value.value for value in EanBoardTimeFormulation),
 )

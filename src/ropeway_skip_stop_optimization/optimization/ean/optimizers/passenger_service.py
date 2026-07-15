@@ -37,6 +37,7 @@ from ropeway_skip_stop_optimization.optimization.ean.headway_semantics import (
 )
 from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     HORIZON_ACTIVATION_EPSILON_SECONDS,
+    EanBoardTimeFormulation,
     EanHorizonFormulation,
     EanSlotActivationFormulation,
     EanStopSkipTimingFormulation,
@@ -124,6 +125,12 @@ class EanPassengerServiceConfig:
             self.checkpoint.validate()
         if self.progress_sample_interval_seconds <= 0:
             raise ValueError("progress_sample_interval_seconds must be positive")
+        if (
+            self.objective is EanPassengerServiceObjective.WAITING_TIME
+            and self.optimization_config.formulation.board_time
+            is EanBoardTimeFormulation.PROJECTED_JOURNEY_TIME
+        ):
+            raise ValueError("board_time_projected_journey_time requires journey_time objective")
 
 
 @dataclass(frozen=True)
@@ -259,7 +266,14 @@ def solve_ean_passenger_service(
         stop[key] = model.addVar(vtype=GRB.BINARY, name=f"stop_{key[0]}_{key[1]}")
 
     slot: dict[tuple[str, int], Any] = {}
-    slot_board_time: dict[tuple[str, int], Any] = {}
+    slot_board_time: dict[tuple[str, int], Any] | None = (
+        {}
+        if (
+            config.objective is EanPassengerServiceObjective.WAITING_TIME
+            or config.optimization_config.formulation.board_time is EanBoardTimeFormulation.EXPLICIT
+        )
+        else None
+    )
     slot_alight_time: dict[tuple[str, int], Any] | None = (
         {} if config.objective is EanPassengerServiceObjective.JOURNEY_TIME else None
     )
@@ -269,12 +283,13 @@ def solve_ean_passenger_service(
         for slot_index in range(slot_count):
             key = (ride_candidate.id, slot_index)
             slot[key] = model.addVar(vtype=GRB.BINARY, name=f"slot_{_var_id(ride_candidate.id)}_{slot_index}")
-            slot_board_time[key] = model.addVar(
-                lb=0.0,
-                ub=time_upper_bound,
-                vtype=GRB.CONTINUOUS,
-                name=f"slot_board_time_{_var_id(ride_candidate.id)}_{slot_index}",
-            )
+            if slot_board_time is not None:
+                slot_board_time[key] = model.addVar(
+                    lb=0.0,
+                    ub=time_upper_bound,
+                    vtype=GRB.CONTINUOUS,
+                    name=f"slot_board_time_{_var_id(ride_candidate.id)}_{slot_index}",
+                )
             if slot_alight_time is not None:
                 slot_alight_time[key] = model.addVar(
                     lb=0.0,
@@ -861,7 +876,7 @@ def _add_passenger_constraints(
     wait_time: dict[tuple[int, int], Any],
     stop: dict[tuple[int, int], Any],
     slot: dict[tuple[str, int], Any],
-    slot_board_time: dict[tuple[str, int], Any],
+    slot_board_time: dict[tuple[str, int], Any] | None,
     slot_alight_time: dict[tuple[str, int], Any] | None,
     unserved: dict[str, Any],
     visits_by_key: dict[tuple[int, int], SwitchVisitDefinition],
@@ -935,7 +950,7 @@ def _add_ride_slot_constraints(
     wait_time: dict[tuple[int, int], Any],
     stop: dict[tuple[int, int], Any],
     slot: dict[tuple[str, int], Any],
-    slot_board_time: dict[tuple[str, int], Any],
+    slot_board_time: dict[tuple[str, int], Any] | None,
     slot_alight_time: dict[tuple[str, int], Any] | None,
     visits_by_key: dict[tuple[int, int], SwitchVisitDefinition],
     timing_by_switch_id: dict[str, SkipStopTiming],
@@ -965,7 +980,6 @@ def _add_ride_slot_constraints(
     for slot_index in range(slot_count):
         key = (ride_candidate.id, slot_index)
         slot_var = slot[key]
-        slot_time = slot_board_time[key]
         if not compact_activation or slot_index == 0:
             _add_ride_slot_activation_constraints(
                 model=model,
@@ -982,12 +996,20 @@ def _add_ride_slot_constraints(
                 release_big_m=release_big_m,
                 omit_zero_release=compact_activation,
             )
-        model.addConstr(slot_time <= time_upper_bound * slot_var, name=f"slot_time_active_{_var_id(ride_candidate.id)}_{slot_index}")
-        model.addConstr(slot_time <= board_time, name=f"slot_time_board_ub_{_var_id(ride_candidate.id)}_{slot_index}")
-        model.addConstr(
-            slot_time >= board_time - time_upper_bound * (1 - slot_var),
-            name=f"slot_time_board_lb_{_var_id(ride_candidate.id)}_{slot_index}",
-        )
+        if slot_board_time is not None:
+            slot_time = slot_board_time[key]
+            model.addConstr(
+                slot_time <= time_upper_bound * slot_var,
+                name=f"slot_time_active_{_var_id(ride_candidate.id)}_{slot_index}",
+            )
+            model.addConstr(
+                slot_time <= board_time,
+                name=f"slot_time_board_ub_{_var_id(ride_candidate.id)}_{slot_index}",
+            )
+            model.addConstr(
+                slot_time >= board_time - time_upper_bound * (1 - slot_var),
+                name=f"slot_time_board_lb_{_var_id(ride_candidate.id)}_{slot_index}",
+            )
         if slot_alight_time is not None:
             alight_slot_time = slot_alight_time[key]
             model.addConstr(
@@ -1003,18 +1025,34 @@ def _add_ride_slot_constraints(
                 name=f"slot_time_alight_lb_{_var_id(ride_candidate.id)}_{slot_index}",
             )
         if enable_slot_time_relaxation_strengthening:
-            _add_slot_time_relaxation_strengthening_constraints(
-                model=model,
-                ride_candidate=ride_candidate,
-                group=group,
-                slot_index=slot_index,
-                slot_var=slot_var,
-                slot_board_time=slot_time,
-                slot_alight_time=slot_alight_time[key] if slot_alight_time is not None else None,
-                visits_by_key=visits_by_key,
-                timing_by_switch_id=timing_by_switch_id,
-                omit_redundant_rows=compact_activation,
-            )
+            if slot_board_time is not None:
+                _add_slot_time_relaxation_strengthening_constraints(
+                    model=model,
+                    ride_candidate=ride_candidate,
+                    group=group,
+                    slot_index=slot_index,
+                    slot_var=slot_var,
+                    slot_board_time=slot_board_time[key],
+                    slot_alight_time=slot_alight_time[key] if slot_alight_time is not None else None,
+                    visits_by_key=visits_by_key,
+                    timing_by_switch_id=timing_by_switch_id,
+                    omit_redundant_rows=compact_activation,
+                )
+            else:
+                if slot_alight_time is None:
+                    raise ValueError("projected board times require journey-time selected alight variables")
+                _add_projected_journey_slot_time_constraints(
+                    model=model,
+                    ride_candidate=ride_candidate,
+                    group=group,
+                    slot_index=slot_index,
+                    slot_var=slot_var,
+                    board_time=board_time,
+                    slot_alight_time=slot_alight_time[key],
+                    time_upper_bound=time_upper_bound,
+                    visits_by_key=visits_by_key,
+                    timing_by_switch_id=timing_by_switch_id,
+                )
         if previous_slot_var is not None:
             model.addConstr(slot_var <= previous_slot_var, name=f"slot_symmetry_{_var_id(ride_candidate.id)}_{slot_index}")
         previous_slot_var = slot_var
@@ -1132,18 +1170,61 @@ def _add_slot_time_relaxation_strengthening_constraints(
     )
 
 
+def _add_projected_journey_slot_time_constraints(
+    model: Any,
+    ride_candidate: EanRideCandidate,
+    group: EanDemandGroup,
+    slot_index: int,
+    slot_var: Any,
+    board_time: Any,
+    slot_alight_time: Any,
+    time_upper_bound: float,
+    visits_by_key: dict[tuple[int, int], SwitchVisitDefinition],
+    timing_by_switch_id: dict[str, SkipStopTiming],
+) -> None:
+    """Add the Fourier--Motzkin projection of selected boarding time.
+
+    For journey time, selected boarding time is auxiliary. Eliminating it from
+    its McCormick linearization, release lower bound, and selected minimum-trip
+    duration preserves the full LP relaxation in the remaining variables.
+    """
+
+    variable_id = _var_id(ride_candidate.id)
+    min_trip_time = _min_candidate_trip_time_seconds(
+        ride_candidate=ride_candidate,
+        visits_by_key=visits_by_key,
+        timing_by_switch_id=timing_by_switch_id,
+    )
+    if group.release_time_seconds > 0.0:
+        model.addConstr(
+            board_time >= group.release_time_seconds * slot_var,
+            name=f"slot_projected_board_release_lb_{variable_id}_{slot_index}",
+        )
+    model.addConstr(
+        slot_alight_time >= (group.release_time_seconds + min_trip_time) * slot_var,
+        name=f"slot_projected_alight_earliest_lb_{variable_id}_{slot_index}",
+    )
+    model.addConstr(
+        slot_alight_time
+        >= board_time - time_upper_bound * (1 - slot_var) + min_trip_time * slot_var,
+        name=f"slot_projected_board_alight_lb_{variable_id}_{slot_index}",
+    )
+
+
 def _passenger_service_objective(
     objective: EanPassengerServiceObjective,
     passenger_build: EanPassengerCandidateBuildResult,
     group_by_id: dict[str, EanDemandGroup],
     slot: dict[tuple[str, int], Any],
-    slot_board_time: dict[tuple[str, int], Any],
+    slot_board_time: dict[tuple[str, int], Any] | None,
     slot_alight_time: dict[tuple[str, int], Any] | None,
     unserved: dict[str, Any],
     horizon_seconds: float,
     gp: Any,
 ) -> Any:
     if objective is EanPassengerServiceObjective.WAITING_TIME:
+        if slot_board_time is None:
+            raise ValueError("slot_board_time is required for waiting-time objective")
         return _served_time_minus_release_objective(
             passenger_build=passenger_build,
             group_by_id=group_by_id,
@@ -1177,7 +1258,7 @@ def _set_all_stop_mip_start(
     wait_time: dict[tuple[int, int], Any],
     stop: dict[tuple[int, int], Any],
     slot: dict[tuple[str, int], Any],
-    slot_board_time: dict[tuple[str, int], Any],
+    slot_board_time: dict[tuple[str, int], Any] | None,
     slot_alight_time: dict[tuple[str, int], Any] | None,
     unserved: dict[str, Any],
     visit_active: dict[tuple[int, int], Any],
@@ -1206,7 +1287,8 @@ def _set_all_stop_mip_start(
 
     for key, variable in slot.items():
         variable.Start = 0.0
-        slot_board_time[key].Start = 0.0
+        if slot_board_time is not None:
+            slot_board_time[key].Start = 0.0
         if slot_alight_time is not None:
             slot_alight_time[key].Start = 0.0
     for variable in unserved.values():
@@ -1256,7 +1338,8 @@ def _set_all_stop_mip_start(
         for slot_index in range(assign_count):
             slot_key = (ride_candidate.id, slot_index)
             slot[slot_key].Start = 1.0
-            slot_board_time[slot_key].Start = board_time
+            if slot_board_time is not None:
+                slot_board_time[slot_key].Start = board_time
             if slot_alight_time is not None:
                 slot_alight_time[slot_key].Start = alight_time
             served_slot_keys.add(slot_key)
@@ -1272,7 +1355,8 @@ def _set_all_stop_mip_start(
         if key in served_slot_keys:
             continue
         variable.Start = 0.0
-        slot_board_time[key].Start = 0.0
+        if slot_board_time is not None:
+            slot_board_time[key].Start = 0.0
         if slot_alight_time is not None:
             slot_alight_time[key].Start = 0.0
 

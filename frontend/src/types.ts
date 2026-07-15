@@ -371,11 +371,15 @@ export type EanTimeBoundFormulation =
 export type EanSlotActivationFormulation =
   | "slot_activation_per_slot"
   | "slot_activation_first_slot";
+export type EanBoardTimeFormulation =
+  | "board_time_explicit"
+  | "board_time_projected_journey_time";
 export interface EanFormulationConfig {
   horizon: EanHorizonFormulation;
   time_bounds: EanTimeBoundFormulation;
   stop_skip_timing: EanStopSkipTimingFormulation;
   slot_activation: EanSlotActivationFormulation;
+  board_time: EanBoardTimeFormulation;
 }
 export interface EanOptimizationConfig {
   enable_candidate_horizon_pruning: boolean;

@@ -478,6 +478,7 @@ def test_cli_help_includes_ean_optimization_selection() -> None:
     assert "--ean-optimizations" in result.stdout
     assert "tight_big_m_bounds" in result.stdout
     assert "slot_activation_first_slot" in result.stdout
+    assert "board_time_projected_journey_time" in result.stdout
 
 
 def test_cli_can_export_milp_v1_waiting_time_objective(tmp_path: Path) -> None:

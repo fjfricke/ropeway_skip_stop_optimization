@@ -25,12 +25,19 @@ slot_time_relaxation_strengthening
 tight_big_m_bounds
 slot_activation_per_slot
 slot_activation_first_slot
+board_time_explicit
+board_time_projected_journey_time
 ```
 
 The two slot-activation values are mutually exclusive formulation cases.
 `slot_activation_per_slot` is the legacy default. The exact
 `slot_activation_first_slot` case removes candidate-level implications that
 are implied by unary slot ordering; it may be combined with `all`.
+
+The board-time values are mutually exclusive formulation cases.
+`board_time_projected_journey_time` is available only for journey-time
+artifacts. It removes selected boarding-time variables through an exact
+Fourier--Motzkin projection and may be combined with `all`.
 
 Default output layout:
 

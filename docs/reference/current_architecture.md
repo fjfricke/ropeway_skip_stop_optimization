@@ -63,7 +63,18 @@ category:
   implied zero-release and optional selected-time strengthening rows.
 
 Both cases represent the same integer model and LP relaxation. The per-slot
-case remains the default until the compact case is benchmarked.
+case remains the default.
+
+Selected boarding time is a third mutually exclusive formulation category:
+
+- `board_time_explicit` creates one selected boarding-time variable per slot;
+- `board_time_projected_journey_time` removes those variables in the
+  journey-time model through the exact Fourier--Motzkin projection of their
+  linearization, release, and minimum-trip constraints.
+
+The projected case preserves the integer model and LP relaxation, but is
+invalid for waiting time because selected boarding time appears in that
+objective. The explicit case remains the default pending its benchmark.
 
 ## EAN Finite-Horizon Formulations
 

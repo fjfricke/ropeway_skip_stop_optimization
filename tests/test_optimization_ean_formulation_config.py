@@ -3,6 +3,7 @@ from __future__ import annotations
 import pytest
 
 from ropeway_skip_stop_optimization.optimization.ean import (
+    EanBoardTimeFormulation,
     EanFormulationConfig,
     EanHorizonFormulation,
     EanOptimizationConfig,
@@ -18,7 +19,8 @@ def test_ean_configuration_parses_independent_and_categorical_selections() -> No
         "horizon_exact_time_activation,"
         "time_bounds_derived_visit_bounds,"
         "stop_skip_timing_affine,"
-        "slot_activation_first_slot"
+        "slot_activation_first_slot,"
+        "board_time_projected_journey_time"
     )
 
     assert config.enable_candidate_horizon_pruning
@@ -28,13 +30,15 @@ def test_ean_configuration_parses_independent_and_categorical_selections() -> No
         time_bounds=EanTimeBoundFormulation.DERIVED_VISIT_BOUNDS,
         stop_skip_timing=EanStopSkipTimingFormulation.AFFINE,
         slot_activation=EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS,
+        board_time=EanBoardTimeFormulation.PROJECTED_JOURNEY_TIME,
     )
     assert config.selection_label() == (
         "candidate_horizon_pruning,"
         "horizon_exact_time_activation,"
         "time_bounds_derived_visit_bounds,"
         "stop_skip_timing_affine,"
-        "slot_activation_first_slot"
+        "slot_activation_first_slot,"
+        "board_time_projected_journey_time"
     )
 
 
@@ -59,6 +63,11 @@ def test_ean_configuration_rejects_multiple_values_in_one_category() -> None:
             "slot_activation_per_slot,slot_activation_first_slot"
         )
 
+    with pytest.raises(ValueError, match="at most one EAN board-time"):
+        EanOptimizationConfig.from_selection(
+            "board_time_explicit,board_time_projected_journey_time"
+        )
+
 
 def test_ean_configuration_all_and_none_keep_legacy_formulation_defaults() -> None:
     assert EanOptimizationConfig.from_selection("all").formulation == EanFormulationConfig()
@@ -67,12 +76,13 @@ def test_ean_configuration_all_and_none_keep_legacy_formulation_defaults() -> No
 
 def test_ean_configuration_all_accepts_formulation_override() -> None:
     config = EanOptimizationConfig.from_selection(
-        "all,stop_skip_timing_affine,slot_activation_first_slot"
+        "all,stop_skip_timing_affine,slot_activation_first_slot,board_time_projected_journey_time"
     )
 
     assert config.enabled_names()
     assert config.formulation.stop_skip_timing is EanStopSkipTimingFormulation.AFFINE
     assert config.formulation.slot_activation is EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS
+    assert config.formulation.board_time is EanBoardTimeFormulation.PROJECTED_JOURNEY_TIME
 
 
 def test_ean_configuration_rejects_all_with_none() -> None:

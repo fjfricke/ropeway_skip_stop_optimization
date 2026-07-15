@@ -57,6 +57,7 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
 )
 from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     ALL_EAN_FORMULATION_SELECTION_NAMES,
+    EanBoardTimeFormulation,
     EanFormulationConfig,
     EanHorizonFormulation,
     EanSlotActivationFormulation,
@@ -116,6 +117,7 @@ __all__ = [
     "EanActivationReference",
     "EanBuildArtifact",
     "EanBuildArtifactBuilder",
+    "EanBoardTimeFormulation",
     "EanCabinStartBuilder",
     "EanCabinStart",
     "EanCabinStartKind",

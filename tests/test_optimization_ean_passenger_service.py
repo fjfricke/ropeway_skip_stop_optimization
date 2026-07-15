@@ -20,6 +20,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     SwitchVisitDefinition,
     EanActivationReference,
     EanBuildArtifact,
+    EanBoardTimeFormulation,
     EanTimeReference,
     EanOptimizationConfig,
     EanFormulationConfig,
@@ -45,6 +46,7 @@ from ropeway_skip_stop_optimization.optimization.ean.horizon import (
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.passenger_service import (
     StopSkipBigMBounds,
     _headway_time_expressions,
+    _add_projected_journey_slot_time_constraints,
     _min_candidate_trip_time_seconds,
     _solver_diagnostics,
     _slot_release_big_m,
@@ -361,6 +363,216 @@ def test_first_slot_activation_preserves_multi_slot_solutions_and_removes_implie
         first_slot.metadata.optimization_config.formulation.slot_activation
         is EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS
     )
+
+
+def test_projected_journey_board_time_matches_explicit_lp_relaxation() -> None:
+    gp = pytest.importorskip("gurobipy")
+    from gurobipy import GRB
+
+    artifact = _minimal_artifact(cabin_capacity=2, cycle_count=2)
+    ride_candidate = EanRideCandidate(
+        id="ride::projection",
+        demand_group_id="demand::projection",
+        cabin_id=0,
+        board_visit_index=0,
+        alight_visit_index=1,
+    )
+    group = EanDemandGroup(
+        id="demand::projection",
+        origin_station_id="A",
+        destination_station_id="B",
+        release_time_seconds=3.0,
+        count=1,
+    )
+    visits_by_key = {
+        (visit.cabin_id, visit.visit_index): visit
+        for visit in artifact.switch_visits
+    }
+    timing_by_switch_id = {timing.switch_id: timing for timing in artifact.timings}
+    time_upper_bound = 20.0
+
+    def support_value(*, projected: bool, coefficients: tuple[float, float, float, float]) -> float:
+        model = gp.Model()
+        model.Params.OutputFlag = 0
+        slot_var = model.addVar(lb=0.0, ub=1.0, vtype=GRB.CONTINUOUS, name="slot")
+        board_time = model.addVar(lb=0.0, ub=time_upper_bound, vtype=GRB.CONTINUOUS, name="board")
+        alight_time = model.addVar(lb=0.0, ub=time_upper_bound, vtype=GRB.CONTINUOUS, name="alight")
+        selected_alight_time = model.addVar(
+            lb=0.0,
+            ub=time_upper_bound,
+            vtype=GRB.CONTINUOUS,
+            name="selected_alight",
+        )
+        model.addConstr(selected_alight_time <= time_upper_bound * slot_var)
+        model.addConstr(selected_alight_time <= alight_time)
+        model.addConstr(selected_alight_time >= alight_time - time_upper_bound * (1 - slot_var))
+
+        if projected:
+            _add_projected_journey_slot_time_constraints(
+                model=model,
+                ride_candidate=ride_candidate,
+                group=group,
+                slot_index=0,
+                slot_var=slot_var,
+                board_time=board_time,
+                slot_alight_time=selected_alight_time,
+                time_upper_bound=time_upper_bound,
+                visits_by_key=visits_by_key,
+                timing_by_switch_id=timing_by_switch_id,
+            )
+        else:
+            selected_board_time = model.addVar(
+                lb=0.0,
+                ub=time_upper_bound,
+                vtype=GRB.CONTINUOUS,
+                name="selected_board",
+            )
+            model.addConstr(selected_board_time <= time_upper_bound * slot_var)
+            model.addConstr(selected_board_time <= board_time)
+            model.addConstr(selected_board_time >= board_time - time_upper_bound * (1 - slot_var))
+            model.addConstr(selected_board_time >= group.release_time_seconds * slot_var)
+            model.addConstr(
+                selected_alight_time - selected_board_time
+                >= _min_candidate_trip_time_seconds(ride_candidate, visits_by_key, timing_by_switch_id) * slot_var
+            )
+
+        model.setObjective(
+            coefficients[0] * slot_var
+            + coefficients[1] * board_time
+            + coefficients[2] * alight_time
+            + coefficients[3] * selected_alight_time,
+            GRB.MAXIMIZE,
+        )
+        model.optimize()
+        assert model.Status == GRB.OPTIMAL
+        return model.ObjVal
+
+    for coefficients in (
+        (1.0, 0.0, 0.0, 0.0),
+        (0.0, 1.0, 0.0, 0.0),
+        (0.0, 0.0, 0.0, 1.0),
+        (-5.0, 3.0, -2.0, 7.0),
+        (3.0, -4.0, 1.0, -6.0),
+    ):
+        assert support_value(projected=True, coefficients=coefficients) == pytest.approx(
+            support_value(projected=False, coefficients=coefficients)
+        )
+
+
+@pytest.mark.parametrize(
+    "waiting_mode",
+    (
+        StationWaitingMode.NO_WAITING,
+        StationWaitingMode.END_OF_PLATFORM_WAIT,
+    ),
+)
+@pytest.mark.parametrize("release_seconds", (0.0, 5.0))
+@pytest.mark.parametrize(
+    "slot_activation",
+    (
+        EanSlotActivationFormulation.PER_SLOT_IMPLICATIONS,
+        EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS,
+    ),
+)
+@pytest.mark.parametrize("enable_strengthening", (False, True))
+def test_projected_journey_board_time_preserves_small_instances_and_removes_auxiliaries(
+    waiting_mode: StationWaitingMode,
+    release_seconds: float,
+    slot_activation: EanSlotActivationFormulation,
+    enable_strengthening: bool,
+) -> None:
+    pytest.importorskip("gurobipy")
+    scenario = _minimal_scenario(
+        demands=(
+            Demand(
+                arrival_time=time(8, 0, int(release_seconds)),
+                origin="A",
+                destination="B",
+                count=2,
+            ),
+        ),
+    )
+    artifact = _minimal_artifact(
+        cabin_capacity=2,
+        cycle_count=2,
+        station_waiting_modes={"A": waiting_mode, "B": waiting_mode},
+    )
+    baseline_config = EanOptimizationConfig(
+        enable_slot_time_relaxation_strengthening=enable_strengthening,
+        formulation=EanFormulationConfig(slot_activation=slot_activation),
+    )
+    projected_config = EanOptimizationConfig(
+        enable_slot_time_relaxation_strengthening=enable_strengthening,
+        formulation=EanFormulationConfig(
+            slot_activation=slot_activation,
+            board_time=EanBoardTimeFormulation.PROJECTED_JOURNEY_TIME,
+        ),
+    )
+
+    baseline = solve_ean_passenger_service(
+        scenario,
+        artifact,
+        EanPassengerServiceConfig(
+            objective=EanPassengerServiceObjective.JOURNEY_TIME,
+            optimization_config=baseline_config,
+        ),
+    )
+    projected = solve_ean_passenger_service(
+        scenario,
+        artifact,
+        EanPassengerServiceConfig(
+            objective=EanPassengerServiceObjective.JOURNEY_TIME,
+            optimization_config=projected_config,
+        ),
+    )
+
+    assert baseline.metadata.status == "optimal"
+    assert projected.metadata.status == "optimal"
+    assert projected.metadata.objective_value_seconds == pytest.approx(
+        baseline.metadata.objective_value_seconds
+    )
+    assert projected.metadata.served_passenger_count == baseline.metadata.served_passenger_count
+    assert projected.metadata.unserved_passenger_count == baseline.metadata.unserved_passenger_count
+    assert baseline.passenger_plan is not None
+    assert projected.passenger_plan is not None
+    assert projected.passenger_plan.unserved_counts_by_demand_group_id == (
+        baseline.passenger_plan.unserved_counts_by_demand_group_id
+    )
+
+    slots = baseline.metadata.slot_variable_count
+    assert baseline.metadata.variable_count - projected.metadata.variable_count == slots
+    if not enable_strengthening:
+        expected_removed_rows = 3 * slots
+    elif slot_activation is EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS:
+        expected_removed_rows = 2 * slots
+    elif release_seconds == 0.0:
+        expected_removed_rows = 4 * slots
+    else:
+        expected_removed_rows = 3 * slots
+    assert baseline.metadata.constraint_count - projected.metadata.constraint_count == expected_removed_rows
+    assert (
+        projected.metadata.optimization_config.formulation.board_time
+        is EanBoardTimeFormulation.PROJECTED_JOURNEY_TIME
+    )
+
+
+def test_projected_journey_board_time_rejects_waiting_time_objective() -> None:
+    pytest.importorskip("gurobipy")
+    with pytest.raises(ValueError, match="requires journey_time objective"):
+        solve_ean_passenger_service(
+            _minimal_scenario(
+                demands=(Demand(arrival_time=time(8, 0), origin="A", destination="B", count=1),),
+            ),
+            _minimal_artifact(cabin_capacity=2),
+            EanPassengerServiceConfig(
+                objective=EanPassengerServiceObjective.WAITING_TIME,
+                optimization_config=EanOptimizationConfig(
+                    formulation=EanFormulationConfig(
+                        board_time=EanBoardTimeFormulation.PROJECTED_JOURNEY_TIME,
+                    )
+                ),
+            ),
+        )
 
 
 @pytest.mark.parametrize(

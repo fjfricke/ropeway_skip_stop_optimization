@@ -258,49 +258,6 @@ matrix remains reproducible. Verification must compare exact small-instance
 objectives, extracted prefixes, crossing headways, and empty-prefix cabin
 starts before performance benchmarking.
 
-## Project Board-Slot Times Out of Journey-Time Models
-
-The journey-time objective uses selected alighting times. Selected boarding
-times are auxiliary variables used only to strengthen the relaxation.
-
-For the journey-time model, project `slot_board_time` out instead of merely
-deleting it. Derive the complete linear projection of:
-
-```text
-slot_board_time = slot * board_time
-slot_alight_time - slot_board_time >= minimum_trip_time * slot
-```
-
-including the board-time lower and upper bounds needed by the projection. With
-a global upper bound `U`, the projected family includes constraints of the
-form:
-
-```text
-board_time >= release_time * slot
-
-slot_alight_time
-  >= (release_time + minimum_trip_time) * slot
-
-slot_alight_time
-  >= board_time
-     - U * (1 - slot)
-     + minimum_trip_time * slot
-```
-
-The final implementation must be derived algebraically rather than copied from
-this sketch. Include every projection inequality required to preserve the
-existing LP relaxation. Candidate-specific bounds from the general formulation
-roadmap can later replace `U`.
-
-Potential effect on `three_station_v0`:
-
-- remove 7,664 continuous board-slot variables;
-- remove roughly another 14,000 to 15,000 rows after adding the projected
-  inequalities.
-
-The waiting-time model keeps selected boarding-time variables because they
-appear directly in its objective.
-
 ## Transition-Only Cabin Timing
 
 Using the existing affine formulation as the algebraic basis, investigate
