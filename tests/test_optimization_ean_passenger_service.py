@@ -28,6 +28,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanPassengerServiceConfig,
     EanPassengerServiceObjective,
     EanRideCandidate,
+    EanStopSkipTimingFormulation,
     GurobiSolverPolicy,
     solve_ean_passenger_service,
 )
@@ -203,6 +204,49 @@ def test_ean_passenger_service_tight_big_m_bounds_preserves_minimal_solution() -
         baseline.passenger_plan.unserved_counts_by_demand_group_id
     )
     assert tightened.metadata.optimization_config.enable_tight_big_m_bounds
+
+
+@pytest.mark.parametrize(
+    "objective",
+    (
+        EanPassengerServiceObjective.WAITING_TIME,
+        EanPassengerServiceObjective.JOURNEY_TIME,
+    ),
+)
+def test_affine_stop_skip_timing_preserves_minimal_solution(
+    objective: EanPassengerServiceObjective,
+) -> None:
+    pytest.importorskip("gurobipy")
+    scenario = _minimal_scenario(
+        demands=(Demand(arrival_time=time(8, 0), origin="A", destination="B", count=1),),
+    )
+    artifact = _minimal_artifact(cabin_capacity=2, cycle_count=2)
+
+    baseline = solve_ean_passenger_service(
+        scenario,
+        artifact,
+        EanPassengerServiceConfig(objective=objective),
+    )
+    affine = solve_ean_passenger_service(
+        scenario,
+        artifact,
+        EanPassengerServiceConfig(
+            objective=objective,
+            optimization_config=EanOptimizationConfig(
+                formulation=EanFormulationConfig(
+                    stop_skip_timing=EanStopSkipTimingFormulation.AFFINE,
+                )
+            ),
+        ),
+    )
+
+    assert affine.metadata.status == "optimal"
+    assert affine.metadata.objective_value_seconds == pytest.approx(
+        baseline.metadata.objective_value_seconds
+    )
+    assert affine.metadata.served_passenger_count == baseline.metadata.served_passenger_count
+    assert affine.metadata.unserved_passenger_count == baseline.metadata.unserved_passenger_count
+    assert affine.metadata.constraint_count < baseline.metadata.constraint_count
 
 
 @pytest.mark.parametrize(

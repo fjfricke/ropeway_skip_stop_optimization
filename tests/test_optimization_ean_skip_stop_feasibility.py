@@ -9,20 +9,39 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanOptimizationConfig,
     EanRouteDecision,
     EanSkipStopFeasibilityConfig,
+    EanStopSkipTimingFormulation,
     EanTimeBoundFormulation,
     solve_ean_skip_stop_feasibility,
     validate_ean_movement_plan_against_artifact,
 )
 
 
-def test_ean_skip_stop_feasibility_finds_valid_three_station_plan() -> None:
+@pytest.mark.parametrize(
+    "timing_formulation",
+    (
+        EanStopSkipTimingFormulation.BIG_M,
+        EanStopSkipTimingFormulation.AFFINE,
+    ),
+)
+def test_ean_skip_stop_feasibility_finds_valid_three_station_plan(
+    timing_formulation: EanStopSkipTimingFormulation,
+) -> None:
     pytest.importorskip("gurobipy")
     example = ThreeStationExample()
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
     artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
 
-    result = solve_ean_skip_stop_feasibility(artifact)
+    result = solve_ean_skip_stop_feasibility(
+        artifact,
+        EanSkipStopFeasibilityConfig(
+            optimization_config=EanOptimizationConfig(
+                formulation=EanFormulationConfig(
+                    stop_skip_timing=timing_formulation,
+                )
+            )
+        ),
+    )
 
     assert result.metadata.status == "optimal"
     assert result.movement_plan is not None
@@ -36,7 +55,16 @@ def test_ean_skip_stop_feasibility_finds_valid_three_station_plan() -> None:
     } <= {EanRouteDecision.STOP, EanRouteDecision.SKIP}
 
 
-def test_exact_horizon_activation_extracts_valid_three_station_prefixes() -> None:
+@pytest.mark.parametrize(
+    "timing_formulation",
+    (
+        EanStopSkipTimingFormulation.BIG_M,
+        EanStopSkipTimingFormulation.AFFINE,
+    ),
+)
+def test_exact_horizon_activation_extracts_valid_three_station_prefixes(
+    timing_formulation: EanStopSkipTimingFormulation,
+) -> None:
     pytest.importorskip("gurobipy")
     example = ThreeStationExample()
     scenario = example.build_scenario()
@@ -53,6 +81,7 @@ def test_exact_horizon_activation_extracts_valid_three_station_prefixes() -> Non
                 formulation=EanFormulationConfig(
                     horizon=EanHorizonFormulation.EXACT_TIME_ACTIVATION,
                     time_bounds=EanTimeBoundFormulation.DERIVED_VISIT_BOUNDS,
+                    stop_skip_timing=timing_formulation,
                 )
             )
         ),

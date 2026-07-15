@@ -37,6 +37,7 @@ from ropeway_skip_stop_optimization.optimization.ean.headway_semantics import (
 from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     HORIZON_ACTIVATION_EPSILON_SECONDS,
     EanHorizonFormulation,
+    EanStopSkipTimingFormulation,
 )
 from ropeway_skip_stop_optimization.optimization.ean.horizon import (
     add_visit_horizon_activation,
@@ -63,6 +64,9 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.solver_policy im
 from ropeway_skip_stop_optimization.optimization.ean.time_bounds import (
     EanModelTimeBounds,
     build_ean_model_time_bounds,
+)
+from ropeway_skip_stop_optimization.optimization.ean.timing_formulation import (
+    add_affine_stop_skip_timing_constraint,
 )
 from ropeway_skip_stop_optimization.optimization.solver_progress import GurobiMipProgressSample
 
@@ -310,6 +314,7 @@ def solve_ean_passenger_service(
         big_m,
         config.optimization_config.enable_tight_big_m_bounds,
         visit_active,
+        config.optimization_config.formulation.stop_skip_timing,
     )
     _add_chain_constraints(
         model,
@@ -595,6 +600,7 @@ def _add_timing_constraints(
     big_m: float,
     enable_tight_big_m_bounds: bool,
     visit_active: dict[tuple[int, int], Any],
+    formulation: EanStopSkipTimingFormulation,
 ) -> None:
     for key, visit in visits_by_key.items():
         timing = timing_by_switch_id[visit.switch_id]
@@ -615,6 +621,22 @@ def _add_timing_constraints(
             raise NotImplementedError(
                 f"unsupported EAN passenger-service waiting mode: {station_config.waiting_mode.value}"
             )
+
+        if formulation is EanStopSkipTimingFormulation.AFFINE:
+            add_affine_stop_skip_timing_constraint(
+                model=model,
+                switch_time=switch_time[key],
+                exit_switch_time=exit_switch_time[key],
+                wait_time=wait_time[key],
+                stop=stop[key],
+                active=active,
+                service_seconds=service_seconds,
+                skip_seconds=skip_seconds,
+                name=f"affine_exit_{key[0]}_{key[1]}",
+            )
+            continue
+        if formulation is not EanStopSkipTimingFormulation.BIG_M:
+            raise ValueError(f"unsupported EAN stop/skip timing formulation: {formulation}")
 
         big_m_bounds = _stop_skip_big_m_bounds(
             timing=timing,

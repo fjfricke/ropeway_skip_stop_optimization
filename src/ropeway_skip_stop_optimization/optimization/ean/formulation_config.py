@@ -47,6 +47,20 @@ class EanTimeBoundFormulation(StrEnum):
     DERIVED_VISIT_BOUNDS = "time_bounds_derived_visit_bounds"
 
 
+class EanStopSkipTimingFormulation(StrEnum):
+    """Linear formulation of active visit stop/skip timing.
+
+    `BIG_M` preserves the historical four timing implications.
+
+    `AFFINE` uses one exact affine equality for every unconditionally active
+    visit. Under exact horizon activation, the equality is enabled by the
+    visit-activation binary.
+    """
+
+    BIG_M = "stop_skip_timing_big_m"
+    AFFINE = "stop_skip_timing_affine"
+
+
 @dataclass(frozen=True)
 class EanFormulationConfig:
     """Mutually exclusive EAN formulation choices.
@@ -59,6 +73,7 @@ class EanFormulationConfig:
 
     horizon: EanHorizonFormulation = EanHorizonFormulation.LEGACY
     time_bounds: EanTimeBoundFormulation = EanTimeBoundFormulation.LEGACY_PLUS_10
+    stop_skip_timing: EanStopSkipTimingFormulation = EanStopSkipTimingFormulation.BIG_M
 
     def selection_names(self) -> tuple[str, ...]:
         names: list[str] = []
@@ -66,10 +81,13 @@ class EanFormulationConfig:
             names.append(self.horizon.value)
         if self.time_bounds is not EanTimeBoundFormulation.LEGACY_PLUS_10:
             names.append(self.time_bounds.value)
+        if self.stop_skip_timing is not EanStopSkipTimingFormulation.BIG_M:
+            names.append(self.stop_skip_timing.value)
         return tuple(names)
 
 
 ALL_EAN_FORMULATION_SELECTION_NAMES: tuple[str, ...] = (
     *(value.value for value in EanHorizonFormulation),
     *(value.value for value in EanTimeBoundFormulation),
+    *(value.value for value in EanStopSkipTimingFormulation),
 )

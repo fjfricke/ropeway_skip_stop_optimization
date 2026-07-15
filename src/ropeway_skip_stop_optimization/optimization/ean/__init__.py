@@ -59,6 +59,7 @@ from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     ALL_EAN_FORMULATION_SELECTION_NAMES,
     EanFormulationConfig,
     EanHorizonFormulation,
+    EanStopSkipTimingFormulation,
     EanTimeBoundFormulation,
 )
 from ropeway_skip_stop_optimization.optimization.ean.optimization_config import (
@@ -144,6 +145,7 @@ __all__ = [
     "EanSkipStopFeasibilityConfig",
     "EanSkipStopFeasibilityMetadata",
     "EanSkipStopFeasibilityResult",
+    "EanStopSkipTimingFormulation",
     "EanTimeReference",
     "EanTimeBoundFormulation",
     "GurobiSolverPolicy",

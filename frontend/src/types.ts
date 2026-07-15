@@ -362,6 +362,9 @@ export type EanHorizonFormulation =
   | "horizon_legacy"
   | "horizon_conservative_free_suffix"
   | "horizon_exact_time_activation";
+export type EanStopSkipTimingFormulation =
+  | "stop_skip_timing_big_m"
+  | "stop_skip_timing_affine";
 export type EanHeadwayCandidateTimeReference =
   | "switch_time"
   | "platform_entry_time"

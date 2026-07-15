@@ -9,6 +9,7 @@ from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArt
 from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     HORIZON_ACTIVATION_EPSILON_SECONDS,
     EanHorizonFormulation,
+    EanStopSkipTimingFormulation,
 )
 from ropeway_skip_stop_optimization.optimization.ean.horizon import (
     add_visit_horizon_activation,
@@ -41,6 +42,9 @@ from ropeway_skip_stop_optimization.optimization.ean.optimization_config import 
 from ropeway_skip_stop_optimization.optimization.ean.time_bounds import (
     EanModelTimeBounds,
     build_ean_model_time_bounds,
+)
+from ropeway_skip_stop_optimization.optimization.ean.timing_formulation import (
+    add_affine_stop_skip_timing_constraint,
 )
 from ropeway_skip_stop_optimization.optimization.ean.validation import (
     validate_ean_movement_plan_against_artifact,
@@ -186,6 +190,7 @@ def solve_ean_skip_stop_feasibility(
         model_time_bounds,
         big_m,
         visit_active,
+        config.optimization_config.formulation.stop_skip_timing,
     )
     _add_chain_constraints(
         model,
@@ -309,6 +314,7 @@ def _add_timing_constraints(
     model_time_bounds: EanModelTimeBounds,
     big_m: float,
     visit_active: dict[tuple[int, int], Any],
+    formulation: EanStopSkipTimingFormulation,
 ) -> None:
     for key, visit in visits_by_key.items():
         timing = timing_by_switch_id[visit.switch_id]
@@ -333,6 +339,22 @@ def _add_timing_constraints(
             raise NotImplementedError(
                 f"unsupported EAN skip/stop waiting mode: {station_config.waiting_mode.value}"
             )
+
+        if formulation is EanStopSkipTimingFormulation.AFFINE:
+            add_affine_stop_skip_timing_constraint(
+                model=model,
+                switch_time=switch_time[key],
+                exit_switch_time=exit_switch_time[key],
+                wait_time=wait_time[key],
+                stop=stop[key],
+                active=active,
+                service_seconds=service_seconds,
+                skip_seconds=skip_seconds,
+                name=f"affine_exit_{key[0]}_{key[1]}",
+            )
+            continue
+        if formulation is not EanStopSkipTimingFormulation.BIG_M:
+            raise ValueError(f"unsupported EAN stop/skip timing formulation: {formulation}")
 
         model.addConstr(
             exit_switch_time[key] - switch_time[key] - service_seconds - wait_time[key]

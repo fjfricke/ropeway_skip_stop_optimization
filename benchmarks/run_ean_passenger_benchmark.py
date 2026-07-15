@@ -68,8 +68,8 @@ def _parse_args() -> argparse.Namespace:
         default="all",
         help=(
             "'all' for the current default set, 'none', or comma-separated "
-            "optimization and formulation selections; choose at most one "
-            "horizon_* and one time_bounds_* value: "
+            "optimization and formulation selections; 'all' may be combined "
+            "with formulation overrides, with at most one value per category: "
             + ", ".join(ALL_EAN_SELECTION_NAMES)
         ),
     )

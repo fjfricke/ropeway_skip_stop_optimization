@@ -8,6 +8,7 @@ from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     ALL_EAN_FORMULATION_SELECTION_NAMES,
     EanFormulationConfig,
     EanHorizonFormulation,
+    EanStopSkipTimingFormulation,
     EanTimeBoundFormulation,
 )
 
@@ -36,7 +37,7 @@ class EanOptimizationConfig:
     """Independent reductions plus mutually exclusive formulation choices.
 
     `from_selection` preserves one CLI list: optimization names are freely
-    combinable, while at most one `horizon_*` and one `time_bounds_*` value may
+    combinable, while at most one value from each formulation category may
     occur. Omitted formulation categories use their legacy defaults.
     """
 
@@ -83,23 +84,29 @@ class EanOptimizationConfig:
     @classmethod
     def from_selection(cls, selection: str) -> EanOptimizationConfig:
         normalized = selection.strip()
-        if normalized == "all":
-            return cls.all()
-        if normalized == "none":
-            return cls.none()
         names = [item.strip() for item in normalized.split(",") if item.strip()]
         if not names:
             raise ValueError("EAN optimization selection must be 'all', 'none', or a comma-separated list")
-        unknown = sorted(set(names) - set(ALL_EAN_SELECTION_NAMES))
+        keywords = {"all", "none"}
+        unknown = sorted(set(names) - set(ALL_EAN_SELECTION_NAMES) - keywords)
         if unknown:
             raise ValueError(f"unknown EAN configuration selections: {', '.join(unknown)}")
+        if "all" in names and "none" in names:
+            raise ValueError("EAN configuration selection cannot combine 'all' and 'none'")
 
         horizon_values = [EanHorizonFormulation(name) for name in names if name in EanHorizonFormulation]
         time_bound_values = [EanTimeBoundFormulation(name) for name in names if name in EanTimeBoundFormulation]
+        stop_skip_timing_values = [
+            EanStopSkipTimingFormulation(name)
+            for name in names
+            if name in EanStopSkipTimingFormulation
+        ]
         if len(horizon_values) > 1:
             raise ValueError("select at most one EAN horizon formulation")
         if len(time_bound_values) > 1:
             raise ValueError("select at most one EAN time-bound formulation")
+        if len(stop_skip_timing_values) > 1:
+            raise ValueError("select at most one EAN stop/skip timing formulation")
 
         formulation = EanFormulationConfig(
             horizon=horizon_values[0] if horizon_values else EanHorizonFormulation.LEGACY,
@@ -108,8 +115,16 @@ class EanOptimizationConfig:
                 if time_bound_values
                 else EanTimeBoundFormulation.LEGACY_PLUS_10
             ),
+            stop_skip_timing=(
+                stop_skip_timing_values[0]
+                if stop_skip_timing_values
+                else EanStopSkipTimingFormulation.BIG_M
+            ),
         )
-        optimization_names = [name for name in names if name in EanOptimizationName]
+        optimization_names: list[EanOptimizationName | str] = []
+        if "all" in names:
+            optimization_names.extend(DEFAULT_EAN_OPTIMIZATION_NAMES)
+        optimization_names.extend(name for name in names if name in EanOptimizationName)
         return cls.from_enabled_names(optimization_names, formulation=formulation)
 
     def enabled_names(self) -> tuple[EanOptimizationName, ...]:
