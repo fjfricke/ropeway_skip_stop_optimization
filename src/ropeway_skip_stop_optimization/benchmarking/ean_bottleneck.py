@@ -18,6 +18,7 @@ from ropeway_skip_stop_optimization.examples.ean import EanScenarioExample
 from ropeway_skip_stop_optimization.examples.registry import get_example
 from ropeway_skip_stop_optimization.exports.json_codec import write_json
 from ropeway_skip_stop_optimization.optimization.ean import (
+    EanMipStartStrategy,
     EanMovementFeasibilityProblem,
     EanOptimizationConfig,
     EanOptimizationMetadata,
@@ -156,7 +157,7 @@ class EanBottleneckDiagnosticRunner:
                     scenario=scenario,
                     artifact=artifact,
                     objective=self.config.objective,
-                    use_all_stop_mip_start=False,
+                    mip_start_strategy=EanMipStartStrategy.NONE,
                     fixed_movement_plan=integrated.movement_plan,
                 ),
                 solver_policy,

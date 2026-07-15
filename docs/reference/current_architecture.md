@@ -158,6 +158,14 @@ checkpoint assignment through the final `model.update()`. Candidate generation
 and EAN preprocessing happen before the timer; presolve and solver search happen
 after it.
 
+Integrated passenger solves support `none`, `greedy_all_stop`, and
+`optimized_all_stop` MIP-start strategies. The production default first fixes
+the deterministic all-stop movement plan in the canonical model, solves its
+passenger assignment with a bounded auxiliary optimization, and transfers the
+extracted movement and passenger plans as a partial start into the integrated
+model. The auxiliary solve reuses the same formulation and candidate builder;
+headway-order auxiliaries are left for Gurobi to complete.
+
 Checkpoint files store incumbent solutions and are loaded as MIP starts. They
 do not persist or resume the previous branch-and-bound tree.
 

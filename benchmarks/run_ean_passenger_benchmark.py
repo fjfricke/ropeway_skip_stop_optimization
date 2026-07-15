@@ -12,6 +12,7 @@ from ropeway_skip_stop_optimization.benchmarking.plots import PlotBuilder, load_
 from ropeway_skip_stop_optimization.exports.runner import DEFAULT_OUTPUT_ROOT
 from ropeway_skip_stop_optimization.optimization.ean import (
     ALL_EAN_SELECTION_NAMES,
+    EanMipStartStrategy,
     EanOptimizationConfig,
     GurobiSolverPolicyPreset,
 )
@@ -32,6 +33,9 @@ def main() -> None:
             time_limit_seconds=args.time_limit,
             sample_interval_seconds=args.sample_interval,
             ean_optimization_config=args.ean_optimization_config,
+            ean_mip_start_strategy=EanMipStartStrategy(
+                args.ean_mip_start
+            ),
             label=args.label,
             output_dir=output_dir,
             result_dir=result_dir,
@@ -72,6 +76,11 @@ def _parse_args() -> argparse.Namespace:
             "with formulation overrides, with at most one value per category: "
             + ", ".join(ALL_EAN_SELECTION_NAMES)
         ),
+    )
+    parser.add_argument(
+        "--ean-mip-start",
+        choices=tuple(strategy.value for strategy in EanMipStartStrategy),
+        default=EanMipStartStrategy.OPTIMIZED_ALL_STOP.value,
     )
     parser.add_argument("--label", default=None)
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_BENCHMARK_OUTPUT_DIR)

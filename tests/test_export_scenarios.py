@@ -602,6 +602,7 @@ def _fake_ean_passenger_service_result(objective: EanPassengerObjective) -> EanO
                 movement_fixing_seconds=0.0,
                 passenger_model_seconds=0.0,
                 mip_start_seconds=0.0,
+                mip_start_objective_value_seconds=None,
                 gurobi_setup_total_seconds=0.0,
             ),
             solve_phase_metrics=None,

@@ -24,6 +24,7 @@ from ropeway_skip_stop_optimization.exports.runner import (
     run_artifact_set,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
+    EanMipStartStrategy,
     EanOptimizationConfig,
     GurobiSolverPolicy,
     GurobiSolverPolicyPreset,
@@ -48,6 +49,9 @@ class BenchmarkRunConfig:
     time_limit_seconds: float | None = None
     sample_interval_seconds: float = 5.0
     ean_optimization_config: EanOptimizationConfig = field(default_factory=EanOptimizationConfig)
+    ean_mip_start_strategy: EanMipStartStrategy = (
+        EanMipStartStrategy.OPTIMIZED_ALL_STOP
+    )
     label: str | None = None
     output_dir: Path = DEFAULT_BENCHMARK_OUTPUT_DIR
     result_dir: Path | None = None
@@ -81,6 +85,7 @@ class BenchmarkRunResult:
     ean_optimizations: tuple[str, ...]
     ean_optimization_config: dict[str, Any]
     ean_formulation_config: dict[str, Any]
+    ean_mip_start_strategy: str
     model_variable_count: int | None
     model_constraint_count: int | None
     model_nonzero_count: int | None
@@ -133,6 +138,7 @@ def run_ean_passenger_benchmark(config: BenchmarkRunConfig) -> tuple[BenchmarkRu
         ean_checkpoint_dir=checkpoint_dir,
         ean_resume_checkpoint=resume_checkpoint,
         ean_optimization_config=config.ean_optimization_config,
+        ean_mip_start_strategy=config.ean_mip_start_strategy,
         ean_progress_recorder=recorder,
         ean_progress_sample_interval_seconds=config.sample_interval_seconds,
         progress=ProgressReporter(enabled=config.progress),
@@ -166,6 +172,7 @@ def run_ean_passenger_benchmark(config: BenchmarkRunConfig) -> tuple[BenchmarkRu
         ean_optimizations=tuple(name.value for name in config.ean_optimization_config.enabled_names()),
         ean_optimization_config=resolved_optimization_config,
         ean_formulation_config=resolved_formulation_config,
+        ean_mip_start_strategy=config.ean_mip_start_strategy.value,
         model_variable_count=metadata.get("variable_count"),
         model_constraint_count=metadata.get("constraint_count"),
         model_nonzero_count=metadata.get("model_nonzero_count"),
@@ -236,6 +243,7 @@ def _run_id(config: BenchmarkRunConfig) -> str:
             _safe_checkpoint_part(config.example_id),
             _safe_checkpoint_part(config.artifact_set_id),
             _safe_checkpoint_part(str(config.ean_solver_policy.value)),
+            _safe_checkpoint_part(config.ean_mip_start_strategy.value),
             _short_run_id_part(selection),
         )
     )

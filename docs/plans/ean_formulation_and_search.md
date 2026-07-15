@@ -148,15 +148,15 @@ omitted disjunctions may require new precedence variables.
 
 ### B1. Better and Multiple MIP Starts
 
-Improve the primal side before testing lower-priority solver syntax changes:
+The passenger-optimized deterministic all-stop start is implemented and is the
+production default. Remaining future experiments are:
 
-- retain the accepted earliest all-stop start;
-- create a capacity-aware greedy passenger assignment;
 - skip visits that are unnecessary for that assignment;
 - provide multiple starts for distinct service patterns where supported.
 
-Benchmark first-incumbent time and objective separately from best-bound
-progress. A start may change a time-limited result but not the true optimum.
+Benchmark every additional start against the optimized all-stop default using
+first-incumbent time, objective, and best-bound progress separately. A start may
+change a time-limited result but not the true optimum.
 
 ### B2. Progressive Waiting
 

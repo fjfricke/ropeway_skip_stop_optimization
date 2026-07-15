@@ -490,3 +490,38 @@ hardware and search seeds.
 As of 2026-07-15, the combination is the Journey-Time production default.
 Waiting-Time retains explicit selected boarding times because they occur in
 that objective.
+
+## Passenger-Optimized All-Stop MIP Start
+
+Date: 2026-07-15
+
+Implementation baseline:
+
+```text
+base commit: f4f7bb743492d99cb42bd581e142c6d9e545c7c7
+worktree: dirty with only the MIP-start implementation and its documentation
+```
+
+Two matched `five_station_v0` Journey-Time runs used the current production
+formulation, `exact_optimality`, a 300-second main-solve limit, and five-second
+callback sampling. The only difference was the MIP start. The historical case
+used the direct greedy passenger assignment. The optimized case first fixed
+the same deterministic all-stop movement plan and solved its passenger
+assignment before transferring the complete solution to the integrated model.
+
+| Start | Setup (s) | Objective (s) | Objective (h) | Bound (s) | Gap | Nodes | Served | Unserved |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| greedy all-stop | 5.75 | 3,155,354 | 876.487 | 1,604,228 | 49.16% | 1 | 1,480 | 1,720 |
+| optimized all-stop | 12.85 | 1,947,463 | 540.962 | 1,604,228 | 17.62% | 1 | 2,544 | 656 |
+
+The auxiliary solve adds about 7.10 seconds of setup but improves the accepted
+initial incumbent by 1,207,891 passenger-seconds, or 38.3%, and serves 1,064
+additional passengers. Gurobi accepts both starts after approximately 0.2
+seconds of the main solve. Neither run finds a later incumbent.
+
+The final lower bound is identical, and both runs perform essentially the same
+root work before terminating at one reported node. The optimized start
+therefore repairs a large primal-quality defect without changing the observed
+dual progress. This isolates the remaining Five-Station bottleneck to the root
+relaxation and integrated movement--passenger coupling rather than start
+quality.

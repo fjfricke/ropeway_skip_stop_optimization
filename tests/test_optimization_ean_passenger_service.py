@@ -28,6 +28,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanFormulationConfig,
     EanHorizonFormulation,
     EanMovementPlan,
+    EanMipStartStrategy,
     EanTimeBoundFormulation,
     EanPassengerObjective,
     EanPassengerServiceProblem,
@@ -68,7 +69,9 @@ class _PassengerSolveOptions:
         default_factory=EanOptimizationConfig
     )
     fixed_movement_plan: EanMovementPlan | None = None
-    use_all_stop_mip_start: bool = True
+    mip_start_strategy: EanMipStartStrategy = (
+        EanMipStartStrategy.OPTIMIZED_ALL_STOP
+    )
 
 
 def _solve_passenger(
@@ -85,7 +88,7 @@ def _solve_passenger(
             artifact=artifact,
             objective=options.objective,
             fixed_movement_plan=options.fixed_movement_plan,
-            use_all_stop_mip_start=options.use_all_stop_mip_start,
+            mip_start_strategy=options.mip_start_strategy,
         )
     )
 
@@ -190,7 +193,7 @@ def test_ean_passenger_service_can_fix_the_canonical_movement_plan() -> None:
         _PassengerSolveOptions(
             objective=objective,
             fixed_movement_plan=baseline.movement_plan,
-            use_all_stop_mip_start=False,
+            mip_start_strategy=EanMipStartStrategy.NONE,
         ),
     )
 
@@ -201,6 +204,37 @@ def test_ean_passenger_service_can_fix_the_canonical_movement_plan() -> None:
         baseline.metadata.objective_value_seconds
     )
     assert fixed.movement_plan == baseline.movement_plan
+
+
+def test_ean_passenger_service_can_optimize_the_all_stop_mip_start() -> None:
+    pytest.importorskip("gurobipy")
+    scenario = _minimal_scenario(
+        demands=(
+            Demand(
+                arrival_time=time(8, 0),
+                origin="A",
+                destination="B",
+                count=2,
+            ),
+        )
+    )
+    artifact = _minimal_artifact(cabin_capacity=2, cycle_count=2)
+
+    result = _solve_passenger(
+        scenario,
+        artifact,
+        _PassengerSolveOptions(
+            objective=EanPassengerObjective.JOURNEY_TIME,
+            mip_start_strategy=EanMipStartStrategy.OPTIMIZED_ALL_STOP,
+        ),
+    )
+
+    assert result.metadata.status == "optimal"
+    assert (
+        result.metadata.build_metrics.mip_start_objective_value_seconds
+        == pytest.approx(result.metadata.objective_value_seconds)
+    )
+    assert result.metadata.build_metrics.mip_start_seconds > 0.0
 
 
 def test_headway_time_expressions_use_wait_occupancy_for_platform_exit_waiting() -> None:

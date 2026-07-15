@@ -29,6 +29,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EarliestAllStopEanMovementPlanBuilder,
     EanBuildArtifact,
     EanMovementPlan,
+    EanMipStartStrategy,
     EanMovementFeasibilityProblem,
     EanOptimizationResult,
     EanOptimizer,
@@ -82,6 +83,9 @@ class ExportContext:
     ean_solver_policy: GurobiSolverPolicy = field(default_factory=GurobiSolverPolicy)
     ean_checkpoint_config: GurobiCheckpointConfig | None = None
     ean_optimization_config: EanOptimizationConfig = field(default_factory=EanOptimizationConfig)
+    ean_mip_start_strategy: EanMipStartStrategy = (
+        EanMipStartStrategy.OPTIMIZED_ALL_STOP
+    )
     ean_progress_recorder: Any | None = None
     ean_progress_sample_interval_seconds: float = 5.0
 
@@ -220,6 +224,7 @@ class ExportContext:
                         scenario=self.scenario(),
                         artifact=self.ean_artifact(),
                         objective=objective,
+                        mip_start_strategy=self.ean_mip_start_strategy,
                     )
                 )
                 if result.movement_plan is None or result.passenger_plan is None:

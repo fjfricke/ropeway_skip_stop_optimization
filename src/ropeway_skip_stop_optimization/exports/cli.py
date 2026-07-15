@@ -6,6 +6,7 @@ from pathlib import Path
 from ropeway_skip_stop_optimization.exports.runner import DEFAULT_OUTPUT_ROOT, export_artifact_set, known_artifact_set_ids
 from ropeway_skip_stop_optimization.optimization.discrete_time import MilpV0VariableStrategy
 from ropeway_skip_stop_optimization.optimization.ean import (
+    EanMipStartStrategy,
     ALL_EAN_SELECTION_NAMES,
     EanOptimizationConfig,
     GurobiSolverPolicyPreset,
@@ -66,6 +67,11 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--ean-mip-start",
+        choices=tuple(strategy.value for strategy in EanMipStartStrategy),
+        default=EanMipStartStrategy.OPTIMIZED_ALL_STOP.value,
+    )
+    parser.add_argument(
         "--milp-variable-strategy",
         choices=tuple(strategy.value for strategy in MilpV0VariableStrategy),
         default=MilpV0VariableStrategy.DENSE.value,
@@ -96,6 +102,7 @@ def main() -> None:
         ean_resume_checkpoint=args.ean_resume_checkpoint,
         ean_resume_latest_checkpoint=args.ean_resume_latest_checkpoint,
         ean_optimization_config=ean_optimization_config,
+        ean_mip_start_strategy=EanMipStartStrategy(args.ean_mip_start),
         progress=args.progress,
         clean=args.clean,
     )

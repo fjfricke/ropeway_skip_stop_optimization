@@ -12,8 +12,15 @@ uv run python benchmarks/run_ean_passenger_benchmark.py \
   --ean-solver-policy exact_optimality \
   --time-limit 300 \
   --ean-optimizations all \
+  --ean-mip-start optimized_all_stop \
   --sample-interval 5
 ```
+
+`--ean-mip-start` accepts `none`, `greedy_all_stop`, or
+`optimized_all_stop`. The production default fixes the deterministic all-stop
+movement plan in a bounded auxiliary solve, optimizes its passenger assignment,
+and transfers the complete solution into the integrated model. The greedy
+variant remains available as the historical baseline.
 
 `--ean-optimizations` accepts `all`, `none`, or a comma-separated list of
 active optimizations:

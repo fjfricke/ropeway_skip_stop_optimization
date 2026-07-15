@@ -342,8 +342,9 @@ external validation if that later becomes necessary.
    generation or a movement-only CP prototype.
 4. If passenger assignment dominates, build the fixed-movement evaluator,
    measure LP integrality, and add exact repair only when needed.
-5. If incumbent search dominates, benchmark improved MIP starts and
-   same-artifact progressive waiting independently.
+5. If incumbent search remains limiting beyond the implemented
+   passenger-optimized all-stop start, benchmark multiple structural starts
+   and same-artifact progressive waiting independently.
 6. If coupling dominates, test neighborhood search before a complex exact
    decomposition.
 7. Attempt only the Benders variant justified by the measured passenger

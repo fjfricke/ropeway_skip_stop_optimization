@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from time import perf_counter
@@ -13,9 +13,13 @@ from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArt
 from ropeway_skip_stop_optimization.optimization.ean.builders.passenger_builder import (
     EanPassengerCandidateBuilder,
 )
+from ropeway_skip_stop_optimization.optimization.ean.baselines import (
+    EarliestAllStopEanMovementPlanBuilder,
+)
 from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     EanBoardTimeFormulation,
     EanHorizonFormulation,
+    EanTimeBoundFormulation,
 )
 from ropeway_skip_stop_optimization.optimization.ean.optimization_config import (
     EanOptimizationConfig,
@@ -37,8 +41,12 @@ from ropeway_skip_stop_optimization.optimization.ean.passenger_plan import (
     EanPassengerServicePlan,
 )
 from ropeway_skip_stop_optimization.optimization.ean.plan import (
+    EanCabinTrajectory,
     EanMovementPlan,
     EanRouteDecision,
+)
+from ropeway_skip_stop_optimization.optimization.ean.time_bounds import (
+    build_ean_model_time_bounds,
 )
 from ropeway_skip_stop_optimization.optimization.ean.validation import (
     validate_ean_movement_plan_against_artifact,
@@ -55,6 +63,14 @@ LOGGER = logging.getLogger(__name__)
 class EanOptimizationProblemKind(StrEnum):
     MOVEMENT_FEASIBILITY = "movement_feasibility"
     PASSENGER_SERVICE = "passenger_service"
+
+
+class EanMipStartStrategy(StrEnum):
+    """Primal-start strategy for integrated passenger-service solves."""
+
+    NONE = "none"
+    GREEDY_ALL_STOP = "greedy_all_stop"
+    OPTIMIZED_ALL_STOP = "optimized_all_stop"
 
 
 @dataclass(frozen=True)
@@ -115,7 +131,9 @@ class EanPassengerServiceProblem:
     artifact: EanBuildArtifact
     objective: EanPassengerObjective = EanPassengerObjective.WAITING_TIME
     passenger_builder: EanPassengerCandidateBuilder | None = None
-    use_all_stop_mip_start: bool = True
+    mip_start_strategy: EanMipStartStrategy = (
+        EanMipStartStrategy.OPTIMIZED_ALL_STOP
+    )
     fixed_movement_plan: EanMovementPlan | None = None
 
     @property
@@ -133,6 +151,7 @@ class EanModelBuildMetrics:
     movement_fixing_seconds: float
     passenger_model_seconds: float
     mip_start_seconds: float
+    mip_start_objective_value_seconds: float | None
     gurobi_setup_total_seconds: float
 
 
@@ -285,6 +304,7 @@ class EanOptimizer:
         passenger_model = None
         passenger_runtime = 0.0
         mip_start_runtime = 0.0
+        mip_start_objective_value = None
         if isinstance(problem, EanPassengerServiceProblem):
             if problem.fixed_movement_plan is not None:
                 fixing_started = perf_counter()
@@ -302,16 +322,38 @@ class EanOptimizer:
                 passenger_build=passenger_build,
             )
             passenger_runtime = perf_counter() - passenger_started
-            if (
-                problem.use_all_stop_mip_start
-                and problem.fixed_movement_plan is None
-                and (
-                    self.config.checkpoint is None
-                    or self.config.checkpoint.read_solution_path is None
-                )
-            ):
+            if _should_apply_mip_start(problem, self.config.checkpoint):
                 mip_start_started = perf_counter()
-                passenger_model.apply_all_stop_mip_start()
+                if (
+                    problem.mip_start_strategy
+                    is EanMipStartStrategy.GREEDY_ALL_STOP
+                ):
+                    passenger_model.apply_all_stop_mip_start()
+                elif (
+                    problem.mip_start_strategy
+                    is EanMipStartStrategy.OPTIMIZED_ALL_STOP
+                ):
+                    optimized_start = _solve_optimized_all_stop_start(
+                        optimizer=self,
+                        problem=problem,
+                    )
+                    if (
+                        optimized_start.movement_plan is not None
+                        and optimized_start.passenger_plan is not None
+                    ):
+                        passenger_model.apply_mip_start(
+                            optimized_start.movement_plan,
+                            optimized_start.passenger_plan,
+                        )
+                        mip_start_objective_value = (
+                            optimized_start.metadata.objective_value_seconds
+                        )
+                    else:
+                        LOGGER.warning(
+                            "Optimized all-stop MIP start produced no solution; "
+                            "falling back to greedy all-stop"
+                        )
+                        passenger_model.apply_all_stop_mip_start()
                 mip_start_runtime = perf_counter() - mip_start_started
         else:
             model.setObjective(0.0, GRB.MINIMIZE)
@@ -328,6 +370,7 @@ class EanOptimizer:
             movement_fixing_seconds=movement_fixing_runtime,
             passenger_model_seconds=passenger_runtime,
             mip_start_seconds=mip_start_runtime,
+            mip_start_objective_value_seconds=mip_start_objective_value,
             gurobi_setup_total_seconds=setup_runtime,
         )
         _log_model_summary(
@@ -418,6 +461,118 @@ class EanOptimizer:
                 passenger_plan=passenger_plan,
             ),
         )
+
+
+def _should_apply_mip_start(
+    problem: EanPassengerServiceProblem,
+    checkpoint: GurobiCheckpointConfig | None,
+) -> bool:
+    return (
+        problem.mip_start_strategy is not EanMipStartStrategy.NONE
+        and problem.fixed_movement_plan is None
+        and (
+            checkpoint is None
+            or checkpoint.read_solution_path is None
+        )
+    )
+
+
+def _solve_optimized_all_stop_start(
+    *,
+    optimizer: EanOptimizer,
+    problem: EanPassengerServiceProblem,
+) -> EanOptimizationResult:
+    """Optimize passenger service for the deterministic all-stop movement.
+
+    The auxiliary solve uses the same formulation and candidate builder as the
+    integrated problem. Its fixed movement makes the solve a passenger
+    assignment problem; a bounded 60-second budget prevents start generation
+    from consuming an unbounded share of the main run.
+    """
+
+    all_stop_plan = _all_stop_plan_for_formulation(
+        problem.artifact,
+        optimizer.config.optimization_config.formulation.horizon,
+    )
+    main_limit = optimizer.config.solver_policy.time_limit_seconds
+    start_limit = min(main_limit, 60.0) if main_limit is not None else 60.0
+    start_policy = replace(
+        optimizer.config.solver_policy,
+        mip_gap=0.0,
+        time_limit_seconds=start_limit,
+    )
+    return EanOptimizer(
+        EanSolveConfig(
+            solver_policy=start_policy,
+            optimization_config=optimizer.config.optimization_config,
+            log_to_console=False,
+        )
+    ).solve(
+        EanPassengerServiceProblem(
+            scenario=problem.scenario,
+            artifact=problem.artifact,
+            objective=problem.objective,
+            passenger_builder=problem.passenger_builder,
+            mip_start_strategy=EanMipStartStrategy.NONE,
+            fixed_movement_plan=all_stop_plan,
+        )
+    )
+
+
+def _all_stop_plan_for_formulation(
+    artifact: EanBuildArtifact,
+    horizon_formulation: EanHorizonFormulation,
+) -> EanMovementPlan:
+    plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)
+    if horizon_formulation is EanHorizonFormulation.LEGACY:
+        return plan
+
+    active_keys: set[tuple[int, int]]
+    if (
+        horizon_formulation
+        is EanHorizonFormulation.CONSERVATIVE_FREE_SUFFIX
+    ):
+        bounds = build_ean_model_time_bounds(
+            artifact,
+            EanTimeBoundFormulation.DERIVED_VISIT_BOUNDS,
+        )
+        active_keys = {
+            key
+            for key, visit_bounds in bounds.by_visit.items()
+            if visit_bounds.switch_lower
+            <= artifact.config.operational_end_seconds
+        }
+    elif (
+        horizon_formulation
+        is EanHorizonFormulation.EXACT_TIME_ACTIVATION
+    ):
+        active_keys = {
+            (visit.cabin_id, visit.visit_index)
+            for trajectory in plan.trajectories
+            for visit in trajectory.visits
+            if visit.switch_time_seconds
+            <= artifact.config.operational_end_seconds
+        }
+    else:
+        raise ValueError(
+            f"unsupported EAN horizon formulation: {horizon_formulation}"
+        )
+
+    return replace(
+        plan,
+        trajectories=tuple(
+            EanCabinTrajectory(
+                cabin_id=trajectory.cabin_id,
+                visits=tuple(
+                    visit
+                    for visit in trajectory.visits
+                    if (visit.cabin_id, visit.visit_index) in active_keys
+                ),
+            )
+            for trajectory in plan.trajectories
+        ),
+        horizon_formulation=horizon_formulation,
+    )
 
 
 def _metadata(

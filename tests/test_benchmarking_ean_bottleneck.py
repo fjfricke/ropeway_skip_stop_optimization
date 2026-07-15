@@ -13,6 +13,7 @@ from ropeway_skip_stop_optimization.benchmarking.plots import (
     EanBottleneckPlotBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
+    EanMipStartStrategy,
     EanMovementFeasibilityProblem,
     EanPassengerServiceProblem,
 )
@@ -58,7 +59,10 @@ def test_bottleneck_runner_builds_all_three_cases(
     assert isinstance(problems[1], EanMovementFeasibilityProblem)
     assert isinstance(problems[2], EanPassengerServiceProblem)
     assert problems[2].fixed_movement_plan is integrated_plan
-    assert not problems[2].use_all_stop_mip_start
+    assert (
+        problems[2].mip_start_strategy
+        is EanMipStartStrategy.NONE
+    )
 
 
 def test_bottleneck_diagnostic_config_rejects_invalid_intervals() -> None:

@@ -5,6 +5,7 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.passenger_model 
     EanPassengerVariables,
 )
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.solver import (
+    EanMipStartStrategy,
     EanMovementFeasibilityProblem,
     EanModelBuildMetrics,
     EanOptimizationMetadata,
@@ -23,6 +24,7 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.solver_policy im
 )
 
 __all__ = [
+    "EanMipStartStrategy",
     "EanMovementFeasibilityProblem",
     "EanModelBuildMetrics",
     "EanOptimizationMetadata",

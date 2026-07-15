@@ -31,6 +31,7 @@ from ropeway_skip_stop_optimization.optimization.ean.passenger_plan import (
 )
 from ropeway_skip_stop_optimization.optimization.ean.plan import (
     EanCabinVisit,
+    EanMovementPlan,
     EanRouteDecision,
 )
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.movement_model import (
@@ -81,6 +82,36 @@ class EanPassengerModel:
             slot_alight_time=self.variables.slot_alight_time,
             unserved=self.variables.unserved,
             visit_active=movement_variables.visit_active,
+        )
+
+    def apply_mip_start(
+        self,
+        movement_plan: EanMovementPlan,
+        passenger_plan: EanPassengerServicePlan,
+    ) -> None:
+        """Apply an extracted feasible solution as a partial Gurobi MIP start."""
+
+        artifact = self.movement.artifact
+        if passenger_plan.scenario_id != artifact.scenario_id:
+            raise ValueError(
+                "EAN passenger MIP start scenario does not match the build "
+                f"artifact: {passenger_plan.scenario_id!r} != "
+                f"{artifact.scenario_id!r}"
+            )
+        if passenger_plan.horizon_seconds != artifact.config.horizon_seconds:
+            raise ValueError(
+                "EAN passenger MIP start horizon does not match the build "
+                f"artifact: {passenger_plan.horizon_seconds} != "
+                f"{artifact.config.horizon_seconds}"
+            )
+        self.movement.apply_mip_start(movement_plan)
+        _set_passenger_plan_mip_start(
+            passenger_plan=passenger_plan,
+            passenger_build=self.passenger_build,
+            slot=self.variables.slot,
+            slot_board_time=self.variables.slot_board_time,
+            slot_alight_time=self.variables.slot_alight_time,
+            unserved=self.variables.unserved,
         )
 
     def extract_passenger_plan(self) -> EanPassengerServicePlan:
@@ -722,6 +753,83 @@ def _set_all_stop_mip_start(
             slot_board_time[key].Start = 0.0
         if slot_alight_time is not None:
             slot_alight_time[key].Start = 0.0
+
+
+def _set_passenger_plan_mip_start(
+    *,
+    passenger_plan: EanPassengerServicePlan,
+    passenger_build: EanPassengerCandidateBuildResult,
+    slot: dict[tuple[str, int], Any],
+    slot_board_time: dict[tuple[str, int], Any] | None,
+    slot_alight_time: dict[tuple[str, int], Any] | None,
+    unserved: dict[str, Any],
+) -> None:
+    passenger_plan.validate()
+    candidate_by_signature = {
+        (
+            candidate.demand_group_id,
+            candidate.cabin_id,
+            candidate.board_visit_index,
+            candidate.alight_visit_index,
+        ): candidate
+        for candidate in passenger_build.ride_candidates
+    }
+    slot_count_by_candidate_id: dict[str, int] = {}
+    for candidate_id, _slot_index in slot:
+        slot_count_by_candidate_id[candidate_id] = (
+            slot_count_by_candidate_id.get(candidate_id, 0) + 1
+        )
+
+    for key, variable in slot.items():
+        variable.Start = 0.0
+        if slot_board_time is not None:
+            slot_board_time[key].Start = 0.0
+        if slot_alight_time is not None:
+            slot_alight_time[key].Start = 0.0
+
+    assigned_by_group_id = {
+        group.id: 0 for group in passenger_build.demand_groups
+    }
+    for ride in passenger_plan.served_rides:
+        signature = (
+            ride.demand_group_id,
+            ride.cabin_id,
+            ride.board_visit_index,
+            ride.alight_visit_index,
+        )
+        candidate = candidate_by_signature.get(signature)
+        if candidate is None:
+            raise ValueError(
+                "passenger MIP start references an unavailable ride candidate: "
+                f"{signature!r}"
+            )
+        slot_count = slot_count_by_candidate_id[candidate.id]
+        if ride.count > slot_count:
+            raise ValueError(
+                "passenger MIP start ride count exceeds candidate slots: "
+                f"{ride.count} > {slot_count}"
+            )
+        for slot_index in range(ride.count):
+            key = (candidate.id, slot_index)
+            slot[key].Start = 1.0
+            if slot_board_time is not None:
+                slot_board_time[key].Start = ride.boarding_time_seconds
+            if slot_alight_time is not None:
+                slot_alight_time[key].Start = ride.alighting_time_seconds
+        assigned_by_group_id[ride.demand_group_id] += ride.count
+
+    for group in passenger_build.demand_groups:
+        expected_unserved = group.count - assigned_by_group_id[group.id]
+        reported_unserved = (
+            passenger_plan.unserved_counts_by_demand_group_id.get(group.id, 0)
+        )
+        if expected_unserved != reported_unserved:
+            raise ValueError(
+                "passenger MIP start demand balance mismatch for "
+                f"{group.id!r}: expected {expected_unserved}, "
+                f"reported {reported_unserved}"
+            )
+        unserved[group.id].Start = reported_unserved
 
 
 def _all_stop_mip_start_candidate_order(

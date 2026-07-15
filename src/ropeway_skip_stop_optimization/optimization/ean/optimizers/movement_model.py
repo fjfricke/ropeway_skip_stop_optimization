@@ -118,6 +118,11 @@ class EanMovementModel:
 
         fix_movement_model_to_plan(self, plan)
 
+    def apply_mip_start(self, plan: EanMovementPlan) -> None:
+        """Apply route and timing decisions as a partial Gurobi MIP start."""
+
+        apply_movement_plan_mip_start(self, plan)
+
 
 @dataclass(frozen=True)
 class EanMovementModelBuilder:
@@ -833,6 +838,62 @@ def fix_movement_model_to_plan(
             label=f"visit_active[{key}]",
         )
     movement_model.model.update()
+
+
+def apply_movement_plan_mip_start(
+    movement_model: EanMovementModel,
+    plan: EanMovementPlan,
+) -> None:
+    """Transfer an extracted movement plan without fixing model variables.
+
+    Headway-order and checkpoint-activation auxiliaries are omitted. Gurobi can
+    complete them from the supplied route, timing, waiting, and visit decisions.
+    """
+
+    plan.validate()
+    artifact = movement_model.artifact
+    if plan.scenario_id != artifact.scenario_id:
+        raise ValueError(
+            "EAN movement MIP start scenario does not match the build "
+            f"artifact: {plan.scenario_id!r} != {artifact.scenario_id!r}"
+        )
+    if plan.horizon_formulation is not (
+        movement_model.optimization_config.formulation.horizon
+    ):
+        raise ValueError(
+            "EAN movement MIP start horizon formulation does not match the "
+            "optimization configuration"
+        )
+
+    plan_visits = {
+        (visit.cabin_id, visit.visit_index): visit
+        for trajectory in plan.trajectories
+        for visit in trajectory.visits
+    }
+    variables = movement_model.variables
+    for key, visit_definition in movement_model.visits_by_key.items():
+        plan_visit = plan_visits.get(key)
+        if plan_visit is None:
+            variables.stop[key].Start = 0.0
+            if not isinstance(variables.visit_active[key], int | float):
+                variables.visit_active[key].Start = 0.0
+            continue
+        if plan_visit.switch_id != visit_definition.switch_id:
+            raise ValueError(
+                "EAN movement MIP start switch does not match artifact for "
+                f"visit {key}: {plan_visit.switch_id!r} != "
+                f"{visit_definition.switch_id!r}"
+            )
+        variables.switch_time[key].Start = plan_visit.switch_time_seconds
+        variables.exit_switch_time[key].Start = (
+            plan_visit.exit_switch_time_seconds
+        )
+        variables.wait_time[key].Start = plan_visit.wait_seconds
+        variables.stop[key].Start = float(
+            plan_visit.decision is EanRouteDecision.STOP
+        )
+        if not isinstance(variables.visit_active[key], int | float):
+            variables.visit_active[key].Start = 1.0
 
 
 def _fix_variable(variable: Any, value: float, *, label: str) -> None:

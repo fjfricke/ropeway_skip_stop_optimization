@@ -5,6 +5,24 @@ corresponding decisions were made.
 
 ## 2026-07-15
 
+### Passenger-optimized all-stop MIP start
+
+The integrated EAN passenger solver now supports three explicit MIP-start
+strategies: no start, the historical greedy all-stop assignment, and a
+passenger-optimized all-stop start. The optimized strategy fixes the
+deterministic all-stop movement plan in the canonical model, solves the
+resulting passenger assignment with a bounded auxiliary solve, and transfers
+the complete extracted solution into the integrated model. It became the
+production default after a matched Five-Station experiment.
+
+With identical Journey-Time formulation, exact solver policy, and 300-second
+main-solve limit, the optimized start reduced the incumbent from 3,155,354 to
+1,947,463 passenger-seconds and the final gap from 49.16% to 17.62%. The final
+lower bound was identical at 1,604,228 passenger-seconds, both runs remained at
+the root node, and total Gurobi setup increased from 5.75 to 12.85 seconds.
+This confirmed that the change repairs primal quality but does not strengthen
+the relaxation or improve dual progress.
+
 ### Phase-0 EAN bottleneck diagnostic
 
 The selected production formulation can now be diagnosed through one runner
