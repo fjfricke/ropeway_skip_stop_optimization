@@ -13,6 +13,8 @@ Each plan must:
 
 Current plans:
 
+- `ean_root_bound_improvement.md`: immediate root-relaxation diagnosis and the
+  evidence-driven sequence for strengthening the integrated passenger model.
 - `ean_formulation_and_search.md`: immediate baseline validation, bottleneck
   diagnosis, and conditional exact formulation or MIP-search improvements.
 - `ean_structural_reformulation.md`: exact structural reductions of the

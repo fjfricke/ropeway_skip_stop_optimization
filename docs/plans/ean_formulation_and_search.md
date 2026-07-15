@@ -79,8 +79,14 @@ Keep the option opt-in unless it produces a reproducible net improvement.
 
 ## Step 2: Locate the Active Bottleneck
 
-Run the Phase-0 scaling diagnosis from `ean_decomposition.md` before choosing
-the next substantial reformulation. At each useful problem size compare:
+The implemented Phase-0 diagnosis and the passenger-optimized MIP-start
+comparison show that `five_station_v0` is currently limited by integrated root
+relaxation and movement--passenger coupling rather than initial incumbent
+quality. Execute the focused diagnosis in
+`ean_root_bound_improvement.md` before choosing the next substantial
+reformulation.
+
+For broader scaling validation, continue comparing at each useful problem size:
 
 ```text
 integrated movement and passenger model
