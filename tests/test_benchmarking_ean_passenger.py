@@ -107,6 +107,8 @@ def test_plot_builder_writes_expected_svg_files(tmp_path: Path) -> None:
     assert "gap_over_time.svg" in names
     assert "objective_and_bound_over_time.svg" in names
     assert "runtime_by_run.svg" in names
+    assert "model_nonzeros_by_run.svg" in names
+    assert "model_setup_runtime_by_run.svg" in names
     assert (tmp_path / "gap_over_time.svg").read_text(encoding="utf-8").startswith("<svg")
 
 
@@ -162,6 +164,8 @@ def _benchmark_result(label: str) -> dict[str, object]:
         "objective_passenger_hours": 2.5,
         "model_variable_count": 100,
         "model_constraint_count": 200,
+        "model_nonzero_count": 300,
+        "model_setup_runtime_seconds": 1.5,
         "demand_group_count": 4,
         "ride_candidate_count": 25,
         "slot_variable_count": 180,

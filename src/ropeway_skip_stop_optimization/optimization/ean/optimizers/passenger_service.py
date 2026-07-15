@@ -5,6 +5,7 @@ import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from ropeway_skip_stop_optimization.models import Scenario
@@ -37,6 +38,7 @@ from ropeway_skip_stop_optimization.optimization.ean.headway_semantics import (
 from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     HORIZON_ACTIVATION_EPSILON_SECONDS,
     EanHorizonFormulation,
+    EanSlotActivationFormulation,
     EanStopSkipTimingFormulation,
 )
 from ropeway_skip_stop_optimization.optimization.ean.horizon import (
@@ -145,6 +147,8 @@ class EanPassengerServiceMetadata:
     unserved_passenger_count: int
     variable_count: int
     constraint_count: int
+    model_nonzero_count: int
+    model_setup_runtime_seconds: float
     skipped_visit_count: int
     visible_skipped_visit_count: int
     checkpoint_read_path: str | None
@@ -220,6 +224,9 @@ def solve_ean_passenger_service(
     time_upper_bound = model_time_bounds.global_upper
     big_m = time_upper_bound + _max_headway_seconds(artifact) + 1.0
 
+    # Measure Gurobi model materialization separately from candidate generation
+    # and from optimize(), whose runtime includes presolve and search.
+    model_setup_started = perf_counter()
     model = gp.Model("ean_passenger_service")
     model.Params.OutputFlag = 1 if config.log_to_console else 0
     apply_gurobi_solver_policy(model, config.solver_policy)
@@ -361,6 +368,7 @@ def solve_ean_passenger_service(
             config.optimization_config.enable_slot_time_relaxation_strengthening
         ),
         enable_tight_big_m_bounds=config.optimization_config.enable_tight_big_m_bounds,
+        slot_activation_formulation=config.optimization_config.formulation.slot_activation,
     )
 
     if (
@@ -395,14 +403,18 @@ def solve_ean_passenger_service(
     )
     model.setObjective(objective, GRB.MINIMIZE)
     _configure_gurobi_checkpoints(model, config.checkpoint)
+    model.update()
+    model_nonzero_count = model.NumNZs
+    model_setup_runtime_seconds = perf_counter() - model_setup_started
     if config.log_to_console:
-        model.update()
         LOGGER.info(
-            "ean_passenger_service.optimize objective=%s variables=%s constraints=%s "
+            "ean_passenger_service.optimize objective=%s variables=%s constraints=%s nonzeros=%s setup_seconds=%.3f "
             "demand_groups=%s ride_candidates=%s slots=%s solver_policy=%s waiting_modes=%s",
             config.objective.value,
             model.NumVars,
             model.NumConstrs,
+            model_nonzero_count,
+            model_setup_runtime_seconds,
             len(passenger_build.demand_groups),
             len(passenger_build.ride_candidates),
             len(slot),
@@ -452,6 +464,8 @@ def solve_ean_passenger_service(
                 unserved_passenger_count=0,
                 variable_count=model.NumVars,
                 constraint_count=model.NumConstrs,
+                model_nonzero_count=model_nonzero_count,
+                model_setup_runtime_seconds=model_setup_runtime_seconds,
                 skipped_visit_count=0,
                 visible_skipped_visit_count=0,
                 **checkpoint_diagnostics,
@@ -524,6 +538,8 @@ def solve_ean_passenger_service(
             unserved_passenger_count=unserved_passenger_count,
             variable_count=model.NumVars,
             constraint_count=model.NumConstrs,
+            model_nonzero_count=model_nonzero_count,
+            model_setup_runtime_seconds=model_setup_runtime_seconds,
             skipped_visit_count=skipped_visit_count,
             visible_skipped_visit_count=visible_skipped_visit_count,
             **checkpoint_diagnostics,
@@ -856,6 +872,7 @@ def _add_passenger_constraints(
     big_m: float,
     enable_slot_time_relaxation_strengthening: bool,
     enable_tight_big_m_bounds: bool,
+    slot_activation_formulation: EanSlotActivationFormulation,
 ) -> None:
     ride_by_group_id: dict[str, list[EanRideCandidate]] = {group.id: [] for group in passenger_build.demand_groups}
     for ride_candidate in passenger_build.ride_candidates:
@@ -878,6 +895,7 @@ def _add_passenger_constraints(
             cabin_capacity=cabin_capacity,
             enable_slot_time_relaxation_strengthening=enable_slot_time_relaxation_strengthening,
             enable_tight_big_m_bounds=enable_tight_big_m_bounds,
+            slot_activation_formulation=slot_activation_formulation,
         )
 
     for group in passenger_build.demand_groups:
@@ -927,6 +945,7 @@ def _add_ride_slot_constraints(
     cabin_capacity: int,
     enable_slot_time_relaxation_strengthening: bool,
     enable_tight_big_m_bounds: bool,
+    slot_activation_formulation: EanSlotActivationFormulation,
 ) -> None:
     board_key = (ride_candidate.cabin_id, ride_candidate.board_visit_index)
     alight_key = (ride_candidate.cabin_id, ride_candidate.alight_visit_index)
@@ -939,25 +958,30 @@ def _add_ride_slot_constraints(
         enable_tight_big_m_bounds=enable_tight_big_m_bounds,
     )
 
+    compact_activation = (
+        slot_activation_formulation is EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS
+    )
     previous_slot_var = None
     for slot_index in range(slot_count):
         key = (ride_candidate.id, slot_index)
         slot_var = slot[key]
         slot_time = slot_board_time[key]
-        model.addConstr(slot_var <= stop[board_key], name=f"slot_board_stop_{_var_id(ride_candidate.id)}_{slot_index}")
-        model.addConstr(slot_var <= stop[alight_key], name=f"slot_alight_stop_{_var_id(ride_candidate.id)}_{slot_index}")
-        model.addConstr(
-            board_time >= group.release_time_seconds - release_big_m * (1 - slot_var),
-            name=f"slot_release_{_var_id(ride_candidate.id)}_{slot_index}",
-        )
-        model.addConstr(
-            board_time <= horizon_seconds + big_m * (1 - slot_var),
-            name=f"slot_board_horizon_{_var_id(ride_candidate.id)}_{slot_index}",
-        )
-        model.addConstr(
-            alight_time <= horizon_seconds + big_m * (1 - slot_var),
-            name=f"slot_alight_horizon_{_var_id(ride_candidate.id)}_{slot_index}",
-        )
+        if not compact_activation or slot_index == 0:
+            _add_ride_slot_activation_constraints(
+                model=model,
+                ride_candidate=ride_candidate,
+                group=group,
+                slot_index=slot_index,
+                slot_var=slot_var,
+                board_time=board_time,
+                alight_time=alight_time,
+                board_stop=stop[board_key],
+                alight_stop=stop[alight_key],
+                horizon_seconds=horizon_seconds,
+                big_m=big_m,
+                release_big_m=release_big_m,
+                omit_zero_release=compact_activation,
+            )
         model.addConstr(slot_time <= time_upper_bound * slot_var, name=f"slot_time_active_{_var_id(ride_candidate.id)}_{slot_index}")
         model.addConstr(slot_time <= board_time, name=f"slot_time_board_ub_{_var_id(ride_candidate.id)}_{slot_index}")
         model.addConstr(
@@ -989,10 +1013,53 @@ def _add_ride_slot_constraints(
                 slot_alight_time=slot_alight_time[key] if slot_alight_time is not None else None,
                 visits_by_key=visits_by_key,
                 timing_by_switch_id=timing_by_switch_id,
+                omit_redundant_rows=compact_activation,
             )
         if previous_slot_var is not None:
             model.addConstr(slot_var <= previous_slot_var, name=f"slot_symmetry_{_var_id(ride_candidate.id)}_{slot_index}")
         previous_slot_var = slot_var
+
+
+def _add_ride_slot_activation_constraints(
+    model: Any,
+    ride_candidate: EanRideCandidate,
+    group: EanDemandGroup,
+    slot_index: int,
+    slot_var: Any,
+    board_time: Any,
+    alight_time: Any,
+    board_stop: Any,
+    alight_stop: Any,
+    horizon_seconds: float,
+    big_m: float,
+    release_big_m: float,
+    omit_zero_release: bool,
+) -> None:
+    """Add candidate-level conditions activated through one unary slot.
+
+    With unary ordering, the first slot dominates all later slot binaries.
+    Attaching these rows only to that first slot therefore preserves the full
+    LP relaxation. At zero release, the release implication is redundant
+    because platform-departure expressions are nonnegative in every supported
+    time-bound formulation.
+    """
+
+    variable_id = _var_id(ride_candidate.id)
+    model.addConstr(slot_var <= board_stop, name=f"slot_board_stop_{variable_id}_{slot_index}")
+    model.addConstr(slot_var <= alight_stop, name=f"slot_alight_stop_{variable_id}_{slot_index}")
+    if not (omit_zero_release and group.release_time_seconds == 0.0):
+        model.addConstr(
+            board_time >= group.release_time_seconds - release_big_m * (1 - slot_var),
+            name=f"slot_release_{variable_id}_{slot_index}",
+        )
+    model.addConstr(
+        board_time <= horizon_seconds + big_m * (1 - slot_var),
+        name=f"slot_board_horizon_{variable_id}_{slot_index}",
+    )
+    model.addConstr(
+        alight_time <= horizon_seconds + big_m * (1 - slot_var),
+        name=f"slot_alight_horizon_{variable_id}_{slot_index}",
+    )
 
 
 def _slot_release_big_m(
@@ -1025,6 +1092,7 @@ def _add_slot_time_relaxation_strengthening_constraints(
     slot_alight_time: Any | None,
     visits_by_key: dict[tuple[int, int], SwitchVisitDefinition],
     timing_by_switch_id: dict[str, SkipStopTiming],
+    omit_redundant_rows: bool,
 ) -> None:
     """Add slot-time relaxation strengthening constraints.
 
@@ -1032,14 +1100,18 @@ def _add_slot_time_relaxation_strengthening_constraints(
     active slots cannot board before demand release, and journey-time slots
     cannot alight earlier than the minimum physical trip time. They preserve the
     integer feasible set but make fractional slot assignments less artificially
-    cheap in the LP relaxation.
+    cheap in the LP relaxation. In the compact activation formulation, the
+    zero-release board lower bound follows from the variable lower bound, and
+    the alight-earliest row follows from the board-release and retained
+    minimum-trip-duration rows.
     """
 
     variable_id = _var_id(ride_candidate.id)
-    model.addConstr(
-        slot_board_time >= group.release_time_seconds * slot_var,
-        name=f"slot_board_release_lb_{variable_id}_{slot_index}",
-    )
+    if not (omit_redundant_rows and group.release_time_seconds == 0.0):
+        model.addConstr(
+            slot_board_time >= group.release_time_seconds * slot_var,
+            name=f"slot_board_release_lb_{variable_id}_{slot_index}",
+        )
 
     if slot_alight_time is None:
         return
@@ -1049,10 +1121,11 @@ def _add_slot_time_relaxation_strengthening_constraints(
         visits_by_key=visits_by_key,
         timing_by_switch_id=timing_by_switch_id,
     )
-    model.addConstr(
-        slot_alight_time >= (group.release_time_seconds + min_trip_time) * slot_var,
-        name=f"slot_alight_earliest_lb_{variable_id}_{slot_index}",
-    )
+    if not omit_redundant_rows:
+        model.addConstr(
+            slot_alight_time >= (group.release_time_seconds + min_trip_time) * slot_var,
+            name=f"slot_alight_earliest_lb_{variable_id}_{slot_index}",
+        )
     model.addConstr(
         slot_alight_time - slot_board_time >= min_trip_time * slot_var,
         name=f"slot_trip_duration_lb_{variable_id}_{slot_index}",

@@ -28,6 +28,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanPassengerServiceConfig,
     EanPassengerServiceObjective,
     EanRideCandidate,
+    EanSlotActivationFormulation,
     EanStopSkipTimingFormulation,
     GurobiSolverPolicy,
     solve_ean_passenger_service,
@@ -247,6 +248,119 @@ def test_affine_stop_skip_timing_preserves_minimal_solution(
     assert affine.metadata.served_passenger_count == baseline.metadata.served_passenger_count
     assert affine.metadata.unserved_passenger_count == baseline.metadata.unserved_passenger_count
     assert affine.metadata.constraint_count < baseline.metadata.constraint_count
+
+
+@pytest.mark.parametrize(
+    "objective",
+    (
+        EanPassengerServiceObjective.WAITING_TIME,
+        EanPassengerServiceObjective.JOURNEY_TIME,
+    ),
+)
+@pytest.mark.parametrize(
+    "waiting_mode",
+    (
+        StationWaitingMode.NO_WAITING,
+        StationWaitingMode.END_OF_PLATFORM_WAIT,
+    ),
+)
+@pytest.mark.parametrize(
+    ("arrival_time", "release_seconds"),
+    (
+        (time(8, 0), 0.0),
+        (time(8, 0, 5), 5.0),
+    ),
+)
+@pytest.mark.parametrize(
+    ("time_bound_formulation", "enable_strengthening", "enable_tight_big_m_bounds"),
+    (
+        (EanTimeBoundFormulation.LEGACY_PLUS_10, True, False),
+        (EanTimeBoundFormulation.DERIVED_VISIT_BOUNDS, True, False),
+        (EanTimeBoundFormulation.LEGACY_PLUS_10, False, False),
+        (EanTimeBoundFormulation.DERIVED_VISIT_BOUNDS, False, False),
+        (EanTimeBoundFormulation.LEGACY_PLUS_10, True, True),
+        (EanTimeBoundFormulation.DERIVED_VISIT_BOUNDS, False, True),
+    ),
+)
+def test_first_slot_activation_preserves_multi_slot_solutions_and_removes_implied_rows(
+    objective: EanPassengerServiceObjective,
+    waiting_mode: StationWaitingMode,
+    arrival_time: time,
+    release_seconds: float,
+    time_bound_formulation: EanTimeBoundFormulation,
+    enable_strengthening: bool,
+    enable_tight_big_m_bounds: bool,
+) -> None:
+    pytest.importorskip("gurobipy")
+    scenario = _minimal_scenario(
+        demands=(Demand(arrival_time=arrival_time, origin="A", destination="B", count=2),),
+    )
+    artifact = _minimal_artifact(
+        cabin_capacity=2,
+        cycle_count=2,
+        station_waiting_modes={"A": waiting_mode, "B": waiting_mode},
+    )
+
+    baseline = solve_ean_passenger_service(
+        scenario,
+        artifact,
+        EanPassengerServiceConfig(
+            objective=objective,
+            optimization_config=EanOptimizationConfig(
+                enable_slot_time_relaxation_strengthening=enable_strengthening,
+                enable_tight_big_m_bounds=enable_tight_big_m_bounds,
+                formulation=EanFormulationConfig(time_bounds=time_bound_formulation),
+            ),
+        ),
+    )
+    first_slot = solve_ean_passenger_service(
+        scenario,
+        artifact,
+        EanPassengerServiceConfig(
+            objective=objective,
+            optimization_config=EanOptimizationConfig(
+                enable_slot_time_relaxation_strengthening=enable_strengthening,
+                enable_tight_big_m_bounds=enable_tight_big_m_bounds,
+                formulation=EanFormulationConfig(
+                    time_bounds=time_bound_formulation,
+                    slot_activation=EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS,
+                )
+            ),
+        ),
+    )
+
+    assert baseline.metadata.status == "optimal"
+    assert first_slot.metadata.status == "optimal"
+    assert first_slot.metadata.objective_value_seconds == pytest.approx(
+        baseline.metadata.objective_value_seconds
+    )
+    assert first_slot.metadata.served_passenger_count == baseline.metadata.served_passenger_count
+    assert first_slot.metadata.unserved_passenger_count == baseline.metadata.unserved_passenger_count
+    assert first_slot.passenger_plan is not None
+    assert baseline.passenger_plan is not None
+    assert first_slot.passenger_plan.unserved_counts_by_demand_group_id == (
+        baseline.passenger_plan.unserved_counts_by_demand_group_id
+    )
+    assert first_slot.metadata.model_nonzero_count < baseline.metadata.model_nonzero_count
+    assert first_slot.metadata.model_setup_runtime_seconds >= 0.0
+
+    slots = baseline.metadata.slot_variable_count
+    rides = baseline.metadata.ride_candidate_count
+    if release_seconds == 0.0:
+        expected_removed_rows = 5 * slots - 4 * rides
+        if enable_strengthening:
+            expected_removed_rows += slots
+            if objective is EanPassengerServiceObjective.JOURNEY_TIME:
+                expected_removed_rows += slots
+    else:
+        expected_removed_rows = 5 * (slots - rides)
+        if enable_strengthening and objective is EanPassengerServiceObjective.JOURNEY_TIME:
+            expected_removed_rows += slots
+    assert baseline.metadata.constraint_count - first_slot.metadata.constraint_count == expected_removed_rows
+    assert (
+        first_slot.metadata.optimization_config.formulation.slot_activation
+        is EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS
+    )
 
 
 @pytest.mark.parametrize(

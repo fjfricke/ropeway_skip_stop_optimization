@@ -349,3 +349,42 @@ journey-time objectives.
 The affine formulation remains opt-in after this single long run. The result
 is strong evidence that it is a better proof formulation, but not enough to
 replace the Big-M default while incumbent quality is also important.
+
+## Compact Unary-Slot Activation
+
+Date: 2026-07-15
+
+Implementation baseline:
+
+```text
+base commit: 103d9b8
+worktree: compact unary-slot activation implementation under evaluation
+```
+
+The comparison used six `three_station_v0` journey-time runs: three with the
+default per-slot activation and three with exact first-slot activation. Every
+run used the `exact_optimality` policy, a 300-second limit, five-second
+callback sampling, the default independent optimizations, and no resumed
+checkpoint. Execution order alternated between the two cases.
+
+| Activation | Runs | Vars | Rows | Nonzeros | Mean setup (s) | Objective (h) | Bound (s) | Gap | Mean nodes |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| per slot | 3 | 82,398 | 233,193 | 858,970 | 1.93 | 751.303 | 2,528,472 | 6.52% | 574 |
+| first slot | 3 | 82,398 | 183,377 | 752,632 | 1.71 | 751.351 | 2,531,673 | 6.40% | 561 |
+
+First-slot activation removes 49,816 rows (21.4%) and 106,338 nonzeros
+(12.4%) without changing the variable count. Mean Gurobi model setup time
+decreases by about 11.4%. Presolve retains 4,246 fewer rows and 16,277 fewer
+nonzeros in the compact case.
+
+All three runs of each formulation reached the same final incumbent, bound,
+and gap. The compact formulation improves the bound by 3,201
+passenger-seconds and lowers the final gap by 0.11 percentage points. Its
+incumbent is 174 passenger-seconds, or 0.048 passenger-hours, worse. The
+branch-and-bound node counts are similar.
+
+The repeated equality of final values indicates that these runs are
+effectively deterministic under the fixed machine, MIP start, and solver
+configuration. The result supports the compact formulation as an exact
+proof-side and model-size improvement, but not yet as the default for
+export-oriented solves where the best time-limited incumbent also matters.

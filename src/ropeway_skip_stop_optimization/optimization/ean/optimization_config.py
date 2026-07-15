@@ -8,6 +8,7 @@ from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     ALL_EAN_FORMULATION_SELECTION_NAMES,
     EanFormulationConfig,
     EanHorizonFormulation,
+    EanSlotActivationFormulation,
     EanStopSkipTimingFormulation,
     EanTimeBoundFormulation,
 )
@@ -101,12 +102,19 @@ class EanOptimizationConfig:
             for name in names
             if name in EanStopSkipTimingFormulation
         ]
+        slot_activation_values = [
+            EanSlotActivationFormulation(name)
+            for name in names
+            if name in EanSlotActivationFormulation
+        ]
         if len(horizon_values) > 1:
             raise ValueError("select at most one EAN horizon formulation")
         if len(time_bound_values) > 1:
             raise ValueError("select at most one EAN time-bound formulation")
         if len(stop_skip_timing_values) > 1:
             raise ValueError("select at most one EAN stop/skip timing formulation")
+        if len(slot_activation_values) > 1:
+            raise ValueError("select at most one EAN slot-activation formulation")
 
         formulation = EanFormulationConfig(
             horizon=horizon_values[0] if horizon_values else EanHorizonFormulation.LEGACY,
@@ -119,6 +127,11 @@ class EanOptimizationConfig:
                 stop_skip_timing_values[0]
                 if stop_skip_timing_values
                 else EanStopSkipTimingFormulation.BIG_M
+            ),
+            slot_activation=(
+                slot_activation_values[0]
+                if slot_activation_values
+                else EanSlotActivationFormulation.PER_SLOT_IMPLICATIONS
             ),
         )
         optimization_names: list[EanOptimizationName | str] = []

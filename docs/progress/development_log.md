@@ -3,6 +3,47 @@
 This document records when relevant project work was completed and why the
 corresponding decisions were made.
 
+## 2026-07-15
+
+### Compact unary-slot activation
+
+The EAN passenger model received an opt-in
+`slot_activation_first_slot` formulation alongside the historical
+`slot_activation_per_slot` default. Passenger slots for a candidate are unary
+ordered, so every later slot is at most the first. Candidate-level stop,
+release, and passenger-cutoff conditions therefore need to be attached only
+to the first slot; the later rows are implied even in the LP relaxation.
+
+The compact case also removes the zero-release selected-board lower bound and
+when slot-time strengthening is enabled, the selected-alight earliest lower
+bound. These rows are algebraically implied by nonnegative time domains, the
+selected-board release lower bound, and minimum trip duration. Slot-specific
+time linearization, passenger costs, capacity, and unary ordering remain
+unchanged.
+
+This was kept as a formulation benchmark case rather than a default change.
+The optimizer and benchmark JSON now record model nonzeros and pre-optimize
+model-setup time, because this reduction is expected to affect construction
+and presolve as much as branch-and-bound search. Exact small instances cover
+both objectives, no-waiting and end-of-platform waiting, multiple slots, and
+zero and positive release times.
+
+One-second construction smokes verified the expected row reductions on the
+real examples: 49,816 rows and 106,338 nonzeros on `three_station_v0`, and
+267,072 rows and 570,096 nonzeros on `five_station_v0`. The compact setup
+measure was lower in these single runs, but the smoke results are only a model
+construction check and not a solver-performance conclusion.
+
+The subsequent comparison used three matched five-minute
+`three_station_v0` runs per case without checkpoint resume. First-slot
+activation reduced rows by 21.4%, nonzeros by 12.4%, and average Gurobi model
+setup time from 1.93 to 1.71 seconds. Its final bound was 3,201
+passenger-seconds higher and its gap was 0.11 percentage points smaller, while
+its incumbent was 174 passenger-seconds worse. The repeated end values were
+effectively deterministic. The compact formulation therefore remains opt-in:
+it is a useful proof-side and resource reduction, but the benchmark does not
+justify changing the export-oriented default.
+
 ## 2026-07-14
 
 ### Documentation consolidation

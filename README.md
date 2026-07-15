@@ -105,6 +105,7 @@ optimizations and at most one value from each formulation category:
 | Horizon formulation | `horizon_legacy`, `horizon_conservative_free_suffix`, `horizon_exact_time_activation` |
 | Time-bound formulation | `time_bounds_legacy_plus_10`, `time_bounds_derived_visit_bounds` |
 | Stop/skip timing formulation | `stop_skip_timing_big_m`, `stop_skip_timing_affine` |
+| Unary-slot activation formulation | `slot_activation_per_slot`, `slot_activation_first_slot` |
 
 `all` means the current default optimization set with the legacy formulation
 categories; it does not select every mutually exclusive formulation.
@@ -144,6 +145,15 @@ Under exact horizon activation, the affine equality is enabled by the visit
 activation binary. The current default remains `stop_skip_timing_big_m` until
 repeated benchmarks justify promotion; the first five-minute comparison showed
 a substantially better affine proof gap but a slightly worse incumbent.
+
+The legacy unary-slot case repeats candidate stop, release, and service-cutoff
+implications for every interchangeable passenger slot. The exact
+`slot_activation_first_slot` case attaches them only to the first slot. Unary
+ordering makes every later slot no larger than the first, so the omitted rows
+are implied even in the LP relaxation. The compact case also removes
+the zero-release implication and, when slot-time strengthening is enabled,
+selected-time lower bounds that are algebraically redundant. It remains opt-in
+until its dedicated benchmark comparison is run.
 
 Checkpoint resume loads a prior incumbent solution as a Gurobi MIP start. It
 does not resume the previous branch-and-bound tree.

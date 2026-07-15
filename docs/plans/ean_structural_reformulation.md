@@ -63,14 +63,11 @@ independently.
 
 ## Composable Experiment Configuration
 
-The typed configuration and the horizon/time-bound categories are implemented.
-Future structural experiments should extend the same pattern with one value
-per mutually exclusive category:
+Future structural experiments should extend the existing typed formulation
+configuration with one value per mutually exclusive category:
 
 ```text
 EanFormulationConfig
-  stop_skip_timing: one StopSkipTimingFormulation
-  slot_activation: one SlotActivationFormulation
   board_time: one BoardTimeFormulation
   cabin_timing: one CabinTimingFormulation
   headway_precedence: one HeadwayPrecedenceFormulation
@@ -79,17 +76,9 @@ EanOptimizationConfig
   enabled exact reductions: a set of EanOptimizationName
 ```
 
-Future category candidates are:
+The future formulation categories in this plan are:
 
 ```text
-stop_skip_timing:
-  big_m
-  affine
-
-slot_activation:
-  per_slot_implications
-  first_slot_implications
-
 board_time:
   explicit
   projected_journey_time
@@ -269,57 +258,7 @@ matrix remains reproducible. Verification must compare exact small-instance
 objectives, extracted prefixes, crossing headways, and empty-prefix cabin
 starts before performance benchmarking.
 
-## Phase 2: Remove Redundant Unary-Slot Rows
-
-Each candidate's unary passenger slots satisfy:
-
-```text
-slot[k] <= slot[k - 1]
-```
-
-Therefore `slot[0]` is the strongest activation variable for every
-candidate-level condition. Add the following only for `slot[0]`:
-
-- boarding visit must stop;
-- alighting visit must stop;
-- boarding must respect release time;
-- boarding must be inside the passenger horizon;
-- alighting must be inside the passenger horizon.
-
-The later-slot versions are implied even in the LP relaxation because every
-later slot is at most `slot[0]`.
-
-Apply two additional exact simplifications:
-
-- omit the release implication when the release time is zero;
-- remove the alight-earliest strengthening row because it is implied by the
-  board-release and minimum-trip-duration rows.
-
-For release time zero, the board-release strengthening row is itself
-redundant, leaving only:
-
-```text
-slot_alight_time - slot_board_time
-  >= minimum_trip_time * slot
-```
-
-Keep the boarding-horizon implication during the first benchmark even though
-alighting before the horizon makes it integer-redundant. Under the current
-Big-M relaxation it may still be a useful valid inequality. Test its removal
-separately after Phase 1.
-
-Expected row reduction without removing the boarding-horizon inequality:
-
-| Example | Removed passenger rows |
-|---|---:|
-| `three_station_v0` | approximately 49,816 |
-| `five_station_v0` | approximately 267,072 |
-
-These reductions should primarily improve model construction, memory use, and
-presolve. Gurobi may already remove part of the redundancy during presolve, so
-do not assume an equal solve-time improvement.
-
-## Phase 3: Project Board-Slot Times Out of Journey-Time Models
+## Project Board-Slot Times Out of Journey-Time Models
 
 The journey-time objective uses selected alighting times. Selected boarding
 times are auxiliary variables used only to strengthen the relaxation.
@@ -362,10 +301,10 @@ Potential effect on `three_station_v0`:
 The waiting-time model keeps selected boarding-time variables because they
 appear directly in its objective.
 
-## Phase 4: Transition-Only Cabin Timing
+## Transition-Only Cabin Timing
 
-After the affine formulation is validated, investigate eliminating both
-`exit_switch_time` and `wait_time`.
+Using the existing affine formulation as the algebraic basis, investigate
+eliminating both `exit_switch_time` and `wait_time`.
 
 For consecutive visit entry times, define the affine minimum transition:
 
@@ -395,9 +334,9 @@ post-horizon boundary context.
 
 This phase is more invasive because extraction, MIP starts, headway expressions,
 and checkpoint files currently reference explicit exit and wait variables.
-Benchmark it only after Phases 1 to 3 are stable.
+Benchmark it only after the preceding structural reformulations are stable.
 
-## Phase 5: Headway Structure
+## Headway Structure
 
 ### Horizon Pruning
 
@@ -496,12 +435,11 @@ only three dominated rows for `three_station_v0` and twelve for
 1. Keep the legacy horizon and time bounds as the current default.
 2. Refine exact-activation time domains only if exact finite-horizon activation
    becomes a priority.
-3. Remove redundant unary-slot rows.
-4. Project board-slot variables out of journey-time models.
-5. Evaluate transition-only timing.
-6. Add guaranteed post-horizon headway pruning.
-7. Prove and benchmark shared physical precedence.
-8. Consider the lower-priority experiments independently.
+3. Project board-slot variables out of journey-time models.
+4. Evaluate transition-only timing.
+5. Add guaranteed post-horizon headway pruning.
+6. Prove and benchmark shared physical precedence.
+7. Consider the lower-priority experiments independently.
 
 Do not combine unvalidated phases in the first benchmark. Each phase needs a
 separate optimization toggle until objective equivalence and performance are

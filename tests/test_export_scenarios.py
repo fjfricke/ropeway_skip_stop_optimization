@@ -477,6 +477,7 @@ def test_cli_help_includes_ean_optimization_selection() -> None:
 
     assert "--ean-optimizations" in result.stdout
     assert "tight_big_m_bounds" in result.stdout
+    assert "slot_activation_first_slot" in result.stdout
 
 
 def test_cli_can_export_milp_v1_waiting_time_objective(tmp_path: Path) -> None:
@@ -545,6 +546,8 @@ def _fake_ean_passenger_service_result(objective: EanPassengerServiceObjective) 
             unserved_passenger_count=0,
             variable_count=0,
             constraint_count=0,
+            model_nonzero_count=0,
+            model_setup_runtime_seconds=0.0,
             skipped_visit_count=0,
             visible_skipped_visit_count=0,
             checkpoint_read_path=None,

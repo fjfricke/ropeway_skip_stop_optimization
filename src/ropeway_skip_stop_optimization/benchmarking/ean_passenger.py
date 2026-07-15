@@ -77,6 +77,8 @@ class BenchmarkRunResult:
     ean_formulation_config: dict[str, Any]
     model_variable_count: int | None
     model_constraint_count: int | None
+    model_nonzero_count: int | None
+    model_setup_runtime_seconds: float | None
     demand_group_count: int | None
     ride_candidate_count: int | None
     slot_variable_count: int | None
@@ -154,6 +156,8 @@ def run_ean_passenger_benchmark(config: BenchmarkRunConfig) -> tuple[BenchmarkRu
         ean_formulation_config=to_jsonable(config.ean_optimization_config.formulation),
         model_variable_count=metadata.get("variable_count"),
         model_constraint_count=metadata.get("constraint_count"),
+        model_nonzero_count=metadata.get("model_nonzero_count"),
+        model_setup_runtime_seconds=metadata.get("model_setup_runtime_seconds"),
         demand_group_count=metadata.get("demand_group_count"),
         ride_candidate_count=metadata.get("ride_candidate_count"),
         slot_variable_count=metadata.get("slot_variable_count"),

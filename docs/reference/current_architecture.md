@@ -53,6 +53,18 @@ For an exact-time horizon, the affine equality is attached to the visit
 activation binary as an indicator. Big-M remains the default while the affine
 case is benchmarked.
 
+Unary passenger-slot activation is another mutually exclusive formulation
+category:
+
+- `slot_activation_per_slot` repeats candidate-level stop, release, and
+  passenger-cutoff implications for every interchangeable slot;
+- `slot_activation_first_slot` adds those implications only for the first
+  unary slot, which dominates every later slot, and removes algebraically
+  implied zero-release and optional selected-time strengthening rows.
+
+Both cases represent the same integer model and LP relaxation. The per-slot
+case remains the default until the compact case is benchmarked.
+
 ## EAN Finite-Horizon Formulations
 
 `EanConfig.horizon_seconds` is the passenger service cutoff \(T\).
@@ -102,10 +114,16 @@ provides scenario, graph, metrics, optimization, and replay views.
 ## Solver Observability and Checkpoints
 
 Solver policies configure Gurobi without changing the model definition.
-Optimizers expose status, objective, bound, gap, runtime, node count, and
-solution count. Normal EAN passenger exports automatically receive
+Optimizers expose status, objective, bound, gap, runtime, node count, solution
+count, variable and row counts, nonzeros, and pre-optimize model-setup time.
+Normal EAN passenger exports automatically receive
 per-objective progress recorders; benchmark tooling reuses the same callback
 metrics and adds result files and plots.
+
+The setup timer covers Gurobi model materialization, objective and MIP-start or
+checkpoint assignment through the final `model.update()`. Candidate generation
+and EAN preprocessing happen before the timer; presolve and solver search happen
+after it.
 
 Checkpoint files store incumbent solutions and are loaded as MIP starts. They
 do not persist or resume the previous branch-and-bound tree.

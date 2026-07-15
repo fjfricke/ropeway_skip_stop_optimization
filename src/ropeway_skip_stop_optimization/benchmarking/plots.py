@@ -15,6 +15,8 @@ PLOT_NAMES = (
     "final_gap_by_run",
     "objective_by_run",
     "model_size_by_run",
+    "model_nonzeros_by_run",
+    "model_setup_runtime_by_run",
     "candidate_size_by_run",
 )
 
@@ -99,6 +101,18 @@ class PlotBuilder:
                         ("constraints", "model_constraint_count"),
                     ),
                 ),
+            )
+        if name == "model_nonzeros_by_run":
+            return _bar_chart(
+                title="Model nonzeros by run",
+                y_label="nonzeros",
+                groups=_single_metric_groups(self.results, "model_nonzero_count"),
+            )
+        if name == "model_setup_runtime_by_run":
+            return _bar_chart(
+                title="Model setup time by run",
+                y_label="seconds",
+                groups=_single_metric_groups(self.results, "model_setup_runtime_seconds"),
             )
         if name == "candidate_size_by_run":
             return _bar_chart(

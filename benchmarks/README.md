@@ -23,7 +23,14 @@ candidate_horizon_pruning
 single_ring_dominated_ride_pruning
 slot_time_relaxation_strengthening
 tight_big_m_bounds
+slot_activation_per_slot
+slot_activation_first_slot
 ```
+
+The two slot-activation values are mutually exclusive formulation cases.
+`slot_activation_per_slot` is the legacy default. The exact
+`slot_activation_first_slot` case removes candidate-level implications that
+are implied by unary slot ordering; it may be combined with `all`.
 
 Default output layout:
 
@@ -40,6 +47,13 @@ uv run python benchmarks/plot_ean_passenger_benchmarks.py \
   --input-dir benchmarks/output/results \
   --output-dir benchmarks/output/plots
 ```
+
+The generated SVG set includes separate bars for model nonzeros and
+pre-optimize model setup time in addition to rows, variables, candidates, and
+solver-progress metrics. Setup time covers Gurobi model creation, variables,
+constraints, objective, MIP-start/checkpoint loading, and the final
+`model.update()`. It excludes EAN/passenger candidate construction and
+`optimize()`, including presolve and branch-and-bound.
 
 Checkpoint resume means Gurobi receives a prior incumbent solution as a MIP
 start. It does not resume the previous branch-and-bound tree.

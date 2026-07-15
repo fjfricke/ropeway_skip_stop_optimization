@@ -61,6 +61,24 @@ class EanStopSkipTimingFormulation(StrEnum):
     AFFINE = "stop_skip_timing_affine"
 
 
+class EanSlotActivationFormulation(StrEnum):
+    """Placement of candidate-level constraints for unary passenger slots.
+
+    `PER_SLOT_IMPLICATIONS` preserves the historical formulation, which repeats
+    candidate-level stop and time implications for every interchangeable slot.
+
+    `FIRST_SLOT_IMPLICATIONS` attaches those implications only to the first
+    unary slot. Every later slot is at most the first slot, so this removes
+    rows implied even in the LP relaxation. It also omits the zero-release
+    implication and, when slot-time strengthening is enabled, lower-bound rows
+    that are algebraically implied by existing variable bounds and the retained
+    minimum-trip-duration row.
+    """
+
+    PER_SLOT_IMPLICATIONS = "slot_activation_per_slot"
+    FIRST_SLOT_IMPLICATIONS = "slot_activation_first_slot"
+
+
 @dataclass(frozen=True)
 class EanFormulationConfig:
     """Mutually exclusive EAN formulation choices.
@@ -74,6 +92,7 @@ class EanFormulationConfig:
     horizon: EanHorizonFormulation = EanHorizonFormulation.LEGACY
     time_bounds: EanTimeBoundFormulation = EanTimeBoundFormulation.LEGACY_PLUS_10
     stop_skip_timing: EanStopSkipTimingFormulation = EanStopSkipTimingFormulation.BIG_M
+    slot_activation: EanSlotActivationFormulation = EanSlotActivationFormulation.PER_SLOT_IMPLICATIONS
 
     def selection_names(self) -> tuple[str, ...]:
         names: list[str] = []
@@ -83,6 +102,8 @@ class EanFormulationConfig:
             names.append(self.time_bounds.value)
         if self.stop_skip_timing is not EanStopSkipTimingFormulation.BIG_M:
             names.append(self.stop_skip_timing.value)
+        if self.slot_activation is not EanSlotActivationFormulation.PER_SLOT_IMPLICATIONS:
+            names.append(self.slot_activation.value)
         return tuple(names)
 
 
@@ -90,4 +111,5 @@ ALL_EAN_FORMULATION_SELECTION_NAMES: tuple[str, ...] = (
     *(value.value for value in EanHorizonFormulation),
     *(value.value for value in EanTimeBoundFormulation),
     *(value.value for value in EanStopSkipTimingFormulation),
+    *(value.value for value in EanSlotActivationFormulation),
 )

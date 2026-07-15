@@ -59,6 +59,7 @@ from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     ALL_EAN_FORMULATION_SELECTION_NAMES,
     EanFormulationConfig,
     EanHorizonFormulation,
+    EanSlotActivationFormulation,
     EanStopSkipTimingFormulation,
     EanTimeBoundFormulation,
 )
@@ -124,6 +125,7 @@ __all__ = [
     "EanDemandGroup",
     "EanFormulationConfig",
     "EanHorizonFormulation",
+    "EanSlotActivationFormulation",
     "EanMovementPlan",
     "EanMovementPlanBuilder",
     "EanOptimizationConfig",

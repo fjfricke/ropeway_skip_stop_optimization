@@ -365,6 +365,25 @@ export type EanHorizonFormulation =
 export type EanStopSkipTimingFormulation =
   | "stop_skip_timing_big_m"
   | "stop_skip_timing_affine";
+export type EanTimeBoundFormulation =
+  | "time_bounds_legacy_plus_10"
+  | "time_bounds_derived_visit_bounds";
+export type EanSlotActivationFormulation =
+  | "slot_activation_per_slot"
+  | "slot_activation_first_slot";
+export interface EanFormulationConfig {
+  horizon: EanHorizonFormulation;
+  time_bounds: EanTimeBoundFormulation;
+  stop_skip_timing: EanStopSkipTimingFormulation;
+  slot_activation: EanSlotActivationFormulation;
+}
+export interface EanOptimizationConfig {
+  enable_candidate_horizon_pruning: boolean;
+  enable_single_ring_dominated_ride_pruning: boolean;
+  enable_slot_time_relaxation_strengthening: boolean;
+  enable_tight_big_m_bounds: boolean;
+  formulation?: EanFormulationConfig;
+}
 export type EanHeadwayCandidateTimeReference =
   | "switch_time"
   | "platform_entry_time"
@@ -553,6 +572,9 @@ export interface EanPassengerServiceMetadata {
   unserved_passenger_count: number;
   variable_count: number;
   constraint_count: number;
+  model_nonzero_count?: number;
+  model_setup_runtime_seconds?: number;
+  optimization_config?: EanOptimizationConfig;
   skipped_visit_count: number;
   visible_skipped_visit_count: number;
   progress_samples?: EanSolverProgressSample[];

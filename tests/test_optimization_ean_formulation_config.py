@@ -6,6 +6,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanFormulationConfig,
     EanHorizonFormulation,
     EanOptimizationConfig,
+    EanSlotActivationFormulation,
     EanStopSkipTimingFormulation,
     EanTimeBoundFormulation,
 )
@@ -16,7 +17,8 @@ def test_ean_configuration_parses_independent_and_categorical_selections() -> No
         "candidate_horizon_pruning,"
         "horizon_exact_time_activation,"
         "time_bounds_derived_visit_bounds,"
-        "stop_skip_timing_affine"
+        "stop_skip_timing_affine,"
+        "slot_activation_first_slot"
     )
 
     assert config.enable_candidate_horizon_pruning
@@ -25,12 +27,14 @@ def test_ean_configuration_parses_independent_and_categorical_selections() -> No
         horizon=EanHorizonFormulation.EXACT_TIME_ACTIVATION,
         time_bounds=EanTimeBoundFormulation.DERIVED_VISIT_BOUNDS,
         stop_skip_timing=EanStopSkipTimingFormulation.AFFINE,
+        slot_activation=EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS,
     )
     assert config.selection_label() == (
         "candidate_horizon_pruning,"
         "horizon_exact_time_activation,"
         "time_bounds_derived_visit_bounds,"
-        "stop_skip_timing_affine"
+        "stop_skip_timing_affine,"
+        "slot_activation_first_slot"
     )
 
 
@@ -50,6 +54,11 @@ def test_ean_configuration_rejects_multiple_values_in_one_category() -> None:
             "stop_skip_timing_big_m,stop_skip_timing_affine"
         )
 
+    with pytest.raises(ValueError, match="at most one EAN slot-activation"):
+        EanOptimizationConfig.from_selection(
+            "slot_activation_per_slot,slot_activation_first_slot"
+        )
+
 
 def test_ean_configuration_all_and_none_keep_legacy_formulation_defaults() -> None:
     assert EanOptimizationConfig.from_selection("all").formulation == EanFormulationConfig()
@@ -57,10 +66,13 @@ def test_ean_configuration_all_and_none_keep_legacy_formulation_defaults() -> No
 
 
 def test_ean_configuration_all_accepts_formulation_override() -> None:
-    config = EanOptimizationConfig.from_selection("all,stop_skip_timing_affine")
+    config = EanOptimizationConfig.from_selection(
+        "all,stop_skip_timing_affine,slot_activation_first_slot"
+    )
 
     assert config.enabled_names()
     assert config.formulation.stop_skip_timing is EanStopSkipTimingFormulation.AFFINE
+    assert config.formulation.slot_activation is EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS
 
 
 def test_ean_configuration_rejects_all_with_none() -> None:
