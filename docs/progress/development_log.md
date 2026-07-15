@@ -22,15 +22,21 @@ zero and positive release times, both waiting modes, per-slot and first-slot
 activation, and both strengthening settings. The complete test suite, Ruff,
 and the frontend build passed.
 
+The combination with first-slot activation was subsequently tightened by
+keeping the projected physical boarding-release row only for the first unary
+slot. Unary ordering implies the omitted later-slot rows even in the LP
+relaxation; the slot-specific selected-alighting and board--alight coupling
+rows remain unchanged.
+
 A matched 300-second Three-Station comparison at implementation commit
 `5872075` reduced variables by 9.3%, rows by 13.1%, nonzeros by 8.0%, and
 pre-optimize Gurobi setup time from 2.005 to 1.847 seconds. The projected run
 had a slightly worse incumbent and lower bound, a 6.62% rather than 6.52%
-gap, and processed 15.3 times as many nodes. It remains opt-in: the exact
-model reduction is useful, but this single time-limited run does not justify
-changing the export-oriented default. Unrelated documentation plan edits were
-present in the worktree while the benchmark ran; the recorded code revision
-was nevertheless commit `5872075`.
+gap, and processed 15.3 times as many nodes. At this stage, the exact model
+reduction remained opt-in because the individual time-limited run did not
+justify changing the export-oriented default. Unrelated documentation plan
+edits were present in the worktree while the benchmark ran; the recorded code
+revision was nevertheless commit `5872075`.
 
 ### Compact unary-slot activation
 
@@ -67,9 +73,33 @@ activation reduced rows by 21.4%, nonzeros by 12.4%, and average Gurobi model
 setup time from 1.93 to 1.71 seconds. Its final bound was 3,201
 passenger-seconds higher and its gap was 0.11 percentage points smaller, while
 its incumbent was 174 passenger-seconds worse. The repeated end values were
-effectively deterministic. The compact formulation therefore remains opt-in:
-it is a useful proof-side and resource reduction, but the benchmark does not
-justify changing the export-oriented default.
+effectively deterministic. At this stage, the compact formulation remained
+opt-in: it is a useful proof-side and resource reduction, but the individual
+benchmark did not justify changing the export-oriented default.
+
+### Combined exact journey-time formulation benchmark
+
+The three exact formulation changes were benchmarked together on
+`three_station_v0`: affine stop/skip timing, first-slot activation, and
+projected journey-time boarding variables. The combined model was compared
+against the unchanged `all` baseline for five and fifteen minutes under the
+same solver policy, horizon, time bounds, MIP start, and callback sampling.
+
+At five minutes, the combined formulation had the best incumbent, best bound,
+gap, served demand, model size, and setup time of the three tested cases. The
+fifteen-minute comparison confirmed the result: its gap was 3.09% rather than
+6.50%, it served twelve additional passengers, and it used 28.5% fewer rows.
+The detailed measurements are recorded in
+`docs/findings/ean_passenger_optimization_benchmarks.md`.
+
+The benchmark was subsequently promoted to an objective-aware production
+default: passenger solves use affine timing and first-slot activation; the
+Journey-Time objective additionally uses projected boarding time, while
+Waiting-Time retains explicit boarding time. Big-M, per-slot activation, and
+explicit Journey-Time boarding time remain selectable for controlled
+comparisons. The evidence remains limited to the Journey-Time Three-Station
+case, so `tight_big_m_bounds`, changed horizon semantics, and derived time
+bounds remain opt-in experiments.
 
 ## 2026-07-14
 
@@ -183,6 +213,6 @@ thesis PDF build also succeeded.
 
 A five-minute Three-Station comparison reduced rows by 1,293 and improved the
 MIP gap from 6.52% to 4.83%. The affine incumbent was slightly worse and served
-four fewer passengers, so Big-M remains the default until repeated runs show
-that the proof improvement is stable without an unacceptable primal-side
-regression.
+four fewer passengers. At this stage, Big-M remained the default until
+repeated runs showed whether the proof improvement was stable without an
+unacceptable primal-side regression.

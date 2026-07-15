@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 from typing import Iterable
 
@@ -40,7 +40,7 @@ class EanOptimizationConfig:
 
     `from_selection` preserves one CLI list: optimization names are freely
     combinable, while at most one value from each formulation category may
-    occur. Omitted formulation categories use their legacy defaults.
+    occur. Omitted formulation categories use the current production defaults.
     """
 
     enable_candidate_horizon_pruning: bool = True
@@ -111,7 +111,10 @@ class EanOptimizationConfig:
         board_time_values = [
             EanBoardTimeFormulation(name)
             for name in names
-            if name in EanBoardTimeFormulation
+            if name in {
+                EanBoardTimeFormulation.EXPLICIT,
+                EanBoardTimeFormulation.PROJECTED_JOURNEY_TIME,
+            }
         ]
         if len(horizon_values) > 1:
             raise ValueError("select at most one EAN horizon formulation")
@@ -134,17 +137,17 @@ class EanOptimizationConfig:
             stop_skip_timing=(
                 stop_skip_timing_values[0]
                 if stop_skip_timing_values
-                else EanStopSkipTimingFormulation.BIG_M
+                else EanStopSkipTimingFormulation.AFFINE
             ),
             slot_activation=(
                 slot_activation_values[0]
                 if slot_activation_values
-                else EanSlotActivationFormulation.PER_SLOT_IMPLICATIONS
+                else EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS
             ),
             board_time=(
                 board_time_values[0]
                 if board_time_values
-                else EanBoardTimeFormulation.EXPLICIT
+                else EanBoardTimeFormulation.AUTO
             ),
         )
         optimization_names: list[EanOptimizationName | str] = []
@@ -173,3 +176,23 @@ class EanOptimizationConfig:
         if not enabled and not formulation_names:
             return "none"
         return ",".join((*[name.value for name in enabled], *formulation_names))
+
+    def resolved_for_passenger_objective(self, objective: str) -> EanOptimizationConfig:
+        """Resolve the objective-aware boarding-time production default.
+
+        The projected representation is exact only for journey time because
+        selected boarding time is absent from that objective. Explicit user
+        selections always take precedence over this automatic choice.
+        """
+
+        if self.formulation.board_time is not EanBoardTimeFormulation.AUTO:
+            return self
+        board_time = (
+            EanBoardTimeFormulation.PROJECTED_JOURNEY_TIME
+            if objective == "journey_time"
+            else EanBoardTimeFormulation.EXPLICIT
+        )
+        return replace(
+            self,
+            formulation=replace(self.formulation, board_time=board_time),
+        )

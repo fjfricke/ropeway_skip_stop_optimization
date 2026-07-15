@@ -82,6 +82,10 @@ class EanSlotActivationFormulation(StrEnum):
 class EanBoardTimeFormulation(StrEnum):
     """Representation of selected boarding times in passenger objectives.
 
+    `AUTO` resolves to the formulation appropriate for the passenger
+    objective: projected boarding time for journey time and explicit boarding
+    time for waiting time. It is an internal default, not a CLI selection.
+
     `EXPLICIT` keeps one selected boarding-time variable per passenger slot.
     It is required for the waiting-time objective.
 
@@ -90,6 +94,7 @@ class EanBoardTimeFormulation(StrEnum):
     linearization and minimum-trip-time constraints.
     """
 
+    AUTO = "board_time_auto"
     EXPLICIT = "board_time_explicit"
     PROJECTED_JOURNEY_TIME = "board_time_projected_journey_time"
 
@@ -106,9 +111,9 @@ class EanFormulationConfig:
 
     horizon: EanHorizonFormulation = EanHorizonFormulation.LEGACY
     time_bounds: EanTimeBoundFormulation = EanTimeBoundFormulation.LEGACY_PLUS_10
-    stop_skip_timing: EanStopSkipTimingFormulation = EanStopSkipTimingFormulation.BIG_M
-    slot_activation: EanSlotActivationFormulation = EanSlotActivationFormulation.PER_SLOT_IMPLICATIONS
-    board_time: EanBoardTimeFormulation = EanBoardTimeFormulation.EXPLICIT
+    stop_skip_timing: EanStopSkipTimingFormulation = EanStopSkipTimingFormulation.AFFINE
+    slot_activation: EanSlotActivationFormulation = EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS
+    board_time: EanBoardTimeFormulation = EanBoardTimeFormulation.AUTO
 
     def selection_names(self) -> tuple[str, ...]:
         names: list[str] = []
@@ -116,11 +121,11 @@ class EanFormulationConfig:
             names.append(self.horizon.value)
         if self.time_bounds is not EanTimeBoundFormulation.LEGACY_PLUS_10:
             names.append(self.time_bounds.value)
-        if self.stop_skip_timing is not EanStopSkipTimingFormulation.BIG_M:
+        if self.stop_skip_timing is not EanStopSkipTimingFormulation.AFFINE:
             names.append(self.stop_skip_timing.value)
-        if self.slot_activation is not EanSlotActivationFormulation.PER_SLOT_IMPLICATIONS:
+        if self.slot_activation is not EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS:
             names.append(self.slot_activation.value)
-        if self.board_time is not EanBoardTimeFormulation.EXPLICIT:
+        if self.board_time is not EanBoardTimeFormulation.AUTO:
             names.append(self.board_time.value)
         return tuple(names)
 
@@ -130,5 +135,9 @@ ALL_EAN_FORMULATION_SELECTION_NAMES: tuple[str, ...] = (
     *(value.value for value in EanTimeBoundFormulation),
     *(value.value for value in EanStopSkipTimingFormulation),
     *(value.value for value in EanSlotActivationFormulation),
-    *(value.value for value in EanBoardTimeFormulation),
+    *(
+        value.value
+        for value in EanBoardTimeFormulation
+        if value is not EanBoardTimeFormulation.AUTO
+    ),
 )

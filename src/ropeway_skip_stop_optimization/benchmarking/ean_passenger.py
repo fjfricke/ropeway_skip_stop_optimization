@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import platform
 import socket
@@ -32,6 +33,7 @@ from ropeway_skip_stop_optimization.progress import ProgressReporter
 
 
 DEFAULT_BENCHMARK_OUTPUT_DIR = Path("benchmarks/output")
+_MAX_RUN_ID_SELECTION_PART_LENGTH = 96
 
 
 @dataclass(frozen=True)
@@ -134,6 +136,12 @@ def run_ean_passenger_benchmark(config: BenchmarkRunConfig) -> tuple[BenchmarkRu
     )
     passenger_result = _load_passenger_result(export_result.artifact_paths)
     metadata = passenger_result.get("metadata", {})
+    resolved_optimization_config = metadata.get("optimization_config")
+    if not isinstance(resolved_optimization_config, dict):
+        resolved_optimization_config = to_jsonable(config.ean_optimization_config)
+    resolved_formulation_config = resolved_optimization_config.get("formulation")
+    if not isinstance(resolved_formulation_config, dict):
+        resolved_formulation_config = to_jsonable(config.ean_optimization_config.formulation)
 
     result = BenchmarkRunResult(
         run_id=run_id,
@@ -152,8 +160,8 @@ def run_ean_passenger_benchmark(config: BenchmarkRunConfig) -> tuple[BenchmarkRu
         objective=metadata.get("objective_kind"),
         solver_policy=to_jsonable(solver_policy),
         ean_optimizations=tuple(name.value for name in config.ean_optimization_config.enabled_names()),
-        ean_optimization_config=to_jsonable(config.ean_optimization_config),
-        ean_formulation_config=to_jsonable(config.ean_optimization_config.formulation),
+        ean_optimization_config=resolved_optimization_config,
+        ean_formulation_config=resolved_formulation_config,
         model_variable_count=metadata.get("variable_count"),
         model_constraint_count=metadata.get("constraint_count"),
         model_nonzero_count=metadata.get("model_nonzero_count"),
@@ -217,15 +225,24 @@ def _latest_checkpoint_in_root(root: Path, *, example_id: str, artifact_set_id: 
 
 def _run_id(config: BenchmarkRunConfig) -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    selection = _safe_checkpoint_part(config.ean_optimization_config.selection_label().replace(",", "+"))
     return "__".join(
         (
             timestamp,
             _safe_checkpoint_part(config.example_id),
             _safe_checkpoint_part(config.artifact_set_id),
             _safe_checkpoint_part(str(config.ean_solver_policy.value)),
-            _safe_checkpoint_part(config.ean_optimization_config.selection_label().replace(",", "+")),
+            _short_run_id_part(selection),
         )
     )
+
+
+def _short_run_id_part(value: str) -> str:
+    if len(value) <= _MAX_RUN_ID_SELECTION_PART_LENGTH:
+        return value
+    digest = hashlib.sha256(value.encode("utf-8")).hexdigest()[:12]
+    prefix_length = _MAX_RUN_ID_SELECTION_PART_LENGTH - len(digest) - 2
+    return f"{value[:prefix_length]}__{digest}"
 
 
 def _default_label(config: BenchmarkRunConfig) -> str:

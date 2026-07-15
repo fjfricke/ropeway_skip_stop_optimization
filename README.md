@@ -108,12 +108,14 @@ optimizations and at most one value from each formulation category:
 | Unary-slot activation formulation | `slot_activation_per_slot`, `slot_activation_first_slot` |
 | Journey board-time formulation | `board_time_explicit`, `board_time_projected_journey_time` |
 
-`all` means the current default optimization set with the legacy formulation
-categories; it does not select every mutually exclusive formulation.
-`none` means no optional optimization and the same legacy formulation defaults.
+`all` means the current production configuration: the three independent
+reductions, affine stop/skip timing, and first-slot activation. For the
+journey-time objective it also resolves to projected boarding time; for
+waiting time it resolves to explicit boarding time. `none` disables only the
+independent reductions and keeps these formulation defaults.
 `all` may be combined with formulation overrides such as
-`all,stop_skip_timing_affine`. In an explicit list without `all`, omitted
-optimizations are disabled and omitted formulation categories use their legacy
+`all,stop_skip_timing_big_m`. In an explicit list without `all`, omitted
+optimizations are disabled and omitted formulation categories use the current
 defaults.
 
 The horizon cases have different finite-horizon meanings:
@@ -143,9 +145,9 @@ exit = switch + skip_duration
 ```
 
 Under exact horizon activation, the affine equality is enabled by the visit
-activation binary. The current default remains `stop_skip_timing_big_m` until
-repeated benchmarks justify promotion; the first five-minute comparison showed
-a substantially better affine proof gap but a slightly worse incumbent.
+activation binary. `stop_skip_timing_affine` is the production default.
+`stop_skip_timing_big_m` remains selectable as the historical formulation
+comparator.
 
 The legacy unary-slot case repeats candidate stop, release, and service-cutoff
 implications for every interchangeable passenger slot. The exact
@@ -153,9 +155,9 @@ implications for every interchangeable passenger slot. The exact
 ordering makes every later slot no larger than the first, so the omitted rows
 are implied even in the LP relaxation. The compact case also removes
 the zero-release implication and, when slot-time strengthening is enabled,
-selected-time lower bounds that are algebraically redundant. It remains opt-in
-after its dedicated benchmark: it reduces model size and improves proof-side
-metrics, but does not improve the best five-minute incumbent.
+selected-time lower bounds that are algebraically redundant. First-slot
+activation is the production default for passenger solves; per-slot activation
+remains selectable as the historical comparator.
 
 For journey time, `board_time_projected_journey_time` eliminates each selected
 boarding-time variable through the exact Fourier--Motzkin projection of its
@@ -163,8 +165,10 @@ linearization, release, and minimum-trip-time constraints. It preserves the
 integer model and LP relaxation, but cannot be selected for waiting time because
 selected boarding time appears directly in that objective. A dedicated
 five-minute comparison reduced model size and setup time but slightly worsened
-the time-limited incumbent and proof bound, so the explicit case remains the
-default.
+the time-limited incumbent and proof bound in isolation. The combined
+Journey-Time configuration promoted the exact projection, affine timing, and
+first-slot activation together; Waiting-Time continues to use the explicit
+formulation by default.
 
 Checkpoint resume loads a prior incumbent solution as a Gurobi MIP start. It
 does not resume the previous branch-and-bound tree.

@@ -78,6 +78,18 @@ def test_ean_passenger_service_minimizes_waiting_with_unserved_backlog() -> None
     assert result.metadata.runtime_seconds is not None
     assert result.metadata.node_count is not None
     assert result.metadata.best_bound is not None
+    assert (
+        result.metadata.optimization_config.formulation.stop_skip_timing
+        is EanStopSkipTimingFormulation.AFFINE
+    )
+    assert (
+        result.metadata.optimization_config.formulation.slot_activation
+        is EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS
+    )
+    assert (
+        result.metadata.optimization_config.formulation.board_time
+        is EanBoardTimeFormulation.EXPLICIT
+    )
 
 
 def test_ean_passenger_service_journey_time_uses_alighting_time() -> None:
@@ -101,6 +113,18 @@ def test_ean_passenger_service_journey_time_uses_alighting_time() -> None:
     assert ride.alight_visit_index == 1
     assert result.metadata.objective_value_seconds == pytest.approx(9.0)
     assert result.metadata.objective_passenger_hours == pytest.approx(9.0 / 3600.0)
+    assert (
+        result.metadata.optimization_config.formulation.stop_skip_timing
+        is EanStopSkipTimingFormulation.AFFINE
+    )
+    assert (
+        result.metadata.optimization_config.formulation.slot_activation
+        is EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS
+    )
+    assert (
+        result.metadata.optimization_config.formulation.board_time
+        is EanBoardTimeFormulation.PROJECTED_JOURNEY_TIME
+    )
 
 
 def test_headway_time_expressions_use_wait_occupancy_for_platform_exit_waiting() -> None:
@@ -228,7 +252,14 @@ def test_affine_stop_skip_timing_preserves_minimal_solution(
     baseline = solve_ean_passenger_service(
         scenario,
         artifact,
-        EanPassengerServiceConfig(objective=objective),
+        EanPassengerServiceConfig(
+            objective=objective,
+            optimization_config=EanOptimizationConfig(
+                formulation=EanFormulationConfig(
+                    stop_skip_timing=EanStopSkipTimingFormulation.BIG_M,
+                )
+            ),
+        ),
     )
     affine = solve_ean_passenger_service(
         scenario,
@@ -311,7 +342,11 @@ def test_first_slot_activation_preserves_multi_slot_solutions_and_removes_implie
             optimization_config=EanOptimizationConfig(
                 enable_slot_time_relaxation_strengthening=enable_strengthening,
                 enable_tight_big_m_bounds=enable_tight_big_m_bounds,
-                formulation=EanFormulationConfig(time_bounds=time_bound_formulation),
+                formulation=EanFormulationConfig(
+                    time_bounds=time_bound_formulation,
+                    slot_activation=EanSlotActivationFormulation.PER_SLOT_IMPLICATIONS,
+                    board_time=EanBoardTimeFormulation.EXPLICIT,
+                ),
             ),
         ),
     )
@@ -326,6 +361,7 @@ def test_first_slot_activation_preserves_multi_slot_solutions_and_removes_implie
                 formulation=EanFormulationConfig(
                     time_bounds=time_bound_formulation,
                     slot_activation=EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS,
+                    board_time=EanBoardTimeFormulation.EXPLICIT,
                 )
             ),
         ),
@@ -499,7 +535,10 @@ def test_projected_journey_board_time_preserves_small_instances_and_removes_auxi
     )
     baseline_config = EanOptimizationConfig(
         enable_slot_time_relaxation_strengthening=enable_strengthening,
-        formulation=EanFormulationConfig(slot_activation=slot_activation),
+        formulation=EanFormulationConfig(
+            slot_activation=slot_activation,
+            board_time=EanBoardTimeFormulation.EXPLICIT,
+        ),
     )
     projected_config = EanOptimizationConfig(
         enable_slot_time_relaxation_strengthening=enable_strengthening,
@@ -544,7 +583,11 @@ def test_projected_journey_board_time_preserves_small_instances_and_removes_auxi
     if not enable_strengthening:
         expected_removed_rows = 3 * slots
     elif slot_activation is EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS:
-        expected_removed_rows = 2 * slots
+        expected_removed_rows = (
+            2 * slots
+            if release_seconds == 0.0
+            else 3 * slots - baseline.metadata.ride_candidate_count
+        )
     elif release_seconds == 0.0:
         expected_removed_rows = 4 * slots
     else:

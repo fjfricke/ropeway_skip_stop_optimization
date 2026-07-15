@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from pathlib import Path
 from time import perf_counter
@@ -209,6 +209,12 @@ def solve_ean_passenger_service(
 
     artifact.validate()
     config = config or EanPassengerServiceConfig()
+    config = replace(
+        config,
+        optimization_config=config.optimization_config.resolved_for_passenger_objective(
+            config.objective
+        ),
+    )
     config.validate()
     _require_supported_waiting_modes(artifact)
 
@@ -1052,6 +1058,7 @@ def _add_ride_slot_constraints(
                     time_upper_bound=time_upper_bound,
                     visits_by_key=visits_by_key,
                     timing_by_switch_id=timing_by_switch_id,
+                    omit_release_row=compact_activation and slot_index > 0,
                 )
         if previous_slot_var is not None:
             model.addConstr(slot_var <= previous_slot_var, name=f"slot_symmetry_{_var_id(ride_candidate.id)}_{slot_index}")
@@ -1181,12 +1188,15 @@ def _add_projected_journey_slot_time_constraints(
     time_upper_bound: float,
     visits_by_key: dict[tuple[int, int], SwitchVisitDefinition],
     timing_by_switch_id: dict[str, SkipStopTiming],
+    omit_release_row: bool = False,
 ) -> None:
     """Add the Fourier--Motzkin projection of selected boarding time.
 
     For journey time, selected boarding time is auxiliary. Eliminating it from
     its McCormick linearization, release lower bound, and selected minimum-trip
-    duration preserves the full LP relaxation in the remaining variables.
+    duration preserves the full LP relaxation in the remaining variables. With
+    first-slot activation, the shared board-time release row is needed only for
+    the first unary slot because every later slot is bounded by that slot.
     """
 
     variable_id = _var_id(ride_candidate.id)
@@ -1195,7 +1205,7 @@ def _add_projected_journey_slot_time_constraints(
         visits_by_key=visits_by_key,
         timing_by_switch_id=timing_by_switch_id,
     )
-    if group.release_time_seconds > 0.0:
+    if group.release_time_seconds > 0.0 and not omit_release_row:
         model.addConstr(
             board_time >= group.release_time_seconds * slot_var,
             name=f"slot_projected_board_release_lb_{variable_id}_{slot_index}",

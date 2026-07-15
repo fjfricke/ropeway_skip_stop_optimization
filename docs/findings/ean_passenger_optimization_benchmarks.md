@@ -97,7 +97,7 @@ nodes:              662
 
 ## Findings
 
-`all` is the best current default. It gives the smallest final gap, the best
+The historical `all` independent-optimization configuration gives the smallest final gap, the best
 objective, and a much smaller model than the unoptimized benchmark. Relative to
 `none`, it reduces variables by 45.8%, constraints by 52.0%, ride candidates by
 75.2%, and slots by 75.2%, while improving the final bound by 1.20 percentage
@@ -145,7 +145,7 @@ constraint on inactive or fractional passenger slots.
 
 | Run | Objective (h) | Best bound (s) | Gap | Nodes | Notes |
 |---|---:|---:|---:|---:|---|
-| `opt_all_5min` | 751.2602 | 2,532,474 | 6.36% | 2,019 | current default |
+| `opt_all_5min` | 751.2602 | 2,532,474 | 6.36% | 2,019 | historical baseline |
 | `tight_big_m_phase1_5min` | 751.2331 | 2,526,600 | 6.58% | 657 | release Big-M only |
 
 Phase 1 improved some early time-to-gap thresholds, but the five-minute final
@@ -346,9 +346,11 @@ This is consistent with a changed time-limited search trajectory, not changed
 integer semantics: exact small-instance tests preserve both waiting-time and
 journey-time objectives.
 
-The affine formulation remains opt-in after this single long run. The result
-is strong evidence that it is a better proof formulation, but not enough to
-replace the Big-M default while incumbent quality is also important.
+At this stage, the affine formulation remained opt-in after the individual
+long run. The result was strong evidence that it is a better proof
+formulation, but did not by itself justify replacing Big-M while incumbent
+quality was also important. The later combined comparison changed that
+Journey-Time default decision.
 
 ## Compact Unary-Slot Activation
 
@@ -362,7 +364,7 @@ worktree: compact unary-slot activation implementation under evaluation
 ```
 
 The comparison used six `three_station_v0` journey-time runs: three with the
-default per-slot activation and three with exact first-slot activation. Every
+historical per-slot activation and three with exact first-slot activation. Every
 run used the `exact_optimality` policy, a 300-second limit, five-second
 callback sampling, the default independent optimizations, and no resumed
 checkpoint. Execution order alternated between the two cases.
@@ -420,4 +422,71 @@ variables, the single five-minute projected run has a 280 passenger-second
 worse incumbent, a 2,560 passenger-second lower bound decrease, and a 0.10
 percentage-point larger gap. It processes 15.3 times as many nodes and serves
 four fewer passengers. This is a time-limited search outcome, not evidence of
-changed passenger-model semantics. The projected formulation remains opt-in.
+changed passenger-model semantics. This individual result did not justify
+promotion by itself; the later combined experiment below did.
+
+## Combined Exact Formulations
+
+Date: 2026-07-15
+
+Implementation baseline:
+
+```text
+git commit: 3d4eb3e527df42c066f410eeb7533dffda6fe3ec
+worktree: dirty with the exact first-slot projected-release reduction
+```
+
+All runs used `three_station_v0`, the journey-time objective,
+`exact_optimality`, legacy horizon and time bounds, the three default
+independent optimizations, no checkpoint resume, and five-second callback
+sampling. The combined projected case additionally used:
+
+```text
+stop_skip_timing_affine
+slot_activation_first_slot
+board_time_projected_journey_time
+```
+
+The first two changes are exact timing and unary-slot reformulations. The third
+is the exact Fourier--Motzkin board-time projection. Therefore all three
+configurations preserve the same intended integer model for this journey-time
+case.
+
+### Five-Minute Comparison
+
+| Formulation | Vars | Rows | Nonzeros | Setup (s) | Objective (h) | Best bound (s) | Gap | Nodes | Served | Unserved |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `all` | 82,398 | 233,193 | 858,970 | 2.262 | 751.303 | 2,528,472 | 6.52% | 574 | 2,428 | 1,052 |
+| affine + first slot | 82,398 | 182,084 | 748,108 | 1.693 | 751.300 | 2,565,551 | 5.14% | 8,971 | 2,432 | 1,048 |
+| affine + first slot + projected board time | 74,734 | 166,756 | 702,124 | 1.545 | 751.245 | 2,582,536 | 4.51% | 9,160 | 2,440 | 1,040 |
+
+The full combination improves every recorded five-minute result relative to
+`all`: it has the best incumbent, bound, gap, and service count, while also
+using the smallest model and least setup time.
+
+### Fifteen-Minute Confirmation
+
+| Formulation | Vars | Rows | Nonzeros | Setup (s) | Objective (h) | Best bound (s) | Gap | Nodes | Served | Unserved |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `all` | 82,398 | 233,193 | 858,970 | 1.906 | 751.277 | 2,528,801 | 6.50% | 8,960 | 2,436 | 1,044 |
+| affine + first slot + projected board time | 74,734 | 166,756 | 702,124 | 1.530 | 751.229 | 2,620,817 | 3.09% | 9,316 | 2,448 | 1,032 |
+
+After fifteen minutes, the combined formulation reduces variables by 9.3%,
+rows by 28.5%, nonzeros by 18.3%, and pre-optimize setup time by 19.7%. Its
+incumbent improves by 173 passenger-seconds, its best bound improves by
+92,016 passenger-seconds, and its gap falls by 3.41 percentage points, a
+52.4% relative reduction.
+
+The combined run reaches a 6% gap after 29.8 seconds, 5% after 52.6 seconds,
+and 4.5% after 286.5 seconds. The baseline does not reach 6% within the
+fifteen-minute limit.
+
+This is one deterministic machine-level comparison on the journey-time
+Three-Station instance. It establishes the combined configuration as the best
+observed formulation for that scope, but does not establish the same result
+for the waiting-time objective, `five_station_v0`, or different solver
+hardware and search seeds.
+
+As of 2026-07-15, the combination is the Journey-Time production default.
+Waiting-Time retains explicit selected boarding times because they occur in
+that objective.

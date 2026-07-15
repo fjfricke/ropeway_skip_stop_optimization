@@ -9,18 +9,22 @@ MILP without changing its integer optimum. Do not apply the remaining ideas in
 one fixed sequence: first stabilize the immediate baseline, then measure which
 part of the model is limiting performance, and select the matching branch.
 
-The current default exact reductions remain:
+The current production passenger configuration uses:
 
 ```text
 candidate_horizon_pruning
 single_ring_dominated_ride_pruning
 slot_time_relaxation_strengthening
+stop_skip_timing_affine
+slot_activation_first_slot
+board_time_projected_journey_time for Journey-Time
+board_time_explicit for Waiting-Time
 ```
 
-`tight_big_m_bounds` and the affine stop/skip timing formulation remain
-separately selectable until their repeated benchmarks justify a baseline
-decision. Full-ring ride pruning is exact dominance pruning: a passenger can
-alight at the first matching destination visit, so remaining onboard for an
+`tight_big_m_bounds` remains opt-in. Big-M timing, per-slot activation, and
+explicit Journey-Time boarding time remain selectable as controlled historical
+comparators. Full-ring ride pruning is exact dominance pruning: a passenger
+can alight at the first matching destination visit, so remaining onboard for an
 additional full loop cannot improve waiting or journey time and occupies
 capacity for longer.
 
@@ -42,31 +46,30 @@ These instances are the correctness gate for every later reduction,
 classification, or reformulation. They are infrastructure, not a separate
 performance experiment.
 
-## Step 1: Select the Immediate Timing Baseline
+## Step 1: Validate the Current Timing Default Beyond Its Promotion Instance
 
 ### Repeated Affine Timing Validation
 
-Repeat the five-minute comparison of the current baseline against affine
-stop/skip timing with controlled solver seeds. Add longer runs and
-`five_station_v0` construction or bounded-solve checks. Compare:
+Repeat the combined Journey-Time default against the historical Big-M,
+per-slot, explicit comparator with controlled solver seeds. Add longer runs
+and `five_station_v0` construction or bounded-solve checks. Compare:
 
 - model size and construction time;
 - root relaxation and best-bound progress;
 - first and final incumbent quality;
 - final gap, node count, and memory.
 
-Promote affine timing only if its proof improvement is reproducible and its
-incumbent regression remains acceptable for export-oriented runs. If promoted,
-remove the historical stop/skip Big-M formulation after a short compatibility
-window and preserve historical benchmark JSON instead of permanent duplicate
-model code.
+Keep the promoted defaults unless their observed advantage fails to reproduce.
+Preserve the historical formulation choices for controlled benchmarks; do not
+infer a Waiting-Time advantage from the Journey-Time projection result.
 
 ### Conditional Tight Big-M Validation
 
-Repeat `all` against `all + tight_big_m_bounds` only for constraints that remain
-Big-M based in the selected timing baseline. Skip tests for rows replaced by
-the affine formulation. Use repeated seeds and fixed 5-, 10-, and 15-minute
-limits; record incumbent, bound, gap, nodes, time-to-gap, and served passengers.
+Repeat the current default against the same configuration plus
+`tight_big_m_bounds` only for constraints that remain Big-M based. Skip tests
+for rows replaced by affine timing. Use repeated seeds and fixed 5-, 10-, and
+15-minute limits; record incumbent, bound, gap, nodes, time-to-gap, and served
+passengers.
 
 Keep the option opt-in unless it produces a reproducible net improvement.
 

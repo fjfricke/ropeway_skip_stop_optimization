@@ -50,8 +50,8 @@ Stop/skip timing is a mutually exclusive formulation category:
 - `stop_skip_timing_affine` uses one exact affine equality per active visit.
 
 For an exact-time horizon, the affine equality is attached to the visit
-activation binary as an indicator. Big-M remains the default while the affine
-case is benchmarked.
+activation binary as an indicator. Affine timing is the default; Big-M remains
+selectable for controlled historical comparisons.
 
 Unary passenger-slot activation is another mutually exclusive formulation
 category:
@@ -63,7 +63,8 @@ category:
   implied zero-release and optional selected-time strengthening rows.
 
 Both cases represent the same integer model and LP relaxation. The per-slot
-case remains the default.
+case remains selectable as the historical comparator; first-slot activation is
+the default.
 
 Selected boarding time is a third mutually exclusive formulation category:
 
@@ -74,9 +75,10 @@ Selected boarding time is a third mutually exclusive formulation category:
 
 The projected case preserves the integer model and LP relaxation, but is
 invalid for waiting time because selected boarding time appears in that
-objective. A dedicated five-minute comparison reduced model size and setup
-time but slightly worsened time-limited incumbent and proof metrics; the
-explicit case therefore remains the default.
+objective. The default is objective-aware: Journey-Time uses projection, while
+Waiting-Time uses the explicit selected boarding-time variables. Both explicit
+CLI selections remain available for controlled comparisons, subject to the
+Waiting-Time validity restriction.
 
 ## EAN Finite-Horizon Formulations
 

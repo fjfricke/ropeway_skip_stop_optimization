@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from ropeway_skip_stop_optimization.benchmarking.ean_passenger import _short_run_id_part
 from ropeway_skip_stop_optimization.benchmarking.plots import PlotBuilder, collect_result_paths
 from ropeway_skip_stop_optimization.optimization.solver_progress import (
     GurobiMipProgressRecorder,
@@ -117,6 +118,20 @@ def test_collect_result_paths_uses_input_dir_when_inputs_empty(tmp_path: Path) -
     result_path.write_text(json.dumps(_benchmark_result("run-a")), encoding="utf-8")
 
     assert collect_result_paths((), tmp_path) == (result_path,)
+
+
+def test_short_run_id_part_hashes_long_configuration_selections() -> None:
+    selection = (
+        "candidate_horizon_pruning+single_ring_dominated_ride_pruning+"
+        "slot_time_relaxation_strengthening+stop_skip_timing_affine+"
+        "slot_activation_first_slot+board_time_projected_journey_time"
+    )
+
+    shortened = _short_run_id_part(selection)
+
+    assert len(shortened) == 96
+    assert shortened.endswith("__6e51e5fc4e85")
+    assert _short_run_id_part(selection) == shortened
 
 
 class _FakeCallback:

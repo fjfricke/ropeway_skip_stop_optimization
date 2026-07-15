@@ -7,6 +7,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanFormulationConfig,
     EanHorizonFormulation,
     EanOptimizationConfig,
+    EanPassengerServiceObjective,
     EanSlotActivationFormulation,
     EanStopSkipTimingFormulation,
     EanTimeBoundFormulation,
@@ -36,8 +37,6 @@ def test_ean_configuration_parses_independent_and_categorical_selections() -> No
         "candidate_horizon_pruning,"
         "horizon_exact_time_activation,"
         "time_bounds_derived_visit_bounds,"
-        "stop_skip_timing_affine,"
-        "slot_activation_first_slot,"
         "board_time_projected_journey_time"
     )
 
@@ -69,9 +68,17 @@ def test_ean_configuration_rejects_multiple_values_in_one_category() -> None:
         )
 
 
-def test_ean_configuration_all_and_none_keep_legacy_formulation_defaults() -> None:
-    assert EanOptimizationConfig.from_selection("all").formulation == EanFormulationConfig()
-    assert EanOptimizationConfig.from_selection("none").formulation == EanFormulationConfig()
+def test_ean_configuration_all_and_none_use_current_formulation_defaults() -> None:
+    default_formulation = EanFormulationConfig(
+        stop_skip_timing=EanStopSkipTimingFormulation.AFFINE,
+        slot_activation=EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS,
+        board_time=EanBoardTimeFormulation.AUTO,
+    )
+
+    assert EanOptimizationConfig.from_selection("all").formulation == default_formulation
+    assert EanOptimizationConfig.from_selection("none").formulation == default_formulation
+    assert EanOptimizationConfig.from_selection("all").selection_label() == "all"
+    assert EanOptimizationConfig.from_selection("none").selection_label() == "none"
 
 
 def test_ean_configuration_all_accepts_formulation_override() -> None:
@@ -88,3 +95,28 @@ def test_ean_configuration_all_accepts_formulation_override() -> None:
 def test_ean_configuration_rejects_all_with_none() -> None:
     with pytest.raises(ValueError, match="cannot combine"):
         EanOptimizationConfig.from_selection("all,none")
+
+
+def test_ean_configuration_resolves_board_time_by_objective_without_overriding_explicit_selection() -> None:
+    automatic = EanOptimizationConfig.from_selection("all")
+
+    assert (
+        automatic.resolved_for_passenger_objective(
+            EanPassengerServiceObjective.JOURNEY_TIME
+        ).formulation.board_time
+        is EanBoardTimeFormulation.PROJECTED_JOURNEY_TIME
+    )
+    assert (
+        automatic.resolved_for_passenger_objective(
+            EanPassengerServiceObjective.WAITING_TIME
+        ).formulation.board_time
+        is EanBoardTimeFormulation.EXPLICIT
+    )
+
+    explicit = EanOptimizationConfig.from_selection("all,board_time_explicit")
+    assert (
+        explicit.resolved_for_passenger_objective(
+            EanPassengerServiceObjective.JOURNEY_TIME
+        ).formulation.board_time
+        is EanBoardTimeFormulation.EXPLICIT
+    )
