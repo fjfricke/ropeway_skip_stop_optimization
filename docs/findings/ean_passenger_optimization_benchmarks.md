@@ -525,3 +525,51 @@ therefore repairs a large primal-quality defect without changing the observed
 dual progress. This isolates the remaining Five-Station bottleneck to the root
 relaxation and integrated movement--passenger coupling rather than start
 quality.
+
+## Root-Relaxation Variable Families
+
+Date: 2026-07-15
+
+Implementation commit:
+
+```text
+659b005 fix(benchmarks): add raw LP diagnostic fallback
+```
+
+The diagnostic used `five_station_v0`, the production Journey-Time
+formulation, the optimized all-stop MIP start, the exact-optimality policy, and
+a 300-second main-solve limit. The integrated model contained 252,844
+variables and 601,181 rows. The separately labelled raw continuous relaxation
+used barrier without crossover and solved optimally in 68.67 seconds.
+
+| Metric | Raw LP | Five-minute MIP |
+|---|---:|---:|
+| Objective or lower bound (s) | 312,738 | 1,604,228 |
+| Incumbent (s) | n/a | 1,947,463 |
+| Gap | n/a | 17.62% |
+| Reported nodes | n/a | 1 |
+
+The MIP did not expose an optimal `MIPNODE` relaxation vector within the time
+limit, so the raw-LP family values below are not post-cut root values:
+
+| Variable family | Integer variables | Fractional | Share | Fractional distance |
+|---|---:|---:|---:|---:|
+| Stop/skip | 989 | 739 | 74.7% | 183.45 |
+| Headway order | 166,692 | 50,609 | 30.4% | 23,806.04 |
+| Passenger slot | 41,088 | 16,528 | 40.2% | 3,018.41 |
+| Unserved demand | 20 | 2 | 10.0% | 0.62 |
+
+The raw LP is much weaker than the bound obtained during MIP root processing:
+Gurobi raises the lower bound by approximately 1.29 million passenger-seconds
+before the five-minute termination. Therefore the large raw headway
+fractionality cannot be interpreted directly as the remaining post-cut
+bottleneck.
+
+A matched Three-Station smoke comparison demonstrates the distinction. Its raw
+LP contained 14,317 fractional headway-order variables, while a later
+`MIPNODE` sample contained only seven. Passenger slots remained heavily
+fractional: 5,848 in the raw LP and 3,686 after root processing. This is
+evidence that Gurobi cuts can almost eliminate headway-order fractionality on
+the smaller case while substantial passenger and stop/skip coupling remains.
+It does not prove that the Five-Station post-cut relaxation has the same family
+distribution.

@@ -31,6 +31,14 @@ comparison verified why the two sources remain separate: the raw LP contained
 14,317 fractional headway-order variables, while the later post-cut root sample
 contained only seven; passenger slots remained heavily fractional in both.
 
+The final Five-Station diagnostic solved the raw LP in 68.67 seconds with an
+objective of 312,738 passenger-seconds. It found 50,609 fractional headway
+orders, 16,528 fractional passenger slots, and 739 fractional stop decisions.
+The subsequent five-minute MIP raised the bound to 1,604,228 seconds but still
+did not expose a post-cut relaxation vector. The family values are therefore
+recorded as raw-LP structure rather than attributed directly to the remaining
+post-cut gap.
+
 ### Passenger-optimized all-stop MIP start
 
 The integrated EAN passenger solver now supports three explicit MIP-start

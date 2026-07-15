@@ -19,129 +19,23 @@ improved start. The immediate bottleneck is therefore no longer the initial
 primal solution; it is the integrated root relaxation and the coupling between
 movement, timing, headway, and passenger decisions.
 
-This plan determines which part of that relaxation is weak before implementing
-another substantial reformulation.
+The implemented root diagnostic shows severe fractionality in the raw
+continuous relaxation, while Gurobi substantially strengthens the bound during
+MIP root processing. The exact post-cut variable vector is not available on
+`five_station_v0` within five minutes because root processing does not reach an
+optimal `MIPNODE` state. Detailed measurements are recorded in
+`docs/findings/ean_passenger_optimization_benchmarks.md`.
 
 ## Goals
 
-1. Identify the variable and constraint families responsible for the weak root
-   bound.
-2. Test inexpensive exact strengthening before introducing decomposition.
+1. Test inexpensive exact strengthening before introducing decomposition.
+2. Distinguish raw-LP improvements from post-cut MIP-bound improvements.
 3. Select later work from measured evidence rather than model size alone.
-4. Keep the production optimizer free of benchmark-specific policy decisions.
 
 The plan does not assume that the current incumbent is globally near-optimal.
 A strong feasible solution and a weak lower bound do not establish that.
 
-## Phase 1: Root-Relaxation Diagnosis
-
-Add a benchmark-only diagnostic that observes the canonical integrated model at
-the root node. Reuse `EanMovementModel` and `EanPassengerModel`; do not rebuild
-or duplicate the mathematical formulation.
-
-### Recorded variable families
-
-At minimum, classify and measure:
-
-- stop/skip binaries;
-- visit and checkpoint activation variables;
-- headway-order binaries;
-- passenger slot variables;
-- unserved passenger variables;
-- waiting and event-time variables;
-- selected board/alight time variables where present.
-
-For every integer family, record:
-
-```text
-variable count
-fractional variable count
-fractional share
-sum of distance to the nearest integer
-maximum distance to the nearest integer
-```
-
-For passenger slots, additionally aggregate fractional mass by demand group,
-ride candidate, cabin, and origin/destination pair. For headways, aggregate by
-checkpoint kind and by same-cabin versus different-cabin pairs.
-
-### Recorded root development
-
-Use callback values instead of parsing the textual Gurobi log. Record repeated
-root samples because presolve, cuts, and root heuristics can change the
-relaxation before branching:
-
-```text
-runtime
-root relaxation objective or best bound
-incumbent objective
-gap
-simplex/barrier work where available
-total cut count where available
-fractionality summary
-linear objective contribution by variable family
-```
-
-Keep the final available root sample as the principal comparison point. A
-standalone continuous relaxation should be used as a secondary structural
-diagnostic for constraint-family metrics:
-
-```text
-constraint count by name prefix
-active or nearly active constraint count
-slack distribution
-dual-value magnitude where available
-```
-
-These metrics identify constraints associated with the relaxed objective, but
-do not by themselves prove which reformulation will improve the MIP root.
-Label the standalone relaxation separately because it is not necessarily the
-post-presolve, post-cut MIP root relaxation used by Gurobi. Do not parse the
-solver log to manufacture cut categories that are unavailable through the
-callback API.
-
-### Code structure
-
-Keep diagnostics typed and separate from optimization behavior:
-
-```text
-benchmarking/ean_root_relaxation.py
-  EanRootRelaxationRecorder
-  EanRootRelaxationSample
-  EanVariableFamilyMetrics
-  EanRootRelaxationDiagnosticResult
-```
-
-The optimizer may expose a narrow observer hook or typed variable-family view
-needed by the recorder. It must not gain formulation branches or objective
-changes for diagnostics. Existing progress and checkpoint behavior must remain
-unchanged when no diagnostic recorder is supplied.
-
-Write one machine-readable JSON result per run and provide compact plots for:
-
-- bound and incumbent over root runtime;
-- fractional count and fractional mass by variable family;
-- passenger fractionality by demand group or OD pair;
-- headway-order fractionality by checkpoint category.
-
-### Initial experiment
-
-Run the diagnostic on:
-
-```text
-example: five_station_v0
-objective: journey_time
-formulation: current production default
-MIP start: optimized_all_stop
-solver policy: exact_optimality
-time limit: 300 seconds
-```
-
-Run the existing movement-only and fixed-movement cases with matching inputs as
-controls. Their objective bounds are not directly comparable, but their
-fractionality, construction cost, and solve behavior help isolate coupling.
-
-## Phase 2: Current Default Versus Tight Big-M
+## Phase 1: Current Default Versus Tight Big-M
 
 Before adding new constraints, compare exactly two integrated cases on
 `five_station_v0`:
@@ -158,7 +52,12 @@ setup time. Repeat with controlled solver seeds if the runner supports them.
 Keep `tight_big_m_bounds` opt-in unless it reproducibly improves the root bound
 without an unacceptable regression in incumbent search or runtime.
 
-## Phase 3: Candidate-Specific Passenger-Time Bounds
+If family-level metrics do not explain a changed bound, extend the diagnostic
+only for the active families: passenger slots by demand group, OD pair, cabin,
+and ride candidate; headway orders by checkpoint kind and same-cabin versus
+different-cabin pairs.
+
+## Phase 2: Candidate-Specific Passenger-Time Bounds
 
 If passenger slots, unserved counts, or selected-time variables dominate the
 root fractionality, implement the exact bounds in this order:
@@ -170,9 +69,9 @@ root fractionality, implement the exact bounds in this order:
 Each bound must follow from physical route and timing bounds, not from an
 incumbent. Prove it for both waiting modes and for every supported horizon and
 board-time formulation. Benchmark each step separately against the best result
-from Phase 2.
+from Phase 1.
 
-## Phase 4: Headway Precedence Reduction
+## Phase 3: Headway Precedence Reduction
 
 If headway-order and movement variables dominate, first classify safe
 same-cabin precedence:
@@ -187,7 +86,7 @@ correct activation-relaxed directed headway constraint. Record fixed, variable,
 and omitted pair counts. Continue to conservative time-window classification
 only if the exact same-cabin reduction has a measurable effect.
 
-## Phase 5: Algorithmic Branch
+## Phase 4: Algorithmic Branch
 
 Use the diagnostic evidence to choose between two separate objectives.
 
@@ -212,7 +111,7 @@ default next step while root coupling is the observed bottleneck.
 
 ## Decision Rules
 
-Choose the next implementation from the Phase-1 result:
+Choose the next implementation from the diagnostic and Phase-1 result:
 
 | Observation | Next work |
 |---|---|
