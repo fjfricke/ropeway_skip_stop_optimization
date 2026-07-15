@@ -45,6 +45,7 @@ from ropeway_skip_stop_optimization.optimization.ean.validation import (
 )
 from ropeway_skip_stop_optimization.optimization.solver_progress import (
     GurobiMipProgressSample,
+    GurobiSolvePhaseMetrics,
 )
 
 
@@ -115,6 +116,7 @@ class EanPassengerServiceProblem:
     objective: EanPassengerObjective = EanPassengerObjective.WAITING_TIME
     passenger_builder: EanPassengerCandidateBuilder | None = None
     use_all_stop_mip_start: bool = True
+    fixed_movement_plan: EanMovementPlan | None = None
 
     @property
     def kind(self) -> EanOptimizationProblemKind:
@@ -122,6 +124,16 @@ class EanPassengerServiceProblem:
 
 
 EanOptimizationProblem = EanMovementFeasibilityProblem | EanPassengerServiceProblem
+
+
+@dataclass(frozen=True)
+class EanModelBuildMetrics:
+    passenger_candidate_generation_seconds: float
+    movement_model_seconds: float
+    movement_fixing_seconds: float
+    passenger_model_seconds: float
+    mip_start_seconds: float
+    gurobi_setup_total_seconds: float
 
 
 @dataclass(frozen=True)
@@ -151,6 +163,11 @@ class EanOptimizationMetadata:
     movement_variable_count: int
     movement_constraint_count: int
     movement_nonzero_count: int
+    headway_pair_count: int
+    headway_order_variable_count: int
+    fixed_movement: bool
+    build_metrics: EanModelBuildMetrics
+    solve_phase_metrics: GurobiSolvePhaseMetrics | None
     skipped_visit_count: int
     visible_skipped_visit_count: int
     checkpoint_read_path: str | None
@@ -162,16 +179,40 @@ class EanOptimizationMetadata:
     def passenger_export_dict(self) -> dict[str, Any]:
         """Preserve the established passenger-result JSON metadata contract."""
 
-        excluded = {
-            "problem_kind",
-            "movement_variable_count",
-            "movement_constraint_count",
-            "movement_nonzero_count",
+        export_fields = {
+            "status",
+            "solver_status",
+            "objective_kind",
+            "objective_value_seconds",
+            "objective_passenger_hours",
+            "best_bound",
+            "mip_gap",
+            "runtime_seconds",
+            "node_count",
+            "solution_count",
+            "mip_gap_target",
+            "time_limit_seconds",
+            "demand_group_count",
+            "ride_candidate_count",
+            "slot_variable_count",
+            "served_passenger_count",
+            "unserved_passenger_count",
+            "variable_count",
+            "constraint_count",
+            "model_nonzero_count",
+            "model_setup_runtime_seconds",
+            "skipped_visit_count",
+            "visible_skipped_visit_count",
+            "checkpoint_read_path",
+            "checkpoint_solution_file_prefix",
+            "checkpoint_final_solution_path",
+            "optimization_config",
+            "progress_samples",
         }
         return {
             key: value
             for key, value in asdict(self).items()
-            if key not in excluded
+            if key in export_fields
         }
 
 
@@ -198,6 +239,7 @@ class EanOptimizer:
         problem.artifact.validate()
         optimization_config = self.config.optimization_config
         passenger_build = None
+        passenger_candidate_runtime = 0.0
         if isinstance(problem, EanPassengerServiceProblem):
             if problem.scenario.id != problem.artifact.scenario_id:
                 raise ValueError(
@@ -218,25 +260,37 @@ class EanOptimizer:
                 raise ValueError(
                     "board_time_projected_journey_time requires journey_time objective"
                 )
+            candidate_started = perf_counter()
             passenger_build = (
                 problem.passenger_builder
                 or EanPassengerCandidateBuilder(
                     optimization_config=optimization_config
                 )
             ).build(problem.scenario, problem.artifact)
+            passenger_candidate_runtime = perf_counter() - candidate_started
 
         setup_started = perf_counter()
         model = gp.Model(f"ean_{problem.kind.value}")
         model.Params.OutputFlag = 1 if self.config.log_to_console else 0
         apply_gurobi_solver_policy(model, self.config.solver_policy)
+        movement_started = perf_counter()
         movement_model = EanMovementModelBuilder().build(
             model=model,
             binary_vtype=GRB.BINARY,
             artifact=problem.artifact,
             optimization_config=optimization_config,
         )
+        movement_runtime = perf_counter() - movement_started
+        movement_fixing_runtime = 0.0
         passenger_model = None
+        passenger_runtime = 0.0
+        mip_start_runtime = 0.0
         if isinstance(problem, EanPassengerServiceProblem):
+            if problem.fixed_movement_plan is not None:
+                fixing_started = perf_counter()
+                movement_model.fix_to_plan(problem.fixed_movement_plan)
+                movement_fixing_runtime = perf_counter() - fixing_started
+            passenger_started = perf_counter()
             passenger_model = EanPassengerModelBuilder().build(
                 scenario=problem.scenario,
                 movement_model=movement_model,
@@ -247,14 +301,18 @@ class EanOptimizer:
                 passenger_builder=problem.passenger_builder,
                 passenger_build=passenger_build,
             )
+            passenger_runtime = perf_counter() - passenger_started
             if (
                 problem.use_all_stop_mip_start
+                and problem.fixed_movement_plan is None
                 and (
                     self.config.checkpoint is None
                     or self.config.checkpoint.read_solution_path is None
                 )
             ):
+                mip_start_started = perf_counter()
                 passenger_model.apply_all_stop_mip_start()
+                mip_start_runtime = perf_counter() - mip_start_started
         else:
             model.setObjective(0.0, GRB.MINIMIZE)
 
@@ -262,6 +320,16 @@ class EanOptimizer:
         model.update()
         model_nonzero_count = int(model.NumNZs)
         setup_runtime = perf_counter() - setup_started
+        build_metrics = EanModelBuildMetrics(
+            passenger_candidate_generation_seconds=(
+                passenger_candidate_runtime
+            ),
+            movement_model_seconds=movement_runtime,
+            movement_fixing_seconds=movement_fixing_runtime,
+            passenger_model_seconds=passenger_runtime,
+            mip_start_seconds=mip_start_runtime,
+            gurobi_setup_total_seconds=setup_runtime,
+        )
         _log_model_summary(
             model=model,
             problem=problem,
@@ -281,6 +349,9 @@ class EanOptimizer:
         progress_samples = _progress_samples(
             self.config.progress_recorder,
             progress_start,
+        )
+        solve_phase_metrics = _progress_phase_metrics(
+            self.config.progress_recorder
         )
         diagnostics = _solver_diagnostics(
             model,
@@ -303,6 +374,8 @@ class EanOptimizer:
                     model=model,
                     model_nonzero_count=model_nonzero_count,
                     setup_runtime=setup_runtime,
+                    build_metrics=build_metrics,
+                    solve_phase_metrics=solve_phase_metrics,
                     progress_samples=progress_samples,
                 ),
             )
@@ -338,6 +411,8 @@ class EanOptimizer:
                 model=model,
                 model_nonzero_count=model_nonzero_count,
                 setup_runtime=setup_runtime,
+                build_metrics=build_metrics,
+                solve_phase_metrics=solve_phase_metrics,
                 progress_samples=progress_samples,
                 movement_plan=movement_plan,
                 passenger_plan=passenger_plan,
@@ -356,6 +431,8 @@ def _metadata(
     model: Any,
     model_nonzero_count: int,
     setup_runtime: float,
+    build_metrics: EanModelBuildMetrics,
+    solve_phase_metrics: GurobiSolvePhaseMetrics | None,
     progress_samples: tuple[GurobiMipProgressSample, ...],
     movement_plan: EanMovementPlan | None = None,
     passenger_plan: EanPassengerServicePlan | None = None,
@@ -425,6 +502,16 @@ def _metadata(
         movement_variable_count=movement_model.variable_count,
         movement_constraint_count=movement_model.constraint_count,
         movement_nonzero_count=movement_model.nonzero_count,
+        headway_pair_count=len(problem.artifact.headway_pairs),
+        headway_order_variable_count=len(
+            movement_model.variables.headway_order
+        ),
+        fixed_movement=(
+            isinstance(problem, EanPassengerServiceProblem)
+            and problem.fixed_movement_plan is not None
+        ),
+        build_metrics=build_metrics,
+        solve_phase_metrics=solve_phase_metrics,
         skipped_visit_count=skipped_count,
         visible_skipped_visit_count=visible_skipped_count,
         **checkpoint_diagnostics,
@@ -468,6 +555,15 @@ def _progress_samples(
     if recorder is None:
         return ()
     return tuple(recorder.samples[start:])
+
+
+def _progress_phase_metrics(
+    recorder: Any | None,
+) -> GurobiSolvePhaseMetrics | None:
+    if recorder is None:
+        return None
+    metrics = getattr(recorder, "phase_metrics", None)
+    return metrics if isinstance(metrics, GurobiSolvePhaseMetrics) else None
 
 
 def _configure_checkpoints(

@@ -100,6 +100,66 @@ def test_gurobi_mip_progress_recorder_records_final_model_state() -> None:
     assert sample.solution_count == 3
 
 
+def test_gurobi_mip_progress_recorder_collects_phase_and_memory_metrics() -> None:
+    recorder = GurobiMipProgressRecorder()
+    model = _FakeCallbackModel()
+    recorder.begin_run()
+
+    model.values = {
+        _FakeCallback.RUNTIME: 1.0,
+        _FakeCallback.MAXMEMUSED: 0.2,
+    }
+    recorder.record_callback(
+        model,
+        _FakeGRB,
+        _FakeCallback.PRESOLVE,
+        sample_interval_seconds=5.0,
+    )
+    model.values = {
+        _FakeCallback.RUNTIME: 2.0,
+        _FakeCallback.MAXMEMUSED: 0.3,
+    }
+    recorder.record_callback(
+        model,
+        _FakeGRB,
+        _FakeCallback.SIMPLEX,
+        sample_interval_seconds=5.0,
+    )
+    model.values = {
+        _FakeCallback.RUNTIME: 5.0,
+        _FakeCallback.MIPNODE_NODCNT: 0.0,
+        _FakeCallback.MAXMEMUSED: 0.4,
+    }
+    recorder.record_callback(
+        model,
+        _FakeGRB,
+        _FakeCallback.MIPNODE,
+        sample_interval_seconds=5.0,
+    )
+    model.values = {
+        _FakeCallback.RUNTIME: 6.0,
+        _FakeCallback.MIPSOL_OBJ: 78.0,
+        _FakeCallback.MIPSOL_OBJBND: 64.0,
+        _FakeCallback.MIPSOL_NODCNT: 10.0,
+        _FakeCallback.MIPSOL_SOLCNT: 1.0,
+        _FakeCallback.MAXMEMUSED: 0.35,
+    }
+    recorder.record_callback(
+        model,
+        _FakeGRB,
+        _FakeCallback.MIPSOL,
+        sample_interval_seconds=5.0,
+    )
+
+    metrics = recorder.phase_metrics
+    assert metrics.presolve_runtime_seconds == 1.0
+    assert metrics.root_relaxation_start_seconds == 2.0
+    assert metrics.root_relaxation_end_seconds == 5.0
+    assert metrics.root_relaxation_runtime_seconds == 3.0
+    assert metrics.first_incumbent_runtime_seconds == 6.0
+    assert metrics.peak_memory_gb == 0.4
+
+
 def test_plot_builder_writes_expected_svg_files(tmp_path: Path) -> None:
     result = _benchmark_result("run-a")
     output_paths = PlotBuilder((result,)).write_all(tmp_path)
@@ -147,6 +207,13 @@ class _FakeCallback:
     MIPSOL_OBJBND = 10
     MIPSOL_NODCNT = 11
     MIPSOL_SOLCNT = 12
+    PRESOLVE = 13
+    SIMPLEX = 14
+    BARRIER = 15
+    MIPNODE = 16
+    MIPNODE_NODCNT = 17
+    MAXMEMUSED = 18
+    MEMUSED = 19
 
 
 class _FakeGRB:

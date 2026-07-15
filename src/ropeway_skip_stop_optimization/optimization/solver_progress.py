@@ -17,21 +17,42 @@ class GurobiMipProgressSample:
     event: str = "interval"
 
 
+@dataclass(frozen=True)
+class GurobiSolvePhaseMetrics:
+    presolve_runtime_seconds: float | None
+    root_relaxation_start_seconds: float | None
+    root_relaxation_end_seconds: float | None
+    root_relaxation_runtime_seconds: float | None
+    first_incumbent_runtime_seconds: float | None
+    peak_memory_gb: float | None
+
+
 @dataclass
 class GurobiMipProgressRecorder:
     samples: list[GurobiMipProgressSample] = field(default_factory=list)
     _last_interval_runtime: float | None = None
     _last_solution_count: int | None = None
     _last_incumbent_objective: float | None = None
+    _presolve_runtime_seconds: float | None = None
+    _root_relaxation_start_seconds: float | None = None
+    _root_relaxation_end_seconds: float | None = None
+    _first_incumbent_runtime_seconds: float | None = None
+    _peak_memory_gb: float | None = None
 
     def begin_run(self) -> int:
         self._last_interval_runtime = None
         self._last_solution_count = None
         self._last_incumbent_objective = None
+        self._presolve_runtime_seconds = None
+        self._root_relaxation_start_seconds = None
+        self._root_relaxation_end_seconds = None
+        self._first_incumbent_runtime_seconds = None
+        self._peak_memory_gb = None
         return len(self.samples)
 
     def record_callback(self, model: Any, grb: Any, where: int, *, sample_interval_seconds: float) -> None:
         callback = grb.Callback
+        self._record_phase_metrics(model, callback, where)
         if where == callback.MIPSOL:
             sample = self._sample_callback(model, grb, where, event="incumbent")
             if self._is_new_incumbent(sample):
@@ -48,6 +69,18 @@ class GurobiMipProgressRecorder:
             self._last_interval_runtime = sample.runtime_seconds
 
     def record_final(self, model: Any, grb: Any) -> None:
+        if self._peak_memory_gb is None:
+            final_memory = _safe_float_attr(model, "MemUsed")
+            if final_memory is None:
+                final_memory = _safe_float_attr(model, "MaxMemUsed")
+            self._peak_memory_gb = final_memory
+        if (
+            self._first_incumbent_runtime_seconds is None
+            and (_safe_int_attr(model, "SolCount") or 0) > 0
+        ):
+            self._first_incumbent_runtime_seconds = (
+                _safe_float_attr(model, "Runtime") or 0.0
+            )
         self.samples.append(
             GurobiMipProgressSample(
                 runtime_seconds=_safe_float_attr(model, "Runtime") or 0.0,
@@ -62,6 +95,73 @@ class GurobiMipProgressRecorder:
                 event="final",
             )
         )
+
+    @property
+    def phase_metrics(self) -> GurobiSolvePhaseMetrics:
+        root_runtime = None
+        if (
+            self._root_relaxation_start_seconds is not None
+            and self._root_relaxation_end_seconds is not None
+        ):
+            root_runtime = max(
+                0.0,
+                self._root_relaxation_end_seconds
+                - self._root_relaxation_start_seconds,
+            )
+        return GurobiSolvePhaseMetrics(
+            presolve_runtime_seconds=self._presolve_runtime_seconds,
+            root_relaxation_start_seconds=(
+                self._root_relaxation_start_seconds
+            ),
+            root_relaxation_end_seconds=self._root_relaxation_end_seconds,
+            root_relaxation_runtime_seconds=root_runtime,
+            first_incumbent_runtime_seconds=(
+                self._first_incumbent_runtime_seconds
+            ),
+            peak_memory_gb=self._peak_memory_gb,
+        )
+
+    def _record_phase_metrics(
+        self,
+        model: Any,
+        callback: Any,
+        where: int,
+    ) -> None:
+        runtime = _cb_get(model, _callback_code(callback, "RUNTIME"))
+        memory = _cb_get(model, _callback_code(callback, "MEMUSED"))
+        if memory is None:
+            memory = _cb_get(model, _callback_code(callback, "MAXMEMUSED"))
+        if memory is not None:
+            self._peak_memory_gb = max(self._peak_memory_gb or 0.0, memory)
+
+        if runtime is None:
+            return
+        if where == getattr(callback, "PRESOLVE", None):
+            self._presolve_runtime_seconds = runtime
+            return
+        if where in {
+            getattr(callback, "SIMPLEX", None),
+            getattr(callback, "BARRIER", None),
+        }:
+            if self._root_relaxation_start_seconds is None:
+                self._root_relaxation_start_seconds = runtime
+            return
+        if where == getattr(callback, "MIPNODE", None):
+            node_count = _cb_get(
+                model,
+                _callback_code(callback, "MIPNODE_NODCNT"),
+            )
+            if (
+                self._root_relaxation_end_seconds is None
+                and (node_count is None or node_count <= 0.0)
+            ):
+                self._root_relaxation_end_seconds = runtime
+            return
+        if (
+            where == getattr(callback, "MIPSOL", None)
+            and self._first_incumbent_runtime_seconds is None
+        ):
+            self._first_incumbent_runtime_seconds = runtime
 
     def _sample_callback(self, model: Any, grb: Any, where: int, *, event: str) -> GurobiMipProgressSample:
         callback = grb.Callback

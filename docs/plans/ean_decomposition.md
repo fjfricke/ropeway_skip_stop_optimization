@@ -10,11 +10,17 @@ model remains the reference implementation and certification path.
 
 ## Phase 0: Stabilize the Immediate Baseline and Locate the Bottleneck
 
-Complete the repeated affine-timing validation from
-`ean_formulation_and_search.md`, choose the immediate production baseline, and
-retain its predecessor as a benchmark reference. Do not wait for every
-speculative phase in `ean_structural_reformulation.md`: the purpose of this
-diagnosis is to decide whether those phases are worth implementing.
+The immediate production baseline has been selected: affine stop/skip timing,
+first-slot activation, and objective-aware boarding-time projection are the
+defaults. Historical formulations remain selectable as benchmark references.
+Repeated-seed validation remains useful, but it no longer blocks this phase.
+Do not wait for every speculative phase in
+`ean_structural_reformulation.md`: the purpose of this diagnosis is to decide
+whether those phases are worth implementing.
+
+The three-case diagnostic runner and callback metrics are implemented. The
+remaining Phase-0 work is to execute and interpret the controlled scaling
+ladder.
 
 Create a scaling ladder with increasing station count, demand, and cabin
 density. For every level, measure the same resource-limited cases:
@@ -26,13 +32,28 @@ passenger optimization for a fixed movement plan
 ```
 
 For the initial diagnostic, obtain the fixed-movement case by fixing movement
-variables in the integrated model. Replace that diagnostic with the independent
-Phase 1 evaluator once it exists.
+variables through the canonical `EanMovementModel` inside the integrated
+passenger model. Use the movement plan extracted from the integrated run and
+disable the all-stop MIP start for this case. Replace that diagnostic with the
+independent Phase 1 evaluator once it exists.
+
+The movement-only case uses the canonical movement model with objective zero.
+It diagnoses construction cost and the difficulty of finding and certifying
+feasibility. Its objective bound and gap are not comparable to the passenger
+objective and must not be interpreted as proof progress for the integrated
+problem.
 
 Separate model construction, presolve, root relaxation, incumbent search, and
 proof progress. Record variables, constraints, nonzeros, headway pairs,
 ordering binaries, passenger candidates, peak memory, first incumbent, final
 incumbent, bound, gap, and runtime.
+
+Use callback metrics rather than parsing solver text. Record candidate
+generation, movement-model construction, passenger-model construction, and
+MIP-start application separately. The scaling runner should write one
+machine-readable result containing all three cases for an example and solver
+budget. Existing passenger benchmark and frontend JSON contracts remain
+unchanged.
 
 Use the measurements to select the next branch:
 
@@ -313,9 +334,10 @@ external validation if that later becomes necessary.
 
 ## Evaluation Order
 
-1. Select the immediate affine/non-affine baseline and establish the scaling
-   ladder; do not require speculative structural phases first.
-2. Run integrated, movement-only, and fixed-movement passenger diagnostics.
+1. Establish the scaling ladder around the selected production baseline; do
+   not require speculative structural phases first.
+2. Run integrated, movement-only, and fixed-movement passenger diagnostics
+   with the implemented Phase-0 runner.
 3. If movement/headways dominate, test safe fixed precedence before delayed
    generation or a movement-only CP prototype.
 4. If passenger assignment dominates, build the fixed-movement evaluator,

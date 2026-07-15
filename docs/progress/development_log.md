@@ -5,6 +5,23 @@ corresponding decisions were made.
 
 ## 2026-07-15
 
+### Phase-0 EAN bottleneck diagnostic
+
+The selected production formulation can now be diagnosed through one runner
+that executes integrated passenger service, movement-only feasibility, and
+fixed-movement passenger optimization under the same per-case solver budget.
+The fixed case reuses the integrated movement plan and fixes it through the
+canonical `EanMovementModel`; it does not introduce a separate formulation or
+solver path.
+
+The callback recorder now captures presolve timing, observed root-relaxation
+boundaries, first-incumbent time, and current-memory peaks without parsing
+Gurobi text output. Model setup is split into passenger candidate generation,
+movement construction, movement fixing, passenger construction, and MIP-start
+application. Diagnostic JSON and five SVG case comparisons are written outside
+the frontend export tree. A one-second smoke run verified the complete path,
+but its values are not performance findings.
+
 ### Unified object-oriented EAN solver architecture
 
 The separate skip/stop-feasibility and passenger-service solver entry points

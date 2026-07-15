@@ -4,13 +4,17 @@ import hashlib
 import json
 import platform
 import socket
-import subprocess
 import sys
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from ropeway_skip_stop_optimization.benchmarking.environment import (
+    current_git_commit,
+    git_is_dirty,
+    gurobi_version,
+)
 from ropeway_skip_stop_optimization.examples.registry import get_example
 from ropeway_skip_stop_optimization.exports.json_codec import to_jsonable, write_json
 from ropeway_skip_stop_optimization.exports.runner import (
@@ -147,12 +151,12 @@ def run_ean_passenger_benchmark(config: BenchmarkRunConfig) -> tuple[BenchmarkRu
         run_id=run_id,
         label=config.label or _default_label(config),
         timestamp=datetime.now(timezone.utc).isoformat(timespec="seconds"),
-        git_commit=_git_commit(),
-        git_dirty=_git_dirty(),
+        git_commit=current_git_commit(),
+        git_dirty=git_is_dirty(),
         hostname=socket.gethostname(),
         platform=platform.platform(),
         python_version=sys.version.split()[0],
-        gurobi_version=_gurobi_version(),
+        gurobi_version=gurobi_version(),
         example_id=example.metadata.id,
         family_id=example.metadata.family_id,
         variant_id=example.metadata.variant_id,
@@ -247,29 +251,6 @@ def _short_run_id_part(value: str) -> str:
 
 def _default_label(config: BenchmarkRunConfig) -> str:
     return f"{config.example_id} / {config.artifact_set_id} / {config.ean_solver_policy.value}"
-
-
-def _git_commit() -> str | None:
-    try:
-        return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
-    except Exception:
-        return None
-
-
-def _git_dirty() -> bool:
-    try:
-        return bool(subprocess.check_output(["git", "status", "--porcelain"], text=True).strip())
-    except Exception:
-        return False
-
-
-def _gurobi_version() -> str | None:
-    try:
-        import gurobipy as gp
-
-        return ".".join(str(part) for part in gp.gurobi.version())
-    except Exception:
-        return None
 
 
 def benchmark_result_to_dict(result: BenchmarkRunResult) -> dict[str, Any]:

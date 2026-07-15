@@ -72,6 +72,7 @@ from ropeway_skip_stop_optimization.optimization.ean.optimization_config import 
 )
 from ropeway_skip_stop_optimization.optimization.ean.optimizers import (
     EanMovementFeasibilityProblem,
+    EanModelBuildMetrics,
     EanOptimizationMetadata,
     EanOptimizationProblemKind,
     EanOptimizationResult,
@@ -134,6 +135,7 @@ __all__ = [
     "EanPassengerCandidateBuilder",
     "EanPassengerCandidateBuildResult",
     "EanMovementFeasibilityProblem",
+    "EanModelBuildMetrics",
     "EanOptimizationMetadata",
     "EanOptimizationProblemKind",
     "EanOptimizationResult",

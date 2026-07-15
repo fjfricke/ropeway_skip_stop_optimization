@@ -27,6 +27,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanOptimizer,
     EanFormulationConfig,
     EanHorizonFormulation,
+    EanMovementPlan,
     EanTimeBoundFormulation,
     EanPassengerObjective,
     EanPassengerServiceProblem,
@@ -66,6 +67,8 @@ class _PassengerSolveOptions:
     optimization_config: EanOptimizationConfig = field(
         default_factory=EanOptimizationConfig
     )
+    fixed_movement_plan: EanMovementPlan | None = None
+    use_all_stop_mip_start: bool = True
 
 
 def _solve_passenger(
@@ -81,6 +84,8 @@ def _solve_passenger(
             scenario=scenario,
             artifact=artifact,
             objective=options.objective,
+            fixed_movement_plan=options.fixed_movement_plan,
+            use_all_stop_mip_start=options.use_all_stop_mip_start,
         )
     )
 
@@ -156,6 +161,46 @@ def test_ean_passenger_service_journey_time_uses_alighting_time() -> None:
         result.metadata.optimization_config.formulation.board_time
         is EanBoardTimeFormulation.PROJECTED_JOURNEY_TIME
     )
+
+
+def test_ean_passenger_service_can_fix_the_canonical_movement_plan() -> None:
+    pytest.importorskip("gurobipy")
+    scenario = _minimal_scenario(
+        demands=(
+            Demand(
+                arrival_time=time(8, 0),
+                origin="A",
+                destination="B",
+                count=2,
+            ),
+        )
+    )
+    artifact = _minimal_artifact(cabin_capacity=2, cycle_count=2)
+    objective = EanPassengerObjective.JOURNEY_TIME
+    baseline = _solve_passenger(
+        scenario,
+        artifact,
+        _PassengerSolveOptions(objective=objective),
+    )
+    assert baseline.movement_plan is not None
+
+    fixed = _solve_passenger(
+        scenario,
+        artifact,
+        _PassengerSolveOptions(
+            objective=objective,
+            fixed_movement_plan=baseline.movement_plan,
+            use_all_stop_mip_start=False,
+        ),
+    )
+
+    assert fixed.metadata.status == "optimal"
+    assert fixed.metadata.fixed_movement
+    assert fixed.metadata.build_metrics.movement_fixing_seconds >= 0.0
+    assert fixed.metadata.objective_value_seconds == pytest.approx(
+        baseline.metadata.objective_value_seconds
+    )
+    assert fixed.movement_plan == baseline.movement_plan
 
 
 def test_headway_time_expressions_use_wait_occupancy_for_platform_exit_waiting() -> None:

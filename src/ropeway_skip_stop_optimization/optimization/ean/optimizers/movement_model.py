@@ -107,6 +107,17 @@ class EanMovementModel:
     def extract_plan(self) -> EanMovementPlan:
         return extract_movement_plan(self)
 
+    def fix_to_plan(self, plan: EanMovementPlan) -> None:
+        """Fix operational movement decisions to an extracted movement plan.
+
+        Headway-order and checkpoint-activation binaries are not part of the
+        public movement plan. Once visit times, route decisions, waiting, and
+        visit activation are fixed, those auxiliary decisions are implied and
+        can be eliminated by presolve.
+        """
+
+        fix_movement_model_to_plan(self, plan)
+
 
 @dataclass(frozen=True)
 class EanMovementModelBuilder:
@@ -746,6 +757,93 @@ def extract_movement_plan(movement_model: EanMovementModel) -> EanMovementPlan:
     )
     plan.validate()
     return plan
+
+
+def fix_movement_model_to_plan(
+    movement_model: EanMovementModel,
+    plan: EanMovementPlan,
+) -> None:
+    plan.validate()
+    artifact = movement_model.artifact
+    if plan.scenario_id != artifact.scenario_id:
+        raise ValueError(
+            "fixed EAN movement plan scenario does not match the build "
+            f"artifact: {plan.scenario_id!r} != {artifact.scenario_id!r}"
+        )
+    if plan.horizon_formulation is not (
+        movement_model.optimization_config.formulation.horizon
+    ):
+        raise ValueError(
+            "fixed EAN movement plan horizon formulation does not match the "
+            "optimization configuration"
+        )
+
+    plan_visits = {
+        (visit.cabin_id, visit.visit_index): visit
+        for trajectory in plan.trajectories
+        for visit in trajectory.visits
+    }
+    unknown_keys = set(plan_visits) - set(movement_model.visits_by_key)
+    if unknown_keys:
+        raise ValueError(
+            "fixed EAN movement plan contains unknown visits: "
+            f"{sorted(unknown_keys)}"
+        )
+
+    variables = movement_model.variables
+    for key, visit_definition in movement_model.visits_by_key.items():
+        plan_visit = plan_visits.get(key)
+        if plan_visit is None:
+            _fix_variable(variables.stop[key], 0.0, label=f"stop[{key}]")
+            _fix_variable(
+                variables.visit_active[key],
+                0.0,
+                label=f"visit_active[{key}]",
+            )
+            continue
+        if plan_visit.switch_id != visit_definition.switch_id:
+            raise ValueError(
+                "fixed EAN movement plan switch does not match artifact for "
+                f"visit {key}: {plan_visit.switch_id!r} != "
+                f"{visit_definition.switch_id!r}"
+            )
+        _fix_variable(
+            variables.switch_time[key],
+            plan_visit.switch_time_seconds,
+            label=f"switch_time[{key}]",
+        )
+        _fix_variable(
+            variables.exit_switch_time[key],
+            plan_visit.exit_switch_time_seconds,
+            label=f"exit_switch_time[{key}]",
+        )
+        _fix_variable(
+            variables.wait_time[key],
+            plan_visit.wait_seconds,
+            label=f"wait_time[{key}]",
+        )
+        _fix_variable(
+            variables.stop[key],
+            1.0 if plan_visit.decision is EanRouteDecision.STOP else 0.0,
+            label=f"stop[{key}]",
+        )
+        _fix_variable(
+            variables.visit_active[key],
+            1.0,
+            label=f"visit_active[{key}]",
+        )
+    movement_model.model.update()
+
+
+def _fix_variable(variable: Any, value: float, *, label: str) -> None:
+    if hasattr(variable, "LB") and hasattr(variable, "UB"):
+        variable.LB = value
+        variable.UB = value
+        return
+    if not math.isclose(float(variable), value, abs_tol=1e-8):
+        raise ValueError(
+            f"cannot fix constant {label}={float(variable)} to {value}"
+        )
 
 
 def visits_by_key_for(

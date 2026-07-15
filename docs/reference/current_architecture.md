@@ -161,6 +161,14 @@ after it.
 Checkpoint files store incumbent solutions and are loaded as MIP starts. They
 do not persist or resume the previous branch-and-bound tree.
 
+The bottleneck diagnostic uses the same optimizer and model builders for three
+cases: integrated passenger service, zero-objective movement feasibility, and
+passenger service with an extracted movement plan fixed through
+`EanMovementModel`. Callback observability additionally records presolve,
+root-relaxation boundaries when exposed, first-incumbent time, and the peak
+current Gurobi memory observed during each case. No solver log parsing is used.
+Movement-only bounds are not compared with passenger-objective bounds.
+
 ## Benchmark and Delivery
 
 Benchmark scripts write machine-specific JSON, SVG plots, and checkpoints under

@@ -130,6 +130,129 @@ class PlotBuilder:
         raise ValueError(f"Unknown plot name: {name}")
 
 
+@dataclass(frozen=True)
+class EanBottleneckPlotBuilder:
+    diagnostic: Mapping[str, Any]
+
+    def write_all(
+        self,
+        output_dir: Path,
+        *,
+        prefix: str,
+    ) -> tuple[Path, ...]:
+        output_dir.mkdir(parents=True, exist_ok=True)
+        case_results = self._case_results()
+        plots = {
+            "runtime_by_case": _bar_chart(
+                title="EAN bottleneck runtime by case",
+                y_label="seconds",
+                groups=_single_metric_groups(
+                    case_results,
+                    "runtime_seconds",
+                ),
+            ),
+            "model_size_by_case": _bar_chart(
+                title="EAN bottleneck model size by case",
+                y_label="count",
+                groups=_multi_metric_groups(
+                    case_results,
+                    (
+                        ("variables", "variable_count"),
+                        ("constraints", "constraint_count"),
+                        ("nonzeros", "model_nonzero_count"),
+                    ),
+                ),
+            ),
+            "build_time_by_case": _bar_chart(
+                title="EAN model construction by case",
+                y_label="seconds",
+                groups=_multi_metric_groups(
+                    case_results,
+                    (
+                        ("candidates", "candidate_seconds"),
+                        ("movement", "movement_seconds"),
+                        ("fix movement", "fixing_seconds"),
+                        ("passengers", "passenger_seconds"),
+                        ("MIP start", "mip_start_seconds"),
+                    ),
+                ),
+            ),
+            "solve_phases_by_case": _bar_chart(
+                title="EAN solve phases by case",
+                y_label="seconds",
+                groups=_multi_metric_groups(
+                    case_results,
+                    (
+                        ("presolve", "presolve_seconds"),
+                        ("root relaxation", "root_seconds"),
+                        ("first incumbent", "first_incumbent_seconds"),
+                    ),
+                ),
+            ),
+            "memory_by_case": _bar_chart(
+                title="EAN observed memory by case",
+                y_label="GB",
+                groups=_single_metric_groups(
+                    case_results,
+                    "peak_memory_gb",
+                ),
+            ),
+        }
+        written: list[Path] = []
+        for name, svg in plots.items():
+            output_path = output_dir / f"{prefix}__{name}.svg"
+            output_path.write_text(svg, encoding="utf-8")
+            written.append(output_path)
+        return tuple(written)
+
+    def _case_results(self) -> tuple[dict[str, Any], ...]:
+        results: list[dict[str, Any]] = []
+        example_id = str(self.diagnostic.get("example_id", "EAN"))
+        for case in self.diagnostic.get("cases") or ():
+            metadata = case.get("metadata")
+            if not isinstance(metadata, Mapping):
+                continue
+            build = metadata.get("build_metrics")
+            phases = metadata.get("solve_phase_metrics")
+            build = build if isinstance(build, Mapping) else {}
+            phases = phases if isinstance(phases, Mapping) else {}
+            results.append(
+                {
+                    "label": f"{example_id} / {case.get('case')}",
+                    "runtime_seconds": metadata.get("runtime_seconds"),
+                    "variable_count": metadata.get("variable_count"),
+                    "constraint_count": metadata.get("constraint_count"),
+                    "model_nonzero_count": metadata.get(
+                        "model_nonzero_count"
+                    ),
+                    "candidate_seconds": build.get(
+                        "passenger_candidate_generation_seconds"
+                    ),
+                    "movement_seconds": build.get(
+                        "movement_model_seconds"
+                    ),
+                    "fixing_seconds": build.get(
+                        "movement_fixing_seconds"
+                    ),
+                    "passenger_seconds": build.get(
+                        "passenger_model_seconds"
+                    ),
+                    "mip_start_seconds": build.get("mip_start_seconds"),
+                    "presolve_seconds": phases.get(
+                        "presolve_runtime_seconds"
+                    ),
+                    "root_seconds": phases.get(
+                        "root_relaxation_runtime_seconds"
+                    ),
+                    "first_incumbent_seconds": phases.get(
+                        "first_incumbent_runtime_seconds"
+                    ),
+                    "peak_memory_gb": phases.get("peak_memory_gb"),
+                }
+            )
+        return tuple(results)
+
+
 def load_benchmark_result_dicts(paths: Sequence[Path]) -> tuple[dict[str, Any], ...]:
     return tuple(json.loads(path.read_text(encoding="utf-8")) for path in paths)
 

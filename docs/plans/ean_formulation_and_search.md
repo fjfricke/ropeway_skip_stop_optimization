@@ -46,7 +46,11 @@ These instances are the correctness gate for every later reduction,
 classification, or reformulation. They are infrastructure, not a separate
 performance experiment.
 
-## Step 1: Validate the Current Timing Default Beyond Its Promotion Instance
+## Step 1: Continue Validation of the Selected Timing Default
+
+The combined Journey-Time formulation has already been promoted to the
+production default. The following runs are continued validation and variance
+measurement, not a prerequisite for selecting the baseline.
 
 ### Repeated Affine Timing Validation
 
@@ -85,7 +89,9 @@ passenger optimization for a fixed movement plan
 ```
 
 Also separate Python construction, presolve, root relaxation, incumbent search,
-and proof progress. The result selects one or more branches below:
+and proof progress. Treat the zero-objective movement-only solve as a
+feasibility and construction diagnostic rather than comparing its gap with the
+passenger objective. The result selects one or more branches below:
 
 - movement/headway bottleneck -> Branch A;
 - weak or late incumbents -> Branch B;
