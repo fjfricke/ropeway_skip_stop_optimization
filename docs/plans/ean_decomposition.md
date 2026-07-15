@@ -18,7 +18,7 @@ Do not wait for every speculative phase in
 `ean_structural_reformulation.md`: the purpose of this diagnosis is to decide
 whether those phases are worth implementing.
 
-The three-case diagnostic runner and callback metrics are implemented. The
+The four-case diagnostic runner and callback metrics are implemented. The
 remaining Phase-0 work is to execute and interpret the controlled scaling
 ladder.
 
@@ -28,14 +28,14 @@ density. For every level, measure the same resource-limited cases:
 ```text
 integrated movement and passenger model
 movement and headways without passenger assignment
-passenger optimization for a fixed movement plan
+integer passenger optimization for a fixed movement plan
+LP relaxation for the same fixed movement plan
 ```
 
-For the initial diagnostic, obtain the fixed-movement case by fixing movement
-variables through the canonical `EanMovementModel` inside the integrated
-passenger model. Use the movement plan extracted from the integrated run and
-disable the all-stop MIP start for this case. Replace that diagnostic with the
-independent Phase 1 evaluator once it exists.
+The fixed-movement integer and LP cases use the independent compact passenger
+optimizer with the movement plan extracted from the integrated run. They build
+no movement or headway variables and share exactly the same feasible direct
+rides.
 
 The movement-only case uses the canonical movement model with objective zero.
 It diagnoses construction cost and the difficulty of finding and certifying
@@ -51,7 +51,7 @@ incumbent, bound, gap, and runtime.
 Use callback metrics rather than parsing solver text. Record candidate
 generation, movement-model construction, passenger-model construction, and
 MIP-start application separately. The scaling runner should write one
-machine-readable result containing all three cases for an example and solver
+machine-readable result containing all four cases for an example and solver
 budget. Existing passenger benchmark and frontend JSON contracts remain
 unchanged.
 
@@ -72,54 +72,26 @@ Maintain tiny production-path instances that solve to proven optimality. Every
 later exact method must agree with these instances before a scaling benchmark
 is interpreted.
 
-## Phase 1: Fixed-Movement Passenger Evaluator
+## Phase 1: Passenger-Coupling Cut Design
 
-Build a destination-layered event-expanded passenger model for a fixed movement
-and timing plan.
+The compact fixed-movement passenger optimizer and its LP mode are implemented.
+Use their matched LP/IP measurements to design decomposition cuts; do not add a
+separate repair heuristic while the complete integer subproblem remains fast.
 
-The network should contain demand sources, station waiting events, boarding,
-cabin-interval ride arcs, alighting, destination sinks, and an unserved option.
-Destination layers preserve OD identity and share cabin capacities:
+Start with movement patterns from the Three- and Five-Station scaling ladder.
+For each pattern, record the LP/IP objective gap, LP fractionality, exact solve
+time, and which demand or cabin-capacity rows are binding. Then derive and test:
 
-```text
-sum(flow on cabin interval over all destinations) <= cabin capacity
-```
+- valid LP lower-bounding cuts from demand and capacity duals;
+- logic-based optimality cuts from the exact passenger solve;
+- stronger combinatorial cuts for repeated stop/capacity conflicts.
 
-The shared capacities make this a multi-commodity model. Its continuous LP is
-not automatically integral.
+The general direct-ride LP is nonintegral, so LP dual cuts alone do not certify
+the integer passenger value. If the exact fixed-movement problem later becomes
+difficult at larger scale, evaluate restricted repair or path/column methods
+then, rather than adding them preemptively.
 
-Record:
-
-- model size and runtime;
-- whether every flow is integral;
-- fractional arcs and paths;
-- flow-to-path decomposition size;
-- objective agreement with the integrated model for the same fixed movement.
-
-This evaluator is the common prerequisite for Benders, passenger repair,
-movement-only CP, large-neighborhood search, and scalable skip-benefit
-experiments. Build it before committing to any one decomposition algorithm.
-
-## Phase 2: Exact Passenger Certification
-
-If the LP is fractional, solve an exact restricted integer repair over active
-arcs or decomposed paths. Treat a repaired solution as exact only when it is
-feasible for the complete fixed-movement passenger assignment problem.
-
-If restricted repair is insufficient, evaluate path-based column generation
-and then branch-and-price only if exact integer assignment remains a bottleneck.
-The LP may still serve as a lower bound, diagnostic, or MIP-start generator.
-
-Use the following gate:
-
-- if the LP is consistently integral and objective-equivalent, classical
-  LP-based decomposition becomes a candidate;
-- if the LP is fractional but exact repair is fast, retain the LP as a bound
-  and use repair for incumbents;
-- if the exact fixed-movement passenger problem is itself difficult, improve
-  its path or column representation before attempting integrated Benders.
-
-## Phase 3: Progressive Wait Search
+## Phase 2: Progressive Wait Search
 
 Evaluate progressive waiting as a low-cost primal search strategy before
 implementing a full decomposition. For guaranteed feasible-set nesting, build
@@ -148,7 +120,7 @@ the numeric wait cap. Keep progressive waiting only if it reproducibly improves
 the final incumbent or time to a target objective. Do not retain it merely
 because an early restricted stage solves quickly.
 
-## Phase 4: Delayed Exit-Switch Headways
+## Phase 3: Delayed Exit-Switch Headways
 
 If Phase 0 identifies headway materialization or movement search as a dominant
 bottleneck, prototype delayed generation for selected exit-switch or rope-merge
@@ -173,7 +145,7 @@ cannot create missing variables. Continue only if the number of generated pairs
 and the total solve time are materially lower and the number of separation
 rounds remains small.
 
-## Phase 5: Neighborhood Matheuristics
+## Phase 4: Neighborhood Matheuristics
 
 Before building a complex exact decomposition, evaluate local branching or
 large-neighborhood search for strong feasible skip plans:
@@ -191,7 +163,7 @@ optimality certificate. Validate them with the same movement and passenger
 checks as exact solutions. Keep this path if it reaches materially better
 incumbents or a larger network size than direct integrated search.
 
-## Phase 6: Conditional Decomposed Exact Search
+## Phase 5: Conditional Decomposed Exact Search
 
 Represent movement, timing, stop/skip, and waiting decisions in a master and
 evaluate passenger cost in the fixed-movement subproblem. Do not assume that
@@ -199,10 +171,13 @@ this automatically yields useful Benders cuts: stop/skip decisions change
 candidate availability and costs, and shared capacities make the passenger
 problem multi-commodity.
 
-Choose the method from the Phase 1 and 2 evidence:
+Choose the method from the Phase 0 and Phase 1 evidence:
 
-- attempt classical LP Benders only if the relevant passenger LP is integral
-  and its dual information yields valid cuts for the chosen master;
+- do not use classical LP Benders as an exact method for the general passenger
+  model; the direct-ride fixed-movement LP already has a formal fractional
+  counterexample;
+- use LP dual information only for valid lower-bounding cuts whose limitations
+  are explicit;
 - use branch-and-Benders when an LP subproblem supplies valid bounds but
   integrality must be recovered inside the search;
 - use logic-based Benders when the passenger subproblem remains genuinely
@@ -341,7 +316,7 @@ external validation if that later becomes necessary.
 3. If movement/headways dominate, test safe fixed precedence before delayed
    generation or a movement-only CP prototype.
 4. If passenger assignment dominates, build the fixed-movement evaluator,
-   measure LP integrality, and add exact repair only when needed.
+   measure the practical LP/IP gap, and benchmark exact integer repair.
 5. If incumbent search remains limiting beyond the implemented
    passenger-optimized all-stop start, benchmark multiple structural starts
    and same-artifact progressive waiting independently.

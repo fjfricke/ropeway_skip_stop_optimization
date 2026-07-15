@@ -100,10 +100,10 @@ For better feasible solutions:
 For stronger bounds or exact certification:
 
 - build the fixed-movement destination-layered passenger evaluator;
-- measure LP integrality before selecting a decomposition method;
-- consider classical Benders only with demonstrated integrality and valid dual
-  cuts;
-- otherwise evaluate branch-and-Benders or logic-based Benders.
+- measure its practical LP/IP gap and exact-repair cost;
+- use its LP only for valid lower-bounding information;
+- evaluate branch-and-Benders or logic-based Benders for exact decomposition,
+  because the direct-ride fixed-movement LP is nonintegral in general.
 
 Delayed headway generation is considered only if diagnostics show that eager
 headway materialization or movement search remains dominant. It is not the

@@ -1,3 +1,9 @@
+from ropeway_skip_stop_optimization.optimization.ean.optimizers.fixed_movement_passenger_model import (
+    EanFixedMovementPassengerModel,
+    EanFixedMovementPassengerModelBuilder,
+    EanPassengerAssignment,
+    EanPassengerAssignmentDomain,
+)
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.passenger_model import (
     EanPassengerModel,
     EanPassengerModelBuilder,
@@ -5,6 +11,7 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.passenger_model 
     EanPassengerVariables,
 )
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.solver import (
+    EanFixedMovementPassengerProblem,
     EanMipStartStrategy,
     EanMovementFeasibilityProblem,
     EanModelBuildMetrics,
@@ -24,6 +31,9 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.solver_policy im
 )
 
 __all__ = [
+    "EanFixedMovementPassengerModel",
+    "EanFixedMovementPassengerModelBuilder",
+    "EanFixedMovementPassengerProblem",
     "EanMipStartStrategy",
     "EanMovementFeasibilityProblem",
     "EanModelBuildMetrics",
@@ -34,6 +44,8 @@ __all__ = [
     "EanPassengerModel",
     "EanPassengerModelBuilder",
     "EanPassengerObjective",
+    "EanPassengerAssignment",
+    "EanPassengerAssignmentDomain",
     "EanPassengerServiceProblem",
     "EanPassengerVariables",
     "EanSolveConfig",

@@ -13,13 +13,14 @@ from ropeway_skip_stop_optimization.benchmarking.plots import (
     EanBottleneckPlotBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
-    EanMipStartStrategy,
+    EanFixedMovementPassengerProblem,
     EanMovementFeasibilityProblem,
+    EanPassengerAssignmentDomain,
     EanPassengerServiceProblem,
 )
 
 
-def test_bottleneck_runner_builds_all_three_cases(
+def test_bottleneck_runner_builds_all_four_cases(
     tmp_path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -64,14 +65,21 @@ def test_bottleneck_runner_builds_all_three_cases(
         EanBottleneckCase.INTEGRATED,
         EanBottleneckCase.MOVEMENT_ONLY,
         EanBottleneckCase.FIXED_MOVEMENT_PASSENGER,
+        EanBottleneckCase.FIXED_MOVEMENT_PASSENGER_LP,
     ]
     assert isinstance(problems[0], EanPassengerServiceProblem)
     assert isinstance(problems[1], EanMovementFeasibilityProblem)
-    assert isinstance(problems[2], EanPassengerServiceProblem)
-    assert problems[2].fixed_movement_plan is integrated_plan
+    assert isinstance(problems[2], EanFixedMovementPassengerProblem)
+    assert problems[2].movement_plan is integrated_plan
     assert (
-        problems[2].mip_start_strategy
-        is EanMipStartStrategy.NONE
+        problems[2].assignment_domain
+        is EanPassengerAssignmentDomain.INTEGER
+    )
+    assert isinstance(problems[3], EanFixedMovementPassengerProblem)
+    assert problems[3].movement_plan is integrated_plan
+    assert (
+        problems[3].assignment_domain
+        is EanPassengerAssignmentDomain.LP_RELAXATION
     )
 
 
@@ -121,6 +129,8 @@ def test_bottleneck_plot_builder_writes_case_comparisons(tmp_path) -> None:
     assert {path.name for path in paths} == {
         "run__runtime_by_case.svg",
         "run__model_size_by_case.svg",
+        "run__objective_by_case.svg",
+        "run__fixed_assignment_fractionality.svg",
         "run__build_time_by_case.svg",
         "run__solve_phases_by_case.svg",
         "run__memory_by_case.svg",

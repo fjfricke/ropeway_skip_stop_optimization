@@ -163,6 +163,22 @@ class EanBottleneckPlotBuilder:
                     ),
                 ),
             ),
+            "objective_by_case": _bar_chart(
+                title="EAN passenger objective by case",
+                y_label="passenger seconds",
+                groups=_single_metric_groups(
+                    case_results,
+                    "objective_value_seconds",
+                ),
+            ),
+            "fixed_assignment_fractionality": _bar_chart(
+                title="EAN fixed-movement fractional ride counts",
+                y_label="fractional variables",
+                groups=_single_metric_groups(
+                    case_results,
+                    "fractional_ride_count",
+                ),
+            ),
             "build_time_by_case": _bar_chart(
                 title="EAN model construction by case",
                 y_label="seconds",
@@ -239,6 +255,12 @@ class EanBottleneckPlotBuilder:
                     "constraint_count": metadata.get("constraint_count"),
                     "model_nonzero_count": metadata.get(
                         "model_nonzero_count"
+                    ),
+                    "objective_value_seconds": metadata.get(
+                        "objective_value_seconds"
+                    ),
+                    "fractional_ride_count": metadata.get(
+                        "fractional_ride_count"
                     ),
                     "candidate_seconds": build.get(
                         "passenger_candidate_generation_seconds"

@@ -62,9 +62,9 @@ the relaxation or improve dual progress.
 The selected production formulation can now be diagnosed through one runner
 that executes integrated passenger service, movement-only feasibility, and
 fixed-movement passenger optimization under the same per-case solver budget.
-The fixed case reuses the integrated movement plan and fixes it through the
-canonical `EanMovementModel`; it does not introduce a separate formulation or
-solver path.
+At this stage, the fixed case reused the integrated movement plan and fixed it
+through the canonical `EanMovementModel`; the independent compact evaluator
+documented below superseded this implementation later on 2026-07-15.
 
 The callback recorder now captures presolve timing, observed root-relaxation
 boundaries, first-incumbent time, and current-memory peaks without parsing
@@ -305,3 +305,39 @@ MIP gap from 6.52% to 4.83%. The affine incumbent was slightly worse and served
 four fewer passengers. At this stage, Big-M remained the default until
 repeated runs showed whether the proof improvement was stable without an
 unacceptable primal-side regression.
+
+## 2026-07-15: Fixed-movement passenger LP integrality
+
+The direct-ride passenger assignment with fixed movement was analyzed
+mathematically before implementing a separate decomposition evaluator.
+Aggregating unary slots yields demand-balance rows and consecutive interval
+capacity rows. Although each individual ride has interval structure, ride
+alternatives across cabins can combine demand conflicts and capacity conflicts
+into an odd cycle.
+
+A valid three-station, two-cabin, no-transfer construction with seven ride
+candidates produces an odd-cycle matrix with determinant \(2\). Setting all
+seven ride variables to one half is a fractional vertex, and the standard
+waiting-time objective gives a strict LP/IP gap on the same construction.
+Therefore the fixed-movement passenger LP is not integral in general even
+without transfers. The decomposition plan was updated to measure practical
+LP gaps and exact integer solve time rather than attempting to infer general
+integrality from benchmark observations.
+
+## 2026-07-15: Independent fixed-movement passenger optimizer
+
+The fixed-movement diagnostic and optimized all-stop start no longer rebuild
+the integrated movement model and fix all of its variables. A third typed
+`EanOptimizer` problem now validates the supplied movement plan and builds only
+the direct passenger assignment.
+
+The compact model uses one integer passenger-count variable per feasible ride,
+demand upper bounds, and cabin-interval capacities. Waiting and journey costs
+are constants from the fixed movement, and unserved demand is represented
+implicitly in the objective. The same builder can create a labelled continuous
+LP relaxation. LP results expose fractional ride counts but cannot be
+extracted as integer passenger plans.
+
+The bottleneck diagnostic retains its exact fixed-movement case and adds a
+matched LP case, LP/IP gap metadata, and objective/fractionality plots. A valid
+three-station odd-cycle regression test reproduces the formal strict LP/IP gap.

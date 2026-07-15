@@ -21,6 +21,12 @@ from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     EanHorizonFormulation,
     EanTimeBoundFormulation,
 )
+from ropeway_skip_stop_optimization.optimization.ean.optimizers.fixed_movement_passenger_model import (
+    EanFixedMovementPassengerModel,
+    EanFixedMovementPassengerModelBuilder,
+    EanPassengerAssignment,
+    EanPassengerAssignmentDomain,
+)
 from ropeway_skip_stop_optimization.optimization.ean.optimization_config import (
     EanOptimizationConfig,
 )
@@ -63,6 +69,7 @@ LOGGER = logging.getLogger(__name__)
 class EanOptimizationProblemKind(StrEnum):
     MOVEMENT_FEASIBILITY = "movement_feasibility"
     PASSENGER_SERVICE = "passenger_service"
+    FIXED_MOVEMENT_PASSENGER = "fixed_movement_passenger"
 
 
 class EanMipStartStrategy(StrEnum):
@@ -135,14 +142,33 @@ class EanPassengerServiceProblem:
     mip_start_strategy: EanMipStartStrategy = (
         EanMipStartStrategy.OPTIMIZED_ALL_STOP
     )
-    fixed_movement_plan: EanMovementPlan | None = None
 
     @property
     def kind(self) -> EanOptimizationProblemKind:
         return EanOptimizationProblemKind.PASSENGER_SERVICE
 
 
-EanOptimizationProblem = EanMovementFeasibilityProblem | EanPassengerServiceProblem
+@dataclass(frozen=True)
+class EanFixedMovementPassengerProblem:
+    scenario: Scenario
+    artifact: EanBuildArtifact
+    movement_plan: EanMovementPlan
+    objective: EanPassengerObjective = EanPassengerObjective.WAITING_TIME
+    assignment_domain: EanPassengerAssignmentDomain = (
+        EanPassengerAssignmentDomain.INTEGER
+    )
+    passenger_builder: EanPassengerCandidateBuilder | None = None
+
+    @property
+    def kind(self) -> EanOptimizationProblemKind:
+        return EanOptimizationProblemKind.FIXED_MOVEMENT_PASSENGER
+
+
+EanOptimizationProblem = (
+    EanMovementFeasibilityProblem
+    | EanPassengerServiceProblem
+    | EanFixedMovementPassengerProblem
+)
 
 
 @dataclass(frozen=True)
@@ -195,6 +221,11 @@ class EanOptimizationMetadata:
     checkpoint_final_solution_path: str | None
     optimization_config: EanOptimizationConfig
     progress_samples: tuple[GurobiMipProgressSample, ...] = ()
+    assignment_domain: EanPassengerAssignmentDomain | None = None
+    passenger_assignment_variable_count: int | None = None
+    fractional_ride_count: int | None = None
+    fractional_distance_sum: float | None = None
+    maximum_fractional_distance: float | None = None
 
     def passenger_export_dict(self) -> dict[str, Any]:
         """Preserve the established passenger-result JSON metadata contract."""
@@ -242,6 +273,7 @@ class EanOptimizationResult:
     movement_plan: EanMovementPlan | None
     passenger_plan: EanPassengerServicePlan | None
     metadata: EanOptimizationMetadata
+    passenger_assignment: EanPassengerAssignment | None = None
 
 
 @dataclass(frozen=True)
@@ -257,6 +289,13 @@ class EanOptimizer:
 
         self.config.validate()
         problem.artifact.validate()
+        if isinstance(problem, EanFixedMovementPassengerProblem):
+            return _solve_fixed_movement_passenger(
+                optimizer=self,
+                problem=problem,
+                gp=gp,
+                grb=GRB,
+            )
         optimization_config = self.config.optimization_config
         passenger_build = None
         passenger_candidate_runtime = 0.0
@@ -307,10 +346,6 @@ class EanOptimizer:
         mip_start_runtime = 0.0
         mip_start_objective_value = None
         if isinstance(problem, EanPassengerServiceProblem):
-            if problem.fixed_movement_plan is not None:
-                fixing_started = perf_counter()
-                movement_model.fix_to_plan(problem.fixed_movement_plan)
-                movement_fixing_runtime = perf_counter() - fixing_started
             passenger_started = perf_counter()
             passenger_model = EanPassengerModelBuilder().build(
                 scenario=problem.scenario,
@@ -475,13 +510,252 @@ class EanOptimizer:
         )
 
 
+def _solve_fixed_movement_passenger(
+    *,
+    optimizer: EanOptimizer,
+    problem: EanFixedMovementPassengerProblem,
+    gp: Any,
+    grb: Any,
+) -> EanOptimizationResult:
+    config = optimizer.config
+    if (
+        problem.assignment_domain
+        is EanPassengerAssignmentDomain.LP_RELAXATION
+        and config.checkpoint is not None
+    ):
+        raise ValueError(
+            "checkpoints are not supported for fixed-movement passenger LP relaxations"
+        )
+    if config.diagnostic_recorders:
+        raise ValueError(
+            "movement root diagnostic recorders are not supported for the "
+            "fixed-movement passenger problem"
+        )
+    if problem.scenario.id != problem.artifact.scenario_id:
+        raise ValueError(
+            "fixed-movement passenger scenario does not match the build artifact: "
+            f"{problem.scenario.id!r} != {problem.artifact.scenario_id!r}"
+        )
+
+    optimization_config = (
+        config.optimization_config.resolved_for_passenger_objective(
+            problem.objective
+        )
+    )
+    candidate_started = perf_counter()
+    passenger_build = (
+        problem.passenger_builder
+        or EanPassengerCandidateBuilder(
+            optimization_config=optimization_config
+        )
+    ).build(problem.scenario, problem.artifact)
+    passenger_candidate_runtime = perf_counter() - candidate_started
+
+    setup_started = perf_counter()
+    model = gp.Model(f"ean_{problem.kind.value}_{problem.assignment_domain.value}")
+    model.Params.OutputFlag = 1 if config.log_to_console else 0
+    apply_gurobi_solver_policy(model, config.solver_policy)
+    passenger_started = perf_counter()
+    fixed_model = EanFixedMovementPassengerModelBuilder().build(
+        model=model,
+        scenario=problem.scenario,
+        artifact=problem.artifact,
+        movement_plan=problem.movement_plan,
+        passenger_build=passenger_build,
+        objective=problem.objective,
+        assignment_domain=problem.assignment_domain,
+        grb=grb,
+        gp=gp,
+    )
+    passenger_runtime = perf_counter() - passenger_started
+    _configure_checkpoints(model, config.checkpoint)
+    model.update()
+    model_nonzero_count = int(model.NumNZs)
+    setup_runtime = perf_counter() - setup_started
+    build_metrics = EanModelBuildMetrics(
+        passenger_candidate_generation_seconds=passenger_candidate_runtime,
+        movement_model_seconds=0.0,
+        movement_fixing_seconds=0.0,
+        passenger_model_seconds=passenger_runtime,
+        mip_start_seconds=0.0,
+        mip_start_objective_value_seconds=None,
+        gurobi_setup_total_seconds=setup_runtime,
+    )
+    if config.log_to_console:
+        LOGGER.info(
+            "ean.optimize kind=%s domain=%s variables=%s constraints=%s "
+            "nonzeros=%s demand_groups=%s ride_candidates=%s setup_seconds=%.3f "
+            "solver_policy=%s",
+            problem.kind.value,
+            problem.assignment_domain.value,
+            model.NumVars,
+            model.NumConstrs,
+            model.NumNZs,
+            len(fixed_model.passenger_build.demand_groups),
+            len(fixed_model.passenger_build.ride_candidates),
+            setup_runtime,
+            config.solver_policy,
+        )
+    progress_start = _optimize(
+        model=model,
+        grb=grb,
+        recorder=config.progress_recorder,
+        diagnostic_recorders=(),
+        sample_interval_seconds=config.progress_sample_interval_seconds,
+    )
+    _write_final_checkpoint(model, config.checkpoint)
+    progress_samples = _progress_samples(
+        config.progress_recorder,
+        progress_start,
+    )
+    solve_phase_metrics = _progress_phase_metrics(config.progress_recorder)
+    diagnostics = _solver_diagnostics(
+        model,
+        grb,
+        config.solver_policy,
+    )
+    if problem.assignment_domain is EanPassengerAssignmentDomain.LP_RELAXATION:
+        diagnostics["mip_gap"] = None
+        diagnostics["mip_gap_target"] = None
+        diagnostics["node_count"] = None
+    checkpoint_diagnostics = _checkpoint_diagnostics(config.checkpoint)
+    assignment = (
+        fixed_model.extract_assignment()
+        if int(model.SolCount) > 0
+        else None
+    )
+    passenger_plan = (
+        fixed_model.extract_passenger_plan(assignment)
+        if (
+            assignment is not None
+            and problem.assignment_domain
+            is EanPassengerAssignmentDomain.INTEGER
+        )
+        else None
+    )
+    metadata = _fixed_movement_metadata(
+        problem=problem,
+        optimization_config=optimization_config,
+        diagnostics=diagnostics,
+        checkpoint_diagnostics=checkpoint_diagnostics,
+        fixed_model=fixed_model,
+        model=model,
+        model_nonzero_count=model_nonzero_count,
+        setup_runtime=setup_runtime,
+        build_metrics=build_metrics,
+        solve_phase_metrics=solve_phase_metrics,
+        progress_samples=progress_samples,
+        assignment=assignment,
+        passenger_plan=passenger_plan,
+    )
+    return EanOptimizationResult(
+        problem_kind=problem.kind,
+        movement_plan=problem.movement_plan,
+        passenger_plan=passenger_plan,
+        metadata=metadata,
+        passenger_assignment=assignment,
+    )
+
+
+def _fixed_movement_metadata(
+    *,
+    problem: EanFixedMovementPassengerProblem,
+    optimization_config: EanOptimizationConfig,
+    diagnostics: dict[str, Any],
+    checkpoint_diagnostics: dict[str, str | None],
+    fixed_model: EanFixedMovementPassengerModel,
+    model: Any,
+    model_nonzero_count: int,
+    setup_runtime: float,
+    build_metrics: EanModelBuildMetrics,
+    solve_phase_metrics: GurobiSolvePhaseMetrics | None,
+    progress_samples: tuple[GurobiMipProgressSample, ...],
+    assignment: EanPassengerAssignment | None,
+    passenger_plan: EanPassengerServicePlan | None,
+) -> EanOptimizationMetadata:
+    objective_value = (
+        float(model.ObjVal)
+        if int(model.SolCount) > 0
+        else None
+    )
+    skipped_count = sum(
+        visit.decision is EanRouteDecision.SKIP
+        for trajectory in problem.movement_plan.trajectories
+        for visit in trajectory.visits
+    )
+    visible_skipped_count = sum(
+        visit.decision is EanRouteDecision.SKIP
+        and visit.switch_time_seconds
+        <= problem.artifact.config.horizon_seconds
+        for trajectory in problem.movement_plan.trajectories
+        for visit in trajectory.visits
+    )
+    return EanOptimizationMetadata(
+        problem_kind=problem.kind,
+        **diagnostics,
+        objective_kind=problem.objective,
+        objective_value_seconds=objective_value,
+        objective_passenger_hours=(
+            objective_value / 3600.0
+            if objective_value is not None
+            else None
+        ),
+        demand_group_count=len(fixed_model.passenger_build.demand_groups),
+        ride_candidate_count=len(fixed_model.passenger_build.ride_candidates),
+        slot_variable_count=None,
+        served_passenger_count=(
+            sum(ride.count for ride in passenger_plan.served_rides)
+            if passenger_plan is not None
+            else None
+        ),
+        unserved_passenger_count=(
+            sum(passenger_plan.unserved_counts_by_demand_group_id.values())
+            if passenger_plan is not None
+            else None
+        ),
+        variable_count=int(model.NumVars),
+        constraint_count=int(model.NumConstrs),
+        model_nonzero_count=model_nonzero_count,
+        model_setup_runtime_seconds=setup_runtime,
+        movement_variable_count=0,
+        movement_constraint_count=0,
+        movement_nonzero_count=0,
+        headway_pair_count=0,
+        headway_order_variable_count=0,
+        fixed_movement=True,
+        build_metrics=build_metrics,
+        solve_phase_metrics=solve_phase_metrics,
+        skipped_visit_count=skipped_count,
+        visible_skipped_visit_count=visible_skipped_count,
+        **checkpoint_diagnostics,
+        optimization_config=optimization_config,
+        progress_samples=progress_samples,
+        assignment_domain=problem.assignment_domain,
+        passenger_assignment_variable_count=fixed_model.variable_count,
+        fractional_ride_count=(
+            assignment.fractional_ride_count
+            if assignment is not None
+            else None
+        ),
+        fractional_distance_sum=(
+            assignment.fractional_distance_sum
+            if assignment is not None
+            else None
+        ),
+        maximum_fractional_distance=(
+            assignment.maximum_fractional_distance
+            if assignment is not None
+            else None
+        ),
+    )
+
+
 def _should_apply_mip_start(
     problem: EanPassengerServiceProblem,
     checkpoint: GurobiCheckpointConfig | None,
 ) -> bool:
     return (
         problem.mip_start_strategy is not EanMipStartStrategy.NONE
-        and problem.fixed_movement_plan is None
         and (
             checkpoint is None
             or checkpoint.read_solution_path is None
@@ -520,13 +794,12 @@ def _solve_optimized_all_stop_start(
             log_to_console=False,
         )
     ).solve(
-        EanPassengerServiceProblem(
+        EanFixedMovementPassengerProblem(
             scenario=problem.scenario,
             artifact=problem.artifact,
+            movement_plan=all_stop_plan,
             objective=problem.objective,
             passenger_builder=problem.passenger_builder,
-            mip_start_strategy=EanMipStartStrategy.NONE,
-            fixed_movement_plan=all_stop_plan,
         )
     )
 
@@ -673,10 +946,7 @@ def _metadata(
         headway_order_variable_count=len(
             movement_model.variables.headway_order
         ),
-        fixed_movement=(
-            isinstance(problem, EanPassengerServiceProblem)
-            and problem.fixed_movement_plan is not None
-        ),
+        fixed_movement=False,
         build_metrics=build_metrics,
         solve_phase_metrics=solve_phase_metrics,
         skipped_visit_count=skipped_count,

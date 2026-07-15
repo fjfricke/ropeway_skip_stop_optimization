@@ -28,10 +28,11 @@ transitions, headway checkpoints, headway candidates, and headway pairs before
 Gurobi model construction.
 
 `EanOptimizer` is the single public continuous-EAN solver API. It accepts one
-of two typed problem objects:
+of three typed problem objects:
 
 - `EanMovementFeasibilityProblem`;
-- `EanPassengerServiceProblem`.
+- `EanPassengerServiceProblem`;
+- `EanFixedMovementPassengerProblem`.
 
 Both cases use `EanMovementModelBuilder` as the sole implementation of movement
 times, stop/skip decisions, waiting, finite-horizon activation, route chaining,
@@ -41,6 +42,15 @@ capacity, demand balance, and the objective. The movement-feasibility case
 instead assigns the shared movement model a zero objective. This composition
 prevents the feasibility and passenger cases from drifting into different
 timing, Big-M, or headway formulations.
+
+The fixed-movement passenger problem validates an extracted movement plan and
+builds no movement or headway variables. It filters the shared structural ride
+candidates against the fixed stops, release times, event times, and horizon,
+then assigns an integer passenger count to each remaining direct ride. Demand
+balance and cabin-interval capacities are sufficient because boarding and
+alighting times are constants. The same compact model can use continuous ride
+counts as an explicitly labelled LP relaxation; fractional assignments are
+reported separately and are never extracted as passenger plans.
 
 Solver policy, progress recording, checkpoints, result metadata, validation,
 and movement-plan extraction are coordinated by `EanOptimizer`. Passenger
@@ -160,19 +170,23 @@ after it.
 
 Integrated passenger solves support `none`, `greedy_all_stop`, and
 `optimized_all_stop` MIP-start strategies. The production default first fixes
-the deterministic all-stop movement plan in the canonical model, solves its
-passenger assignment with a bounded auxiliary optimization, and transfers the
+the deterministic all-stop movement plan as input to the compact
+fixed-movement passenger optimizer, solves its passenger assignment with a
+bounded auxiliary optimization, and transfers the
 extracted movement and passenger plans as a partial start into the integrated
-model. The auxiliary solve reuses the same formulation and candidate builder;
-headway-order auxiliaries are left for Gurobi to complete.
+model. Candidate generation and passenger semantics are shared; movement and
+headway auxiliaries are absent from the auxiliary model and left for Gurobi to
+complete in the integrated solve.
 
 Checkpoint files store incumbent solutions and are loaded as MIP starts. They
 do not persist or resume the previous branch-and-bound tree.
 
-The bottleneck diagnostic uses the same optimizer and model builders for three
-cases: integrated passenger service, zero-objective movement feasibility, and
-passenger service with an extracted movement plan fixed through
-`EanMovementModel`. Callback observability additionally records presolve,
+The bottleneck diagnostic uses the same optimizer for four cases: integrated
+passenger service, zero-objective movement feasibility, exact fixed-movement
+passenger assignment, and its continuous LP relaxation. The two fixed cases
+use the same extracted movement and candidate configuration, allowing the
+LP/IP objective gap and ride-count fractionality to be measured directly.
+Callback observability additionally records presolve,
 root-relaxation boundaries when exposed, first-incumbent time, and the peak
 current Gurobi memory observed during each case. No solver log parsing is used.
 Movement-only bounds are not compared with passenger-objective bounds.

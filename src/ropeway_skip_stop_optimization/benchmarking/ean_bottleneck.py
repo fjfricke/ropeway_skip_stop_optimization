@@ -22,13 +22,14 @@ from ropeway_skip_stop_optimization.examples.ean import EanScenarioExample
 from ropeway_skip_stop_optimization.examples.registry import get_example
 from ropeway_skip_stop_optimization.exports.json_codec import write_json
 from ropeway_skip_stop_optimization.optimization.ean import (
-    EanMipStartStrategy,
+    EanFixedMovementPassengerProblem,
     EanMovementFeasibilityProblem,
     EanOptimizationConfig,
     EanOptimizationMetadata,
     EanOptimizationResult,
     EanOptimizer,
     EanPassengerObjective,
+    EanPassengerAssignmentDomain,
     EanPassengerServiceProblem,
     EanSolveConfig,
     GurobiSolverPolicy,
@@ -49,6 +50,7 @@ class EanBottleneckCase(StrEnum):
     INTEGRATED = "integrated"
     MOVEMENT_ONLY = "movement_only"
     FIXED_MOVEMENT_PASSENGER = "fixed_movement_passenger"
+    FIXED_MOVEMENT_PASSENGER_LP = "fixed_movement_passenger_lp"
 
 
 @dataclass(frozen=True)
@@ -107,6 +109,10 @@ class EanBottleneckDiagnosticResult:
     cabin_count: int
     switch_visit_count: int
     headway_pair_count: int
+    fixed_movement_lp_objective_seconds: float | None
+    fixed_movement_integer_objective_seconds: float | None
+    fixed_movement_lp_ip_gap_seconds: float | None
+    fixed_movement_lp_ip_gap: float | None
     cases: tuple[EanBottleneckCaseResult, ...]
 
 
@@ -160,14 +166,21 @@ class EanBottleneckDiagnosticRunner:
                     "integrated case produced no movement incumbent"
                 ),
             )
+            fixed_movement_lp = EanBottleneckCaseResult(
+                case=EanBottleneckCase.FIXED_MOVEMENT_PASSENGER_LP,
+                metadata=None,
+                root_relaxation=None,
+                unavailable_reason=(
+                    "integrated case produced no movement incumbent"
+                ),
+            )
         else:
             fixed_movement_result, fixed_movement_root = self._solve(
-                EanPassengerServiceProblem(
+                EanFixedMovementPassengerProblem(
                     scenario=scenario,
                     artifact=artifact,
+                    movement_plan=integrated.movement_plan,
                     objective=self.config.objective,
-                    mip_start_strategy=EanMipStartStrategy.NONE,
-                    fixed_movement_plan=integrated.movement_plan,
                 ),
                 solver_policy,
                 standalone_root_relaxation=False,
@@ -177,6 +190,44 @@ class EanBottleneckDiagnosticRunner:
                 metadata=fixed_movement_result.metadata,
                 root_relaxation=fixed_movement_root,
             )
+            fixed_movement_lp_result, _ = self._solve(
+                EanFixedMovementPassengerProblem(
+                    scenario=scenario,
+                    artifact=artifact,
+                    movement_plan=integrated.movement_plan,
+                    objective=self.config.objective,
+                    assignment_domain=(
+                        EanPassengerAssignmentDomain.LP_RELAXATION
+                    ),
+                ),
+                solver_policy,
+                standalone_root_relaxation=False,
+            )
+            fixed_movement_lp = EanBottleneckCaseResult(
+                case=EanBottleneckCase.FIXED_MOVEMENT_PASSENGER_LP,
+                metadata=fixed_movement_lp_result.metadata,
+                root_relaxation=None,
+            )
+
+        integer_objective = _case_objective(fixed_movement)
+        lp_objective = _case_objective(fixed_movement_lp)
+        absolute_lp_ip_gap = (
+            integer_objective - lp_objective
+            if (
+                integer_objective is not None
+                and lp_objective is not None
+            )
+            else None
+        )
+        relative_lp_ip_gap = (
+            absolute_lp_ip_gap / abs(integer_objective)
+            if (
+                absolute_lp_ip_gap is not None
+                and integer_objective is not None
+                and abs(integer_objective) > 1e-12
+            )
+            else None
+        )
 
         run_id = _run_id(self.config)
         result = EanBottleneckDiagnosticResult(
@@ -205,6 +256,10 @@ class EanBottleneckDiagnosticRunner:
             cabin_count=len(artifact.cabin_starts),
             switch_visit_count=len(artifact.switch_visits),
             headway_pair_count=len(artifact.headway_pairs),
+            fixed_movement_lp_objective_seconds=lp_objective,
+            fixed_movement_integer_objective_seconds=integer_objective,
+            fixed_movement_lp_ip_gap_seconds=absolute_lp_ip_gap,
+            fixed_movement_lp_ip_gap=relative_lp_ip_gap,
             cases=(
                 EanBottleneckCaseResult(
                     case=EanBottleneckCase.INTEGRATED,
@@ -217,6 +272,7 @@ class EanBottleneckDiagnosticRunner:
                     root_relaxation=movement_only_root,
                 ),
                 fixed_movement,
+                fixed_movement_lp,
             ),
         )
         output_path = self.config.output_dir / f"{run_id}.json"
@@ -225,7 +281,11 @@ class EanBottleneckDiagnosticRunner:
 
     def _solve(
         self,
-        problem: EanMovementFeasibilityProblem | EanPassengerServiceProblem,
+        problem: (
+            EanMovementFeasibilityProblem
+            | EanPassengerServiceProblem
+            | EanFixedMovementPassengerProblem
+        ),
         solver_policy: GurobiSolverPolicy,
         *,
         standalone_root_relaxation: bool,
@@ -243,7 +303,13 @@ class EanBottleneckDiagnosticRunner:
                     else None
                 ),
             )
-            if self.config.root_diagnostics
+            if (
+                self.config.root_diagnostics
+                and not isinstance(
+                    problem,
+                    EanFixedMovementPassengerProblem,
+                )
+            )
             else None
         )
         optimizer = EanOptimizer(
@@ -269,6 +335,14 @@ class EanBottleneckDiagnosticRunner:
             if root_recorder is not None
             else None,
         )
+
+
+def _case_objective(
+    case: EanBottleneckCaseResult,
+) -> float | None:
+    if case.metadata is None:
+        return None
+    return case.metadata.objective_value_seconds
 
 
 def _run_id(config: EanBottleneckDiagnosticConfig) -> str:

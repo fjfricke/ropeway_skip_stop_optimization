@@ -74,7 +74,7 @@ start. It does not resume the previous branch-and-bound tree.
 
 ## EAN Bottleneck Diagnosis
 
-Run the three-case Phase-0 diagnosis with the selected production formulation:
+Run the four-case Phase-0 diagnosis with the selected production formulation:
 
 ```bash
 uv run python benchmarks/run_ean_bottleneck_diagnostic.py \
@@ -93,12 +93,14 @@ The time limit applies separately to:
 integrated
 movement_only
 fixed_movement_passenger
+fixed_movement_passenger_lp
 ```
 
-The fixed-movement case reuses the integrated run's extracted movement plan,
-fixes it through the canonical movement model, and disables the all-stop MIP
-start. If the integrated run produces no incumbent, that case is marked
-unavailable.
+The two fixed-movement cases reuse the integrated run's extracted movement
+plan and build only the compact direct-ride passenger model. The integer case
+is the exact passenger evaluator; the LP case relaxes the same ride-count
+variables and reports fractionality and the LP/IP objective gap. If the
+integrated run produces no incumbent, both cases are marked unavailable.
 
 With `--root-diagnostics`, the same Gurobi callback additionally samples the
 actual MIP root relaxation through `cbGetNodeRel()`. It records fractionality
@@ -116,7 +118,7 @@ reported as the post-cut root bound. The additional LP runtime is stored
 separately and increases total wall-clock time only when root diagnostics are
 enabled.
 
-Each run writes one JSON plus five base SVG comparisons under
+Each run writes one JSON plus seven base SVG comparisons under
 `benchmarks/output/bottleneck_diagnostics/`. The JSON includes scenario and
 artifact construction, passenger-candidate construction, movement and
 passenger model construction, movement fixing, MIP-start time, presolve,

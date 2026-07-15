@@ -9,6 +9,8 @@ from ropeway_skip_stop_optimization.models import Demand, OperatingParameters, S
 from ropeway_skip_stop_optimization.optimization.ean import (
     EanCabinStart,
     EanCabinStartKind,
+    EanCabinTrajectory,
+    EanCabinVisit,
     EanConfig,
     EanDemandGroup,
     HeadwayCandidate,
@@ -26,17 +28,21 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanOptimizationConfig,
     EanOptimizer,
     EanFormulationConfig,
+    EanFixedMovementPassengerProblem,
     EanHorizonFormulation,
     EanMovementPlan,
     EanMipStartStrategy,
     EanTimeBoundFormulation,
     EanPassengerObjective,
+    EanPassengerAssignmentDomain,
     EanPassengerServiceProblem,
     EanRideCandidate,
+    EanRouteDecision,
     EanSolveConfig,
     EanSlotActivationFormulation,
     EanStopSkipTimingFormulation,
     GurobiSolverPolicy,
+    GurobiCheckpointConfig,
 )
 from ropeway_skip_stop_optimization.optimization.ean.time_bounds import (
     build_ean_model_time_bounds,
@@ -68,7 +74,6 @@ class _PassengerSolveOptions:
     optimization_config: EanOptimizationConfig = field(
         default_factory=EanOptimizationConfig
     )
-    fixed_movement_plan: EanMovementPlan | None = None
     mip_start_strategy: EanMipStartStrategy = (
         EanMipStartStrategy.OPTIMIZED_ALL_STOP
     )
@@ -87,7 +92,6 @@ def _solve_passenger(
             scenario=scenario,
             artifact=artifact,
             objective=options.objective,
-            fixed_movement_plan=options.fixed_movement_plan,
             mip_start_strategy=options.mip_start_strategy,
         )
     )
@@ -187,23 +191,119 @@ def test_ean_passenger_service_can_fix_the_canonical_movement_plan() -> None:
     )
     assert baseline.movement_plan is not None
 
-    fixed = _solve_passenger(
-        scenario,
-        artifact,
-        _PassengerSolveOptions(
+    fixed = EanOptimizer().solve(
+        EanFixedMovementPassengerProblem(
+            scenario=scenario,
+            artifact=artifact,
+            movement_plan=baseline.movement_plan,
             objective=objective,
-            fixed_movement_plan=baseline.movement_plan,
-            mip_start_strategy=EanMipStartStrategy.NONE,
-        ),
+        )
     )
 
     assert fixed.metadata.status == "optimal"
     assert fixed.metadata.fixed_movement
-    assert fixed.metadata.build_metrics.movement_fixing_seconds >= 0.0
+    assert (
+        fixed.metadata.assignment_domain
+        is EanPassengerAssignmentDomain.INTEGER
+    )
+    assert fixed.metadata.movement_variable_count == 0
+    assert fixed.metadata.movement_constraint_count == 0
+    assert fixed.metadata.build_metrics.movement_fixing_seconds == 0.0
     assert fixed.metadata.objective_value_seconds == pytest.approx(
         baseline.metadata.objective_value_seconds
     )
     assert fixed.movement_plan == baseline.movement_plan
+    assert fixed.passenger_plan == baseline.passenger_plan
+    assert fixed.passenger_assignment is not None
+    assert fixed.passenger_assignment.fractional_ride_count == 0
+
+
+def test_fixed_movement_passenger_lp_reports_fractional_odd_cycle() -> None:
+    pytest.importorskip("gurobipy")
+    scenario, artifact, movement_plan = _odd_cycle_fixed_movement_case()
+
+    integer_result = EanOptimizer().solve(
+        EanFixedMovementPassengerProblem(
+            scenario=scenario,
+            artifact=artifact,
+            movement_plan=movement_plan,
+            objective=EanPassengerObjective.WAITING_TIME,
+        )
+    )
+    lp_result = EanOptimizer().solve(
+        EanFixedMovementPassengerProblem(
+            scenario=scenario,
+            artifact=artifact,
+            movement_plan=movement_plan,
+            objective=EanPassengerObjective.WAITING_TIME,
+            assignment_domain=(
+                EanPassengerAssignmentDomain.LP_RELAXATION
+            ),
+        )
+    )
+
+    assert integer_result.metadata.status == "optimal"
+    assert integer_result.metadata.objective_value_seconds == pytest.approx(
+        12.5
+    )
+    assert integer_result.passenger_plan is not None
+    assert integer_result.passenger_assignment is not None
+    assert integer_result.passenger_assignment.fractional_ride_count == 0
+
+    assert lp_result.metadata.status == "optimal"
+    assert lp_result.metadata.objective_value_seconds == pytest.approx(12.25)
+    assert lp_result.passenger_plan is None
+    assert lp_result.passenger_assignment is not None
+    assert lp_result.passenger_assignment.fractional_ride_count == 7
+    assert lp_result.passenger_assignment.fractional_distance_sum == pytest.approx(
+        3.5
+    )
+    assert lp_result.passenger_assignment.maximum_fractional_distance == pytest.approx(
+        0.5
+    )
+    assert all(
+        value == pytest.approx(0.5)
+        for value in (
+            lp_result.passenger_assignment.ride_counts_by_candidate_id.values()
+        )
+    )
+
+
+def test_fixed_movement_passenger_lp_rejects_checkpoints(tmp_path) -> None:
+    scenario = _minimal_scenario(
+        demands=(
+            Demand(
+                arrival_time=time(8, 0),
+                origin="A",
+                destination="B",
+                count=1,
+            ),
+        )
+    )
+    artifact = _minimal_artifact(cabin_capacity=2)
+    movement = _solve_passenger(scenario, artifact).movement_plan
+    assert movement is not None
+
+    with pytest.raises(
+        ValueError,
+        match="checkpoints are not supported",
+    ):
+        EanOptimizer(
+            EanSolveConfig(
+                checkpoint=GurobiCheckpointConfig(
+                    final_solution_path=tmp_path / "fixed.sol",
+                )
+            )
+        ).solve(
+            EanFixedMovementPassengerProblem(
+                scenario=scenario,
+                artifact=artifact,
+                movement_plan=movement,
+                assignment_domain=(
+                    EanPassengerAssignmentDomain.LP_RELAXATION
+                ),
+            )
+        )
 
 
 def test_ean_passenger_service_can_optimize_the_all_stop_mip_start() -> None:
@@ -1135,6 +1235,193 @@ def _minimal_artifact(
             ),
         ),
         headway_pairs=(),
+    )
+
+
+def _odd_cycle_fixed_movement_case() -> tuple[
+    Scenario,
+    EanBuildArtifact,
+    EanMovementPlan,
+]:
+    demand_specs = (
+        ("0", "1", 0),
+        ("0", "2", 1),
+        ("1", "0", 0),
+        ("1", "2", 1),
+        ("2", "1", 2),
+    )
+    scenario = Scenario(
+        id="odd_cycle_ean",
+        service_start_time=time(8, 0),
+        service_end_time=time(8, 1),
+        stations=(),
+        physical_nodes=(),
+        track_segments=(),
+        station_routes=(),
+        cabins=(),
+        cabin_initial_states=(),
+        demands=tuple(
+            Demand(
+                arrival_time=time(8, 0, release),
+                origin=origin,
+                destination=destination,
+                count=1,
+            )
+            for origin, destination, release in demand_specs
+        ),
+        operating=OperatingParameters(
+            rope_speed_m_per_s=5.0,
+            station_speed_m_per_s=0.5,
+            cabin_capacity=1,
+            cabin_length_m=3.0,
+            min_clearance_m=0.5,
+        ),
+    )
+    switch_ids = ("switch_0", "switch_1", "switch_2")
+    timings = tuple(
+        SkipStopTiming(
+            switch_id=switch_id,
+            station_id=str(index),
+            entry_to_platform_entry_seconds=0.2,
+            min_platform_entry_to_platform_exit_seconds=0.3,
+            platform_exit_to_exit_switch_seconds=0.2,
+            skip_entry_to_exit_switch_seconds=0.7,
+            rope_to_next_switch_seconds=0.3,
+            skip_allowed=True,
+        )
+        for index, switch_id in enumerate(switch_ids)
+    )
+    config = EanConfig(
+        horizon_seconds=5.0,
+        tail_seconds=0.0,
+        cabin_capacity=1,
+        station_configs=tuple(
+            StationEanConfig(
+                station_id=str(index),
+                waiting_mode=StationWaitingMode.NO_WAITING,
+            )
+            for index in range(3)
+        ),
+    )
+    cabin_sequences = {
+        0: (0, 1, 2, 0, 1, 2),
+        1: (1, 2, 0, 1, 2, 0),
+    }
+    artifact = EanBuildArtifact(
+        scenario_id=scenario.id,
+        config=config,
+        switch_cycle=switch_ids,
+        timings=timings,
+        cabin_starts=(
+            EanCabinStart(
+                cabin_id=0,
+                first_switch_id="switch_0",
+                kind=EanCabinStartKind.FIXED,
+                time_seconds=0.0,
+            ),
+            EanCabinStart(
+                cabin_id=1,
+                first_switch_id="switch_1",
+                kind=EanCabinStartKind.FIXED,
+                time_seconds=0.0,
+            ),
+        ),
+        switch_visits=tuple(
+            SwitchVisitDefinition(
+                cabin_id=cabin_id,
+                visit_index=visit_index,
+                switch_id=switch_ids[station_index],
+            )
+            for cabin_id, sequence in cabin_sequences.items()
+            for visit_index, station_index in enumerate(sequence)
+        ),
+        switch_transitions=tuple(
+            SwitchTransition(
+                from_switch_id=switch_ids[index],
+                to_switch_id=switch_ids[(index + 1) % 3],
+                min_seconds=0.3,
+                max_seconds=0.3,
+            )
+            for index in range(3)
+        ),
+        headway_checkpoints=(
+            HeadwayCheckpointDefinition(
+                id="platform_entry::switch_0",
+                kind=HeadwayCheckpointKind.PLATFORM_ENTRY,
+                switch_id="switch_0",
+                station_id="0",
+                headway_seconds=0.1,
+                applies_to_serve=True,
+                applies_to_skip=False,
+                waiting_modes=(StationWaitingMode.NO_WAITING,),
+            ),
+        ),
+        headway_candidates=(
+            HeadwayCandidate(
+                id="candidate::platform_entry::switch_0::cabin_0::visit_0",
+                checkpoint_id="platform_entry::switch_0",
+                cabin_id=0,
+                visit_index=0,
+                time_reference=EanTimeReference.PLATFORM_ENTRY_TIME,
+                activation_reference=EanActivationReference.SERVE,
+            ),
+        ),
+        headway_pairs=(),
+    )
+    movement_plan = EanMovementPlan(
+        scenario_id=scenario.id,
+        horizon_seconds=config.horizon_seconds,
+        model_end_seconds=config.model_end_seconds,
+        trajectories=tuple(
+            EanCabinTrajectory(
+                cabin_id=cabin_id,
+                visits=tuple(
+                    _odd_cycle_visit(
+                        cabin_id=cabin_id,
+                        visit_index=visit_index,
+                        station_index=station_index,
+                    )
+                    for visit_index, station_index in enumerate(sequence)
+                ),
+            )
+            for cabin_id, sequence in cabin_sequences.items()
+        ),
+    )
+    return scenario, artifact, movement_plan
+
+
+def _odd_cycle_visit(
+    *,
+    cabin_id: int,
+    visit_index: int,
+    station_index: int,
+) -> EanCabinVisit:
+    decision = (
+        EanRouteDecision.SKIP
+        if visit_index in {0, 5}
+        else EanRouteDecision.STOP
+    )
+    switch_time = float(visit_index)
+    return EanCabinVisit(
+        cabin_id=cabin_id,
+        visit_index=visit_index,
+        switch_id=f"switch_{station_index}",
+        station_id=str(station_index),
+        decision=decision,
+        switch_time_seconds=switch_time,
+        platform_entry_time_seconds=(
+            switch_time + 0.2
+            if decision is EanRouteDecision.STOP
+            else None
+        ),
+        platform_exit_time_seconds=(
+            switch_time + 0.5
+            if decision is EanRouteDecision.STOP
+            else None
+        ),
+        exit_switch_time_seconds=switch_time + 0.7,
+        next_switch_time_seconds=switch_time + 1.0,
+        wait_seconds=0.0,
     )
 
 

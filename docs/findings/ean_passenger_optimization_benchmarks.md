@@ -573,3 +573,39 @@ evidence that Gurobi cuts can almost eliminate headway-order fractionality on
 the smaller case while substantial passenger and stop/skip coupling remains.
 It does not prove that the Five-Station post-cut relaxation has the same family
 distribution.
+
+## Compact Fixed-Movement Passenger Optimizer
+
+Date: 2026-07-15
+
+Software baseline:
+
+```text
+base commit: 08ac095
+worktree: dirty with the independent fixed-movement optimizer implementation
+```
+
+Matched `three_station_v0` and `five_station_v0` Journey-Time diagnostics used
+the production formulation, exact-optimality policy, and a 300-second limit per
+case. The fixed integer and LP cases used the same movement incumbent extracted
+from the integrated case and exactly the same filtered ride candidates.
+
+| Instance | Case | Objective (s) | Runtime (s) | Variables | Rows | Nonzeros | Fractional rides |
+|---|---|---:|---:|---:|---:|---:|---:|
+| three station | integer | 2,704,563.2 | 0.0048 | 737 | 332 | 2,192 | 0 |
+| three station | LP | 2,704,563.2 | 0.0028 | 737 | 332 | 2,192 | 0 |
+| five station | integer | 1,947,463.3 | 0.0203 | 3,550 | 681 | 16,942 | 0 |
+| five station | LP | 1,947,463.3 | 0.0082 | 3,550 | 681 | 16,942 | 0 |
+
+Both practical LPs are integral and have zero observed LP/IP objective gap.
+This does not contradict the direct-ride odd-cycle counterexample: it shows
+only that these two particular movement incumbents do not expose the general
+nonintegrality.
+
+The compact integer model reproduces the integrated incumbent objective on the
+Five-Station all-stop movement and improves the Three-Station passenger
+assignment by approximately 284 passenger-seconds. Compared with the
+integrated models, it removes all movement, timing, headway, selected-time, and
+unary-slot variables. Exact fixed-movement passenger evaluation is therefore
+negligible for these instances; the computational bottleneck remains the joint
+movement--passenger search.

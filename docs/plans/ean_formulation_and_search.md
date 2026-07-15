@@ -202,8 +202,10 @@ modes.
 ### C3. Fixed-Movement Passenger Evaluator
 
 If the isolated passenger problem remains material, build the destination-
-layered evaluator from `ean_decomposition.md`, measure its LP integrality, and
-choose exact repair or decomposition only from those measurements.
+layered evaluator from `ean_decomposition.md`, measure its practical LP/IP gap
+and exact-repair cost, and choose the decomposition mechanism from those
+measurements. General LP exactness is already ruled out by the direct-ride
+odd-cycle counterexample.
 
 ## Low-Priority Experiments
 

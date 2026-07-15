@@ -105,7 +105,7 @@ def _parse_args() -> argparse.Namespace:
         "--time-limit",
         type=float,
         default=300.0,
-        help="Solver time limit in seconds for each of the three cases.",
+        help="Solver time limit in seconds for each benchmark case.",
     )
     parser.add_argument("--sample-interval", type=float, default=5.0)
     parser.add_argument(
