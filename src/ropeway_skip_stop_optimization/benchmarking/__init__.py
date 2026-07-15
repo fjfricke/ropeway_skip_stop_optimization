@@ -16,6 +16,7 @@ from ropeway_skip_stop_optimization.benchmarking.ean_root_relaxation import (
     EanRootRelaxationDiagnostic,
     EanRootRelaxationRecorder,
     EanRootRelaxationSample,
+    EanStandaloneRelaxationDiagnostic,
     EanVariableFamily,
     EanVariableFamilyMetrics,
 )
@@ -36,6 +37,7 @@ __all__ = [
     "EanRootRelaxationDiagnostic",
     "EanRootRelaxationRecorder",
     "EanRootRelaxationSample",
+    "EanStandaloneRelaxationDiagnostic",
     "EanVariableFamily",
     "EanVariableFamilyMetrics",
     "GurobiMipProgressRecorder",

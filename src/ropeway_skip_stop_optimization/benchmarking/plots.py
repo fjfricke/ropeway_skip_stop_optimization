@@ -275,10 +275,15 @@ class EanBottleneckPlotBuilder:
             if not isinstance(root, Mapping):
                 continue
             samples = root.get("samples") or ()
-            if not samples:
-                continue
-            final_sample = samples[-1]
-            families = final_sample.get("families") or ()
+            if samples:
+                families = samples[-1].get("families") or ()
+            else:
+                standalone = root.get("standalone_relaxation")
+                families = (
+                    standalone.get("families") or ()
+                    if isinstance(standalone, Mapping)
+                    else ()
+                )
             values = {
                 str(family.get("family")): _as_float(
                     family.get("fractional_variable_count")
@@ -311,6 +316,28 @@ class EanBottleneckPlotBuilder:
                 bound = _as_float(sample.get("best_bound"))
                 if runtime is not None and bound is not None:
                     points.append((runtime, bound))
+            if not points:
+                metadata = case.get("metadata")
+                if isinstance(metadata, Mapping):
+                    for sample in (
+                        metadata.get("progress_samples") or ()
+                    ):
+                        runtime = _as_float(
+                            sample.get("runtime_seconds")
+                        )
+                        bound = _as_float(sample.get("best_bound"))
+                        node_count = _as_float(
+                            sample.get("node_count")
+                        )
+                        if (
+                            runtime is not None
+                            and bound is not None
+                            and (
+                                node_count is None
+                                or node_count <= 0.5
+                            )
+                        ):
+                            points.append((runtime, bound))
             if points:
                 series.append(
                     PlotSeries(

@@ -185,6 +185,13 @@ recorders share the existing Gurobi callback with progress recording and are
 absent from normal exports unless explicitly supplied. Presolve-only solves can
 finish without producing a root sample.
 
+For the integrated bottleneck case, the recorder also clones the completed
+model with `Model.relax()` and solves that raw continuous relaxation through
+barrier without crossover. The clone is disposed before the normal MIP solve.
+Its objective and variable-family metrics are stored separately from
+`MIPNODE` samples because presolve and MIP cuts can make the actual root
+substantially stronger than the raw LP.
+
 ## Benchmark and Delivery
 
 Benchmark scripts write machine-specific JSON, SVG plots, and checkpoints under

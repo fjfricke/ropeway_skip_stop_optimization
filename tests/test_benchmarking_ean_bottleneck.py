@@ -26,7 +26,14 @@ def test_bottleneck_runner_builds_all_three_cases(
     problems: list[object] = []
     integrated_plan = object()
 
-    def fake_solve(self, problem, solver_policy):
+    def fake_solve(
+        self,
+        problem,
+        solver_policy,
+        *,
+        standalone_root_relaxation,
+    ):
+        del standalone_root_relaxation
         problems.append(problem)
         return (
             SimpleNamespace(

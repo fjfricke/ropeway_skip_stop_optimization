@@ -388,6 +388,11 @@ class EanOptimizer:
             solver_policy=self.config.solver_policy,
             enabled=self.config.log_to_console,
         )
+        _prepare_diagnostic_recorders(
+            self.config.diagnostic_recorders,
+            model,
+            GRB,
+        )
         progress_start = _optimize(
             model=model,
             grb=GRB,
@@ -733,6 +738,17 @@ def _bind_diagnostic_recorders(
         bind_models = getattr(recorder, "bind_models", None)
         if callable(bind_models):
             bind_models(movement_model, passenger_model)
+
+
+def _prepare_diagnostic_recorders(
+    diagnostic_recorders: tuple[Any, ...],
+    model: Any,
+    grb: Any,
+) -> None:
+    for recorder in diagnostic_recorders:
+        prepare_model = getattr(recorder, "prepare_model", None)
+        if callable(prepare_model):
+            prepare_model(model, grb)
 
 
 def _record_callbacks(

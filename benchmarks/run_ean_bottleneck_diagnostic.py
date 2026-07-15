@@ -64,6 +64,16 @@ def main() -> None:
                     "    root samples="
                     f"{len(case.root_relaxation.samples)}"
                 )
+                standalone = (
+                    case.root_relaxation.standalone_relaxation
+                )
+                if standalone is not None:
+                    print(
+                        "    standalone relaxation: "
+                        f"status={standalone.status} "
+                        f"runtime={standalone.runtime_seconds} "
+                        f"objective={standalone.objective_value}"
+                    )
 
 
 def _parse_args() -> argparse.Namespace:

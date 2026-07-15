@@ -56,6 +56,15 @@ class EanRootRelaxationSample:
 class EanRootRelaxationDiagnostic:
     sample_interval_seconds: float
     samples: tuple[EanRootRelaxationSample, ...]
+    standalone_relaxation: EanStandaloneRelaxationDiagnostic | None
+
+
+@dataclass(frozen=True)
+class EanStandaloneRelaxationDiagnostic:
+    status: str
+    runtime_seconds: float
+    objective_value: float | None
+    families: tuple[EanVariableFamilyMetrics, ...]
 
 
 @dataclass
@@ -63,7 +72,9 @@ class EanRootRelaxationRecorder:
     """Sample canonical EAN variable families at the MIP root node."""
 
     sample_interval_seconds: float = 5.0
+    standalone_time_limit_seconds: float | None = None
     samples: list[EanRootRelaxationSample] = field(default_factory=list)
+    standalone_relaxation: EanStandaloneRelaxationDiagnostic | None = None
     _last_sample_runtime: float | None = None
     _groups: tuple[
         tuple[EanVariableFamily, tuple[Any, ...]],
@@ -74,6 +85,13 @@ class EanRootRelaxationRecorder:
     def __post_init__(self) -> None:
         if self.sample_interval_seconds <= 0:
             raise ValueError("sample_interval_seconds must be positive")
+        if (
+            self.standalone_time_limit_seconds is not None
+            and self.standalone_time_limit_seconds <= 0
+        ):
+            raise ValueError(
+                "standalone_time_limit_seconds must be positive"
+            )
 
     def bind_models(
         self,
@@ -143,6 +161,45 @@ class EanRootRelaxationRecorder:
 
     def begin_run(self) -> None:
         self._last_sample_runtime = None
+
+    def prepare_model(self, model: Any, grb: Any) -> None:
+        """Solve a separately labelled raw LP relaxation when requested."""
+
+        if self.standalone_time_limit_seconds is None:
+            return
+        relaxed_model = model.relax()
+        try:
+            relaxed_model.Params.OutputFlag = 0
+            relaxed_model.Params.TimeLimit = (
+                self.standalone_time_limit_seconds
+            )
+            relaxed_model.Params.Method = 2
+            relaxed_model.Params.Crossover = 0
+            relaxed_model.optimize()
+            families: tuple[EanVariableFamilyMetrics, ...] = ()
+            objective_value = None
+            if int(relaxed_model.SolCount) > 0:
+                families = self._relaxed_family_metrics(relaxed_model)
+                objective_value = _safe_float_attr(
+                    relaxed_model,
+                    "ObjVal",
+                )
+            self.standalone_relaxation = (
+                EanStandaloneRelaxationDiagnostic(
+                    status=_solver_status_name(
+                        int(relaxed_model.Status),
+                        grb,
+                    ),
+                    runtime_seconds=(
+                        _safe_float_attr(relaxed_model, "Runtime")
+                        or 0.0
+                    ),
+                    objective_value=objective_value,
+                    families=families,
+                )
+            )
+        finally:
+            relaxed_model.dispose()
 
     def record_callback(
         self,
@@ -236,7 +293,32 @@ class EanRootRelaxationRecorder:
         return EanRootRelaxationDiagnostic(
             sample_interval_seconds=self.sample_interval_seconds,
             samples=tuple(self.samples),
+            standalone_relaxation=self.standalone_relaxation,
         )
+
+    def _relaxed_family_metrics(
+        self,
+        relaxed_model: Any,
+    ) -> tuple[EanVariableFamilyMetrics, ...]:
+        metrics: list[EanVariableFamilyMetrics] = []
+        for family, variables in self._groups:
+            relaxed_variables = tuple(
+                relaxed_model.getVarByName(str(variable.VarName))
+                for variable in variables
+            )
+            if any(variable is None for variable in relaxed_variables):
+                raise ValueError(
+                    "relaxed EAN model is missing variables from "
+                    f"family {family.value!r}"
+                )
+            values = tuple(
+                float(variable.X)
+                for variable in relaxed_variables
+            )
+            metrics.append(
+                _family_metrics(family, variables, values)
+            )
+        return tuple(metrics)
 
 
 def _model_variables(
@@ -337,3 +419,23 @@ def _finite_or_none(
     if infinity is not None and abs(value) >= float(infinity) * 0.5:
         return None
     return value
+
+
+def _safe_float_attr(model: Any, name: str) -> float | None:
+    try:
+        value = float(getattr(model, name))
+    except Exception:
+        return None
+    return value if math.isfinite(value) else None
+
+
+def _solver_status_name(status: int, grb: Any) -> str:
+    names = {
+        grb.OPTIMAL: "optimal",
+        grb.INFEASIBLE: "infeasible",
+        grb.INF_OR_UNBD: "infeasible_or_unbounded",
+        grb.UNBOUNDED: "unbounded",
+        grb.TIME_LIMIT: "time_limit",
+        grb.INTERRUPTED: "interrupted",
+    }
+    return names.get(status, f"status_{status}")

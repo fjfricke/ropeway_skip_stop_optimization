@@ -107,6 +107,15 @@ passenger-slot, selected-time, and unserved variable families. It does not
 parse the solver log or change the mathematical model. Cases solved entirely
 in presolve may legitimately contain no root samples.
 
+Before the integrated MIP solve, the diagnostic also solves a separately
+labelled continuous relaxation of the same built model, using barrier without
+crossover and the configured per-case time limit. This raw LP provides
+fractionality when the MIP root does not finish far enough to expose
+`MIPNODE` values. It does not contain Gurobi's later MIP cuts and must not be
+reported as the post-cut root bound. The additional LP runtime is stored
+separately and increases total wall-clock time only when root diagnostics are
+enabled.
+
 Each run writes one JSON plus five base SVG comparisons under
 `benchmarks/output/bottleneck_diagnostics/`. The JSON includes scenario and
 artifact construction, passenger-candidate construction, movement and

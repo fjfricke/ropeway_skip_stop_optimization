@@ -11,9 +11,18 @@ from ropeway_skip_stop_optimization.benchmarking.ean_root_relaxation import (
 
 
 class _FakeVariable:
-    def __init__(self, *, variable_type: str, objective: float = 0.0) -> None:
+    def __init__(
+        self,
+        *,
+        variable_type: str,
+        objective: float = 0.0,
+        name: str = "variable",
+        value: float = 0.0,
+    ) -> None:
         self.VType = variable_type
         self.Obj = objective
+        self.VarName = name
+        self.X = value
 
 
 class _FakeCallback:
@@ -29,6 +38,11 @@ class _FakeCallback:
 class _FakeGRB:
     Callback = _FakeCallback
     OPTIMAL = 2
+    INFEASIBLE = 3
+    INF_OR_UNBD = 4
+    UNBOUNDED = 5
+    TIME_LIMIT = 6
+    INTERRUPTED = 7
     INFINITY = 1e100
 
 
@@ -45,6 +59,36 @@ class _FakeCallbackModel:
         variables: list[_FakeVariable],
     ) -> list[float]:
         return [self.node_values[variable] for variable in variables]
+
+
+class _FakeRelaxedModel:
+    def __init__(self, variables: list[_FakeVariable]) -> None:
+        self.Params = SimpleNamespace()
+        self.Status = _FakeGRB.OPTIMAL
+        self.SolCount = 1
+        self.Runtime = 2.5
+        self.ObjVal = 42.0
+        self.disposed = False
+        self._by_name = {
+            variable.VarName: variable for variable in variables
+        }
+
+    def optimize(self) -> None:
+        pass
+
+    def getVarByName(self, name: str) -> _FakeVariable | None:
+        return self._by_name.get(name)
+
+    def dispose(self) -> None:
+        self.disposed = True
+
+
+class _FakeOriginalModel:
+    def __init__(self, relaxed_model: _FakeRelaxedModel) -> None:
+        self.relaxed_model = relaxed_model
+
+    def relax(self) -> _FakeRelaxedModel:
+        return self.relaxed_model
 
 
 def test_root_relaxation_recorder_groups_fractional_variables() -> None:
@@ -156,3 +200,50 @@ def test_root_relaxation_recorder_samples_only_optimal_root_nodes() -> None:
         sample.runtime_seconds
         for sample in recorder.diagnostic.samples
     ] == [3.0, 8.0]
+
+
+def test_root_relaxation_recorder_solves_standalone_relaxation() -> None:
+    original_stop = _FakeVariable(
+        variable_type="B",
+        objective=10.0,
+        name="stop",
+    )
+    relaxed_stop = _FakeVariable(
+        variable_type="C",
+        objective=10.0,
+        name="stop",
+        value=0.4,
+    )
+    movement_model = SimpleNamespace(
+        variables=SimpleNamespace(
+            switch_time={},
+            exit_switch_time={},
+            wait_time={},
+            stop={(0, 0): original_stop},
+            visit_active={},
+            checkpoint_within_horizon={},
+            headway_order={},
+        )
+    )
+    relaxed_model = _FakeRelaxedModel([relaxed_stop])
+    recorder = EanRootRelaxationRecorder(
+        standalone_time_limit_seconds=30.0,
+    )
+    recorder.bind_models(movement_model, None)
+
+    recorder.prepare_model(
+        _FakeOriginalModel(relaxed_model),
+        _FakeGRB,
+    )
+
+    diagnostic = recorder.diagnostic.standalone_relaxation
+    assert diagnostic is not None
+    assert diagnostic.status == "optimal"
+    assert diagnostic.runtime_seconds == 2.5
+    assert diagnostic.objective_value == 42.0
+    assert diagnostic.families[0].fractional_variable_count == 1
+    assert relaxed_model.Params.OutputFlag == 0
+    assert relaxed_model.Params.TimeLimit == 30.0
+    assert relaxed_model.Params.Method == 2
+    assert relaxed_model.Params.Crossover == 0
+    assert relaxed_model.disposed

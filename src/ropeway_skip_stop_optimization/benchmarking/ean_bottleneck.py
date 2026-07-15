@@ -144,10 +144,12 @@ class EanBottleneckDiagnosticRunner:
                 objective=self.config.objective,
             ),
             solver_policy,
+            standalone_root_relaxation=self.config.root_diagnostics,
         )
         movement_only, movement_only_root = self._solve(
             EanMovementFeasibilityProblem(artifact),
             solver_policy,
+            standalone_root_relaxation=False,
         )
         if integrated.movement_plan is None:
             fixed_movement = EanBottleneckCaseResult(
@@ -168,6 +170,7 @@ class EanBottleneckDiagnosticRunner:
                     fixed_movement_plan=integrated.movement_plan,
                 ),
                 solver_policy,
+                standalone_root_relaxation=False,
             )
             fixed_movement = EanBottleneckCaseResult(
                 case=EanBottleneckCase.FIXED_MOVEMENT_PASSENGER,
@@ -224,6 +227,8 @@ class EanBottleneckDiagnosticRunner:
         self,
         problem: EanMovementFeasibilityProblem | EanPassengerServiceProblem,
         solver_policy: GurobiSolverPolicy,
+        *,
+        standalone_root_relaxation: bool,
     ) -> tuple[
         EanOptimizationResult,
         EanRootRelaxationDiagnostic | None,
@@ -232,6 +237,11 @@ class EanBottleneckDiagnosticRunner:
         root_recorder = (
             EanRootRelaxationRecorder(
                 sample_interval_seconds=self.config.sample_interval_seconds,
+                standalone_time_limit_seconds=(
+                    self.config.time_limit_seconds
+                    if standalone_root_relaxation
+                    else None
+                ),
             )
             if self.config.root_diagnostics
             else None

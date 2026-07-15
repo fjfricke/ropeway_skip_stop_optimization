@@ -22,6 +22,15 @@ and plots compare final root fractionality by family and root-bound progress.
 A real Three-Station smoke run reached the root, produced typed samples, and
 verified JSON and SVG generation.
 
+The Five-Station MIP did not expose an optimal `MIPNODE` relaxation within its
+300-second root processing. The diagnostic therefore gained a separately
+labelled raw-LP fallback: it clones the completed integrated model with
+`Model.relax()`, solves it by barrier without crossover, records the same typed
+family metrics, and disposes the clone before the MIP solve. A Three-Station
+comparison verified why the two sources remain separate: the raw LP contained
+14,317 fractional headway-order variables, while the later post-cut root sample
+contained only seven; passenger slots remained heavily fractional in both.
+
 ### Passenger-optimized all-stop MIP start
 
 The integrated EAN passenger solver now supports three explicit MIP-start
