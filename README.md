@@ -104,12 +104,15 @@ optimizations and at most one value from each formulation category:
 | Independent optimizations | `candidate_horizon_pruning`, `single_ring_dominated_ride_pruning`, `slot_time_relaxation_strengthening`, `tight_big_m_bounds` |
 | Horizon formulation | `horizon_legacy`, `horizon_conservative_free_suffix`, `horizon_exact_time_activation` |
 | Time-bound formulation | `time_bounds_legacy_plus_10`, `time_bounds_derived_visit_bounds` |
+| Stop/skip timing formulation | `stop_skip_timing_big_m`, `stop_skip_timing_affine` |
 
 `all` means the current default optimization set with the legacy formulation
 categories; it does not select every mutually exclusive formulation.
 `none` means no optional optimization and the same legacy formulation defaults.
-In an explicit list, omitted optimizations are disabled and omitted formulation
-categories use their legacy defaults.
+`all` may be combined with formulation overrides such as
+`all,stop_skip_timing_affine`. In an explicit list without `all`, omitted
+optimizations are disabled and omitted formulation categories use their legacy
+defaults.
 
 The horizon cases have different finite-horizon meanings:
 
@@ -127,6 +130,20 @@ The legacy time bound uses the longest no-wait chain plus ten seconds as one
 global bound. Derived visit bounds propagate per-visit lower and upper bounds
 and use an explicit station maximum wait when configured, otherwise one
 operational horizon as a finite terminal waiting cap.
+
+The Big-M timing case uses four conditional service/skip inequalities per
+visit. The affine case replaces them, for every active visit, with:
+
+```text
+exit = switch + skip_duration
+       + (service_duration - skip_duration) * stop
+       + wait
+```
+
+Under exact horizon activation, the affine equality is enabled by the visit
+activation binary. The current default remains `stop_skip_timing_big_m` until
+repeated benchmarks justify promotion; the first five-minute comparison showed
+a substantially better affine proof gap but a slightly worse incumbent.
 
 Checkpoint resume loads a prior incumbent solution as a Gurobi MIP start. It
 does not resume the previous branch-and-bound tree.

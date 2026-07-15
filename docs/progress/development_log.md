@@ -92,3 +92,29 @@ The legacy horizon and legacy time bounds remain the default. The new cases
 remain explicit formulation experiments because the horizon choices have
 different finite-horizon semantics and the derived bounds have not shown a
 general performance benefit.
+
+### Affine stop/skip timing formulation
+
+The historical four Big-M timing implications per visit were retained as one
+formulation case and an exact affine alternative was added:
+
+```text
+exit = switch + skip_duration
+       + (service_duration - skip_duration) * stop
+       + wait
+```
+
+The affine relation is one ordinary linear equality for an unconditionally
+active visit. Under exact time activation, an indicator enables the equality
+only for an active visit. Passenger and skip/stop-feasibility optimizers use
+the same helper so their timing algebra cannot drift independently.
+
+Exact small instances preserved waiting-time and journey-time objectives.
+The full suite passed with 242 tests; Ruff lint, the frontend build, and the
+thesis PDF build also succeeded.
+
+A five-minute Three-Station comparison reduced rows by 1,293 and improved the
+MIP gap from 6.52% to 4.83%. The affine incumbent was slightly worse and served
+four fewer passengers, so Big-M remains the default until repeated runs show
+that the proof improvement is stable without an unacceptable primal-side
+regression.

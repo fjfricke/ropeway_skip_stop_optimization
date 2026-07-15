@@ -269,50 +269,6 @@ matrix remains reproducible. Verification must compare exact small-instance
 objectives, extracted prefixes, crossing headways, and empty-prefix cabin
 starts before performance benchmarking.
 
-## Phase 1: Affine Stop/Skip Timing
-
-Replace the four Big-M timing implications per visit with the exact affine
-relation
-
-```text
-exit_time
-  = switch_time
-  + skip_seconds
-  + (service_seconds - skip_seconds) * stop
-  + wait_time
-```
-
-together with the existing waiting-domain rule:
-
-```text
-no_waiting:
-  wait_time = 0
-
-end_of_platform_wait:
-  0 <= wait_time <= wait_upper_bound * stop
-```
-
-This is linear because both route durations are constants. For `stop = 0`,
-waiting is zero and the skip duration is selected. For `stop = 1`, the service
-duration plus waiting is selected.
-
-Implement the same formulation in the passenger optimizer and the
-skip/stop-feasibility optimizer. Avoid maintaining two independent timing
-derivations; extract only the small shared expression or helper needed by both
-models.
-
-Expected structural reduction:
-
-| Example | Current timing implication rows | Affine rows | Removed rows |
-|---|---:|---:|---:|
-| `three_station_v0` | 1,724 | 431 | 1,293 |
-| `five_station_v0` | 3,956 | 989 | 2,967 |
-
-The important expected benefit is the stronger relaxation, not only the row
-count. If adopted, the stop/skip portion of `tight_big_m_bounds` becomes
-obsolete. Keep the old formulation only as a temporary benchmark toggle and
-remove it after equivalence and performance are established.
-
 ## Phase 2: Remove Redundant Unary-Slot Rows
 
 Each candidate's unary passenger slots satisfy:
@@ -540,13 +496,12 @@ only three dominated rows for `three_station_v0` and twelve for
 1. Keep the legacy horizon and time bounds as the current default.
 2. Refine exact-activation time domains only if exact finite-horizon activation
    becomes a priority.
-3. Add and validate affine stop/skip timing.
-4. Remove redundant unary-slot rows.
-5. Project board-slot variables out of journey-time models.
-6. Evaluate transition-only timing.
-7. Add guaranteed post-horizon headway pruning.
-8. Prove and benchmark shared physical precedence.
-9. Consider the lower-priority experiments independently.
+3. Remove redundant unary-slot rows.
+4. Project board-slot variables out of journey-time models.
+5. Evaluate transition-only timing.
+6. Add guaranteed post-horizon headway pruning.
+7. Prove and benchmark shared physical precedence.
+8. Consider the lower-priority experiments independently.
 
 Do not combine unvalidated phases in the first benchmark. Each phase needs a
 separate optimization toggle until objective equivalence and performance are

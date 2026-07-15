@@ -44,6 +44,15 @@ Implemented default optimizations:
 Tight passenger and stop/skip Big-M bounds are implemented behind the opt-in
 `tight_big_m_bounds` selection.
 
+Stop/skip timing is a mutually exclusive formulation category:
+
+- `stop_skip_timing_big_m` uses the historical four conditional timing rows;
+- `stop_skip_timing_affine` uses one exact affine equality per active visit.
+
+For an exact-time horizon, the affine equality is attached to the visit
+activation binary as an indicator. Big-M remains the default while the affine
+case is benchmarked.
+
 ## EAN Finite-Horizon Formulations
 
 `EanConfig.horizon_seconds` is the passenger service cutoff \(T\).

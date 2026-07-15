@@ -299,3 +299,53 @@ The matrix supports retaining `horizon_legacy` with
 promoted by this experiment. The exact activation formulation should be
 evaluated only together with meaningful propagated event bounds; the
 historical global domain is an unsuitable companion formulation.
+
+## Affine Stop/Skip Timing
+
+Date: 2026-07-14
+
+Implementation baseline:
+
+```text
+git commit: 5db36ecbe6bf26a4ba2e21d7a4014eb40d72d834
+worktree: dirty with the affine timing implementation under evaluation
+```
+
+Both runs used `three_station_v0`, the journey-time objective, the
+`exact_optimality` solver policy, the three default independent optimizations,
+the legacy horizon and time bounds, a 300-second limit, and five-second
+callback sampling. The only model difference was the stop/skip timing
+formulation.
+
+| Timing | Vars | Constraints | Objective (h) | Best bound (s) | Gap | Nodes | Served | Unserved | Skips |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| Big-M | 82,398 | 233,193 | 751.303 | 2,528,472 | 6.52% | 586 | 2,428 | 1,052 | 57 |
+| affine | 82,398 | 231,900 | 751.425 | 2,574,514 | 4.83% | 9,063 | 2,424 | 1,056 | 58 |
+
+The affine formulation removes exactly 1,293 rows: three net rows for each of
+the 431 visits. Variables, ride candidates, slots, horizon semantics, and time
+bounds are unchanged.
+
+The proof-side improvement is substantial. The best bound increases by 46,042
+passenger-seconds, or 1.82%, and the final gap decreases by 1.69 percentage
+points. This is a relative gap reduction of 25.9%. The solver processes about
+15.5 times as many nodes.
+
+| Gap threshold | Big-M | affine |
+|---|---:|---:|
+| <=10% | 38.4s | 47.2s |
+| <=8% | 43.8s | 47.2s |
+| <=7% | 87.7s | 47.2s |
+| <=6% | not reached | 49.1s |
+| <=5% | not reached | 286.5s |
+
+The affine run initially reaches 10% and 8% slightly later, but then closes the
+proof gap much more effectively. Its best incumbent is 441 passenger-seconds,
+or 0.123 passenger-hours, worse than Big-M and serves four fewer passengers.
+This is consistent with a changed time-limited search trajectory, not changed
+integer semantics: exact small-instance tests preserve both waiting-time and
+journey-time objectives.
+
+The affine formulation remains opt-in after this single long run. The result
+is strong evidence that it is a better proof formulation, but not enough to
+replace the Big-M default while incumbent quality is also important.

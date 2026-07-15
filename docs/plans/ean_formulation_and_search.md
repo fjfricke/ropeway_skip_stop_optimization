@@ -25,7 +25,20 @@ not adopted.
 
 ## Ordered Work
 
-### 1. Conditional Repeated Tight Big-M Benchmarks
+### 1. Repeated Affine Timing Validation
+
+Repeat the first five-minute `all` versus
+`all,stop_skip_timing_affine` comparison with controlled solver seeds and
+longer limits. Include `five_station_v0` model construction and bounded runs.
+Compare incumbent quality separately from best-bound and gap progress.
+
+Promote affine timing only if the proof improvement is reproducible and the
+primal-side regression is acceptable for export-oriented runs. If promoted,
+remove the historical stop/skip Big-M formulation after a short compatibility
+window; retain historical benchmark JSON rather than permanent model
+complexity.
+
+### 2. Conditional Repeated Tight Big-M Benchmarks
 
 Compare `all` against `all + tight_big_m_bounds` with repeated seeds or runs and
 fixed 5-, 10-, and 15-minute limits. Record incumbent, bound, gap, node count,
@@ -36,7 +49,7 @@ and incumbent quality is not consistently worse for export-oriented runs.
 Skip this work if affine stop/skip timing replaces the corresponding Big-M
 constraints.
 
-### 2. Candidate Earliest Board-Time Bounds
+### 3. Candidate Earliest Board-Time Bounds
 
 Add a conservative physical lower bound for every ride candidate:
 
@@ -49,7 +62,7 @@ boarding time reference. It must not use an incumbent or assume undecided
 stop/skip choices. This is especially relevant for waiting-time objectives with
 release time zero.
 
-### 3. Candidate Latest Board and Alight Bounds
+### 4. Candidate Latest Board and Alight Bounds
 
 Derive expression-specific upper bounds:
 
@@ -63,7 +76,7 @@ these values merely from the switch-time upper bound because boarding and
 alighting expressions include route constants and possibly waiting. Prove each
 bound for both waiting and no-waiting modes before enabling it.
 
-### 4. Better MIP Starts
+### 5. Better MIP Starts
 
 Improve the primal side before testing more reformulations:
 
@@ -75,7 +88,7 @@ Improve the primal side before testing more reformulations:
 Benchmark first-incumbent time and objective separately from best-bound
 progress. Starts may change time-limited output but not the true optimum.
 
-### 5. Safe Headway Pair Classification
+### 6. Safe Headway Pair Classification
 
 Introduce a benchmark toggle and classify only pairs whose order is proven:
 
@@ -88,7 +101,7 @@ A fixed pair gets one activation-relaxed directed headway constraint and no
 ordering binary. All different-cabin pairs remain variable in the first phase.
 Log total, fixed, variable, and omitted pairs plus ordering-binary count.
 
-### 6. Conservative Reordering and Time-Window Rules
+### 7. Conservative Reordering and Time-Window Rules
 
 After the same-cabin rule is validated, investigate:
 
@@ -99,7 +112,7 @@ After the same-cabin rule is validated, investigate:
 Any uncertain pair stays variable. A false fixed-order classification can
 silently remove feasible solutions.
 
-### 7. Headway Reformulation Experiments
+### 8. Headway Reformulation Experiments
 
 Benchmark, independently:
 
@@ -110,7 +123,7 @@ Benchmark, independently:
 Keep slot-time valid inequalities even when indicators are used. Cleaner
 Gurobi syntax is not sufficient evidence of better performance.
 
-### 8. Small Debug Instances
+### 9. Small Debug Instances
 
 Add tiny fixtures using the production EAN builder and optimizer paths:
 
