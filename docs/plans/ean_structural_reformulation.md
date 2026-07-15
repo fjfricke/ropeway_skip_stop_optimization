@@ -4,12 +4,10 @@ Status: **future work**
 
 ## Goal
 
-Reduce the integrated EAN passenger MILP before adding more solver tuning or
-decomposition. Prefer exact projections and removal of redundant variables and
-constraints over alternative Big-M constants.
-
-This plan precedes the candidate-bound, MIP-start, and general headway search
-work in `ean_formulation_and_search.md`.
+Track larger exact structural reformulations that remain plausible but are not
+the automatic next step. Prefer projections and removal of redundant variables
+and constraints over alternative Big-M constants, but implement a phase only
+when the bottleneck diagnosis in `ean_decomposition.md` supports it.
 
 ## Correctness Baseline
 
@@ -68,7 +66,6 @@ configuration with one value per mutually exclusive category:
 
 ```text
 EanFormulationConfig
-  board_time: one BoardTimeFormulation
   cabin_timing: one CabinTimingFormulation
   headway_precedence: one HeadwayPrecedenceFormulation
 
@@ -79,10 +76,6 @@ EanOptimizationConfig
 The future formulation categories in this plan are:
 
 ```text
-board_time:
-  explicit
-  projected_journey_time
-
 cabin_timing:
   explicit_exit_and_wait
   transition_only
@@ -95,124 +88,41 @@ headway_precedence:
 Configurations may combine one value from each category with any compatible
 set of independent reductions. Configuration validation must reject invalid
 combinations, for example `tight_big_m_bounds` with a formulation that has
-removed the corresponding Big-M rows, or projected board times for the
-waiting-time objective.
+removed the corresponding Big-M rows.
 
 Keep the existing single list-style CLI and structured benchmark metadata.
 Every new category value receives a unique selection name, omitted categories
 use their defaults, and incompatible cross-category combinations are rejected.
 
-## Future Full-Day Terminal Designs
+## Fleet Activation and Full-Day Boundaries
 
-The finite-horizon contract is not the final full-day boundary model. Keep the
-following exact terminal designs available for later implementation.
+Optimized cabin activation, depot dispatch, fleet-size experiments, physical
+depot resources, and full-day terminal contracts are specified in
+`ean_fleet_activation_and_depots.md`. They change the feasible set and belong
+to a separate semantic roadmap rather than the solver-preserving structural
+reformulations in this document.
 
-#### Return to Depot
+## Intermediate Turnbacks
 
-After passenger service, optimize an unrestricted recovery phase until:
-
-```text
-all passengers have alighted
-all cabins are in the depot
-```
-
-This gives an independent next-day start. It requires explicit depot entry,
-exit, capacity, inventory, and conflict semantics.
-
-#### Identity-Free Cyclic Day
-
-Require the physical terminal state after day length `D` to equal the initial
-state without requiring the same cabin identifiers at the same positions. For
-identical cabins, permit a type-preserving bijection `pi`:
-
-```text
-state(c, D) = state(pi(c), 0)
-```
-
-On a no-overtaking ring, use a cyclic order shift instead of general assignment
-binaries whenever the topology proves that this is sufficient. Match position,
-direction, motion phase, cabin type or capacity, and every controller state
-needed to repeat the schedule. Add wrap-around headway constraints between the
-last events of one day and the first events of the next.
-
-Cabin identifiers may differ across the boundary. The number of active cabins
-of each interchangeable type must still match for a one-day cycle.
-
-#### Hybrid Line and Depot Cycle
-
-Allow some cabins to remain on the line and others to be exchanged through the
-depot. Require:
-
-```text
-line state at D = line state at 0, modulo interchangeable cabin identities
-depot inventory by cabin type at D = depot inventory by cabin type at 0
-```
-
-This is the most general exact one-day design for continuous operation. It
-allows mixed stop, skip, and wait patterns and does not reduce the feasible
-fleet to the capacity of a fixed all-stop/no-wait policy.
-
-#### Recovery Before a Terminal Condition
-
-Separate passenger service from the day boundary:
-
-```text
-[0, T]: passenger operation
-(T, D]: passenger-free optimized recovery
-```
-
-Use the recovery phase before either `return_to_depot` or `cyclic_state`.
-Recovery decisions remain free so that the terminal condition does not
-unnecessarily distort the passenger-service period.
-
-#### Multi-Day Supercycle
-
-If active fleet sizes, depot inventories, maintenance states, or service
-patterns genuinely differ between days, require repetition only after `k`
-days:
-
-```text
-state(k * D) = state(0)
-```
-
-A different cabin identifier is compatible with a one-day cycle. A different
-physical count at the boundary is not; it requires a multi-day cycle, a
-non-periodic planning horizon, or rolling-horizon operation.
-
-#### Rolling Horizon
-
-Optimize one day plus an overlap into the next day, execute only the committed
-prefix, then solve again from the realized boundary state. This is suitable for
-operational replanning but is not a proof of indefinite extendability.
-
-Do not use a fixed all-stop/no-wait terminal policy as a general
-extendability certificate. Skip and wait choices can support more cabins on
-the line than that fixed policy, so such a certificate can remove physically
-valid solutions.
-
-Open terminal work:
-
-- [ ] Design explicit depot resources and inventory flow.
-- [ ] Add `return_to_depot` as an exact terminal mode.
-- [ ] Add identity-free `cyclic_state` with wrap-around headways.
-- [ ] Extend cyclic matching to the hybrid line/depot state.
-- [ ] Add a multi-day supercycle only when daily fleet counts must differ.
+Station crossovers, fixed short-turn circulation patterns, dynamic route
+choices, and a future switch-graph EAN are specified in
+`ean_intermediate_turnbacks.md`. They change cabin topology and passenger
+reachability and are therefore not structural reductions of the current fixed
+ring formulation.
 
 ## Optional Exact-Activation Time-Domain Refinement
 
 This work is not required for the current model default. The legacy horizon
-with `time_bounds_legacy_plus_10` remains the selected operational formulation
-and performed best in the current five-minute benchmark matrix. Keep the
-following work deferred unless exact event-time horizon activation is needed
-for its finite-horizon semantics.
+with `time_bounds_legacy_plus_10` remains the selected operational formulation.
+Keep the following work deferred unless exact event-time horizon activation is
+needed for its finite-horizon semantics.
 
 The current `time_bounds_derived_visit_bounds` fallback permits up to one full
 operational horizon of waiting at every waiting-enabled visit. Propagating that
-allowance through every generated visit creates a very large terminal time
-domain. On `three_station_v0`, the global upper bound grows from about 1,596
-seconds to about 19,586 seconds. This weakens the legacy and conservative
-horizon formulations, although the propagated visit bounds are currently
-necessary to make `horizon_exact_time_activation` computationally usable.
+allowance through every generated visit can create a very large terminal time
+domain. This weakens the legacy and conservative horizon formulations, although
+propagated visit bounds are necessary to make
+`horizon_exact_time_activation` computationally usable.
 
 Investigate an exact-activation-specific domain that distinguishes:
 
@@ -289,25 +199,22 @@ switch time for the previous operational visit. It should not receive its own
 route decision when the selected exact horizon formulation classifies it as
 post-horizon boundary context.
 
-This phase is more invasive because extraction, MIP starts, headway expressions,
-and checkpoint files currently reference explicit exit and wait variables.
-Benchmark it only after the preceding structural reformulations are stable.
+This removes only roughly two continuous variables per operational visit while
+touching extraction, MIP starts, headway expressions, and checkpoint files.
+The expected size reduction is therefore small relative to the headway
+disjunction count. Defer implementation until Phase 0 shows that explicit
+timing variables or their coupling materially dominate model construction,
+relaxation, or memory.
 
 ## Headway Structure
 
 ### Horizon Pruning
 
 Use conservative earliest occurrence times to omit headway candidates and
-pairs that are guaranteed to lie after the selected movement horizon. On the
-current examples, the initial analysis found:
-
-| Example | Pairs touching guaranteed post-horizon events |
-|---|---:|
-| `three_station_v0` | 5,040 |
-| `five_station_v0` | 12,803 |
-
-These numbers are planning estimates and must be recomputed for each implemented
-horizon formulation before this reduction is benchmarked.
+pairs that are guaranteed to lie after the selected movement horizon. Recompute
+the eligible set for every horizon formulation. Do not implement the reduction
+until the selected horizon semantics define which post-horizon events must
+remain for boundary clearance and collision safety.
 
 ### Shared Physical Precedence
 
@@ -316,21 +223,20 @@ binaries at platform entry, platform exit, and exit switch. Investigate sharing
 one precedence binary across those checkpoints when the physical route proves
 that both serving cabins cannot overtake.
 
-This remains valid even when a skipping cabin can overtake a serving cabin:
-platform constraints are inactive unless both visits serve. The proof must
-still cover the actual route topology and end-of-platform waiting semantics.
-
-Current upper-bound estimates for removable order binaries are:
-
-| Example | Potential duplicate order binaries |
-|---|---:|
-| `three_station_v0` | 34,670 |
-| `five_station_v0` | 106,044 |
+Evaluate this only after the safe same-cabin and conservative reordering work in
+`ean_formulation_and_search.md` has produced a reusable physical-order proof.
+The proof must cover the actual route topology, skip overtaking, activation,
+and end-of-platform waiting semantics.
 
 This work refines, but does not replace, the broader conservative headway
 classification work in `ean_formulation_and_search.md`.
 
 ## Lower-Priority Experiments
+
+Solver backends that change the modeling paradigm are tracked separately in
+`ean_decomposition.md`. In particular, the planned movement-only CP prototype
+is an alternative scaling path, not another formulation toggle of the
+integrated Gurobi MILP.
 
 ### Eliminate Unserved Variables
 
@@ -383,24 +289,28 @@ branch-and-bound tree.
 
 ## Explicit Non-Priority
 
-Do not prioritize capacity-row subset elimination. The current analysis found
-only three dominated rows for `three_station_v0` and twelve for
-`five_station_v0`, so the implementation complexity is not justified.
+Do not prioritize capacity-row subset elimination unless a future scaling
+diagnosis finds materially more dominated rows. The currently observed
+reduction is too small to justify the implementation complexity.
 
-## Implementation and Benchmark Order
+## Conditional Evaluation Order
 
-1. Keep the legacy horizon and time bounds as the current default.
-2. Refine exact-activation time domains only if exact finite-horizon activation
-   becomes a priority.
-3. Project board-slot variables out of journey-time models.
-4. Evaluate transition-only timing.
-5. Add guaranteed post-horizon headway pruning.
-6. Prove and benchmark shared physical precedence.
-7. Consider the lower-priority experiments independently.
+1. Keep the selected legacy horizon and time bounds unless exact finite-horizon
+   activation becomes an explicit semantic requirement.
+2. Run the Phase-0 bottleneck diagnosis before selecting a structural phase.
+3. If explicit timing variables dominate, evaluate transition-only timing.
+4. If exact horizon activation is required, refine its time domain before
+   attempting post-horizon pruning.
+5. If headway binaries dominate, first implement the safe classifications in
+   `ean_formulation_and_search.md`, then evaluate shared physical precedence.
+6. Add guaranteed post-horizon pruning only after the horizon boundary contract
+   is fixed and verified.
+7. Consider lower-priority experiments independently and only for a measured
+   bottleneck.
 
-Do not combine unvalidated phases in the first benchmark. Each phase needs a
-separate optimization toggle until objective equivalence and performance are
-established.
+Do not combine unvalidated phases in an initial benchmark. Each phase needs a
+separate formulation selection or optimization toggle until objective
+equivalence and performance are established.
 
 ## Verification Protocol
 
@@ -414,8 +324,8 @@ For each phase:
 - record model construction time, presolve time, variables, rows, and nonzeros;
 - record root bound, first incumbent, best incumbent, best bound, gap, nodes,
   and runtime;
-- run repeated five-minute `three_station_v0` benchmarks against the unchanged
-  default;
+- run repeated five-minute `three_station_v0` benchmarks against the selected
+  baseline;
 - run `five_station_v0` model construction and bounded benchmarks after the
   Three-Station checks pass.
 

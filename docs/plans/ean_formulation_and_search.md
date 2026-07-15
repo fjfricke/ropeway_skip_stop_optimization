@@ -5,7 +5,11 @@ Status: **future work**
 ## Goal
 
 Improve incumbent quality and proof progress of the integrated EAN passenger
-MILP without changing its integer optimum. The current default remains:
+MILP without changing its integer optimum. Do not apply the remaining ideas in
+one fixed sequence: first stabilize the immediate baseline, then measure which
+part of the model is limiting performance, and select the matching branch.
+
+The current default exact reductions remain:
 
 ```text
 candidate_horizon_pruning
@@ -13,56 +17,160 @@ single_ring_dominated_ride_pruning
 slot_time_relaxation_strengthening
 ```
 
-`tight_big_m_bounds` is implemented but remains opt-in. The single-ring ride
-reduction is exact dominance pruning: a passenger can alight at the first
-matching destination visit, so remaining onboard for an additional full loop
-cannot improve waiting or journey time and occupies capacity for longer.
+`tight_big_m_bounds` and the affine stop/skip timing formulation remain
+separately selectable until their repeated benchmarks justify a baseline
+decision. Full-ring ride pruning is exact dominance pruning: a passenger can
+alight at the first matching destination visit, so remaining onboard for an
+additional full loop cannot improve waiting or journey time and occupies
+capacity for longer.
 
-The horizon corrections and exact model reductions in
-`ean_structural_reformulation.md` precede this roadmap. In particular, repeated
-stop/skip Big-M experiments are needed only if the affine timing formulation is
-not adopted.
+Semantic extensions such as optional fleet activation, depots, cyclic days,
+and turnbacks are outside this solver-preserving roadmap.
 
-## Ordered Work
+## Prerequisite: Exact Debug Instances
 
-### 1. Repeated Affine Timing Validation
+Before adding another formulation toggle, maintain tiny fixtures that use the
+production EAN builder and optimizer paths:
 
-Repeat the first five-minute `all` versus
-`all,stop_skip_timing_affine` comparison with controlled solver seeds and
-longer limits. Include `five_station_v0` model construction and bounded runs.
-Compare incumbent quality separately from best-bound and gap progress.
+- a short horizon and few cabins;
+- one or two demand groups;
+- waiting and no-waiting variants;
+- waiting-time and journey-time objectives;
+- exact solves suitable for objective-equivalence tests.
 
-Promote affine timing only if the proof improvement is reproducible and the
-primal-side regression is acceptable for export-oriented runs. If promoted,
+These instances are the correctness gate for every later reduction,
+classification, or reformulation. They are infrastructure, not a separate
+performance experiment.
+
+## Step 1: Select the Immediate Timing Baseline
+
+### Repeated Affine Timing Validation
+
+Repeat the five-minute comparison of the current baseline against affine
+stop/skip timing with controlled solver seeds. Add longer runs and
+`five_station_v0` construction or bounded-solve checks. Compare:
+
+- model size and construction time;
+- root relaxation and best-bound progress;
+- first and final incumbent quality;
+- final gap, node count, and memory.
+
+Promote affine timing only if its proof improvement is reproducible and its
+incumbent regression remains acceptable for export-oriented runs. If promoted,
 remove the historical stop/skip Big-M formulation after a short compatibility
-window; retain historical benchmark JSON rather than permanent model
-complexity.
+window and preserve historical benchmark JSON instead of permanent duplicate
+model code.
 
-### 2. Conditional Repeated Tight Big-M Benchmarks
+### Conditional Tight Big-M Validation
 
-Compare `all` against `all + tight_big_m_bounds` with repeated seeds or runs and
-fixed 5-, 10-, and 15-minute limits. Record incumbent, bound, gap, node count,
-time-to-gap, and served passengers.
+Repeat `all` against `all + tight_big_m_bounds` only for constraints that remain
+Big-M based in the selected timing baseline. Skip tests for rows replaced by
+the affine formulation. Use repeated seeds and fixed 5-, 10-, and 15-minute
+limits; record incumbent, bound, gap, nodes, time-to-gap, and served passengers.
 
-Promote the toggle into the default only if the stronger bound is reproducible
-and incumbent quality is not consistently worse for export-oriented runs.
-Skip this work if affine stop/skip timing replaces the corresponding Big-M
-constraints.
+Keep the option opt-in unless it produces a reproducible net improvement.
 
-### 3. Candidate Earliest Board-Time Bounds
+## Step 2: Locate the Active Bottleneck
 
-Add a conservative physical lower bound for every ride candidate:
+Run the Phase-0 scaling diagnosis from `ean_decomposition.md` before choosing
+the next substantial reformulation. At each useful problem size compare:
+
+```text
+integrated movement and passenger model
+movement and headways without passenger assignment
+passenger optimization for a fixed movement plan
+```
+
+Also separate Python construction, presolve, root relaxation, incumbent search,
+and proof progress. The result selects one or more branches below:
+
+- movement/headway bottleneck -> Branch A;
+- weak or late incumbents -> Branch B;
+- passenger relaxation or fixed-movement assignment bottleneck -> Branch C;
+- construction or artifact bottleneck -> compact materialization work in
+  `ean_structural_reformulation.md`.
+
+Do not require every speculative structural idea to be implemented before this
+diagnosis. Re-run the diagnosis after a branch produces a material change.
+
+## Branch A: Movement and Headways Dominate
+
+### A1. Safe Same-Cabin Precedence
+
+Classify only pairs whose order is proven by the current fixed route:
+
+```text
+same cabin + same checkpoint:
+  lower visit index is the leader
+```
+
+Replace each such pair's order binary and two-direction disjunction with one
+activation-relaxed directed headway constraint. Keep all different-cabin pairs
+variable in this first experiment. Log total, fixed, variable, and omitted
+pairs plus the resulting ordering-binary count.
+
+### A2. Conservative Time-Window and Reordering Classification
+
+After A1 is exact and beneficial, investigate:
+
+- fixed order in unique-path, no-skip, no-wait segments;
+- graph-based detection of possible overtaking or merge reordering;
+- pairs whose conservative earliest/latest windows cannot conflict.
+
+Any uncertain pair remains variable. A false fixed-order classification can
+silently remove feasible solutions.
+
+### A3. Shared Physical Precedence
+
+Only after the route-level ordering proof from A1 and A2 is available,
+investigate sharing one precedence decision across platform entry, platform
+exit, and exit-switch checkpoints of the same physical visit pair. The proof
+must cover skip overtaking, merge topology, activation, and end-of-platform
+waiting.
+
+### A4. Delayed Headway Generation
+
+If eager headway materialization remains dominant after safe classifications,
+continue with the external solve-and-verify experiment in
+`ean_decomposition.md`. Do not start with callback-only separation because
+omitted disjunctions may require new precedence variables.
+
+## Branch B: Incumbent Search Is Weak
+
+### B1. Better and Multiple MIP Starts
+
+Improve the primal side before testing lower-priority solver syntax changes:
+
+- retain the accepted earliest all-stop start;
+- create a capacity-aware greedy passenger assignment;
+- skip visits that are unnecessary for that assignment;
+- provide multiple starts for distinct service patterns where supported.
+
+Benchmark first-incumbent time and objective separately from best-bound
+progress. A start may change a time-limited result but not the true optimum.
+
+### B2. Progressive Waiting
+
+If waiting creates a difficult primal search, test the same-artifact staged
+strategy from `ean_decomposition.md`: first fix existing wait variables to
+zero, optionally allow a small cap, then release the full configured bound.
+Treat this as a search strategy, not an exact formulation reduction.
+
+## Branch C: Passenger Relaxation or Assignment Dominates
+
+### C1. Candidate-Specific Earliest Board Bounds
+
+Derive a conservative physical lower bound for each ride candidate:
 
 ```text
 slot_board_time >= earliest_physical_board_time(candidate) * slot
 ```
 
-Derive it from the cabin start, visit chain, route minimum durations, and the
-boarding time reference. It must not use an incumbent or assume undecided
-stop/skip choices. This is especially relevant for waiting-time objectives with
-release time zero.
+Use the cabin start, visit chain, route minimum durations, and boarding-time
+reference. The bound must not depend on an incumbent or assume undecided
+stop/skip choices.
 
-### 4. Candidate Latest Board and Alight Bounds
+### C2. Candidate-Specific Latest Board and Alight Bounds
 
 Derive expression-specific upper bounds:
 
@@ -71,70 +179,42 @@ latest_board_time(candidate)
 latest_alight_time(candidate)
 ```
 
-Use them to tighten slot activation and horizon Big-M constraints. Do not infer
-these values merely from the switch-time upper bound because boarding and
-alighting expressions include route constants and possibly waiting. Prove each
-bound for both waiting and no-waiting modes before enabling it.
+Use them to tighten activation and horizon implications. Do not derive them
+merely from a switch-time upper bound because boarding and alighting expressions
+include route constants and possibly waiting. Prove each bound for both waiting
+modes.
 
-### 5. Better MIP Starts
+### C3. Fixed-Movement Passenger Evaluator
 
-Improve the primal side before testing more reformulations:
+If the isolated passenger problem remains material, build the destination-
+layered evaluator from `ean_decomposition.md`, measure its LP integrality, and
+choose exact repair or decomposition only from those measurements.
 
-- retain the accepted earliest all-stop start;
-- create a capacity-aware greedy passenger assignment;
-- skip visits that are unnecessary for that assignment;
-- consider multiple Gurobi starts for distinct service patterns.
+## Low-Priority Experiments
 
-Benchmark first-incumbent time and objective separately from best-bound
-progress. Starts may change time-limited output but not the true optimum.
+Run these only when the relevant branch remains a bottleneck after the safer
+changes:
 
-### 6. Safe Headway Pair Classification
-
-Introduce a benchmark toggle and classify only pairs whose order is proven:
-
-```text
-same cabin + same checkpoint:
-  lower visit index is the leader
-```
-
-A fixed pair gets one activation-relaxed directed headway constraint and no
-ordering binary. All different-cabin pairs remain variable in the first phase.
-Log total, fixed, variable, and omitted pairs plus ordering-binary count.
-
-### 7. Conservative Reordering and Time-Window Rules
-
-After the same-cabin rule is validated, investigate:
-
-- fixed order in unique-path, no-skip, no-wait segments;
-- graph-based detection of possible overtaking or merge reordering;
-- redundant pairs proven by conservative earliest/latest time windows.
-
-Any uncertain pair stays variable. A false fixed-order classification can
-silently remove feasible solutions.
-
-### 8. Headway Reformulation Experiments
-
-Benchmark, independently:
-
-- per-pair tight Big-M bounds;
+- per-pair tight Big-M values for remaining headway disjunctions;
 - `AND` activation plus forward/reverse indicators;
-- stop/skip or slot indicators only where they replace an identical implication.
+- indicators that replace an identical stop/skip or slot implication;
+- binary passenger-count encodings;
+- slot-time ordering cuts.
 
-Keep slot-time valid inequalities even when indicators are used. Cleaner
-Gurobi syntax is not sufficient evidence of better performance.
+Keep existing valid inequalities when testing indicators. Cleaner solver syntax
+alone is not evidence of a stronger or faster formulation.
 
-### 9. Small Debug Instances
+## Acceptance Protocol
 
-Add tiny fixtures using the production EAN builder and optimizer paths:
+Every exact formulation toggle requires:
 
-- short horizon;
-- few cabins;
-- one or two demand groups;
-- waiting and no-waiting variants;
-- exact solves suitable for objective-equivalence tests.
+- focused unit tests for its algebra or classification;
+- exact objective agreement on tiny production-path instances;
+- checks for both objectives and both waiting modes;
+- extraction and validator checks;
+- a fixed-protocol benchmark against the selected baseline;
+- separate reporting of construction, incumbent, and bound effects.
 
-## Acceptance Rule
-
-Every formulation toggle needs unit tests for its bound/classification logic,
-an exact small-instance comparison with the toggle off, and a fixed-protocol
-benchmark. Long benchmarks remain outside pytest.
+Long benchmarks remain outside pytest. Promote a change only when correctness
+is established and its intended metric improves reproducibly without an
+unacceptable regression elsewhere.
