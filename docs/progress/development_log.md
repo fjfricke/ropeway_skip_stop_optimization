@@ -5,6 +5,26 @@ corresponding decisions were made.
 
 ## 2026-07-15
 
+### Unified object-oriented EAN solver architecture
+
+The separate skip/stop-feasibility and passenger-service solver entry points
+were replaced by one `EanOptimizer` API with typed movement-feasibility and
+passenger-service problem objects. Both now construct movement timing,
+stop/skip, waiting, horizon activation, chaining, and headways through one
+canonical `EanMovementModelBuilder`. The passenger model composes that object
+through `EanPassengerModelBuilder` instead of maintaining a second movement
+formulation.
+
+This refactor was necessary because the former feasibility implementation had
+retained older Big-M rows and did not consistently apply every current
+optimization setting. The unified builder uses the previously verified
+passenger movement formulation as the reference, while the external passenger,
+movement-plan, replay, benchmark, and frontend JSON contracts remain
+unchanged. Solver policy, progress callbacks, checkpoints, validation, and
+metadata are now handled once by the optimizer. Exact small models, both
+horizon modes, both timing formulations, export smokes, the complete test
+suite, and Ruff were used as regression checks.
+
 ### Projected selected boarding times
 
 The journey-time passenger model received the opt-in

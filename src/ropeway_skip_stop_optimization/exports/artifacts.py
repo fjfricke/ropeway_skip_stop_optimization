@@ -29,17 +29,17 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EarliestAllStopEanMovementPlanBuilder,
     EanBuildArtifact,
     EanMovementPlan,
+    EanMovementFeasibilityProblem,
+    EanOptimizationResult,
+    EanOptimizer,
+    EanPassengerObjective,
+    EanPassengerServiceProblem,
     EanPhysicalReplay,
-    EanPassengerServiceCheckpointConfig,
-    EanPassengerServiceConfig,
-    EanPassengerServiceObjective,
-    EanPassengerServiceResult,
     EanOptimizationConfig,
-    EanSkipStopFeasibilityConfig,
+    EanSolveConfig,
+    GurobiCheckpointConfig,
     GurobiSolverPolicy,
     project_ean_movement_plan_to_physical_replay,
-    solve_ean_passenger_service,
-    solve_ean_skip_stop_feasibility,
     validate_ean_movement_plan_against_artifact,
 )
 from ropeway_skip_stop_optimization.optimization.solver_progress import GurobiMipProgressRecorder
@@ -80,7 +80,7 @@ class ExportContext:
     example: ScenarioExample
     progress: ProgressReporter
     ean_solver_policy: GurobiSolverPolicy = field(default_factory=GurobiSolverPolicy)
-    ean_checkpoint_config: EanPassengerServiceCheckpointConfig | None = None
+    ean_checkpoint_config: GurobiCheckpointConfig | None = None
     ean_optimization_config: EanOptimizationConfig = field(default_factory=EanOptimizationConfig)
     ean_progress_recorder: Any | None = None
     ean_progress_sample_interval_seconds: float = 5.0
@@ -95,9 +95,9 @@ class ExportContext:
     _ean_physical_replay: EanPhysicalReplay | None = None
     _ean_skip_stop_plan: EanMovementPlan | None = None
     _ean_skip_stop_replay: EanPhysicalReplay | None = None
-    _ean_passenger_service_results: dict[EanPassengerServiceObjective, EanPassengerServiceResult] = field(default_factory=dict)
-    _ean_passenger_service_replays: dict[EanPassengerServiceObjective, EanPhysicalReplay] = field(default_factory=dict)
-    _ean_passenger_service_progress_recorders: dict[EanPassengerServiceObjective, GurobiMipProgressRecorder] = field(
+    _ean_passenger_service_results: dict[EanPassengerObjective, EanOptimizationResult] = field(default_factory=dict)
+    _ean_passenger_service_replays: dict[EanPassengerObjective, EanPhysicalReplay] = field(default_factory=dict)
+    _ean_passenger_service_progress_recorders: dict[EanPassengerObjective, GurobiMipProgressRecorder] = field(
         default_factory=dict
     )
 
@@ -178,13 +178,13 @@ class ExportContext:
     def ean_skip_stop_plan(self) -> EanMovementPlan:
         if self._ean_skip_stop_plan is None:
             with self.progress.phase("export.context.ean_skip_stop_plan"):
-                result = solve_ean_skip_stop_feasibility(
-                    self.ean_artifact(),
-                    EanSkipStopFeasibilityConfig(
+                result = EanOptimizer(
+                    EanSolveConfig(
+                        solver_policy=self.ean_solver_policy,
                         log_to_console=self.progress.enabled,
                         optimization_config=self.ean_optimization_config,
-                    ),
-                )
+                    )
+                ).solve(EanMovementFeasibilityProblem(self.ean_artifact()))
                 if result.movement_plan is None:
                     raise ValueError(f"EAN skip/stop optimizer did not produce a plan; status={result.metadata.status}")
                 self._ean_skip_stop_plan = result.movement_plan
@@ -202,22 +202,25 @@ class ExportContext:
 
     def ean_passenger_service_result(
         self,
-        objective: EanPassengerServiceObjective = EanPassengerServiceObjective.WAITING_TIME,
-    ) -> EanPassengerServiceResult:
+        objective: EanPassengerObjective = EanPassengerObjective.WAITING_TIME,
+    ) -> EanOptimizationResult:
         if objective not in self._ean_passenger_service_results:
             with self.progress.phase(f"export.context.ean_passenger_service_result objective={objective.value}"):
-                result = solve_ean_passenger_service(
-                    self.scenario(),
-                    self.ean_artifact(),
-                    EanPassengerServiceConfig(
-                        objective=objective,
+                result = EanOptimizer(
+                    EanSolveConfig(
                         solver_policy=self.ean_solver_policy,
                         log_to_console=self.progress.enabled,
                         checkpoint=self.ean_checkpoint_config,
                         optimization_config=self.ean_optimization_config,
                         progress_recorder=self._ean_progress_recorder(objective),
                         progress_sample_interval_seconds=self.ean_progress_sample_interval_seconds,
-                    ),
+                    )
+                ).solve(
+                    EanPassengerServiceProblem(
+                        scenario=self.scenario(),
+                        artifact=self.ean_artifact(),
+                        objective=objective,
+                    )
                 )
                 if result.movement_plan is None or result.passenger_plan is None:
                     raise ValueError(
@@ -227,7 +230,7 @@ class ExportContext:
                 self._ean_passenger_service_results[objective] = result
         return self._ean_passenger_service_results[objective]
 
-    def _ean_progress_recorder(self, objective: EanPassengerServiceObjective) -> object:
+    def _ean_progress_recorder(self, objective: EanPassengerObjective) -> object:
         if self.ean_progress_recorder is not None:
             return self.ean_progress_recorder
         if objective not in self._ean_passenger_service_progress_recorders:
@@ -236,7 +239,7 @@ class ExportContext:
 
     def ean_passenger_service_replay(
         self,
-        objective: EanPassengerServiceObjective = EanPassengerServiceObjective.WAITING_TIME,
+        objective: EanPassengerObjective = EanPassengerObjective.WAITING_TIME,
     ) -> EanPhysicalReplay:
         if objective not in self._ean_passenger_service_replays:
             with self.progress.phase(f"export.context.ean_passenger_service_replay objective={objective.value}"):
@@ -422,7 +425,7 @@ class EanSkipStopPhysicalReplayArtifactBuilder(ArtifactBuilder):
 
 @dataclass(frozen=True)
 class EanPassengerServiceArtifactBuilder(ArtifactBuilder):
-    objective: EanPassengerServiceObjective = EanPassengerServiceObjective.WAITING_TIME
+    objective: EanPassengerObjective = EanPassengerObjective.WAITING_TIME
 
     kind = ArtifactKind.MILP_RESULT
 
@@ -443,22 +446,22 @@ class EanPassengerServiceArtifactBuilder(ArtifactBuilder):
             {
                 "movement_plan": result.movement_plan,
                 "passenger_plan": result.passenger_plan,
-                "metadata": result.metadata,
+                "metadata": result.metadata.passenger_export_dict(),
             },
             self.label,
         )
 
     def _objective_label(self) -> str:
-        if self.objective is EanPassengerServiceObjective.WAITING_TIME:
+        if self.objective is EanPassengerObjective.WAITING_TIME:
             return "waiting-time"
-        if self.objective is EanPassengerServiceObjective.JOURNEY_TIME:
+        if self.objective is EanPassengerObjective.JOURNEY_TIME:
             return "journey-time"
         return self.objective.value
 
 
 @dataclass(frozen=True)
 class EanPassengerServiceMovementPlanArtifactBuilder(ArtifactBuilder):
-    objective: EanPassengerServiceObjective = EanPassengerServiceObjective.WAITING_TIME
+    objective: EanPassengerObjective = EanPassengerObjective.WAITING_TIME
 
     kind = ArtifactKind.EAN_RESULT
 
@@ -483,16 +486,16 @@ class EanPassengerServiceMovementPlanArtifactBuilder(ArtifactBuilder):
         )
 
     def _objective_label(self) -> str:
-        if self.objective is EanPassengerServiceObjective.WAITING_TIME:
+        if self.objective is EanPassengerObjective.WAITING_TIME:
             return "waiting-time"
-        if self.objective is EanPassengerServiceObjective.JOURNEY_TIME:
+        if self.objective is EanPassengerObjective.JOURNEY_TIME:
             return "journey-time"
         return self.objective.value
 
 
 @dataclass(frozen=True)
 class EanPassengerServicePhysicalReplayArtifactBuilder(ArtifactBuilder):
-    objective: EanPassengerServiceObjective = EanPassengerServiceObjective.WAITING_TIME
+    objective: EanPassengerObjective = EanPassengerObjective.WAITING_TIME
 
     kind = ArtifactKind.EAN_REPLAY
 
@@ -514,15 +517,15 @@ class EanPassengerServicePhysicalReplayArtifactBuilder(ArtifactBuilder):
         )
 
     def _objective_label(self) -> str:
-        if self.objective is EanPassengerServiceObjective.WAITING_TIME:
+        if self.objective is EanPassengerObjective.WAITING_TIME:
             return "waiting-time"
-        if self.objective is EanPassengerServiceObjective.JOURNEY_TIME:
+        if self.objective is EanPassengerObjective.JOURNEY_TIME:
             return "journey-time"
         return self.objective.value
 
 
-def _passenger_service_filename(objective: EanPassengerServiceObjective, artifact_kind: str) -> str:
-    if objective is EanPassengerServiceObjective.WAITING_TIME:
+def _passenger_service_filename(objective: EanPassengerObjective, artifact_kind: str) -> str:
+    if objective is EanPassengerObjective.WAITING_TIME:
         return {
             "result": "ean_passenger_service_waiting_time.json",
             "movement_plan": "ean_passenger_service_movement_plan.json",

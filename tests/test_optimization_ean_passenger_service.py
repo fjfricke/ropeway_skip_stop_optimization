@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 from datetime import time
 
 import pytest
@@ -23,16 +24,17 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanBoardTimeFormulation,
     EanTimeReference,
     EanOptimizationConfig,
+    EanOptimizer,
     EanFormulationConfig,
     EanHorizonFormulation,
     EanTimeBoundFormulation,
-    EanPassengerServiceConfig,
-    EanPassengerServiceObjective,
+    EanPassengerObjective,
+    EanPassengerServiceProblem,
     EanRideCandidate,
+    EanSolveConfig,
     EanSlotActivationFormulation,
     EanStopSkipTimingFormulation,
     GurobiSolverPolicy,
-    solve_ean_passenger_service,
 )
 from ropeway_skip_stop_optimization.optimization.ean.time_bounds import (
     build_ean_model_time_bounds,
@@ -43,15 +45,44 @@ from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
 from ropeway_skip_stop_optimization.optimization.ean.horizon import (
     add_visit_horizon_activation,
 )
-from ropeway_skip_stop_optimization.optimization.ean.optimizers.passenger_service import (
+from ropeway_skip_stop_optimization.optimization.ean.optimizers.movement_model import (
     StopSkipBigMBounds,
-    _headway_time_expressions,
+    headway_time_expressions as _headway_time_expressions,
+    stop_skip_big_m_bounds as _stop_skip_big_m_bounds,
+)
+from ropeway_skip_stop_optimization.optimization.ean.optimizers.passenger_model import (
     _add_projected_journey_slot_time_constraints,
     _min_candidate_trip_time_seconds,
-    _solver_diagnostics,
     _slot_release_big_m,
-    _stop_skip_big_m_bounds,
 )
+from ropeway_skip_stop_optimization.optimization.ean.optimizers.solver import (
+    _solver_diagnostics,
+)
+
+
+@dataclass(frozen=True)
+class _PassengerSolveOptions:
+    objective: EanPassengerObjective = EanPassengerObjective.WAITING_TIME
+    optimization_config: EanOptimizationConfig = field(
+        default_factory=EanOptimizationConfig
+    )
+
+
+def _solve_passenger(
+    scenario: Scenario,
+    artifact: EanBuildArtifact,
+    options: _PassengerSolveOptions | None = None,
+):
+    options = options or _PassengerSolveOptions()
+    return EanOptimizer(
+        EanSolveConfig(optimization_config=options.optimization_config)
+    ).solve(
+        EanPassengerServiceProblem(
+            scenario=scenario,
+            artifact=artifact,
+            objective=options.objective,
+        )
+    )
 
 
 def test_ean_passenger_service_minimizes_waiting_with_unserved_backlog() -> None:
@@ -61,10 +92,10 @@ def test_ean_passenger_service_minimizes_waiting_with_unserved_backlog() -> None
     )
     artifact = _minimal_artifact(cabin_capacity=2)
 
-    result = solve_ean_passenger_service(scenario, artifact)
+    result = _solve_passenger(scenario, artifact)
 
     assert result.metadata.status == "optimal"
-    assert result.metadata.objective_kind is EanPassengerServiceObjective.WAITING_TIME
+    assert result.metadata.objective_kind is EanPassengerObjective.WAITING_TIME
     assert result.movement_plan is not None
     assert result.passenger_plan is not None
     assert result.metadata.served_passenger_count == 2
@@ -99,14 +130,14 @@ def test_ean_passenger_service_journey_time_uses_alighting_time() -> None:
     )
     artifact = _minimal_artifact(cabin_capacity=2, cycle_count=2)
 
-    result = solve_ean_passenger_service(
+    result = _solve_passenger(
         scenario,
         artifact,
-        EanPassengerServiceConfig(objective=EanPassengerServiceObjective.JOURNEY_TIME),
+        _PassengerSolveOptions(objective=EanPassengerObjective.JOURNEY_TIME),
     )
 
     assert result.metadata.status == "optimal"
-    assert result.metadata.objective_kind is EanPassengerServiceObjective.JOURNEY_TIME
+    assert result.metadata.objective_kind is EanPassengerObjective.JOURNEY_TIME
     assert result.passenger_plan is not None
     assert len(result.passenger_plan.served_rides) == 1
     ride = result.passenger_plan.served_rides[0]
@@ -181,16 +212,16 @@ def test_ean_passenger_service_can_disable_slot_time_strengthening() -> None:
     )
     artifact = _minimal_artifact(cabin_capacity=2, cycle_count=2)
 
-    strengthened = solve_ean_passenger_service(
+    strengthened = _solve_passenger(
         scenario,
         artifact,
-        EanPassengerServiceConfig(objective=EanPassengerServiceObjective.JOURNEY_TIME),
+        _PassengerSolveOptions(objective=EanPassengerObjective.JOURNEY_TIME),
     )
-    unstrengthened = solve_ean_passenger_service(
+    unstrengthened = _solve_passenger(
         scenario,
         artifact,
-        EanPassengerServiceConfig(
-            objective=EanPassengerServiceObjective.JOURNEY_TIME,
+        _PassengerSolveOptions(
+            objective=EanPassengerObjective.JOURNEY_TIME,
             optimization_config=EanOptimizationConfig(enable_slot_time_relaxation_strengthening=False),
         ),
     )
@@ -207,16 +238,16 @@ def test_ean_passenger_service_tight_big_m_bounds_preserves_minimal_solution() -
     )
     artifact = _minimal_artifact(cabin_capacity=2, cycle_count=2)
 
-    baseline = solve_ean_passenger_service(
+    baseline = _solve_passenger(
         scenario,
         artifact,
-        EanPassengerServiceConfig(objective=EanPassengerServiceObjective.JOURNEY_TIME),
+        _PassengerSolveOptions(objective=EanPassengerObjective.JOURNEY_TIME),
     )
-    tightened = solve_ean_passenger_service(
+    tightened = _solve_passenger(
         scenario,
         artifact,
-        EanPassengerServiceConfig(
-            objective=EanPassengerServiceObjective.JOURNEY_TIME,
+        _PassengerSolveOptions(
+            objective=EanPassengerObjective.JOURNEY_TIME,
             optimization_config=EanOptimizationConfig(enable_tight_big_m_bounds=True),
         ),
     )
@@ -236,12 +267,12 @@ def test_ean_passenger_service_tight_big_m_bounds_preserves_minimal_solution() -
 @pytest.mark.parametrize(
     "objective",
     (
-        EanPassengerServiceObjective.WAITING_TIME,
-        EanPassengerServiceObjective.JOURNEY_TIME,
+        EanPassengerObjective.WAITING_TIME,
+        EanPassengerObjective.JOURNEY_TIME,
     ),
 )
 def test_affine_stop_skip_timing_preserves_minimal_solution(
-    objective: EanPassengerServiceObjective,
+    objective: EanPassengerObjective,
 ) -> None:
     pytest.importorskip("gurobipy")
     scenario = _minimal_scenario(
@@ -249,10 +280,10 @@ def test_affine_stop_skip_timing_preserves_minimal_solution(
     )
     artifact = _minimal_artifact(cabin_capacity=2, cycle_count=2)
 
-    baseline = solve_ean_passenger_service(
+    baseline = _solve_passenger(
         scenario,
         artifact,
-        EanPassengerServiceConfig(
+        _PassengerSolveOptions(
             objective=objective,
             optimization_config=EanOptimizationConfig(
                 formulation=EanFormulationConfig(
@@ -261,10 +292,10 @@ def test_affine_stop_skip_timing_preserves_minimal_solution(
             ),
         ),
     )
-    affine = solve_ean_passenger_service(
+    affine = _solve_passenger(
         scenario,
         artifact,
-        EanPassengerServiceConfig(
+        _PassengerSolveOptions(
             objective=objective,
             optimization_config=EanOptimizationConfig(
                 formulation=EanFormulationConfig(
@@ -286,8 +317,8 @@ def test_affine_stop_skip_timing_preserves_minimal_solution(
 @pytest.mark.parametrize(
     "objective",
     (
-        EanPassengerServiceObjective.WAITING_TIME,
-        EanPassengerServiceObjective.JOURNEY_TIME,
+        EanPassengerObjective.WAITING_TIME,
+        EanPassengerObjective.JOURNEY_TIME,
     ),
 )
 @pytest.mark.parametrize(
@@ -316,7 +347,7 @@ def test_affine_stop_skip_timing_preserves_minimal_solution(
     ),
 )
 def test_first_slot_activation_preserves_multi_slot_solutions_and_removes_implied_rows(
-    objective: EanPassengerServiceObjective,
+    objective: EanPassengerObjective,
     waiting_mode: StationWaitingMode,
     arrival_time: time,
     release_seconds: float,
@@ -334,10 +365,10 @@ def test_first_slot_activation_preserves_multi_slot_solutions_and_removes_implie
         station_waiting_modes={"A": waiting_mode, "B": waiting_mode},
     )
 
-    baseline = solve_ean_passenger_service(
+    baseline = _solve_passenger(
         scenario,
         artifact,
-        EanPassengerServiceConfig(
+        _PassengerSolveOptions(
             objective=objective,
             optimization_config=EanOptimizationConfig(
                 enable_slot_time_relaxation_strengthening=enable_strengthening,
@@ -350,10 +381,10 @@ def test_first_slot_activation_preserves_multi_slot_solutions_and_removes_implie
             ),
         ),
     )
-    first_slot = solve_ean_passenger_service(
+    first_slot = _solve_passenger(
         scenario,
         artifact,
-        EanPassengerServiceConfig(
+        _PassengerSolveOptions(
             objective=objective,
             optimization_config=EanOptimizationConfig(
                 enable_slot_time_relaxation_strengthening=enable_strengthening,
@@ -388,11 +419,11 @@ def test_first_slot_activation_preserves_multi_slot_solutions_and_removes_implie
         expected_removed_rows = 5 * slots - 4 * rides
         if enable_strengthening:
             expected_removed_rows += slots
-            if objective is EanPassengerServiceObjective.JOURNEY_TIME:
+            if objective is EanPassengerObjective.JOURNEY_TIME:
                 expected_removed_rows += slots
     else:
         expected_removed_rows = 5 * (slots - rides)
-        if enable_strengthening and objective is EanPassengerServiceObjective.JOURNEY_TIME:
+        if enable_strengthening and objective is EanPassengerObjective.JOURNEY_TIME:
             expected_removed_rows += slots
     assert baseline.metadata.constraint_count - first_slot.metadata.constraint_count == expected_removed_rows
     assert (
@@ -548,19 +579,19 @@ def test_projected_journey_board_time_preserves_small_instances_and_removes_auxi
         ),
     )
 
-    baseline = solve_ean_passenger_service(
+    baseline = _solve_passenger(
         scenario,
         artifact,
-        EanPassengerServiceConfig(
-            objective=EanPassengerServiceObjective.JOURNEY_TIME,
+        _PassengerSolveOptions(
+            objective=EanPassengerObjective.JOURNEY_TIME,
             optimization_config=baseline_config,
         ),
     )
-    projected = solve_ean_passenger_service(
+    projected = _solve_passenger(
         scenario,
         artifact,
-        EanPassengerServiceConfig(
-            objective=EanPassengerServiceObjective.JOURNEY_TIME,
+        _PassengerSolveOptions(
+            objective=EanPassengerObjective.JOURNEY_TIME,
             optimization_config=projected_config,
         ),
     )
@@ -602,13 +633,13 @@ def test_projected_journey_board_time_preserves_small_instances_and_removes_auxi
 def test_projected_journey_board_time_rejects_waiting_time_objective() -> None:
     pytest.importorskip("gurobipy")
     with pytest.raises(ValueError, match="requires journey_time objective"):
-        solve_ean_passenger_service(
+        _solve_passenger(
             _minimal_scenario(
                 demands=(Demand(arrival_time=time(8, 0), origin="A", destination="B", count=1),),
             ),
             _minimal_artifact(cabin_capacity=2),
-            EanPassengerServiceConfig(
-                objective=EanPassengerServiceObjective.WAITING_TIME,
+            _PassengerSolveOptions(
+                objective=EanPassengerObjective.WAITING_TIME,
                 optimization_config=EanOptimizationConfig(
                     formulation=EanFormulationConfig(
                         board_time=EanBoardTimeFormulation.PROJECTED_JOURNEY_TIME,
@@ -640,11 +671,11 @@ def test_ean_passenger_service_extracts_only_operational_visit_prefix(
         )
     )
 
-    result = solve_ean_passenger_service(
+    result = _solve_passenger(
         scenario,
         artifact,
-        EanPassengerServiceConfig(
-            objective=EanPassengerServiceObjective.JOURNEY_TIME,
+        _PassengerSolveOptions(
+            objective=EanPassengerObjective.JOURNEY_TIME,
             optimization_config=config,
         ),
     )

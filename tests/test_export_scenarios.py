@@ -25,10 +25,11 @@ from ropeway_skip_stop_optimization.optimization.discrete_time import MilpV0Vari
 from ropeway_skip_stop_optimization.optimization.ean import (
     DeterministicPhysicalNodeToSwitchStartBuilder,
     EanConfig,
+    EanOptimizationMetadata,
+    EanOptimizationProblemKind,
     EanOptimizationConfig,
-    EanPassengerServiceMetadata,
-    EanPassengerServiceObjective,
-    EanPassengerServiceResult,
+    EanOptimizationResult,
+    EanPassengerObjective,
     RingEanBuildArtifactBuilder,
     StationEanConfig,
     StationWaitingMode,
@@ -195,16 +196,16 @@ def test_exports_ean_skip_stop_feasibility_json(tmp_path: Path) -> None:
 
 
 def test_export_context_auto_injects_per_objective_ean_progress_recorders(monkeypatch: pytest.MonkeyPatch) -> None:
-    captured_recorders: dict[EanPassengerServiceObjective, object] = {}
+    captured_recorders: dict[EanPassengerObjective, object] = {}
 
-    def fake_solve_ean_passenger_service(scenario: object, artifact: object, config: object) -> EanPassengerServiceResult:
-        objective = config.objective
-        captured_recorders[objective] = config.progress_recorder
+    def fake_solve(self: object, problem: object) -> EanOptimizationResult:
+        objective = problem.objective
+        captured_recorders[objective] = self.config.progress_recorder
         return _fake_ean_passenger_service_result(objective)
 
     monkeypatch.setattr(
-        "ropeway_skip_stop_optimization.exports.artifacts.solve_ean_passenger_service",
-        fake_solve_ean_passenger_service,
+        "ropeway_skip_stop_optimization.exports.artifacts.EanOptimizer.solve",
+        fake_solve,
     )
     context = ExportContext(
         example=ThreeStationExample(),
@@ -213,15 +214,52 @@ def test_export_context_auto_injects_per_objective_ean_progress_recorders(monkey
     context._scenario = build_three_station_scenario()
     context._ean_artifact = object()
 
-    context.ean_passenger_service_result(EanPassengerServiceObjective.WAITING_TIME)
-    context.ean_passenger_service_result(EanPassengerServiceObjective.JOURNEY_TIME)
+    context.ean_passenger_service_result(EanPassengerObjective.WAITING_TIME)
+    context.ean_passenger_service_result(EanPassengerObjective.JOURNEY_TIME)
 
-    assert captured_recorders[EanPassengerServiceObjective.WAITING_TIME] is not None
-    assert captured_recorders[EanPassengerServiceObjective.JOURNEY_TIME] is not None
+    assert captured_recorders[EanPassengerObjective.WAITING_TIME] is not None
+    assert captured_recorders[EanPassengerObjective.JOURNEY_TIME] is not None
     assert (
-        captured_recorders[EanPassengerServiceObjective.WAITING_TIME]
-        is not captured_recorders[EanPassengerServiceObjective.JOURNEY_TIME]
+        captured_recorders[EanPassengerObjective.WAITING_TIME]
+        is not captured_recorders[EanPassengerObjective.JOURNEY_TIME]
     )
+
+
+def test_unified_passenger_metadata_adapter_preserves_export_contract() -> None:
+    result = _fake_ean_passenger_service_result(
+        EanPassengerObjective.JOURNEY_TIME
+    )
+
+    assert set(result.metadata.passenger_export_dict()) == {
+        "status",
+        "solver_status",
+        "objective_kind",
+        "objective_value_seconds",
+        "objective_passenger_hours",
+        "best_bound",
+        "mip_gap",
+        "runtime_seconds",
+        "node_count",
+        "solution_count",
+        "mip_gap_target",
+        "time_limit_seconds",
+        "demand_group_count",
+        "ride_candidate_count",
+        "slot_variable_count",
+        "served_passenger_count",
+        "unserved_passenger_count",
+        "variable_count",
+        "constraint_count",
+        "model_nonzero_count",
+        "model_setup_runtime_seconds",
+        "skipped_visit_count",
+        "visible_skipped_visit_count",
+        "checkpoint_read_path",
+        "checkpoint_solution_file_prefix",
+        "checkpoint_final_solution_path",
+        "optimization_config",
+        "progress_samples",
+    }
 
 
 def test_discrete_export_requires_discrete_example_capability(tmp_path: Path) -> None:
@@ -523,11 +561,13 @@ def _manifest_artifact_set(manifest: dict, family_id: str, variant_id: str, arti
     return next(artifact_set for artifact_set in variant["artifact_sets"] if artifact_set["id"] == artifact_set_id)
 
 
-def _fake_ean_passenger_service_result(objective: EanPassengerServiceObjective) -> EanPassengerServiceResult:
-    return EanPassengerServiceResult(
+def _fake_ean_passenger_service_result(objective: EanPassengerObjective) -> EanOptimizationResult:
+    return EanOptimizationResult(
+        problem_kind=EanOptimizationProblemKind.PASSENGER_SERVICE,
         movement_plan=object(),
         passenger_plan=object(),
-        metadata=EanPassengerServiceMetadata(
+        metadata=EanOptimizationMetadata(
+            problem_kind=EanOptimizationProblemKind.PASSENGER_SERVICE,
             status="optimal",
             solver_status="OPTIMAL",
             objective_kind=objective,
@@ -549,6 +589,9 @@ def _fake_ean_passenger_service_result(objective: EanPassengerServiceObjective) 
             constraint_count=0,
             model_nonzero_count=0,
             model_setup_runtime_seconds=0.0,
+            movement_variable_count=0,
+            movement_constraint_count=0,
+            movement_nonzero_count=0,
             skipped_visit_count=0,
             visible_skipped_visit_count=0,
             checkpoint_read_path=None,

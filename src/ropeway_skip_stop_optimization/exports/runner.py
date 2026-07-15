@@ -35,9 +35,9 @@ from ropeway_skip_stop_optimization.optimization.discrete_time import (
     MilpV1PassengerWaitingObjective,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
-    EanPassengerServiceCheckpointConfig,
-    EanPassengerServiceObjective,
+    EanPassengerObjective,
     EanOptimizationConfig,
+    GurobiCheckpointConfig,
     GurobiSolverPolicy,
     GurobiSolverPolicyPreset,
     gurobi_solver_policy_for_preset,
@@ -122,7 +122,7 @@ def build_artifact_set(
             backend=ArtifactSetBackend.EAN,
         )
     if artifact_set_id == "ean_passenger_journey_time":
-        objective = EanPassengerServiceObjective.JOURNEY_TIME
+        objective = EanPassengerObjective.JOURNEY_TIME
         return ArtifactSet(
             "ean_passenger_journey_time",
             "EAN passenger journey-time objective",
@@ -303,7 +303,7 @@ def _ean_checkpoint_config(
     checkpoint_dir: Path | None,
     resume_checkpoint: Path | None,
     resume_latest_checkpoint: bool,
-) -> EanPassengerServiceCheckpointConfig | None:
+) -> GurobiCheckpointConfig | None:
     if resume_checkpoint is not None and resume_latest_checkpoint:
         raise ValueError("Use either ean_resume_checkpoint or ean_resume_latest_checkpoint, not both")
     read_path = resume_checkpoint
@@ -327,7 +327,7 @@ def _ean_checkpoint_config(
         else None
     )
     final_solution_path = solution_file_prefix.with_suffix(".final.sol") if solution_file_prefix is not None else None
-    return EanPassengerServiceCheckpointConfig(
+    return GurobiCheckpointConfig(
         read_solution_path=read_path,
         solution_file_prefix=solution_file_prefix,
         final_solution_path=final_solution_path,

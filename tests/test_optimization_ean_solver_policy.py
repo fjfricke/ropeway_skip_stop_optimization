@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from ropeway_skip_stop_optimization.optimization.ean import (
-    EanPassengerServiceCheckpointConfig,
+    GurobiCheckpointConfig,
     GurobiSolverPolicy,
     GurobiSolverPolicyPreset,
     apply_gurobi_solver_policy,
@@ -46,10 +46,10 @@ def test_gurobi_solver_policy_rejects_invalid_values() -> None:
 
 def test_ean_passenger_checkpoint_config_rejects_missing_resume_file(tmp_path) -> None:
     with pytest.raises(ValueError, match="does not exist"):
-        EanPassengerServiceCheckpointConfig(read_solution_path=tmp_path / "missing.sol").validate()
+        GurobiCheckpointConfig(read_solution_path=tmp_path / "missing.sol").validate()
 
     with pytest.raises(ValueError, match="must end in"):
-        EanPassengerServiceCheckpointConfig(final_solution_path=tmp_path / "checkpoint.txt").validate()
+        GurobiCheckpointConfig(final_solution_path=tmp_path / "checkpoint.txt").validate()
 
 
 def test_apply_gurobi_solver_policy_sets_only_configured_params() -> None:

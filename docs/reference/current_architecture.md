@@ -25,9 +25,27 @@ physical scenario.
 
 The EAN builder derives route timing, cabin starts, switch visits and
 transitions, headway checkpoints, headway candidates, and headway pairs before
-Gurobi model construction. The passenger optimizer then adds movement timing,
-stop/skip, waiting, ordering, ride-slot, capacity, demand-balance, and
-objective-specific constraints.
+Gurobi model construction.
+
+`EanOptimizer` is the single public continuous-EAN solver API. It accepts one
+of two typed problem objects:
+
+- `EanMovementFeasibilityProblem`;
+- `EanPassengerServiceProblem`.
+
+Both cases use `EanMovementModelBuilder` as the sole implementation of movement
+times, stop/skip decisions, waiting, finite-horizon activation, route chaining,
+headway activation, and headway ordering. `EanPassengerModelBuilder` composes
+the resulting `EanMovementModel` and adds ride slots, selected passenger times,
+capacity, demand balance, and the objective. The movement-feasibility case
+instead assigns the shared movement model a zero objective. This composition
+prevents the feasibility and passenger cases from drifting into different
+timing, Big-M, or headway formulations.
+
+Solver policy, progress recording, checkpoints, result metadata, validation,
+and movement-plan extraction are coordinated by `EanOptimizer`. Passenger
+exports adapt the unified internal result back to the established frontend JSON
+metadata contract.
 
 Implemented passenger objectives:
 

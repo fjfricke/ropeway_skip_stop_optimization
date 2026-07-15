@@ -7,7 +7,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanFormulationConfig,
     EanHorizonFormulation,
     EanOptimizationConfig,
-    EanPassengerServiceObjective,
+    EanPassengerObjective,
     EanSlotActivationFormulation,
     EanStopSkipTimingFormulation,
     EanTimeBoundFormulation,
@@ -102,13 +102,13 @@ def test_ean_configuration_resolves_board_time_by_objective_without_overriding_e
 
     assert (
         automatic.resolved_for_passenger_objective(
-            EanPassengerServiceObjective.JOURNEY_TIME
+            EanPassengerObjective.JOURNEY_TIME
         ).formulation.board_time
         is EanBoardTimeFormulation.PROJECTED_JOURNEY_TIME
     )
     assert (
         automatic.resolved_for_passenger_objective(
-            EanPassengerServiceObjective.WAITING_TIME
+            EanPassengerObjective.WAITING_TIME
         ).formulation.board_time
         is EanBoardTimeFormulation.EXPLICIT
     )
@@ -116,7 +116,7 @@ def test_ean_configuration_resolves_board_time_by_objective_without_overriding_e
     explicit = EanOptimizationConfig.from_selection("all,board_time_explicit")
     assert (
         explicit.resolved_for_passenger_objective(
-            EanPassengerServiceObjective.JOURNEY_TIME
+            EanPassengerObjective.JOURNEY_TIME
         ).formulation.board_time
         is EanBoardTimeFormulation.EXPLICIT
     )
