@@ -161,8 +161,10 @@ For journey time, `board_time_projected_journey_time` eliminates each selected
 boarding-time variable through the exact Fourier--Motzkin projection of its
 linearization, release, and minimum-trip-time constraints. It preserves the
 integer model and LP relaxation, but cannot be selected for waiting time because
-selected boarding time appears directly in that objective. The explicit case
-remains the default pending its dedicated benchmark comparison.
+selected boarding time appears directly in that objective. A dedicated
+five-minute comparison reduced model size and setup time but slightly worsened
+the time-limited incumbent and proof bound, so the explicit case remains the
+default.
 
 Checkpoint resume loads a prior incumbent solution as a Gurobi MIP start. It
 does not resume the previous branch-and-bound tree.

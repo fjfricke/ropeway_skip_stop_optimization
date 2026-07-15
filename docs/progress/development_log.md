@@ -5,6 +5,33 @@ corresponding decisions were made.
 
 ## 2026-07-15
 
+### Projected selected boarding times
+
+The journey-time passenger model received the opt-in
+`board_time_projected_journey_time` formulation. It eliminates one selected
+boarding-time variable per passenger slot using an exact Fourier--Motzkin
+projection of the selected-time linearization, release, and minimum-trip-time
+constraints. The resulting constraints preserve both the integer model and
+the LP relaxation in the remaining variables. Waiting time retains explicit
+selected boarding times because they occur directly in its objective.
+
+The all-stop MIP-start builder was made independent of selected boarding-time
+variables, allowing the same movement and passenger assignment start for the
+explicit and projected journey-time models. Exact small instances covered
+zero and positive release times, both waiting modes, per-slot and first-slot
+activation, and both strengthening settings. The complete test suite, Ruff,
+and the frontend build passed.
+
+A matched 300-second Three-Station comparison at implementation commit
+`5872075` reduced variables by 9.3%, rows by 13.1%, nonzeros by 8.0%, and
+pre-optimize Gurobi setup time from 2.005 to 1.847 seconds. The projected run
+had a slightly worse incumbent and lower bound, a 6.62% rather than 6.52%
+gap, and processed 15.3 times as many nodes. It remains opt-in: the exact
+model reduction is useful, but this single time-limited run does not justify
+changing the export-oriented default. Unrelated documentation plan edits were
+present in the worktree while the benchmark ran; the recorded code revision
+was nevertheless commit `5872075`.
+
 ### Compact unary-slot activation
 
 The EAN passenger model received an opt-in

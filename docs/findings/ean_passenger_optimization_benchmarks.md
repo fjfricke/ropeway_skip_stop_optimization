@@ -388,3 +388,36 @@ effectively deterministic under the fixed machine, MIP start, and solver
 configuration. The result supports the compact formulation as an exact
 proof-side and model-size improvement, but not yet as the default for
 export-oriented solves where the best time-limited incumbent also matters.
+
+## Projected Selected Boarding Times
+
+Date: 2026-07-15
+
+Implementation baseline:
+
+```text
+git commit: 5872075e9d803b1a6c16e83a2935ce529209bade
+worktree: unrelated documentation plan edits were present
+```
+
+The comparison used two matched `three_station_v0` journey-time runs with the
+default independent optimizations, legacy horizon and time bounds, Big-M
+stop/skip timing, per-slot activation, a 300-second limit, and five-second
+callback sampling. The only difference was whether selected boarding time was
+represented explicitly or eliminated by the exact Fourier--Motzkin projection.
+
+| Board time | Vars | Rows | Nonzeros | Setup (s) | Objective (h) | Bound (s) | Gap | Nodes | Served | Unserved |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| explicit | 82,398 | 233,193 | 858,970 | 2.005 | 751.303 | 2,528,472 | 6.52% | 586 | 2,428 | 1,052 |
+| projected | 74,734 | 202,537 | 789,994 | 1.847 | 751.380 | 2,525,912 | 6.62% | 8,967 | 2,424 | 1,056 |
+
+Projection removes 7,664 variables (9.3%), 30,656 rows (13.1%), and 68,976
+nonzeros (8.0%). Gurobi model setup becomes 0.158 seconds, or 7.9%, faster.
+The removed variables equal the 7,664 passenger slots of the artifact.
+
+Despite the exact projection and preserved LP relaxation in the remaining
+variables, the single five-minute projected run has a 280 passenger-second
+worse incumbent, a 2,560 passenger-second lower bound decrease, and a 0.10
+percentage-point larger gap. It processes 15.3 times as many nodes and serves
+four fewer passengers. This is a time-limited search outcome, not evidence of
+changed passenger-model semantics. The projected formulation remains opt-in.

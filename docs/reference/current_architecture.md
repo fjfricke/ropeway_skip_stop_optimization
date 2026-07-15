@@ -74,7 +74,9 @@ Selected boarding time is a third mutually exclusive formulation category:
 
 The projected case preserves the integer model and LP relaxation, but is
 invalid for waiting time because selected boarding time appears in that
-objective. The explicit case remains the default pending its benchmark.
+objective. A dedicated five-minute comparison reduced model size and setup
+time but slightly worsened time-limited incumbent and proof metrics; the
+explicit case therefore remains the default.
 
 ## EAN Finite-Horizon Formulations
 
