@@ -177,6 +177,14 @@ root-relaxation boundaries when exposed, first-incumbent time, and the peak
 current Gurobi memory observed during each case. No solver log parsing is used.
 Movement-only bounds are not compared with passenger-objective bounds.
 
+An optional root-relaxation recorder binds directly to the typed movement and
+passenger variable collections after canonical model construction. At optimal
+root-node callbacks it obtains `cbGetNodeRel()` values and aggregates integer
+fractionality and linear-objective contributions by variable family. Diagnostic
+recorders share the existing Gurobi callback with progress recording and are
+absent from normal exports unless explicitly supplied. Presolve-only solves can
+finish without producing a root sample.
+
 ## Benchmark and Delivery
 
 Benchmark scripts write machine-specific JSON, SVG plots, and checkpoints under

@@ -83,7 +83,8 @@ uv run python benchmarks/run_ean_bottleneck_diagnostic.py \
   --ean-solver-policy quick_good_solution \
   --time-limit 300 \
   --ean-optimizations all \
-  --sample-interval 5
+  --sample-interval 5 \
+  --root-diagnostics
 ```
 
 The time limit applies separately to:
@@ -99,12 +100,21 @@ fixes it through the canonical movement model, and disables the all-stop MIP
 start. If the integrated run produces no incumbent, that case is marked
 unavailable.
 
-Each run writes one JSON plus five SVG comparisons under
+With `--root-diagnostics`, the same Gurobi callback additionally samples the
+actual MIP root relaxation through `cbGetNodeRel()`. It records fractionality
+and linear-objective contributions for typed movement, headway, activation,
+passenger-slot, selected-time, and unserved variable families. It does not
+parse the solver log or change the mathematical model. Cases solved entirely
+in presolve may legitimately contain no root samples.
+
+Each run writes one JSON plus five base SVG comparisons under
 `benchmarks/output/bottleneck_diagnostics/`. The JSON includes scenario and
 artifact construction, passenger-candidate construction, movement and
 passenger model construction, movement fixing, MIP-start time, presolve,
 root-relaxation timing when observed, first-incumbent time, current-memory
 peak observed during the case, and normal final solver diagnostics.
+When root samples are available, two additional SVGs compare fractional
+variable counts by family and lower-bound development over root runtime.
 
 Movement-only has objective zero. Its construction and feasibility behavior
 are diagnostic, but its objective bound and gap are not comparable to the

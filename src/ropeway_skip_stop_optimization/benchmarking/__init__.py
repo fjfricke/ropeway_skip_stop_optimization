@@ -12,6 +12,13 @@ from ropeway_skip_stop_optimization.benchmarking.ean_passenger import (
     GurobiMipProgressSample,
     run_ean_passenger_benchmark,
 )
+from ropeway_skip_stop_optimization.benchmarking.ean_root_relaxation import (
+    EanRootRelaxationDiagnostic,
+    EanRootRelaxationRecorder,
+    EanRootRelaxationSample,
+    EanVariableFamily,
+    EanVariableFamilyMetrics,
+)
 from ropeway_skip_stop_optimization.benchmarking.plots import (
     EanBottleneckPlotBuilder,
     PlotBuilder,
@@ -26,6 +33,11 @@ __all__ = [
     "EanBottleneckDiagnosticResult",
     "EanBottleneckDiagnosticRunner",
     "EanBottleneckPlotBuilder",
+    "EanRootRelaxationDiagnostic",
+    "EanRootRelaxationRecorder",
+    "EanRootRelaxationSample",
+    "EanVariableFamily",
+    "EanVariableFamilyMetrics",
     "GurobiMipProgressRecorder",
     "GurobiMipProgressSample",
     "PlotBuilder",

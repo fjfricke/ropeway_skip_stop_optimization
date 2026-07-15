@@ -106,6 +106,7 @@ class EanSolveConfig:
     log_to_console: bool = False
     checkpoint: GurobiCheckpointConfig | None = None
     progress_recorder: Any | None = None
+    diagnostic_recorders: tuple[Any, ...] = ()
     progress_sample_interval_seconds: float = 5.0
 
     def validate(self) -> None:
@@ -360,6 +361,11 @@ class EanOptimizer:
 
         _configure_checkpoints(model, self.config.checkpoint)
         model.update()
+        _bind_diagnostic_recorders(
+            self.config.diagnostic_recorders,
+            movement_model,
+            passenger_model,
+        )
         model_nonzero_count = int(model.NumNZs)
         setup_runtime = perf_counter() - setup_started
         build_metrics = EanModelBuildMetrics(
@@ -386,6 +392,7 @@ class EanOptimizer:
             model=model,
             grb=GRB,
             recorder=self.config.progress_recorder,
+            diagnostic_recorders=self.config.diagnostic_recorders,
             sample_interval_seconds=self.config.progress_sample_interval_seconds,
         )
         _write_final_checkpoint(model, self.config.checkpoint)
@@ -680,27 +687,68 @@ def _optimize(
     model: Any,
     grb: Any,
     recorder: Any | None,
+    diagnostic_recorders: tuple[Any, ...],
     sample_interval_seconds: float,
 ) -> int:
-    if recorder is None:
+    callback_recorders = tuple(
+        callback_recorder
+        for callback_recorder in (recorder, *diagnostic_recorders)
+        if callback_recorder is not None
+    )
+    if not callback_recorders:
         model.optimize()
         return 0
-    begin_run = getattr(recorder, "begin_run", None)
-    start = (
-        int(begin_run())
-        if callable(begin_run)
-        else len(recorder.samples)
-    )
+    start = 0
+    for callback_recorder in callback_recorders:
+        begin_run = getattr(callback_recorder, "begin_run", None)
+        result = begin_run() if callable(begin_run) else None
+        if callback_recorder is recorder:
+            start = (
+                int(result)
+                if result is not None
+                else len(recorder.samples)
+            )
     model.optimize(
-        lambda callback_model, where: recorder.record_callback(
+        lambda callback_model, where: _record_callbacks(
+            callback_recorders,
             callback_model,
+            grb,
+            where,
+            sample_interval_seconds,
+        ),
+    )
+    for callback_recorder in callback_recorders:
+        record_final = getattr(callback_recorder, "record_final", None)
+        if callable(record_final):
+            record_final(model, grb)
+    return start
+
+
+def _bind_diagnostic_recorders(
+    diagnostic_recorders: tuple[Any, ...],
+    movement_model: EanMovementModel,
+    passenger_model: EanPassengerModel | None,
+) -> None:
+    for recorder in diagnostic_recorders:
+        bind_models = getattr(recorder, "bind_models", None)
+        if callable(bind_models):
+            bind_models(movement_model, passenger_model)
+
+
+def _record_callbacks(
+    recorders: tuple[Any, ...],
+    model: Any,
+    grb: Any,
+    where: int,
+    sample_interval_seconds: float,
+) -> None:
+    for recorder in recorders:
+        recorder.record_callback(
+            model,
             grb,
             where,
             sample_interval_seconds=sample_interval_seconds,
         )
-    )
-    recorder.record_final(model, grb)
-    return start
 
 
 def _progress_samples(

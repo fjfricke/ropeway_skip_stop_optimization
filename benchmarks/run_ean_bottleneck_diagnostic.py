@@ -35,6 +35,7 @@ def main() -> None:
                 optimization_config=args.ean_optimization_config,
                 output_dir=args.output_dir,
                 log_to_console=args.progress,
+                root_diagnostics=args.root_diagnostics,
             )
         ).run()
         plot_paths = EanBottleneckPlotBuilder(
@@ -58,6 +59,11 @@ def main() -> None:
                 f"runtime={case.metadata.runtime_seconds} "
                 f"gap={case.metadata.mip_gap}"
             )
+            if case.root_relaxation is not None:
+                print(
+                    "    root samples="
+                    f"{len(case.root_relaxation.samples)}"
+                )
 
 
 def _parse_args() -> argparse.Namespace:
@@ -110,6 +116,14 @@ def _parse_args() -> argparse.Namespace:
         "--progress",
         action=argparse.BooleanOptionalAction,
         default=True,
+    )
+    parser.add_argument(
+        "--root-diagnostics",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Record variable-family fractionality at the Gurobi root node."
+        ),
     )
     args = parser.parse_args()
     if args.time_limit <= 0:

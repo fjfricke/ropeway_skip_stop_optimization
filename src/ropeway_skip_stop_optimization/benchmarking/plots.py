@@ -198,6 +198,21 @@ class EanBottleneckPlotBuilder:
                 ),
             ),
         }
+        root_fractionality_groups = self._root_fractionality_groups()
+        if root_fractionality_groups:
+            plots["root_fractionality_by_case"] = _bar_chart(
+                title="EAN root fractional variables by family",
+                y_label="fractional variables",
+                groups=root_fractionality_groups,
+            )
+        root_bound_series = self._root_bound_series()
+        if root_bound_series:
+            plots["root_bound_over_time"] = _line_chart(
+                title="EAN root lower bound over time",
+                x_label="runtime seconds",
+                y_label="objective seconds",
+                series=root_bound_series,
+            )
         written: list[Path] = []
         for name, svg in plots.items():
             output_path = output_dir / f"{prefix}__{name}.svg"
@@ -251,6 +266,59 @@ class EanBottleneckPlotBuilder:
                 }
             )
         return tuple(results)
+
+    def _root_fractionality_groups(self) -> tuple[BarGroup, ...]:
+        groups: list[BarGroup] = []
+        example_id = str(self.diagnostic.get("example_id", "EAN"))
+        for case in self.diagnostic.get("cases") or ():
+            root = case.get("root_relaxation")
+            if not isinstance(root, Mapping):
+                continue
+            samples = root.get("samples") or ()
+            if not samples:
+                continue
+            final_sample = samples[-1]
+            families = final_sample.get("families") or ()
+            values = {
+                str(family.get("family")): _as_float(
+                    family.get("fractional_variable_count")
+                )
+                for family in families
+                if _as_float(
+                    family.get("fractional_variable_count")
+                )
+                is not None
+            }
+            if values:
+                groups.append(
+                    BarGroup(
+                        f"{example_id} / {case.get('case')}",
+                        values,
+                    )
+                )
+        return tuple(groups)
+
+    def _root_bound_series(self) -> tuple[PlotSeries, ...]:
+        series: list[PlotSeries] = []
+        example_id = str(self.diagnostic.get("example_id", "EAN"))
+        for case in self.diagnostic.get("cases") or ():
+            root = case.get("root_relaxation")
+            if not isinstance(root, Mapping):
+                continue
+            points: list[tuple[float, float]] = []
+            for sample in root.get("samples") or ():
+                runtime = _as_float(sample.get("runtime_seconds"))
+                bound = _as_float(sample.get("best_bound"))
+                if runtime is not None and bound is not None:
+                    points.append((runtime, bound))
+            if points:
+                series.append(
+                    PlotSeries(
+                        f"{example_id} / {case.get('case')}",
+                        tuple(points),
+                    )
+                )
+        return tuple(series)
 
 
 def load_benchmark_result_dicts(paths: Sequence[Path]) -> tuple[dict[str, Any], ...]:

@@ -28,13 +28,16 @@ def test_bottleneck_runner_builds_all_three_cases(
 
     def fake_solve(self, problem, solver_policy):
         problems.append(problem)
-        return SimpleNamespace(
-            movement_plan=(
-                integrated_plan
-                if len(problems) == 1
-                else None
+        return (
+            SimpleNamespace(
+                movement_plan=(
+                    integrated_plan
+                    if len(problems) == 1
+                    else None
+                ),
+                metadata=None,
             ),
-            metadata=None,
+            None,
         )
 
     monkeypatch.setattr(
@@ -119,3 +122,57 @@ def test_bottleneck_plot_builder_writes_case_comparisons(tmp_path) -> None:
         path.read_text(encoding="utf-8").startswith("<svg")
         for path in paths
     )
+
+
+def test_bottleneck_plot_builder_writes_root_diagnostics(tmp_path) -> None:
+    diagnostic = {
+        "example_id": "example",
+        "cases": [
+            {
+                "case": "integrated",
+                "metadata": {},
+                "root_relaxation": {
+                    "samples": [
+                        {
+                            "runtime_seconds": 5.0,
+                            "best_bound": 100.0,
+                            "families": [
+                                {
+                                    "family": "stop",
+                                    "fractional_variable_count": 4,
+                                },
+                                {
+                                    "family": "passenger_slot",
+                                    "fractional_variable_count": 12,
+                                },
+                            ],
+                        },
+                        {
+                            "runtime_seconds": 10.0,
+                            "best_bound": 120.0,
+                            "families": [
+                                {
+                                    "family": "stop",
+                                    "fractional_variable_count": 2,
+                                },
+                                {
+                                    "family": "passenger_slot",
+                                    "fractional_variable_count": 8,
+                                },
+                            ],
+                        },
+                    ]
+                },
+            }
+        ],
+    }
+
+    paths = EanBottleneckPlotBuilder(diagnostic).write_all(
+        tmp_path,
+        prefix="run",
+    )
+
+    assert {
+        "run__root_fractionality_by_case.svg",
+        "run__root_bound_over_time.svg",
+    }.issubset({path.name for path in paths})

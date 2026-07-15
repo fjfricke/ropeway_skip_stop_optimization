@@ -14,6 +14,10 @@ from ropeway_skip_stop_optimization.benchmarking.environment import (
     git_is_dirty,
     gurobi_version,
 )
+from ropeway_skip_stop_optimization.benchmarking.ean_root_relaxation import (
+    EanRootRelaxationDiagnostic,
+    EanRootRelaxationRecorder,
+)
 from ropeway_skip_stop_optimization.examples.ean import EanScenarioExample
 from ropeway_skip_stop_optimization.examples.registry import get_example
 from ropeway_skip_stop_optimization.exports.json_codec import write_json
@@ -61,6 +65,7 @@ class EanBottleneckDiagnosticConfig:
     )
     output_dir: Path = DEFAULT_BOTTLENECK_OUTPUT_DIR
     log_to_console: bool = True
+    root_diagnostics: bool = False
 
     def validate(self) -> None:
         if self.time_limit_seconds <= 0:
@@ -73,6 +78,7 @@ class EanBottleneckDiagnosticConfig:
 class EanBottleneckCaseResult:
     case: EanBottleneckCase
     metadata: EanOptimizationMetadata | None
+    root_relaxation: EanRootRelaxationDiagnostic | None = None
     unavailable_reason: str | None = None
 
 
@@ -131,7 +137,7 @@ class EanBottleneckDiagnosticRunner:
             gurobi_solver_policy_for_preset(self.config.solver_policy),
             time_limit_seconds=self.config.time_limit_seconds,
         )
-        integrated = self._solve(
+        integrated, integrated_root = self._solve(
             EanPassengerServiceProblem(
                 scenario=scenario,
                 artifact=artifact,
@@ -139,7 +145,7 @@ class EanBottleneckDiagnosticRunner:
             ),
             solver_policy,
         )
-        movement_only = self._solve(
+        movement_only, movement_only_root = self._solve(
             EanMovementFeasibilityProblem(artifact),
             solver_policy,
         )
@@ -147,12 +153,13 @@ class EanBottleneckDiagnosticRunner:
             fixed_movement = EanBottleneckCaseResult(
                 case=EanBottleneckCase.FIXED_MOVEMENT_PASSENGER,
                 metadata=None,
+                root_relaxation=None,
                 unavailable_reason=(
                     "integrated case produced no movement incumbent"
                 ),
             )
         else:
-            fixed_movement_result = self._solve(
+            fixed_movement_result, fixed_movement_root = self._solve(
                 EanPassengerServiceProblem(
                     scenario=scenario,
                     artifact=artifact,
@@ -165,6 +172,7 @@ class EanBottleneckDiagnosticRunner:
             fixed_movement = EanBottleneckCaseResult(
                 case=EanBottleneckCase.FIXED_MOVEMENT_PASSENGER,
                 metadata=fixed_movement_result.metadata,
+                root_relaxation=fixed_movement_root,
             )
 
         run_id = _run_id(self.config)
@@ -198,10 +206,12 @@ class EanBottleneckDiagnosticRunner:
                 EanBottleneckCaseResult(
                     case=EanBottleneckCase.INTEGRATED,
                     metadata=integrated.metadata,
+                    root_relaxation=integrated_root,
                 ),
                 EanBottleneckCaseResult(
                     case=EanBottleneckCase.MOVEMENT_ONLY,
                     metadata=movement_only.metadata,
+                    root_relaxation=movement_only_root,
                 ),
                 fixed_movement,
             ),
@@ -214,20 +224,41 @@ class EanBottleneckDiagnosticRunner:
         self,
         problem: EanMovementFeasibilityProblem | EanPassengerServiceProblem,
         solver_policy: GurobiSolverPolicy,
-    ) -> EanOptimizationResult:
+    ) -> tuple[
+        EanOptimizationResult,
+        EanRootRelaxationDiagnostic | None,
+    ]:
         recorder = GurobiMipProgressRecorder()
+        root_recorder = (
+            EanRootRelaxationRecorder(
+                sample_interval_seconds=self.config.sample_interval_seconds,
+            )
+            if self.config.root_diagnostics
+            else None
+        )
         optimizer = EanOptimizer(
             EanSolveConfig(
                 solver_policy=solver_policy,
                 optimization_config=self.config.optimization_config,
                 log_to_console=self.config.log_to_console,
                 progress_recorder=recorder,
+                diagnostic_recorders=(
+                    (root_recorder,)
+                    if root_recorder is not None
+                    else ()
+                ),
                 progress_sample_interval_seconds=(
                     self.config.sample_interval_seconds
                 ),
             )
         )
-        return optimizer.solve(problem)
+        result = optimizer.solve(problem)
+        return (
+            result,
+            root_recorder.diagnostic
+            if root_recorder is not None
+            else None,
+        )
 
 
 def _run_id(config: EanBottleneckDiagnosticConfig) -> str:

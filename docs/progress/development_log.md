@@ -5,6 +5,23 @@ corresponding decisions were made.
 
 ## 2026-07-15
 
+### EAN root-relaxation diagnostics
+
+The Phase-0 bottleneck runner gained an optional typed root-relaxation recorder.
+It binds to the canonical movement and passenger models and samples Gurobi
+`MIPNODE` relaxation values without parsing solver output. Fractional variable
+counts, fractional distance, and linear-objective contribution are aggregated
+for movement times, waiting, stop/skip, horizon activation, headway order,
+passenger slots, selected passenger times, and unserved demand.
+
+The recorder is attached through an optional diagnostic-observer collection in
+`EanSolveConfig` and shares the existing solver callback with progress
+recording. Normal solves therefore retain the same formulation and behavior
+when diagnostics are disabled. The bottleneck JSON stores samples per case,
+and plots compare final root fractionality by family and root-bound progress.
+A real Three-Station smoke run reached the root, produced typed samples, and
+verified JSON and SVG generation.
+
 ### Passenger-optimized all-stop MIP start
 
 The integrated EAN passenger solver now supports three explicit MIP-start
