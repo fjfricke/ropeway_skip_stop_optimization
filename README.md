@@ -90,6 +90,7 @@ Useful EAN export options:
 
 ```text
 --ean-solver-policy default|debug_short|quick_good_solution|paper_benchmark|exact_optimality
+--ean-time-limit <seconds>
 --ean-optimizations all|none|<comma-separated selections>
 --ean-checkpoint-dir <path>
 --ean-resume-checkpoint <file.sol-or-file.mst>

@@ -60,8 +60,8 @@ Use the measurements to select the next branch:
 - if movement-only is already difficult, first test safe same-cabin precedence
   and conservative pair classification from `ean_formulation_and_search.md`,
   then consider shared precedence, delayed headways, or the CP prototype;
-- if fixed-movement passenger assignment is difficult, prioritize the
-  passenger evaluator and its exact solution method;
+- if fixed-movement passenger assignment becomes difficult at larger scale,
+  prioritize passenger strengthening or a different exact solution method;
 - if both isolated models are easy but the integrated model is difficult,
   prioritize coupling methods such as neighborhood search or logic-based
   decomposition;
@@ -71,6 +71,160 @@ Use the measurements to select the next branch:
 Maintain tiny production-path instances that solve to proven optimality. Every
 later exact method must agree with these instances before a scaling benchmark
 is interpreted.
+
+## Candidate Decomposition Boundaries
+
+Let \(z\) denote stop/skip decisions, \(a\) visit and horizon activations,
+\(o\) headway-order decisions, \(t\) event times, \(w\) waiting, and \(x,u\)
+served and unserved passenger decisions. Two decomposition boundaries are
+plausible and must not be conflated.
+
+### Boundary A: Scheduled Movement and Passenger Assignment
+
+```text
+master:
+  stop/skip, activation, headway order, event times, waiting
+
+subproblem:
+  passenger assignment for the complete fixed movement plan
+```
+
+For a complete movement plan \(m=(z,a,o,t,w)\), the implemented compact
+passenger optimizer evaluates
+
+\[
+  Q_{\mathrm{pass}}(m)
+  =
+  \min_{x,u}
+  f(m,x,u).
+\]
+
+This boundary is attractive when movement scheduling is manageable and
+passenger assignment is the dominant difficulty. Every master solution is
+already physically and temporally feasible, and the passenger subproblem is
+small. It is therefore well suited to:
+
+- exact evaluation of movement plans;
+- passenger-optimized starts;
+- local branching and large-neighborhood search;
+- alternating or heuristic movement/passenger optimization.
+
+Its weakness for exact Benders is the continuous timing in the master.
+Passenger candidate availability and the coefficients of Waiting-Time and
+Journey-Time costs depend on \(t\). Two schedules with the same stop/skip
+vector may have different passenger values. A no-good or optimality cut on the
+binary stop/skip vector alone is therefore not valid, and classical LP-dual
+cuts are not automatic because the subproblem objective coefficients change
+with the master times.
+
+Prefer Boundary A when:
+
+- full movement plans are cheap to generate;
+- timing is nearly determined by the movement decisions;
+- the main purpose is incumbent improvement rather than a global proof;
+- passenger assignment, rather than timing or headways, becomes difficult at
+  larger scale.
+
+### Boundary B: Discrete Movement Structure and Timing plus Passengers
+
+```text
+master:
+  discrete movement structure
+
+subproblem:
+  timing, waiting, and passenger optimization
+```
+
+For a discrete movement structure \(y=(z,a,o)\), define
+
+\[
+  Q_{\mathrm{structure}}(y)
+  =
+  \min_{t,w,x,u}
+  f(t,w,x,u)
+\]
+
+subject to every timing, headway, horizon, release, capacity, and passenger
+constraint implied by \(y\). The subproblem therefore finds the best schedule
+and passenger assignment for the selected structure instead of evaluating one
+externally fixed schedule.
+
+This removes continuous timing degeneracy from the master. A cut on \(y\) is
+logically sound because all possible timings for that discrete structure have
+already been optimized. Timing-infeasible structures can produce
+IIS- or cycle-based feasibility cuts, and integer optimality or explanatory
+passenger cuts can be attached to one discrete structure or a responsible
+subset of its decisions.
+
+The drawback is that the subproblem is itself a MILP because passenger
+assignment is not integral in general. The placement of headway-order
+variables is especially important:
+
+- if \(o\) remains in the subproblem, the master is smaller but the subproblem
+  retains the large headway-order search;
+- if \(o\) is fixed by the master, the timing part becomes much closer to a
+  system of linear difference constraints, but the master may contain a very
+  large number of order binaries.
+
+Prefer Boundary B when:
+
+- many materially different schedules exist for one stop/skip structure;
+- passenger cost depends strongly on optimized event times;
+- the fixed-structure timing/passenger subproblem solves quickly;
+- exact logic-based cuts and timing-feasibility explanations are the goal.
+
+### Comparison
+
+| Property | Boundary A: fixed schedule | Boundary B: fixed structure |
+|---|---|---|
+| Master variables | movement binaries and continuous times | discrete movement structure |
+| Subproblem | passenger assignment | timing, waiting, passenger assignment |
+| Existing implementation | compact fixed-movement optimizer | not yet implemented |
+| Subproblem size | very small in current benchmarks | unknown; must be measured |
+| Master feasibility | already physically timed | may require timing-feasibility cuts |
+| Passenger time costs | constants in one evaluation | optimized inside the subproblem |
+| Binary no-good cuts | difficult to generalize over times | valid for the complete discrete structure |
+| Classical LP Benders | obstructed by time-dependent costs and integer assignment | still not classical while passengers remain integer |
+| Best immediate use | evaluation, starts, LNS | logic-based or branch-and-check decomposition |
+
+Boundary A is already known to solve the isolated passenger problem in
+milliseconds. This does not show that it is the best exact decomposition:
+it leaves the observed movement, timing, and headway coupling in the master.
+Boundary B is theoretically cleaner for logic-based Benders, but only if its
+larger subproblem is consistently easy.
+
+### Boundary Diagnostic
+
+Before implementing a Benders master, add one fixed-structure diagnostic that
+solves the same scenario at three levels:
+
+1. fix the complete movement plan, including all times, and optimize only
+   passengers;
+2. fix stop/skip, activation, and headway orders, then optimize timing,
+   waiting, and passengers;
+3. fix only stop/skip and activation, then optimize headway orders, timing,
+   waiting, and passengers.
+
+Introduce a typed `EanMovementStructure` for this experiment. It contains
+stop/skip decisions, visit activations, and the selected headway orders but no
+continuous event times. Extract it directly from the solved movement model;
+do not infer headway orders afterward from event times that may be equal within
+solver tolerance.
+
+Use the same extracted integrated incumbent and passenger candidate
+configuration in all three cases. Record model size, setup time, first
+incumbent, runtime, objective, bound, gap, and LP fractionality.
+
+Select the boundary from the result:
+
+- if levels 2 and 3 are fast, use a small stop/skip master;
+- if only level 2 is fast, headway orders must be represented or classified in
+  the master;
+- if only level 1 is fast, retain Boundary A for neighborhood search and do
+  not begin a full exact decomposition;
+- if level 2 is fast but the order master is too large, use a hybrid master
+  containing stop/skip, activation, and only critical or unresolved headway
+  orders.
 
 ## Phase 1: Passenger-Coupling Cut Design
 
@@ -90,6 +244,44 @@ The general direct-ride LP is nonintegral, so LP dual cuts alone do not certify
 the integer passenger value. If the exact fixed-movement problem later becomes
 difficult at larger scale, evaluate restricted repair or path/column methods
 then, rather than adding them preemptively.
+
+### Movement-Plan Corpus
+
+Do not add another physical topology before using the existing scenario
+families. The initial corpus should use:
+
+```text
+three_station_v0
+five_station_v0
+five_station_circle_cw_half_skip_no_wait_v0
+five_station_circle_cw_half_skip_wait_v0
+```
+
+These cover a small and a larger bidirectional ring plus a directed circle,
+with and without waiting. The registered no-skip/no-wait variants are useful
+as deterministic controls but contribute little movement-pattern diversity.
+
+For every selected scenario, collect and deduplicate movement plans by their
+stop/skip and waiting signature:
+
+- the deterministic earliest all-stop plan;
+- Journey-Time integrated incumbents at short and full budgets;
+- Waiting-Time integrated incumbents at short and full budgets;
+- additional incumbents from controlled solver seeds once seed support exists.
+
+The current examples all release uniform or near-uniform all-OD demand at the
+service start. Before drawing conclusions about LP integrality or useful cuts,
+add benchmark-only demand profiles on the existing topology:
+
+- staggered release batches across the service horizon;
+- asymmetric OD peaks that create directional or station-specific capacity
+  competition;
+- one lower-load control where most cabin-capacity rows are slack.
+
+Implement these as data-driven benchmark scenario transforms rather than
+copying physical example classes or adding frontend examples. Add a
+seven-station topology only after the cut experiment works on the existing
+families and a larger conflict graph is needed for scaling.
 
 ## Phase 2: Progressive Wait Search
 
@@ -165,11 +357,11 @@ incumbents or a larger network size than direct integrated search.
 
 ## Phase 5: Conditional Decomposed Exact Search
 
-Represent movement, timing, stop/skip, and waiting decisions in a master and
-evaluate passenger cost in the fixed-movement subproblem. Do not assume that
-this automatically yields useful Benders cuts: stop/skip decisions change
-candidate availability and costs, and shared capacities make the passenger
-problem multi-commodity.
+Implement exact decomposition only after the boundary diagnostic selects
+Boundary A, Boundary B, or the hybrid order-master variant. Do not assume that
+either split automatically yields useful Benders cuts: stop/skip decisions
+change candidate availability, times change passenger costs, and shared
+capacities make the passenger problem multi-commodity.
 
 Choose the method from the Phase 0 and Phase 1 evidence:
 
@@ -182,6 +374,11 @@ Choose the method from the Phase 0 and Phase 1 evidence:
   integrality must be recovered inside the search;
 - use logic-based Benders when the passenger subproblem remains genuinely
   integer;
+- for Boundary B, derive timing-feasibility cuts from an IIS or positive cycle
+  before falling back to a complete structure no-good cut;
+- for Boundary A, treat the fixed-movement evaluator primarily as an exact
+  oracle for search unless globally valid timing-dependent lower bounds have
+  been derived;
 - abandon Benders if cuts are weak, iterations repeatedly rediscover similar
   movements, or direct neighborhood search gives better incumbents at the
   target scale.
@@ -315,15 +512,15 @@ external validation if that later becomes necessary.
    with the implemented Phase-0 runner.
 3. If movement/headways dominate, test safe fixed precedence before delayed
    generation or a movement-only CP prototype.
-4. If passenger assignment dominates, build the fixed-movement evaluator,
-   measure the practical LP/IP gap, and benchmark exact integer repair.
+4. Run the decomposition-boundary diagnostic before selecting a master and
+   subproblem split.
 5. If incumbent search remains limiting beyond the implemented
    passenger-optimized all-stop start, benchmark multiple structural starts
    and same-artifact progressive waiting independently.
 6. If coupling dominates, test neighborhood search before a complex exact
    decomposition.
-7. Attempt only the Benders variant justified by the measured passenger
-   subproblem; do not default to classical LP Benders.
+7. Attempt only the Benders variant justified by the measured fixed-schedule
+   and fixed-structure subproblems; do not default to classical LP Benders.
 8. Evaluate SCIP/GCG or Hexaly only after identifying a concrete decomposition
    or large-scale heuristic role.
 9. Combine successful components only after each independently agrees with the

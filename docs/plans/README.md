@@ -20,8 +20,15 @@ Current plans:
 - `ean_structural_reformulation.md`: exact structural reductions of the
   integrated EAN passenger MILP that are evaluated only for a measured
   bottleneck.
+- `ean_eager_headway_build_performance.md`: exact pair pruning, compact
+  conflict storage, batched Gurobi construction, and compact export for large
+  eager OIP headway models.
 - `ean_decomposition.md`: scaling diagnosis, passenger decomposition,
   progressive search, delayed constraints, and alternative solver paths.
+- `ean_terminal_recovery_feasibility.md`: future sink-recovery continuation
+  proof, one-ring feasibility model, and optional logic-based decomposition.
+- `ean_oip_capacity_bound.md`: exact scaling and later automatic use of the
+  implemented OIP packing and capacity-certificate layer.
 - `ean_fleet_activation_and_depots.md`: optional cabin dispatch, fleet-size
   experiments, physical depots, and future full-day terminal semantics.
 - `ean_intermediate_turnbacks.md`: intermediate crossovers, deterministic

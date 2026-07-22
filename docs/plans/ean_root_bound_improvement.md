@@ -35,29 +35,7 @@ optimal `MIPNODE` state. Detailed measurements are recorded in
 The plan does not assume that the current incumbent is globally near-optimal.
 A strong feasible solution and a weak lower bound do not establish that.
 
-## Phase 1: Current Default Versus Tight Big-M
-
-Before adding new constraints, compare exactly two integrated cases on
-`five_station_v0`:
-
-```text
-current production default
-current production default + tight_big_m_bounds
-```
-
-Use the optimized all-stop start for both. Compare root-bound development,
-fractionality by family, final incumbent, final bound, gap, nodes, memory, and
-setup time. Repeat with controlled solver seeds if the runner supports them.
-
-Keep `tight_big_m_bounds` opt-in unless it reproducibly improves the root bound
-without an unacceptable regression in incumbent search or runtime.
-
-If family-level metrics do not explain a changed bound, extend the diagnostic
-only for the active families: passenger slots by demand group, OD pair, cabin,
-and ride candidate; headway orders by checkpoint kind and same-cabin versus
-different-cabin pairs.
-
-## Phase 2: Candidate-Specific Passenger-Time Bounds
+## Phase 1: Candidate-Specific Passenger-Time Bounds
 
 If passenger slots, unserved counts, or selected-time variables dominate the
 root fractionality, implement the exact bounds in this order:
@@ -68,10 +46,10 @@ root fractionality, implement the exact bounds in this order:
 
 Each bound must follow from physical route and timing bounds, not from an
 incumbent. Prove it for both waiting modes and for every supported horizon and
-board-time formulation. Benchmark each step separately against the best result
-from Phase 1.
+board-time formulation. Benchmark each step separately against the production
+default.
 
-## Phase 3: Headway Precedence Reduction
+## Phase 2: Headway Precedence Reduction
 
 If headway-order and movement variables dominate, first classify safe
 same-cabin precedence:
@@ -86,7 +64,7 @@ correct activation-relaxed directed headway constraint. Record fixed, variable,
 and omitted pair counts. Continue to conservative time-window classification
 only if the exact same-cabin reduction has a measurable effect.
 
-## Phase 4: Algorithmic Branch
+## Phase 3: Algorithmic Branch
 
 Use the diagnostic evidence to choose between two separate objectives.
 
@@ -99,8 +77,8 @@ For better feasible solutions:
 
 For stronger bounds or exact certification:
 
-- build the fixed-movement destination-layered passenger evaluator;
-- measure its practical LP/IP gap and exact-repair cost;
+- use the implemented compact fixed-movement passenger evaluator;
+- sample practical LP/IP gaps across structurally different movement plans;
 - use its LP only for valid lower-bounding information;
 - evaluate branch-and-Benders or logic-based Benders for exact decomposition,
   because the direct-ride fixed-movement LP is nonintegral in general.
@@ -111,12 +89,12 @@ default next step while root coupling is the observed bottleneck.
 
 ## Decision Rules
 
-Choose the next implementation from the diagnostic and Phase-1 result:
+Choose the next implementation from the diagnostic evidence:
 
 | Observation | Next work |
 |---|---|
 | Passenger slots or selected times carry most fractional mass | Candidate-specific passenger-time bounds |
-| Unserved variables are strongly fractional | Passenger assignment strengthening and fixed-movement evaluator |
+| Unserved variables are strongly fractional | Passenger assignment strengthening and coupling cuts |
 | Headway orders dominate | Safe precedence classification |
 | Stop/activation and passenger variables are jointly fractional | Coupling reformulation or decomposition |
 | Bound is adequate but incumbent remains poor | Neighborhood search or multiple structural starts |

@@ -146,6 +146,36 @@ toggles. The legacy time bound is retained for reproducible comparison because
 its ten-second residual slack can constrain cumulative waiting on the longest
 cabin chain.
 
+Optimized initial placement fixes exact-time activation together with
+`time_bounds_initial_placement_safe`. It supports the same nonnegative
+certification tail as fixed starts: the ring-list builder sizes the future
+suffix to \(H\), while passenger rides remain bounded by \(T\). The selected
+initial phase creates an inactive indexing prefix; it does not shorten the
+post-service certification interval.
+
+The detailed formulation and its design rationale are recorded in
+`ean_initial_placement_model.md` and
+`ean_optimized_initial_placement_design.md`.
+
+OIP fleet capacity is analyzed by a separate certificate layer. A shared
+physical ring-topology builder identifies the service, enabled skip, and rope
+segments used by timing and capacity construction. The packing builder assigns
+each physical segment the half-open capacity
+`ceil(length / required_spacing)`, counts shared segments once, and adds one
+slot for each end-of-platform waiting resource. `EanPreparedRing` owns this
+shared physical preprocessing together with the all-stop and homogeneous
+periodic-route lower bounds. The capacity search then performs passenger-free,
+exact-cardinality fixed-\(K\) feasibility probes. Eager all-pairs and delayed
+violation generation implement the same headway-probe strategy interface.
+
+Analytic and solver evidence remain distinct: `certified_lower_bound` combines
+all valid lower-bound certificates, while `solver_incumbent_lower_bound` is set
+only when a feasible MILP incumbent was actually extracted. Route-specific
+builders emit the shared `EanPrimalSeed` type; a supplied periodic certificate
+must validate against the exact artifact before it can seed a probe. This
+analysis does not currently change the explicit production
+`available_fleet_count`.
+
 ## Validation, Replay, and Frontend
 
 EAN output is converted to typed movement and passenger plans, validated
