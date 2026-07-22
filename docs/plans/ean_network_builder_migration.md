@@ -59,6 +59,9 @@ Fixed-start builders receive the already extracted movement network and selected
 circulation pattern directly. This removes their former ordered `switch_cycle`
 input and avoids rebuilding the physical network while generating all-stop
 starts.
+Example families now construct named `EanCirculationPatternDefinition` values
+directly. The former cycle factory, ring-order helpers, and duplicated physical
+ring validators have been removed.
 
 Only after this removal does the dynamic-routing stage add indexed visit and
 route decisions. Passenger assignment remains outside that first movement-only

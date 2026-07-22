@@ -22,6 +22,7 @@ from ropeway_skip_stop_optimization.models import (
     TrackSegmentKind,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
+    EanCirculationPatternDefinition,
     EanConfig,
     EanFleetCardinalityMode,
     EanFleetConfig,
@@ -44,7 +45,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanInitialPlacementMipStartSource,
     EanInitialPlacementPackingBoundBuilder,
     HeadwayPairBuilder,
-    network_ean_builder_for_cycle,
+    network_ean_builder_for_pattern,
     SparseHeadwayPairBuilder,
     StationEanConfig,
     StationWaitingMode,
@@ -66,6 +67,13 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.movement_model i
 )
 
 
+def _single_state_pattern() -> EanCirculationPatternDefinition:
+    return EanCirculationPatternDefinition(
+        id="selected_pattern",
+        state_node_ids=("entry",),
+    )
+
+
 def test_segment_packing_capacity_uses_half_open_ceil() -> None:
     assert segment_packing_capacity(10.0, 5.0) == 2
     assert segment_packing_capacity(10.1, 5.0) == 3
@@ -77,7 +85,7 @@ def test_packing_bound_counts_unique_segments_and_no_switch_points() -> None:
     bound = EanInitialPlacementPackingBoundBuilder().build(
         scenario=scenario,
         config=_config(),
-        switch_cycle=("entry",),
+        pattern_definition=_single_state_pattern(),
     )
 
     track_regions = tuple(
@@ -102,12 +110,12 @@ def test_packing_bound_adds_distinct_enabled_skip_segments() -> None:
     without_skip = EanInitialPlacementPackingBoundBuilder().build(
         scenario=_single_station_ring(),
         config=_config(),
-        switch_cycle=("entry",),
+        pattern_definition=_single_state_pattern(),
     )
     with_skip = EanInitialPlacementPackingBoundBuilder().build(
         scenario=_single_station_ring(with_skip=True),
         config=_config(),
-        switch_cycle=("entry",),
+        pattern_definition=_single_state_pattern(),
     )
 
     assert without_skip.packing_upper_bound == 4
@@ -119,7 +127,7 @@ def test_packing_bound_adds_one_end_wait_resource() -> None:
     bound = EanInitialPlacementPackingBoundBuilder().build(
         scenario=_single_station_ring(),
         config=_config(StationWaitingMode.END_OF_PLATFORM_WAIT),
-        switch_cycle=("entry",),
+        pattern_definition=_single_state_pattern(),
     )
 
     wait_regions = tuple(
@@ -140,7 +148,7 @@ def test_packing_bound_keeps_fifo_unimplemented() -> None:
                 StationWaitingMode.STATION_FIFO_BUFFER,
                 fifo_capacity=2,
             ),
-            switch_cycle=("entry",),
+            pattern_definition=_single_state_pattern(),
         )
 
 
@@ -294,7 +302,7 @@ def test_capacity_certificate_rejects_incomplete_headway_pairs() -> None:
         scenario=scenario,
         config=_config(),
         artifact_builder=replace(
-            network_ean_builder_for_cycle(state_ids=("entry",)),
+            network_ean_builder_for_pattern(pattern_definition=_single_state_pattern()),
             headway_pair_builder=_NoHeadwayPairBuilder(),
         ),
     )
@@ -311,8 +319,8 @@ def test_capacity_optimizer_closes_small_ring_capacity() -> None:
         EanInitialPlacementCapacityProblem(
             scenario=scenario,
             config=config,
-            artifact_builder=network_ean_builder_for_cycle(
-                state_ids=("entry",),
+            artifact_builder=network_ean_builder_for_pattern(
+                pattern_definition=_single_state_pattern(),
             ),
         )
     )
@@ -334,7 +342,7 @@ def test_fixed_k_feasibility_keeps_every_cabin_active() -> None:
     capacity_problem = EanInitialPlacementCapacityProblem(
         scenario=_single_station_ring(),
         config=_config(),
-        artifact_builder=network_ean_builder_for_cycle(state_ids=("entry",)),
+        artifact_builder=network_ean_builder_for_pattern(pattern_definition=_single_state_pattern()),
     )
 
     result = EanInitialPlacementFeasibilityOptimizer().solve(
@@ -387,7 +395,7 @@ def test_fixed_k_feasibility_needs_no_periodic_certificate_for_short_horizon() -
     capacity_problem = EanInitialPlacementCapacityProblem(
         scenario=scenario,
         config=replace(_config(), horizon_seconds=1.0),
-        artifact_builder=network_ean_builder_for_cycle(state_ids=("entry",)),
+        artifact_builder=network_ean_builder_for_pattern(pattern_definition=_single_state_pattern()),
     )
 
     result = EanInitialPlacementFeasibilityOptimizer().solve(
@@ -407,7 +415,7 @@ def test_delayed_fixed_k_matches_eager_and_certifies_full_separation() -> None:
     capacity_problem = EanInitialPlacementCapacityProblem(
         scenario=_single_station_ring(),
         config=_config(),
-        artifact_builder=network_ean_builder_for_cycle(state_ids=("entry",)),
+        artifact_builder=network_ean_builder_for_pattern(pattern_definition=_single_state_pattern()),
     )
     optimizer = EanInitialPlacementFeasibilityOptimizer(
         EanInitialPlacementCapacitySolveConfig(
@@ -438,7 +446,7 @@ def test_delayed_fixed_k_total_budget_can_return_unknown() -> None:
     capacity_problem = EanInitialPlacementCapacityProblem(
         scenario=_single_station_ring(),
         config=_config(),
-        artifact_builder=network_ean_builder_for_cycle(state_ids=("entry",)),
+        artifact_builder=network_ean_builder_for_pattern(pattern_definition=_single_state_pattern()),
     )
     optimizer = EanInitialPlacementFeasibilityOptimizer(
         EanInitialPlacementCapacitySolveConfig(
@@ -468,8 +476,8 @@ def test_dynamic_headway_pool_adds_one_binary_and_two_constraints() -> None:
         available_fleet_count=2,
         cardinality_mode=EanFleetCardinalityMode.EXACT,
     )
-    base_builder = network_ean_builder_for_cycle(
-        state_ids=("entry",), fleet_config=fleet_config
+    base_builder = network_ean_builder_for_pattern(
+        pattern_definition=_single_state_pattern(), fleet_config=fleet_config
     )
     complete = base_builder.build(scenario, config)
     sparse = replace(
@@ -502,7 +510,7 @@ def test_capacity_optimizer_reuses_previous_feasible_probe() -> None:
         EanInitialPlacementCapacityProblem(
             scenario=_single_station_ring(with_skip=True),
             config=_config(),
-            artifact_builder=network_ean_builder_for_cycle(state_ids=("entry",)),
+            artifact_builder=network_ean_builder_for_pattern(pattern_definition=_single_state_pattern()),
         )
     )
 
@@ -528,7 +536,7 @@ def test_capacity_progress_mode_uses_tqdm_without_gurobi_log(capsys) -> None:
         EanInitialPlacementCapacityProblem(
             scenario=_single_station_ring(),
             config=_config(),
-            artifact_builder=network_ean_builder_for_cycle(state_ids=("entry",)),
+            artifact_builder=network_ean_builder_for_pattern(pattern_definition=_single_state_pattern()),
         )
     )
 
@@ -541,8 +549,8 @@ def test_fixed_k_partial_mip_start_leaves_added_cabins_unset() -> None:
     gp = pytest.importorskip("gurobipy")
     scenario = _single_station_ring()
     config = _config()
-    artifact = network_ean_builder_for_cycle(
-        state_ids=("entry",),
+    artifact = network_ean_builder_for_pattern(
+        pattern_definition=_single_state_pattern(),
         fleet_config=EanFleetConfig(
             mode=EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT,
             available_fleet_count=5,

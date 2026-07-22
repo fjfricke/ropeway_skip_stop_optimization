@@ -42,6 +42,11 @@ The deterministic physical-start mapper derives its target states from the
 pattern, while the all-stop builders derive timing and capacity without
 constructing a second topology.
 
+Examples expose `EanCirculationPatternDefinition` objects and pass them through
+`network_ean_builder_for_pattern`. Physical connectivity and route
+reconvergence are validated once by `PhysicalMovementNetworkBuilder`; examples
+do not maintain separate ring-connectivity validators.
+
 `EanOptimizer` is the single public continuous-EAN solver API. It accepts one
 of three typed problem objects:
 

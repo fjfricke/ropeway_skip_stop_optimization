@@ -16,7 +16,7 @@ from ropeway_skip_stop_optimization.examples.three_station import (
 )
 from ropeway_skip_stop_optimization.examples.three_station_ean import (
     build_three_station_ean_config,
-    build_three_station_ean_ring_switch_order,
+    build_three_station_ean_pattern_definition,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
     EanFleetPlan,
@@ -37,7 +37,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EvenlySpacedAllStopCabinStartBuilder,
     GurobiSolverPolicy,
     NetworkEanBuildArtifactBuilder,
-    network_ean_builder_for_cycle,
+    network_ean_builder_for_pattern,
     StationWaitingMode,
     project_ean_movement_plan_to_physical_replay,
     validate_ean_movement_plan_against_artifact,
@@ -804,15 +804,15 @@ def test_fixed_starts_and_initial_placement_use_same_k_with_comparable_tail_mode
     example = ThreeStationOptimizedInitialPlacementExample()
     scenario = example.build_scenario()
     config = build_three_station_ean_config(scenario, tail_seconds=300.0)
-    switch_cycle = build_three_station_ean_ring_switch_order(scenario)
-    fixed_artifact = network_ean_builder_for_cycle(
-        state_ids=switch_cycle,
+    pattern_definition = build_three_station_ean_pattern_definition()
+    fixed_artifact = network_ean_builder_for_pattern(
+        pattern_definition=pattern_definition,
         start_builder=EvenlySpacedAllStopCabinStartBuilder(
             cabin_count=len(scenario.cabins),
         ),
     ).build(scenario, config)
-    initial_placement_artifact = network_ean_builder_for_cycle(
-        state_ids=switch_cycle,
+    initial_placement_artifact = network_ean_builder_for_pattern(
+        pattern_definition=pattern_definition,
         fleet_config=EanFleetConfig(
             mode=EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT,
             available_fleet_count=len(fixed_artifact.cabin_starts),

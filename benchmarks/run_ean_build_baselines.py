@@ -38,9 +38,11 @@ from ropeway_skip_stop_optimization.models import (
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
     EanArtifactConstructionMode,
+    EanCirculationPatternDefinition,
     EanConfig,
     EanOptimizationProblemKind,
-    network_ean_builder_for_cycle,
+    NetworkEanBuildArtifactBuilder,
+    network_ean_builder_for_pattern,
     StationEanConfig,
     StationWaitingMode,
 )
@@ -59,6 +61,13 @@ BASELINE_EXAMPLE_IDS = {
         "five_station_optimized_initial_placement_double_all_stop_skip_wait_v0"
     ),
 }
+
+
+def _single_state_pattern() -> EanCirculationPatternDefinition:
+    return EanCirculationPatternDefinition(
+        id="selected_pattern",
+        state_node_ids=("entry",),
+    )
 
 
 def main() -> None:
@@ -250,8 +259,8 @@ class _OneStationBuildBaselineExample(ScenarioExample):
         self,
         scenario: Scenario,
         config: EanConfig,
-    ) -> network_ean_builder_for_cycle:
-        return network_ean_builder_for_cycle(state_ids=("entry",))
+    ) -> NetworkEanBuildArtifactBuilder:
+        return network_ean_builder_for_pattern(pattern_definition=_single_state_pattern())
 
 
 if __name__ == "__main__":

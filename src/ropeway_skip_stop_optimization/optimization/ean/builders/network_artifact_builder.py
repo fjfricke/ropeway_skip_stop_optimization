@@ -63,10 +63,9 @@ class EanArtifactConstructionMode(Enum):
     NETWORK = "network"
 
 
-def network_ean_builder_for_cycle(
+def network_ean_builder_for_pattern(
     *,
-    state_ids: tuple[str, ...],
-    pattern_id: str = "selected_cycle",
+    pattern_definition: EanCirculationPatternDefinition,
     start_builder: EanCabinStartBuilder | None = None,
     headway_duration_builder: HeadwayDurationBuilder | None = None,
     headway_candidate_builder: HeadwayCandidateBuilder | None = None,
@@ -76,10 +75,7 @@ def network_ean_builder_for_cycle(
     """Build the stage-one network builder for one deterministic pattern."""
 
     return NetworkEanBuildArtifactBuilder(
-        pattern_definition=EanCirculationPatternDefinition(
-            id=pattern_id,
-            state_node_ids=state_ids,
-        ),
+        pattern_definition=pattern_definition,
         start_builder=(
             start_builder or DeterministicPhysicalNodeToSwitchStartBuilder()
         ),
@@ -157,7 +153,7 @@ class NetworkEanBuildArtifactBuilder(EanBuildArtifactBuilder):
             if available_fleet_count is None:
                 raise ValueError("optimized initial placement requires available_fleet_count")
             initial_placement_parameters = build_initial_placement_parameters(
-                switch_cycle=pattern.state_ids,
+                state_ids=pattern.state_ids,
                 available_fleet_count=available_fleet_count,
             )
             selectable_initial_phase_count = initial_placement_parameters.initial_phase_visit_count

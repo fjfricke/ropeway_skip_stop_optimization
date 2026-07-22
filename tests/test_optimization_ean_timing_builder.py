@@ -5,7 +5,7 @@ from dataclasses import replace
 import pytest
 
 from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
-from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_ring_switch_order
+from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_pattern_definition
 from ropeway_skip_stop_optimization.models import PhysicalNodeKind, TrackSegmentKind
 from ropeway_skip_stop_optimization.optimization.ean import (
     EanCirculationPatternDefinition,
@@ -16,12 +16,12 @@ from ropeway_skip_stop_optimization.optimization.ean import (
 
 def test_network_skip_stop_timing_builder_derives_three_station_timings() -> None:
     scenario = build_three_station_scenario()
-    switch_cycle = build_three_station_ean_ring_switch_order(scenario)
+    state_ids = build_three_station_ean_pattern_definition().state_node_ids
 
-    timings = _build_timings(scenario, switch_cycle)
+    timings = _build_timings(scenario, state_ids)
 
     timing_by_switch = {timing.switch_id: timing for timing in timings}
-    assert tuple(timing_by_switch) == switch_cycle
+    assert tuple(timing_by_switch) == state_ids
 
     middle_lr = timing_by_switch["M_entry_lr"]
     assert middle_lr.station_id == "M"
@@ -57,7 +57,7 @@ def test_network_skip_stop_timing_builder_rejects_service_route_without_station_
     with pytest.raises(ValueError, match="needs a station segment"):
         _build_timings(
             broken_scenario,
-            build_three_station_ean_ring_switch_order(scenario),
+            build_three_station_ean_pattern_definition().state_node_ids,
         )
 
 
@@ -79,7 +79,7 @@ def test_network_skip_stop_timing_builder_rejects_non_entry_pattern_node() -> No
     with pytest.raises(ValueError, match="not an entry switch"):
         _build_timings(
             broken_scenario,
-            build_three_station_ean_ring_switch_order(scenario),
+            build_three_station_ean_pattern_definition().state_node_ids,
         )
 
 

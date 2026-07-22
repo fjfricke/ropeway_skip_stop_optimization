@@ -55,7 +55,7 @@ class EanPassengerCandidateBuilder:
     visit order.
 
     For the current single directed ring EAN, ride candidates are additionally
-    limited to less than one full switch cycle after boarding. Candidates that
+    limited to less than one full circulation after boarding. Candidates that
     stay onboard for one or more complete loops are dominated: the passenger
     reaches the same destination earlier, could alight at that first matching
     visit, and would never get a better waiting-time or journey-time objective
@@ -145,7 +145,7 @@ def build_ean_ride_candidates(
                     if ring_span_pruning_enabled and not _is_valid_single_ring_ride_span(
                         board_visit=board_visit,
                         alight_visit=alight_visit,
-                        switch_cycle_length=len(artifact.circulation_state_ids),
+                        circulation_length=len(artifact.circulation_state_ids),
                     ):
                         continue
                     if optimization_config.enable_candidate_horizon_pruning and not _can_serve_within_horizon(
@@ -286,10 +286,10 @@ def _min_entry_to_next_switch_seconds(timing: SkipStopTiming) -> float:
 def _is_valid_single_ring_ride_span(
     board_visit: SwitchVisitDefinition,
     alight_visit: SwitchVisitDefinition,
-    switch_cycle_length: int,
+    circulation_length: int,
 ) -> bool:
     span = alight_visit.visit_index - board_visit.visit_index
-    return 0 < span < switch_cycle_length
+    return 0 < span < circulation_length
 
 
 def _is_single_directed_ring_artifact(artifact: EanBuildArtifact) -> bool:

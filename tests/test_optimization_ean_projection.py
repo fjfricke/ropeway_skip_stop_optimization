@@ -7,7 +7,7 @@ import pytest
 from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
 from ropeway_skip_stop_optimization.examples.three_station_ean import (
     build_three_station_ean_config,
-    build_three_station_ean_ring_switch_order,
+    build_three_station_ean_pattern_definition,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
     EarliestAllStopEanMovementPlanBuilder,
@@ -16,7 +16,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanMovementPlan,
     EanPhysicalEventKind,
     EanRouteDecision,
-    network_ean_builder_for_cycle,
+    network_ean_builder_for_pattern,
     StationEanConfig,
     StationWaitingMode,
     project_ean_movement_plan_to_physical_replay,
@@ -182,8 +182,8 @@ def test_ean_projection_keeps_one_post_horizon_event_per_cabin_for_interpolation
 def _scenario_artifact_plan():
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
-    artifact = network_ean_builder_for_cycle(
-        state_ids=build_three_station_ean_ring_switch_order(scenario),
+    artifact = network_ean_builder_for_pattern(
+        pattern_definition=build_three_station_ean_pattern_definition(),
     ).build(scenario, config)
     plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)
     return scenario, artifact, plan

@@ -5,7 +5,7 @@ from ropeway_skip_stop_optimization.examples.linear_skip_stop import (
     FiveStationHalfNoSkipNoWaitExample,
     FiveStationNoWaitExample,
     build_five_station_ean_config,
-    build_five_station_ean_ring_switch_order,
+    build_five_station_ean_pattern_definition,
     build_five_station_half_no_skip_no_wait_ean_config,
     build_five_station_half_no_skip_no_wait_scenario,
     build_five_station_no_wait_ean_config,
@@ -88,8 +88,8 @@ def test_five_station_no_wait_ean_config_keeps_skip_and_disables_all_station_wai
     }
 
 
-def test_five_station_ean_ring_order_matches_physical_ring() -> None:
-    assert build_five_station_ean_ring_switch_order() == (
+def test_five_station_ean_pattern_has_stable_state_order() -> None:
+    assert build_five_station_ean_pattern_definition().state_node_ids == (
         "A_entry_lr",
         "B_entry_lr",
         "C_entry_lr",
@@ -108,7 +108,9 @@ def test_five_station_example_builds_ean_artifact() -> None:
     artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
 
     assert artifact.scenario_id == "five_station_v0"
-    assert artifact.circulation_state_ids == build_five_station_ean_ring_switch_order(scenario)
+    assert artifact.circulation_state_ids == (
+        build_five_station_ean_pattern_definition(scenario).state_node_ids
+    )
     assert len(artifact.timings) == 8
     assert {
         timing.switch_id

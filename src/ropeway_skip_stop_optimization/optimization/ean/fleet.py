@@ -90,18 +90,18 @@ class EanFleetPlan:
 
 def build_initial_placement_parameters(
     *,
-    switch_cycle: tuple[str, ...],
+    state_ids: tuple[str, ...],
     available_fleet_count: int,
 ) -> EanInitialPlacementParameters:
-    if not switch_cycle:
-        raise ValueError("initial placement requires a nonempty switch cycle")
+    if not state_ids:
+        raise ValueError("initial placement requires nonempty circulation states")
     if available_fleet_count <= 0:
         raise ValueError("initial placement available fleet count must be positive")
 
     parameters = EanInitialPlacementParameters(
         mode=EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT,
         available_fleet_count=available_fleet_count,
-        initial_phase_visit_count=len(switch_cycle),
+        initial_phase_visit_count=len(state_ids),
     )
     parameters.validate()
     return parameters

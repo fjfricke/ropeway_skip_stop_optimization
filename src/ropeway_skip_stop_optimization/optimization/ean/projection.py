@@ -75,7 +75,7 @@ def project_ean_movement_plan_to_physical_replay(
                 events.extend(
                     _initial_context_events(
                         first_visit=trajectory.visits[0],
-                        switch_cycle=artifact.circulation_state_ids,
+                        state_ids=artifact.circulation_state_ids,
                         timing_by_switch_id=timing_by_switch_id,
                         route_by_switch_id=route_by_switch_id,
                         station_config_by_id=station_config_by_id,
@@ -106,7 +106,7 @@ def project_ean_movement_plan_to_physical_replay(
 
 def _initial_placement_event(
     visits: tuple[EanCabinVisit, ...],
-    switch_cycle: tuple[str, ...],
+    state_ids: tuple[str, ...],
     route_by_switch_id: dict[str, "_ProjectionRoute"],
     timing_by_switch_id: dict[str, SkipStopTiming],
 ) -> EanPhysicalEvent:
@@ -156,7 +156,7 @@ def _initial_placement_event(
     first_visit = visits[0]
     previous_switch_id = _previous_switch_id(
         first_visit.switch_id,
-        switch_cycle,
+        state_ids,
     )
     route = route_by_switch_id[previous_switch_id]
     timing = timing_by_switch_id[previous_switch_id]
@@ -198,7 +198,7 @@ def _with_boundary_context_events(
 
 def _initial_context_events(
     first_visit: EanCabinVisit,
-    switch_cycle: tuple[str, ...],
+    state_ids: tuple[str, ...],
     timing_by_switch_id: dict[str, SkipStopTiming],
     route_by_switch_id: dict[str, _ProjectionRoute],
     station_config_by_id: dict[str, StationEanConfig],
@@ -206,7 +206,7 @@ def _initial_context_events(
     if first_visit.switch_time_seconds <= 0:
         return ()
 
-    previous_switch_id = _previous_switch_id(first_visit.switch_id, switch_cycle)
+    previous_switch_id = _previous_switch_id(first_visit.switch_id, state_ids)
     timing = timing_by_switch_id[previous_switch_id]
     previous_switch_time_seconds = first_visit.switch_time_seconds - _all_stop_switch_to_next_seconds(timing)
     previous_platform_entry_time_seconds = (
@@ -236,12 +236,12 @@ def _initial_context_events(
     return _events_for_visit(context_visit, route, waiting_mode)
 
 
-def _previous_switch_id(switch_id: str, switch_cycle: tuple[str, ...]) -> str:
-    index_by_switch_id = {cycle_switch_id: index for index, cycle_switch_id in enumerate(switch_cycle)}
+def _previous_switch_id(switch_id: str, state_ids: tuple[str, ...]) -> str:
+    index_by_switch_id = {state_switch_id: index for index, state_switch_id in enumerate(state_ids)}
     index = index_by_switch_id.get(switch_id)
     if index is None:
-        raise ValueError(f"switch {switch_id!r} is outside switch_cycle")
-    return switch_cycle[(index - 1) % len(switch_cycle)]
+        raise ValueError(f"switch {switch_id!r} is outside state_ids")
+    return state_ids[(index - 1) % len(state_ids)]
 
 
 def _all_stop_switch_to_next_seconds(timing: SkipStopTiming) -> float:
@@ -388,12 +388,12 @@ def _events_for_visit(
 
 def _projection_routes_by_switch_id(
     scenario: Scenario,
-    switch_cycle: tuple[str, ...],
+    state_ids: tuple[str, ...],
 ) -> dict[str, _ProjectionRoute]:
     segments_by_id = {segment.id: segment for segment in scenario.track_segments}
     routes: dict[str, _ProjectionRoute] = {}
-    for index, switch_id in enumerate(switch_cycle):
-        next_switch_id = switch_cycle[(index + 1) % len(switch_cycle)]
+    for index, switch_id in enumerate(state_ids):
+        next_switch_id = state_ids[(index + 1) % len(state_ids)]
         service_route = _single_route_from_switch(scenario.station_routes, segments_by_id, switch_id, StationRouteKind.SERVICE)
         skip_route = _optional_route_from_switch(scenario.station_routes, segments_by_id, switch_id, StationRouteKind.SKIP)
         service_segments = tuple(segments_by_id[segment_id] for segment_id in service_route.segment_ids)

@@ -31,7 +31,7 @@ def test_ean_build_artifact_allows_empty_headway_pairs() -> None:
     replace(_artifact(), headway_pairs=()).validate()
 
 
-def test_ean_build_artifact_requires_timings_for_exact_switch_cycle() -> None:
+def test_ean_build_artifact_requires_timings_for_exact_state_ids() -> None:
     with pytest.raises(ValueError, match="timings.*missing"):
         replace(_artifact(), timings=(_timing("sw_a", "A"),)).validate()
 

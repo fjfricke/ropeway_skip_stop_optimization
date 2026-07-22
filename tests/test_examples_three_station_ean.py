@@ -13,9 +13,10 @@ from ropeway_skip_stop_optimization.examples.three_station import (
 )
 from ropeway_skip_stop_optimization.examples.three_station_ean import (
     build_three_station_ean_config,
-    build_three_station_ean_ring_switch_order,
+    build_three_station_ean_pattern_definition,
 )
 from ropeway_skip_stop_optimization.models import PhysicalNodeKind
+from ropeway_skip_stop_optimization.optimization.ean import PhysicalMovementNetworkBuilder
 from ropeway_skip_stop_optimization.optimization.ean import StationWaitingMode
 
 
@@ -91,8 +92,8 @@ def test_three_station_full_and_half_variants_use_expected_ean_start_counts() ->
     assert len(skip_wait_artifact.cabin_starts) == 15
 
 
-def test_three_station_ean_ring_order_matches_physical_ring() -> None:
-    assert build_three_station_ean_ring_switch_order() == (
+def test_three_station_ean_pattern_has_stable_state_order() -> None:
+    assert build_three_station_ean_pattern_definition().state_node_ids == (
         "M_entry_lr",
         "R_entry_lr",
         "M_entry_rl",
@@ -100,7 +101,7 @@ def test_three_station_ean_ring_order_matches_physical_ring() -> None:
     )
 
 
-def test_three_station_ean_ring_order_is_validated_against_physical_nodes() -> None:
+def test_three_station_ean_pattern_is_validated_by_network_builder() -> None:
     scenario = build_three_station_scenario()
     broken_nodes = tuple(
         replace(node, kind=PhysicalNodeKind.CONNECTOR) if node.id == "M_entry_lr" else node
@@ -109,4 +110,7 @@ def test_three_station_ean_ring_order_is_validated_against_physical_nodes() -> N
     broken_scenario = replace(scenario, physical_nodes=broken_nodes)
 
     with pytest.raises(ValueError, match="not an entry switch"):
-        build_three_station_ean_ring_switch_order(broken_scenario)
+        PhysicalMovementNetworkBuilder().build(
+            broken_scenario,
+            build_three_station_ean_pattern_definition(),
+        )

@@ -44,7 +44,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanOptimizationResult,
     EanPassengerObjective,
     GurobiSolverPolicy,
-    network_ean_builder_for_cycle,
+    network_ean_builder_for_pattern,
     StationEanConfig,
     StationWaitingMode,
 )
@@ -743,11 +743,11 @@ class _TinyThreeStationSkipNoWaitEanExample(ThreeStationExample):
         )
 
     def build_ean_artifact_builder(self, scenario, config):
-        from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_ring_switch_order
+        from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_pattern_definition
 
-        switch_cycle = build_three_station_ean_ring_switch_order(scenario)
-        return network_ean_builder_for_cycle(
-            state_ids=switch_cycle,
+        pattern_definition = build_three_station_ean_pattern_definition()
+        return network_ean_builder_for_pattern(
+            pattern_definition=pattern_definition,
             start_builder=DeterministicPhysicalNodeToSwitchStartBuilder(),
         )
 

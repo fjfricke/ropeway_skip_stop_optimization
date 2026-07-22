@@ -11,7 +11,7 @@ from ropeway_skip_stop_optimization.examples.circular_skip_stop import (
 from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
 from ropeway_skip_stop_optimization.examples.three_station_ean import (
     build_three_station_ean_config,
-    build_three_station_ean_ring_switch_order,
+    build_three_station_ean_pattern_definition,
 )
 from ropeway_skip_stop_optimization.models import (
     CabinInitialState,
@@ -32,7 +32,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EvenlySpacedAllStopCabinStartBuilder,
     NetworkEanBuildArtifactBuilder,
     PhysicalMovementNetworkBuilder,
-    network_ean_builder_for_cycle,
+    network_ean_builder_for_pattern,
     validate_ean_movement_plan_against_artifact,
 )
 
@@ -86,7 +86,8 @@ def test_deterministic_physical_start_builder_keeps_start_on_target_switch_at_av
 def test_continuous_all_stop_max_start_builder_places_maximum_three_station_cabins() -> None:
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
-    state_ids = build_three_station_ean_ring_switch_order(scenario)
+    pattern_definition = build_three_station_ean_pattern_definition()
+    state_ids = pattern_definition.state_node_ids
     network, pattern = _network_and_pattern(scenario, state_ids)
     builder = ContinuousAllStopMaxCabinStartBuilder()
 
@@ -98,8 +99,8 @@ def test_continuous_all_stop_max_start_builder_places_maximum_three_station_cabi
     assert {start.kind for start in starts} == {EanCabinStartKind.FIXED}
     assert all(start.time_seconds >= 0 for start in starts)
 
-    artifact = network_ean_builder_for_cycle(
-        state_ids=state_ids,
+    artifact = network_ean_builder_for_pattern(
+        pattern_definition=pattern_definition,
         start_builder=builder,
     ).build(scenario, config)
     plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)
@@ -130,11 +131,10 @@ def test_evenly_spaced_all_stop_builder_places_feasible_explicit_fleet() -> None
     config = example.build_ean_config(scenario)
     optimized_builder = example.build_ean_artifact_builder(scenario, config)
     assert isinstance(optimized_builder, NetworkEanBuildArtifactBuilder)
-    state_ids = optimized_builder.pattern_definition.state_node_ids
     builder = EvenlySpacedAllStopCabinStartBuilder(cabin_count=len(scenario.cabins))
 
-    artifact = network_ean_builder_for_cycle(
-        state_ids=state_ids,
+    artifact = network_ean_builder_for_pattern(
+        pattern_definition=optimized_builder.pattern_definition,
         start_builder=builder,
     ).build(scenario, config)
 
@@ -259,7 +259,7 @@ def _network_and_pattern(
         state_node_ids=(
             state_ids
             if state_ids is not None
-            else build_three_station_ean_ring_switch_order(scenario)
+            else build_three_station_ean_pattern_definition().state_node_ids
         ),
     )
     network = PhysicalMovementNetworkBuilder().build(scenario, definition)

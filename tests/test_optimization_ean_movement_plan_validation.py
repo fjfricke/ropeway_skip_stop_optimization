@@ -5,7 +5,7 @@ from dataclasses import replace
 from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
 from ropeway_skip_stop_optimization.examples.three_station_ean import (
     build_three_station_ean_config,
-    build_three_station_ean_ring_switch_order,
+    build_three_station_ean_pattern_definition,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
     EarliestAllStopEanMovementPlanBuilder,
@@ -25,7 +25,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     HeadwayCheckpointDefinition,
     HeadwayCheckpointKind,
     HeadwayPair,
-    network_ean_builder_for_cycle,
+    network_ean_builder_for_pattern,
     SkipStopTiming,
     StationEanConfig,
     StationWaitingMode,
@@ -314,8 +314,8 @@ def test_violation_batch_is_deterministic_by_strength_then_pair_id() -> None:
 def _artifact_and_plan() -> tuple[EanBuildArtifact, EanMovementPlan]:
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
-    artifact = network_ean_builder_for_cycle(
-        state_ids=build_three_station_ean_ring_switch_order(scenario),
+    artifact = network_ean_builder_for_pattern(
+        pattern_definition=build_three_station_ean_pattern_definition(),
     ).build(scenario, config)
     plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)
     return artifact, plan

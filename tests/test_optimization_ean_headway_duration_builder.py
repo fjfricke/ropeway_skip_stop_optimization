@@ -3,9 +3,8 @@ from __future__ import annotations
 import pytest
 
 from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
-from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_ring_switch_order
+from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_pattern_definition
 from ropeway_skip_stop_optimization.optimization.ean import (
-    EanCirculationPatternDefinition,
     NetworkSkipStopTimingBuilder,
     OperatingSpeedHeadwayDurationBuilder,
     PhysicalMovementNetworkBuilder,
@@ -15,10 +14,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
 
 def test_operating_speed_headway_duration_builder_uses_required_spacing_and_operating_speeds() -> None:
     scenario = build_three_station_scenario()
-    definition = EanCirculationPatternDefinition(
-        id="test_pattern",
-        state_node_ids=build_three_station_ean_ring_switch_order(scenario),
-    )
+    definition = build_three_station_ean_pattern_definition()
     network = PhysicalMovementNetworkBuilder().build(scenario, definition)
     timings = NetworkSkipStopTimingBuilder().build(
         scenario, network, network.pattern(definition.id)

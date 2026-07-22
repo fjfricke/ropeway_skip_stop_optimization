@@ -31,9 +31,10 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanFleetConfig,
     EanFleetMode,
     EanCirculationPattern,
+    EanCirculationPatternDefinition,
     EanMovementNetwork,
     NetworkEanBuildArtifactBuilder,
-    network_ean_builder_for_cycle,
+    network_ean_builder_for_pattern,
     StationEanConfig,
     StationWaitingMode,
 )
@@ -139,9 +140,11 @@ class FiveStationCircleCwFullNoSkipNoWaitExample(ScenarioExample):
         scenario: Scenario,
         config: EanConfig,
     ) -> EanBuildArtifactBuilder:
-        switch_cycle = build_circular_skip_stop_ean_ring_switch_order(scenario, direction=self.spec.direction)
-        return network_ean_builder_for_cycle(
-            state_ids=switch_cycle,
+        pattern_definition = build_circular_skip_stop_ean_pattern_definition(
+            scenario, direction=self.spec.direction
+        )
+        return network_ean_builder_for_pattern(
+            pattern_definition=pattern_definition,
             start_builder=ContinuousAllStopMaxCabinStartBuilder(),
         )
 
@@ -176,9 +179,11 @@ class FiveStationCircleCwHalfNoSkipNoWaitExample(FiveStationCircleCwFullNoSkipNo
         scenario: Scenario,
         config: EanConfig,
     ) -> EanBuildArtifactBuilder:
-        switch_cycle = build_circular_skip_stop_ean_ring_switch_order(scenario, direction=self.spec.direction)
-        return network_ean_builder_for_cycle(
-            state_ids=switch_cycle,
+        pattern_definition = build_circular_skip_stop_ean_pattern_definition(
+            scenario, direction=self.spec.direction
+        )
+        return network_ean_builder_for_pattern(
+            pattern_definition=pattern_definition,
             start_builder=KeepEverySecondCabinStartBuilder(
                 ContinuousAllStopMaxCabinStartBuilder(),
             ),
@@ -405,8 +410,8 @@ def _optimized_initial_placement_artifact_builder(
     scenario: Scenario,
     direction: str,
 ) -> NetworkEanBuildArtifactBuilder:
-    return network_ean_builder_for_cycle(
-        state_ids=build_circular_skip_stop_ean_ring_switch_order(
+    return network_ean_builder_for_pattern(
+        pattern_definition=build_circular_skip_stop_ean_pattern_definition(
             scenario,
             direction=direction,
         ),
@@ -477,10 +482,10 @@ def build_five_station_circle_cw_half_skip_wait_ean_config(
     )
 
 
-def build_five_station_circle_cw_ean_ring_switch_order(
+def build_five_station_circle_cw_ean_pattern_definition(
     scenario: Scenario | None = None,
-) -> tuple[str, ...]:
-    return build_circular_skip_stop_ean_ring_switch_order(
+) -> EanCirculationPatternDefinition:
+    return build_circular_skip_stop_ean_pattern_definition(
         scenario or build_five_station_circle_cw_full_no_skip_no_wait_scenario(),
     )
 
@@ -605,14 +610,19 @@ def build_circular_skip_stop_ean_config(
     return config
 
 
-def build_circular_skip_stop_ean_ring_switch_order(
+def build_circular_skip_stop_ean_pattern_definition(
     scenario: Scenario,
     direction: str = "cw",
-) -> tuple[str, ...]:
+) -> EanCirculationPatternDefinition:
     scenario.validate()
-    switch_cycle = tuple(f"{station.id}_entry_{direction}" for station in scenario.stations if station.kind is StationKind.SERVICE)
-    _validate_switch_cycle_is_physical_ring(scenario, switch_cycle)
-    return switch_cycle
+    return EanCirculationPatternDefinition(
+        id="selected_pattern",
+        state_node_ids=tuple(
+            f"{station.id}_entry_{direction}"
+            for station in scenario.stations
+            if station.kind is StationKind.SERVICE
+        ),
+    )
 
 
 def _station_nodes(station: str, direction: str) -> tuple[PhysicalNode, ...]:
@@ -794,62 +804,3 @@ def _service_duration_seconds(scenario: Scenario) -> float:
 
 def _add_seconds_to_time(value: time, seconds: int) -> time:
     return (datetime.combine(datetime.min.date(), value) + timedelta(seconds=seconds)).time()
-
-
-def _validate_switch_cycle_is_physical_ring(scenario: Scenario, switch_cycle: tuple[str, ...]) -> None:
-    if not switch_cycle:
-        raise ValueError("circular skip-stop EAN switch cycle must not be empty")
-
-    nodes_by_id = {node.id: node for node in scenario.physical_nodes}
-    segments_by_id = {segment.id: segment for segment in scenario.track_segments}
-
-    for index, switch_id in enumerate(switch_cycle):
-        next_switch_id = switch_cycle[(index + 1) % len(switch_cycle)]
-        switch_node = nodes_by_id.get(switch_id)
-        next_switch_node = nodes_by_id.get(next_switch_id)
-        if switch_node is None:
-            raise ValueError(f"circular skip-stop EAN switch cycle references unknown switch {switch_id!r}")
-        if next_switch_node is None:
-            raise ValueError(f"circular skip-stop EAN switch cycle references unknown switch {next_switch_id!r}")
-        if switch_node.kind is not PhysicalNodeKind.ENTRY_SWITCH:
-            raise ValueError(f"circular skip-stop EAN switch {switch_id!r} is not an entry switch")
-        if next_switch_node.kind is not PhysicalNodeKind.ENTRY_SWITCH:
-            raise ValueError(f"circular skip-stop EAN switch {next_switch_id!r} is not an entry switch")
-
-        service_route = _single_service_route_from_switch(scenario.station_routes, segments_by_id, switch_id)
-        exit_segment = segments_by_id[service_route.segment_ids[-1]]
-        exit_node = nodes_by_id[exit_segment.to_node_id]
-        if exit_node.kind is not PhysicalNodeKind.EXIT_SWITCH:
-            raise ValueError(
-                f"circular skip-stop EAN service route {service_route.id!r} does not end at an exit switch"
-            )
-
-        rope_segments = [
-            segment
-            for segment in scenario.track_segments
-            if segment.kind is TrackSegmentKind.ROPE
-            and segment.from_node_id == exit_node.id
-            and segment.to_node_id == next_switch_id
-        ]
-        if len(rope_segments) != 1:
-            raise ValueError(
-                "circular skip-stop EAN switch cycle is not physically connected: "
-                f"{switch_id!r} exits at {exit_node.id!r}, expected one rope segment to {next_switch_id!r}"
-            )
-
-
-def _single_service_route_from_switch(
-    routes: tuple[StationRoute, ...],
-    segments_by_id: dict[str, TrackSegment],
-    switch_id: str,
-) -> StationRoute:
-    matching_routes = [
-        route
-        for route in routes
-        if route.kind is StationRouteKind.SERVICE
-        and route.segment_ids
-        and segments_by_id[route.segment_ids[0]].from_node_id == switch_id
-    ]
-    if len(matching_routes) != 1:
-        raise ValueError(f"expected exactly one service route from switch {switch_id!r}, found {len(matching_routes)}")
-    return matching_routes[0]

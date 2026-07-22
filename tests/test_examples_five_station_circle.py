@@ -5,7 +5,7 @@ from ropeway_skip_stop_optimization.examples.circular_skip_stop import (
     FiveStationCircleCwHalfNoSkipNoWaitExample,
     FiveStationCircleCwHalfSkipNoWaitExample,
     FiveStationCircleCwHalfSkipWaitExample,
-    build_five_station_circle_cw_ean_ring_switch_order,
+    build_five_station_circle_cw_ean_pattern_definition,
     build_five_station_circle_cw_full_no_skip_no_wait_ean_config,
     build_five_station_circle_cw_full_no_skip_no_wait_scenario,
     build_five_station_circle_cw_half_no_skip_no_wait_ean_config,
@@ -80,15 +80,18 @@ def test_five_station_circle_cw_ean_waiting_modes() -> None:
         }
 
 
-def test_five_station_circle_cw_ring_switch_order_is_closed() -> None:
+def test_five_station_circle_cw_pattern_has_stable_state_order() -> None:
     scenario = build_five_station_circle_cw_full_no_skip_no_wait_scenario()
 
-    assert build_five_station_circle_cw_ean_ring_switch_order(scenario) == (
+    assert (
+        build_five_station_circle_cw_ean_pattern_definition(scenario).state_node_ids
+        == (
         "A_entry_cw",
         "B_entry_cw",
         "C_entry_cw",
         "D_entry_cw",
         "E_entry_cw",
+        )
     )
     assert any(
         segment.id == "E_exit_cw_to_A_entry_cw"
@@ -102,7 +105,7 @@ def test_five_station_circle_cw_full_examples_build_ean_artifacts_with_all_start
     example = FiveStationCircleCwFullNoSkipNoWaitExample()
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
-    switch_cycle = build_five_station_circle_cw_ean_ring_switch_order(scenario)
+    pattern_definition = build_five_station_circle_cw_ean_pattern_definition(scenario)
     artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
     assert artifact.movement_network is not None
     pattern = artifact.movement_network.pattern(artifact.circulation_pattern_ids[0])
@@ -114,7 +117,7 @@ def test_five_station_circle_cw_full_examples_build_ean_artifacts_with_all_start
     )
 
     assert artifact.scenario_id == scenario.id
-    assert artifact.circulation_state_ids == switch_cycle
+    assert artifact.circulation_state_ids == pattern_definition.state_node_ids
     assert len(artifact.timings) == 5
     assert artifact.cabin_starts == max_starts
     assert artifact.cabin_starts
@@ -128,7 +131,7 @@ def test_five_station_circle_cw_half_examples_build_ean_artifacts_with_every_sec
     ):
         scenario = example.build_scenario()
         config = example.build_ean_config(scenario)
-        switch_cycle = build_five_station_circle_cw_ean_ring_switch_order(scenario)
+        pattern_definition = build_five_station_circle_cw_ean_pattern_definition(scenario)
         artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
         assert artifact.movement_network is not None
         pattern = artifact.movement_network.pattern(artifact.circulation_pattern_ids[0])
@@ -140,7 +143,7 @@ def test_five_station_circle_cw_half_examples_build_ean_artifacts_with_every_sec
         )
 
         assert artifact.scenario_id == scenario.id
-        assert artifact.circulation_state_ids == switch_cycle
+        assert artifact.circulation_state_ids == pattern_definition.state_node_ids
         assert len(artifact.timings) == 5
         assert artifact.cabin_starts == max_starts[::2]
         assert artifact.cabin_starts

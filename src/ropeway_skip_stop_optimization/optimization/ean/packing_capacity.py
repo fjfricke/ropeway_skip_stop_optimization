@@ -100,20 +100,17 @@ class EanInitialPlacementPackingBoundBuilder:
         *,
         scenario: Scenario,
         config: EanConfig,
-        switch_cycle: tuple[str, ...],
+        pattern_definition: EanCirculationPatternDefinition,
     ) -> EanInitialPlacementPackingBound:
         network = self.network_builder.build(
             scenario,
-            EanCirculationPatternDefinition(
-                id="packing_cycle",
-                state_node_ids=switch_cycle,
-            ),
+            pattern_definition,
         )
         return self.build_for_network(
             scenario=scenario,
             config=config,
             network=network,
-            pattern_id="packing_cycle",
+            pattern_id=pattern_definition.id,
         )
 
     def build_for_network(

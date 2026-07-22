@@ -5,13 +5,14 @@ import pytest
 from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
 from ropeway_skip_stop_optimization.examples.three_station_ean import (
     build_three_station_ean_config,
-    build_three_station_ean_ring_switch_order,
+    build_three_station_ean_pattern_definition,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
     EanBuildProgressKind,
     EanBuildStage,
     EanCabinStartKind,
-    network_ean_builder_for_cycle,
+    EanCirculationPatternDefinition,
+    network_ean_builder_for_pattern,
     StationWaitingMode,
 )
 
@@ -19,14 +20,18 @@ from ropeway_skip_stop_optimization.optimization.ean import (
 def test_ring_ean_build_artifact_builder_builds_three_station_artifact() -> None:
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
-    switch_cycle = build_three_station_ean_ring_switch_order(scenario)
+    pattern_definition = build_three_station_ean_pattern_definition()
 
-    artifact = network_ean_builder_for_cycle(state_ids=switch_cycle).build(scenario, config)
+    artifact = network_ean_builder_for_pattern(
+        pattern_definition=pattern_definition
+    ).build(scenario, config)
 
     artifact.validate()
     assert artifact.scenario_id == scenario.id
-    assert artifact.circulation_state_ids == switch_cycle
-    assert tuple(timing.switch_id for timing in artifact.timings) == switch_cycle
+    assert artifact.circulation_state_ids == pattern_definition.state_node_ids
+    assert tuple(timing.switch_id for timing in artifact.timings) == (
+        pattern_definition.state_node_ids
+    )
     assert {start.cabin_id for start in artifact.cabin_starts} == {0, 1, 2, 3}
     assert artifact.switch_visits
     assert artifact.switch_transitions
@@ -66,7 +71,12 @@ def test_network_ean_build_artifact_builder_rejects_duplicate_pattern_states() -
     config = build_three_station_ean_config(scenario)
 
     with pytest.raises(ValueError, match="node ids must be nonempty and unique"):
-        network_ean_builder_for_cycle(state_ids=("M_entry_lr", "M_entry_lr")).build(scenario, config)
+        network_ean_builder_for_pattern(
+            pattern_definition=EanCirculationPatternDefinition(
+                id="duplicate_pattern",
+                state_node_ids=("M_entry_lr", "M_entry_lr"),
+            )
+        ).build(scenario, config)
 
 
 def test_ring_ean_build_artifact_reports_detailed_build_metrics() -> None:
@@ -74,8 +84,8 @@ def test_ring_ean_build_artifact_reports_detailed_build_metrics() -> None:
     config = build_three_station_ean_config(scenario)
     events = []
 
-    artifact = network_ean_builder_for_cycle(
-        state_ids=build_three_station_ean_ring_switch_order(scenario)
+    artifact = network_ean_builder_for_pattern(
+        pattern_definition=build_three_station_ean_pattern_definition()
     ).build(scenario, config, progress_callback=events.append)
 
     metrics = artifact.build_metrics

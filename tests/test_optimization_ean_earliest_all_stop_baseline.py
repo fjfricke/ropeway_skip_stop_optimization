@@ -5,20 +5,20 @@ import pytest
 from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
 from ropeway_skip_stop_optimization.examples.three_station_ean import (
     build_three_station_ean_config,
-    build_three_station_ean_ring_switch_order,
+    build_three_station_ean_pattern_definition,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
     EarliestAllStopEanMovementPlanBuilder,
     EanRouteDecision,
-    network_ean_builder_for_cycle,
+    network_ean_builder_for_pattern,
 )
 
 
 def test_earliest_all_stop_baseline_builds_plan_from_three_station_artifact() -> None:
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
-    artifact = network_ean_builder_for_cycle(
-        state_ids=build_three_station_ean_ring_switch_order(scenario),
+    artifact = network_ean_builder_for_pattern(
+        pattern_definition=build_three_station_ean_pattern_definition(),
     ).build(scenario, config)
 
     plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)
@@ -43,8 +43,8 @@ def test_earliest_all_stop_baseline_builds_plan_from_three_station_artifact() ->
 def test_earliest_all_stop_baseline_propagates_first_visit_times_from_starts_and_timings() -> None:
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
-    artifact = network_ean_builder_for_cycle(
-        state_ids=build_three_station_ean_ring_switch_order(scenario),
+    artifact = network_ean_builder_for_pattern(
+        pattern_definition=build_three_station_ean_pattern_definition(),
     ).build(scenario, config)
 
     plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)
@@ -75,8 +75,8 @@ def test_earliest_all_stop_baseline_propagates_first_visit_times_from_starts_and
 def test_earliest_all_stop_baseline_keeps_trajectory_times_monotonic() -> None:
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
-    artifact = network_ean_builder_for_cycle(
-        state_ids=build_three_station_ean_ring_switch_order(scenario),
+    artifact = network_ean_builder_for_pattern(
+        pattern_definition=build_three_station_ean_pattern_definition(),
     ).build(scenario, config)
 
     plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)

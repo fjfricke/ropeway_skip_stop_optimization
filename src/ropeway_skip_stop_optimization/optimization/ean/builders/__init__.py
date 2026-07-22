@@ -51,7 +51,7 @@ from ropeway_skip_stop_optimization.optimization.ean.builders.switch_visit_build
 from ropeway_skip_stop_optimization.optimization.ean.builders.network_artifact_builder import (
     EanArtifactConstructionMode,
     NetworkEanBuildArtifactBuilder,
-    network_ean_builder_for_cycle,
+    network_ean_builder_for_pattern,
 )
 from ropeway_skip_stop_optimization.optimization.ean.builders.network_timing_builder import (
     NetworkSkipStopTimingBuilder,
@@ -85,7 +85,7 @@ __all__ = [
     "NetworkEanBuildArtifactBuilder",
     "NetworkSkipStopTimingBuilder",
     "NetworkVisitBuilder",
-    "network_ean_builder_for_cycle",
+    "network_ean_builder_for_pattern",
     "PhysicalMovementNetworkBuilder",
     "ResolvedEanArtifactInputs",
     "SkipStopHeadwayCheckpointBuilder",
