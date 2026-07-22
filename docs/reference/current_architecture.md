@@ -28,14 +28,15 @@ transitions, headway checkpoints, headway candidates, and headway pairs before
 Gurobi model construction.
 
 EAN construction currently has two selectable architecture paths. The default
-`legacy_ring` path preserves the established ring builders. The opt-in `network`
-path first derives a canonical `EanMovementNetwork` with movement states, route
+`network` path first derives a canonical `EanMovementNetwork` with movement states, route
 options, shared physical resources, compatibility headway resources, and one
 deterministic `EanCirculationPattern`. It then verifies exact compatibility with
 the established timings, visits, candidates, and pairs. Network artifacts retain
 `switch_cycle` only as a migration field; new topology work should target the
 network and selected pattern instead. Stage one deliberately rejects dynamic
 route destinations with a clear `dynamic routing not yet supported` error.
+The temporary `legacy_ring` selection remains only for equivalence regression
+and compatibility exports.
 
 `EanOptimizer` is the single public continuous-EAN solver API. It accepts one
 of three typed problem objects:

@@ -54,7 +54,7 @@ class BenchmarkRunConfig:
         EanMipStartStrategy.OPTIMIZED_ALL_STOP
     )
     ean_artifact_construction: EanArtifactConstructionMode = (
-        EanArtifactConstructionMode.LEGACY_RING
+        EanArtifactConstructionMode.NETWORK
     )
     label: str | None = None
     output_dir: Path = DEFAULT_BENCHMARK_OUTPUT_DIR

@@ -15,7 +15,6 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanSolveConfig,
     NetworkEanBuildArtifactBuilder,
     PhysicalMovementNetworkBuilder,
-    RingEanBuildArtifactBuilder,
     validate_ean_movement_plan_against_artifact,
 )
 
@@ -33,11 +32,12 @@ def test_network_builder_reproduces_legacy_artifact(example_id: str) -> None:
     example = get_example(example_id)
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
-    legacy_builder = example.build_ean_artifact_builder(scenario, config)
-    assert isinstance(legacy_builder, RingEanBuildArtifactBuilder)
+    network_builder = example.build_ean_artifact_builder(scenario, config)
+    assert isinstance(network_builder, NetworkEanBuildArtifactBuilder)
+    legacy_builder = network_builder.to_ring()
 
     legacy = legacy_builder.build(scenario, config)
-    network = NetworkEanBuildArtifactBuilder.from_ring(legacy_builder).build(scenario, config)
+    network = network_builder.build(scenario, config)
 
     assert network.switch_cycle == legacy.switch_cycle
     assert network.timings == legacy.timings
@@ -49,7 +49,9 @@ def test_network_builder_reproduces_legacy_artifact(example_id: str) -> None:
     assert network.headway_pairs == legacy.headway_pairs
     assert network.headway_pair_scope is legacy.headway_pair_scope
     assert network.movement_network is not None
-    assert network.circulation_pattern_ids == ("legacy_ring",)
+    assert network.circulation_pattern_ids == (
+        network_builder.pattern_definition.id,
+    )
     assert network.resource_conflict_index is not None
     assert tuple(
         resource_id
@@ -65,8 +67,8 @@ def test_physical_network_builder_preserves_shared_physical_resource_id() -> Non
     example = get_example("three_station_v0")
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
-    legacy_builder = example.build_ean_artifact_builder(scenario, config)
-    assert isinstance(legacy_builder, RingEanBuildArtifactBuilder)
+    network_builder = example.build_ean_artifact_builder(scenario, config)
+    assert isinstance(network_builder, NetworkEanBuildArtifactBuilder)
     first_segment = scenario.track_segments[0]
     second_segment = scenario.track_segments[1]
     shared_resource_id = "shared_test_resource"
@@ -84,7 +86,7 @@ def test_physical_network_builder_preserves_shared_physical_resource_id() -> Non
         scenario,
         EanCirculationPatternDefinition(
             id="test_pattern",
-            state_node_ids=legacy_builder.switch_cycle,
+            state_node_ids=network_builder.switch_cycle,
         ),
     )
 
@@ -106,7 +108,7 @@ def test_physical_network_builder_preserves_shared_physical_resource_id() -> Non
         if shared.id in {usage.resource_id for usage in option.resource_usages}
     )
     assert options_using_shared
-    artifact = legacy_builder.build(scenario, config)
+    artifact = network_builder.to_ring().build(scenario, config)
     indexed = dict(
         EanResourceConflictIndex.build(
             network,
@@ -121,14 +123,14 @@ def test_physical_network_builder_rejects_dynamic_route_choice_clearly() -> None
     example = get_example("three_station_v0")
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
-    legacy_builder = example.build_ean_artifact_builder(scenario, config)
-    assert isinstance(legacy_builder, RingEanBuildArtifactBuilder)
+    network_builder = example.build_ean_artifact_builder(scenario, config)
+    assert isinstance(network_builder, NetworkEanBuildArtifactBuilder)
     segments_by_id = {segment.id: segment for segment in scenario.track_segments}
     existing = next(
         route
         for route in scenario.station_routes
         if segments_by_id[route.segment_ids[0]].from_node_id
-        == legacy_builder.switch_cycle[0]
+        == network_builder.switch_cycle[0]
         and route.kind.value == "service"
     )
     additional_route = StationRoute(
@@ -149,7 +151,7 @@ def test_physical_network_builder_rejects_dynamic_route_choice_clearly() -> None
             scenario,
             EanCirculationPatternDefinition(
                 id="test_pattern",
-                state_node_ids=legacy_builder.switch_cycle,
+                state_node_ids=network_builder.switch_cycle,
             ),
         )
 
@@ -159,12 +161,11 @@ def test_network_and_legacy_build_identical_movement_model_dimensions() -> None:
     example = get_example("three_station_v0")
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
-    legacy_builder = example.build_ean_artifact_builder(scenario, config)
-    assert isinstance(legacy_builder, RingEanBuildArtifactBuilder)
+    network_builder = example.build_ean_artifact_builder(scenario, config)
+    assert isinstance(network_builder, NetworkEanBuildArtifactBuilder)
+    legacy_builder = network_builder.to_ring()
     legacy_artifact = legacy_builder.build(scenario, config)
-    network_artifact = NetworkEanBuildArtifactBuilder.from_ring(legacy_builder).build(
-        scenario, config
-    )
+    network_artifact = network_builder.build(scenario, config)
 
     optimizer = EanOptimizer(EanSolveConfig(build_only=True))
     legacy = optimizer.solve(EanMovementFeasibilityProblem(legacy_artifact))
@@ -188,20 +189,19 @@ def test_all_registered_ean_examples_have_a_deterministic_network_pattern(
     example = get_example(example_id)
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
-    legacy_builder = example.build_ean_artifact_builder(scenario, config)
-    assert isinstance(legacy_builder, RingEanBuildArtifactBuilder)
-    builder = NetworkEanBuildArtifactBuilder.from_ring(legacy_builder)
+    builder = example.build_ean_artifact_builder(scenario, config)
+    assert isinstance(builder, NetworkEanBuildArtifactBuilder)
 
     network = builder.network_builder.build(scenario, builder.pattern_definition)
     pattern = network.pattern(builder.pattern_definition.id)
     timings = builder.timing_builder.build(scenario, network, pattern)
 
-    assert pattern.state_ids == legacy_builder.switch_cycle
-    assert tuple(timing.switch_id for timing in timings) == legacy_builder.switch_cycle
+    assert pattern.state_ids == builder.switch_cycle
+    assert tuple(timing.switch_id for timing in timings) == builder.switch_cycle
 
     discovered = builder.network_builder.discover_pattern_definitions(scenario)
     assert len(discovered) == 1
-    assert set(discovered[0].state_node_ids) == set(legacy_builder.switch_cycle)
+    assert set(discovered[0].state_node_ids) == set(builder.switch_cycle)
     assert discovered == builder.network_builder.discover_pattern_definitions(scenario)
 
 
@@ -210,11 +210,11 @@ def test_network_and_legacy_solver_classification_is_identical() -> None:
     example = get_example("three_station_half_no_skip_no_wait_v0")
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
-    legacy_builder = example.build_ean_artifact_builder(scenario, config)
-    assert isinstance(legacy_builder, RingEanBuildArtifactBuilder)
+    network_builder = example.build_ean_artifact_builder(scenario, config)
+    assert isinstance(network_builder, NetworkEanBuildArtifactBuilder)
     artifacts = (
-        legacy_builder.build(scenario, config),
-        NetworkEanBuildArtifactBuilder.from_ring(legacy_builder).build(scenario, config),
+        network_builder.to_ring().build(scenario, config),
+        network_builder.build(scenario, config),
     )
 
     results = tuple(
@@ -234,9 +234,8 @@ def test_network_analysis_finds_minimum_return_cycles_and_corridors() -> None:
     example = get_example("three_station_v0")
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
-    legacy_builder = example.build_ean_artifact_builder(scenario, config)
-    assert isinstance(legacy_builder, RingEanBuildArtifactBuilder)
-    builder = NetworkEanBuildArtifactBuilder.from_ring(legacy_builder)
+    builder = example.build_ean_artifact_builder(scenario, config)
+    assert isinstance(builder, NetworkEanBuildArtifactBuilder)
     network = builder.network_builder.build(scenario, builder.pattern_definition)
     pattern = network.pattern(builder.pattern_definition.id)
     options_by_id = {option.id: option for option in network.route_options}

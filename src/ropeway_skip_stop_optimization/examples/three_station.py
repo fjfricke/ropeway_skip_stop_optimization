@@ -30,7 +30,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanConfig,
     EanFleetConfig,
     EanFleetMode,
-    RingEanBuildArtifactBuilder,
+    network_ean_builder_for_cycle,
     StationEanConfig,
     StationWaitingMode,
 )
@@ -90,7 +90,7 @@ class ThreeStationExample(ScenarioExample):
         from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_ring_switch_order
 
         switch_cycle = build_three_station_ean_ring_switch_order(scenario)
-        return RingEanBuildArtifactBuilder(
+        return network_ean_builder_for_cycle(
             switch_cycle=switch_cycle,
             start_builder=KeepEverySecondCabinStartBuilder(
                 ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
@@ -138,7 +138,7 @@ class ThreeStationFullNoSkipNoWaitExample(ThreeStationExample):
         from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_ring_switch_order
 
         switch_cycle = build_three_station_ean_ring_switch_order(scenario)
-        return RingEanBuildArtifactBuilder(
+        return network_ean_builder_for_cycle(
             switch_cycle=switch_cycle,
             start_builder=ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
         )
@@ -167,7 +167,7 @@ class ThreeStationHalfNoSkipNoWaitExample(ThreeStationFullNoSkipNoWaitExample):
         from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_ring_switch_order
 
         switch_cycle = build_three_station_ean_ring_switch_order(scenario)
-        return RingEanBuildArtifactBuilder(
+        return network_ean_builder_for_cycle(
             switch_cycle=switch_cycle,
             start_builder=KeepEverySecondCabinStartBuilder(
                 ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
@@ -202,7 +202,7 @@ class ThreeStationOptimizedInitialPlacementExample(ThreeStationExample):
             build_three_station_ean_ring_switch_order,
         )
 
-        return RingEanBuildArtifactBuilder(
+        return network_ean_builder_for_cycle(
             switch_cycle=build_three_station_ean_ring_switch_order(scenario),
             fleet_config=EanFleetConfig(
                 mode=EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT,

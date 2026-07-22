@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from ropeway_skip_stop_optimization.optimization.ean.builders.ring_switch_visit_builder import (
-    RingSwitchVisitBuilder,
+from ropeway_skip_stop_optimization.optimization.ean.builders.cyclic_visit_builder import (
+    CyclicPatternVisitBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ean.builders.switch_visit_builder import (
     SwitchVisitBuilder,
@@ -37,8 +37,8 @@ class NetworkVisitBuilder(SwitchVisitBuilder):
         timings: tuple[SkipStopTiming, ...],
     ) -> SwitchVisitBuildResult:
         self.pattern.validate()
-        return RingSwitchVisitBuilder(
-            switch_cycle=self.pattern.state_ids,
+        return CyclicPatternVisitBuilder(
+            pattern=self.pattern,
             safety_visit_margin=self.safety_visit_margin,
             selectable_initial_phase_count=self.selectable_initial_phase_count,
         ).build(config=config, cabin_starts=cabin_starts, timings=timings)

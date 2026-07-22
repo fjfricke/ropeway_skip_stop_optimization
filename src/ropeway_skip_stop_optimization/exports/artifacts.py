@@ -96,7 +96,7 @@ class ExportContext:
     ean_progress_sample_interval_seconds: float = 5.0
     ean_build_only: bool = False
     ean_artifact_construction: EanArtifactConstructionMode = (
-        EanArtifactConstructionMode.LEGACY_RING
+        EanArtifactConstructionMode.NETWORK
     )
 
     _scenario: Scenario | None = None
@@ -170,11 +170,14 @@ class ExportContext:
                 config = example.build_ean_config(scenario)
                 builder = example.build_ean_artifact_builder(scenario, config)
                 if self.ean_artifact_construction is EanArtifactConstructionMode.NETWORK:
-                    if not isinstance(builder, RingEanBuildArtifactBuilder):
+                    if isinstance(builder, RingEanBuildArtifactBuilder):
+                        builder = NetworkEanBuildArtifactBuilder.from_ring(builder)
+                    elif not isinstance(builder, NetworkEanBuildArtifactBuilder):
                         raise ValueError(
-                            "network EAN construction currently requires a legacy ring builder adapter"
+                            "network EAN construction requires a network or legacy ring builder"
                         )
-                    builder = NetworkEanBuildArtifactBuilder.from_ring(builder)
+                elif isinstance(builder, NetworkEanBuildArtifactBuilder):
+                    builder = builder.to_ring()
                 self._ean_artifact = builder.build(
                     scenario,
                     config,

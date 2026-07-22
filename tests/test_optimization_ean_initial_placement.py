@@ -36,6 +36,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanTimeBoundFormulation,
     EvenlySpacedAllStopCabinStartBuilder,
     GurobiSolverPolicy,
+    NetworkEanBuildArtifactBuilder,
     RingEanBuildArtifactBuilder,
     StationWaitingMode,
     project_ean_movement_plan_to_physical_replay,
@@ -928,7 +929,7 @@ def _artifact(
         config = replace(config, tail_seconds=tail_seconds)
     builder = example.build_ean_artifact_builder(scenario, config)
     if available_fleet_count is not None:
-        assert isinstance(builder, RingEanBuildArtifactBuilder)
+        assert isinstance(builder, NetworkEanBuildArtifactBuilder)
         builder = replace(
             builder,
             fleet_config=replace(

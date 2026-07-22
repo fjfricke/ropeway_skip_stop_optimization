@@ -37,7 +37,7 @@ def main() -> None:
     parser.add_argument(
         "--ean-artifact-construction",
         choices=tuple(mode.value for mode in EanArtifactConstructionMode),
-        default=EanArtifactConstructionMode.LEGACY_RING.value,
+        default=EanArtifactConstructionMode.NETWORK.value,
         help="EAN artifact builder architecture; network is the opt-in compatibility path.",
     )
     parser.add_argument(

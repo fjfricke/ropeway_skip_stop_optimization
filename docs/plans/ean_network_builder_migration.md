@@ -29,7 +29,7 @@ The opt-in `network` construction mode now provides:
 - additive network and pattern provenance in `EanBuildArtifact`;
 - `legacy_ring` and `network` selection in export and benchmark CLIs.
 
-The default remains `legacy_ring`. In the parallel stage, the network builder
+The default is now `network`. In the parallel stage, the network builder
 intentionally runs the established candidate/pair assembly as a compatibility
 pipeline and verifies that network timings, starts, visits, and transitions are
 identical before returning an artifact. This is temporary migration scaffolding,

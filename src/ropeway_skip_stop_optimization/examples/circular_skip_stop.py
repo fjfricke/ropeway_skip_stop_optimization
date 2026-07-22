@@ -30,7 +30,8 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanConfig,
     EanFleetConfig,
     EanFleetMode,
-    RingEanBuildArtifactBuilder,
+    NetworkEanBuildArtifactBuilder,
+    network_ean_builder_for_cycle,
     StationEanConfig,
     StationWaitingMode,
 )
@@ -135,7 +136,7 @@ class FiveStationCircleCwFullNoSkipNoWaitExample(ScenarioExample):
         config: EanConfig,
     ) -> EanBuildArtifactBuilder:
         switch_cycle = build_circular_skip_stop_ean_ring_switch_order(scenario, direction=self.spec.direction)
-        return RingEanBuildArtifactBuilder(
+        return network_ean_builder_for_cycle(
             switch_cycle=switch_cycle,
             start_builder=ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
         )
@@ -172,7 +173,7 @@ class FiveStationCircleCwHalfNoSkipNoWaitExample(FiveStationCircleCwFullNoSkipNo
         config: EanConfig,
     ) -> EanBuildArtifactBuilder:
         switch_cycle = build_circular_skip_stop_ean_ring_switch_order(scenario, direction=self.spec.direction)
-        return RingEanBuildArtifactBuilder(
+        return network_ean_builder_for_cycle(
             switch_cycle=switch_cycle,
             start_builder=KeepEverySecondCabinStartBuilder(
                 ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
@@ -399,8 +400,8 @@ class FiveStationOptimizedInitialPlacementAllStopSkipWaitExample(
 def _optimized_initial_placement_artifact_builder(
     scenario: Scenario,
     direction: str,
-) -> RingEanBuildArtifactBuilder:
-    return RingEanBuildArtifactBuilder(
+) -> NetworkEanBuildArtifactBuilder:
+    return network_ean_builder_for_cycle(
         switch_cycle=build_circular_skip_stop_ean_ring_switch_order(
             scenario,
             direction=direction,

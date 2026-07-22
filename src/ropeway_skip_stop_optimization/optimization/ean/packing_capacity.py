@@ -5,12 +5,17 @@ from decimal import Decimal, ROUND_CEILING
 from enum import StrEnum
 
 from ropeway_skip_stop_optimization.models import Scenario
-from ropeway_skip_stop_optimization.optimization.ean.builders.ring_topology_builder import (
-    PhysicalRingTopologyBuilder,
+from ropeway_skip_stop_optimization.optimization.ean.builders.physical_network_builder import (
+    PhysicalMovementNetworkBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanConfig,
     StationWaitingMode,
+)
+from ropeway_skip_stop_optimization.optimization.ean.network import (
+    EanCirculationPatternDefinition,
+    EanMovementNetwork,
+    EanPassengerBehavior,
 )
 
 
@@ -88,7 +93,7 @@ class EanInitialPlacementPackingBound:
 
 @dataclass(frozen=True)
 class EanInitialPlacementPackingBoundBuilder:
-    topology_builder: PhysicalRingTopologyBuilder = PhysicalRingTopologyBuilder()
+    network_builder: PhysicalMovementNetworkBuilder = PhysicalMovementNetworkBuilder()
 
     def build(
         self,
@@ -97,9 +102,33 @@ class EanInitialPlacementPackingBoundBuilder:
         config: EanConfig,
         switch_cycle: tuple[str, ...],
     ) -> EanInitialPlacementPackingBound:
+        network = self.network_builder.build(
+            scenario,
+            EanCirculationPatternDefinition(
+                id="packing_cycle",
+                state_node_ids=switch_cycle,
+            ),
+        )
+        return self.build_for_network(
+            scenario=scenario,
+            config=config,
+            network=network,
+            pattern_id="packing_cycle",
+        )
+
+    def build_for_network(
+        self,
+        *,
+        scenario: Scenario,
+        config: EanConfig,
+        network: EanMovementNetwork,
+        pattern_id: str,
+    ) -> EanInitialPlacementPackingBound:
         scenario.validate()
         config.validate()
-        topology = self.topology_builder.build(scenario, switch_cycle)
+        network.validate()
+        pattern = network.pattern(pattern_id)
+        options_by_id = {option.id: option for option in network.route_options}
         station_config_by_id = {
             station_config.station_id: station_config
             for station_config in config.station_configs
@@ -128,19 +157,43 @@ class EanInitialPlacementPackingBoundBuilder:
             segment.id: segment for segment in scenario.track_segments
         }
         roles_by_segment_id: dict[str, set[str]] = {}
-        for station in topology.stations:
-            for segment_id in station.service_segment_ids:
-                roles_by_segment_id.setdefault(segment_id, set()).add(
-                    f"service::{station.switch_id}"
+        station_id_by_state_id: dict[str, str] = {}
+        for state_id, option_ids in zip(
+            pattern.state_ids,
+            pattern.route_option_ids_by_position,
+            strict=True,
+        ):
+            options = tuple(options_by_id[option_id] for option_id in option_ids)
+            service_options = tuple(
+                option
+                for option in options
+                if option.passenger_behavior is EanPassengerBehavior.SERVICE
+            )
+            skip_options = tuple(
+                option
+                for option in options
+                if option.passenger_behavior is EanPassengerBehavior.SKIP
+            )
+            if len(service_options) != 1 or len(skip_options) > 1:
+                raise ValueError(
+                    "packing bound requires one service and at most one skip "
+                    f"option at state {state_id!r}"
                 )
-            for segment_id in station.skip_segment_ids:
+            service = service_options[0]
+            station_id_by_state_id[state_id] = service.station_id
+            for segment_id in service.station_segment_ids:
                 roles_by_segment_id.setdefault(segment_id, set()).add(
-                    f"skip::{station.switch_id}"
+                    f"service::{state_id}"
                 )
-            roles_by_segment_id.setdefault(
-                station.rope_segment_id,
-                set(),
-            ).add(f"rope::{station.switch_id}")
+            for skip in skip_options:
+                for segment_id in skip.station_segment_ids:
+                    roles_by_segment_id.setdefault(segment_id, set()).add(
+                        f"skip::{state_id}"
+                    )
+            for segment_id in service.continuation_segment_ids:
+                roles_by_segment_id.setdefault(segment_id, set()).add(
+                    f"rope::{state_id}"
+                )
 
         spacing_m = scenario.operating.required_cabin_spacing_m
         regions: list[EanFleetPackingRegion] = []
@@ -164,12 +217,13 @@ class EanInitialPlacementPackingBoundBuilder:
                 )
             )
 
-        for station in topology.stations:
-            station_config = station_config_by_id.get(station.station_id)
+        for state_id in pattern.state_ids:
+            station_id = station_id_by_state_id[state_id]
+            station_config = station_config_by_id.get(station_id)
             if station_config is None:
                 raise ValueError(
-                    "ring topology references station without EAN config: "
-                    f"{station.station_id!r}"
+                    "movement network references station without EAN config: "
+                    f"{station_id!r}"
                 )
             if (
                 station_config.waiting_mode
@@ -177,11 +231,11 @@ class EanInitialPlacementPackingBoundBuilder:
             ):
                 regions.append(
                     EanFleetPackingRegion(
-                        id=f"platform_wait::{station.switch_id}",
+                        id=f"platform_wait::{state_id}",
                         kind=EanFleetPackingRegionKind.PLATFORM_WAIT,
-                        physical_id=f"platform_exit::{station.switch_id}",
+                        physical_id=f"platform_exit::{state_id}",
                         capacity=1,
-                        source_roles=(f"wait::{station.switch_id}",),
+                        source_roles=(f"wait::{state_id}",),
                     )
                 )
 

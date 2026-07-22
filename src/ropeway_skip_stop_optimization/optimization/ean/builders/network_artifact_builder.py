@@ -68,6 +68,37 @@ class EanArtifactConstructionMode(Enum):
     NETWORK = "network"
 
 
+def network_ean_builder_for_cycle(
+    *,
+    switch_cycle: tuple[str, ...],
+    pattern_id: str = "selected_cycle",
+    start_builder: EanCabinStartBuilder | None = None,
+    headway_duration_builder: HeadwayDurationBuilder | None = None,
+    headway_candidate_builder: HeadwayCandidateBuilder | None = None,
+    headway_pair_builder: HeadwayPairBuilder | None = None,
+    fleet_config: EanFleetConfig | None = None,
+) -> NetworkEanBuildArtifactBuilder:
+    """Compatibility factory while examples migrate from cycle tuples."""
+
+    return NetworkEanBuildArtifactBuilder(
+        pattern_definition=EanCirculationPatternDefinition(
+            id=pattern_id,
+            state_node_ids=switch_cycle,
+        ),
+        start_builder=(
+            start_builder or DeterministicPhysicalNodeToSwitchStartBuilder()
+        ),
+        headway_duration_builder=(
+            headway_duration_builder or OperatingSpeedHeadwayDurationBuilder()
+        ),
+        headway_candidate_builder=(
+            headway_candidate_builder or SwitchVisitHeadwayCandidateBuilder()
+        ),
+        headway_pair_builder=headway_pair_builder or AllPairsHeadwayPairBuilder(),
+        fleet_config=fleet_config or EanFleetConfig(),
+    )
+
+
 @dataclass(frozen=True)
 class NetworkEanBuildArtifactBuilder(EanBuildArtifactBuilder):
     """Parallel stage-one builder backed by the canonical movement network.
@@ -86,6 +117,12 @@ class NetworkEanBuildArtifactBuilder(EanBuildArtifactBuilder):
     headway_candidate_builder: HeadwayCandidateBuilder = field(default_factory=SwitchVisitHeadwayCandidateBuilder)
     headway_pair_builder: HeadwayPairBuilder = field(default_factory=AllPairsHeadwayPairBuilder)
     fleet_config: EanFleetConfig = field(default_factory=EanFleetConfig)
+
+    @property
+    def switch_cycle(self) -> tuple[str, ...]:
+        """Temporary source compatibility for callers not yet pattern-aware."""
+
+        return self.pattern_definition.state_node_ids
 
     @classmethod
     def from_ring(
@@ -106,6 +143,18 @@ class NetworkEanBuildArtifactBuilder(EanBuildArtifactBuilder):
             headway_candidate_builder=builder.headway_candidate_builder,
             headway_pair_builder=builder.headway_pair_builder,
             fleet_config=builder.fleet_config,
+        )
+
+    def to_ring(self) -> RingEanBuildArtifactBuilder:
+        """Construct the legacy adapter while the parallel path is supported."""
+
+        return RingEanBuildArtifactBuilder(
+            switch_cycle=self.pattern_definition.state_node_ids,
+            start_builder=self.start_builder,
+            headway_duration_builder=self.headway_duration_builder,
+            headway_candidate_builder=self.headway_candidate_builder,
+            headway_pair_builder=self.headway_pair_builder,
+            fleet_config=self.fleet_config,
         )
 
     def build(

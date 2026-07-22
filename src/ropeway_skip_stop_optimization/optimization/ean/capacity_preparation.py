@@ -8,6 +8,9 @@ from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArt
 from ropeway_skip_stop_optimization.optimization.ean.builders.artifact_builder import (
     RingEanBuildArtifactBuilder,
 )
+from ropeway_skip_stop_optimization.optimization.ean.builders.network_artifact_builder import (
+    NetworkEanBuildArtifactBuilder,
+)
 from ropeway_skip_stop_optimization.optimization.ean.builders.timing_builder import (
     PhysicalSkipStopTimingBuilder,
 )
@@ -76,21 +79,31 @@ class EanPreparedRingBuilder:
         *,
         scenario: Scenario,
         config: EanConfig,
-        artifact_builder: RingEanBuildArtifactBuilder,
+        artifact_builder: RingEanBuildArtifactBuilder
+        | NetworkEanBuildArtifactBuilder,
     ) -> EanPreparedRing:
-        timing_builder = artifact_builder.timing_builder
-        if not isinstance(timing_builder, PhysicalSkipStopTimingBuilder):
-            raise NotImplementedError(
-                "capacity preparation requires PhysicalSkipStopTimingBuilder"
+        if isinstance(artifact_builder, NetworkEanBuildArtifactBuilder):
+            network = artifact_builder.network_builder.build(
+                scenario,
+                artifact_builder.pattern_definition,
             )
-        packing_bound = replace(
-            self.packing_bound_builder,
-            topology_builder=timing_builder.topology_builder,
-        ).build(
-            scenario=scenario,
-            config=config,
-            switch_cycle=artifact_builder.switch_cycle,
-        )
+            packing_bound = self.packing_bound_builder.build_for_network(
+                scenario=scenario,
+                config=config,
+                network=network,
+                pattern_id=artifact_builder.pattern_definition.id,
+            )
+        else:
+            timing_builder = artifact_builder.timing_builder
+            if not isinstance(timing_builder, PhysicalSkipStopTimingBuilder):
+                raise NotImplementedError(
+                    "legacy capacity preparation requires PhysicalSkipStopTimingBuilder"
+                )
+            packing_bound = self.packing_bound_builder.build(
+                scenario=scenario,
+                config=config,
+                switch_cycle=artifact_builder.switch_cycle,
+            )
         seed_artifact = replace(
             artifact_builder,
             fleet_config=EanFleetConfig(

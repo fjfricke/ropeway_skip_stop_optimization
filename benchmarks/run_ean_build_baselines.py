@@ -78,7 +78,7 @@ def main() -> None:
     parser.add_argument(
         "--ean-artifact-construction",
         choices=tuple(mode.value for mode in EanArtifactConstructionMode),
-        default=EanArtifactConstructionMode.LEGACY_RING.value,
+        default=EanArtifactConstructionMode.NETWORK.value,
     )
     args = parser.parse_args()
     if args.progress:

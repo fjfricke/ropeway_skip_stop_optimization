@@ -28,7 +28,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanCabinStartBuilder,
     EanBuildArtifactBuilder,
     EanConfig,
-    RingEanBuildArtifactBuilder,
+    network_ean_builder_for_cycle,
     StationEanConfig,
     StationWaitingMode,
 )
@@ -126,7 +126,7 @@ class FiveStationExample(ScenarioExample):
         config: EanConfig,
     ) -> EanBuildArtifactBuilder:
         switch_cycle = build_linear_skip_stop_ean_ring_switch_order(scenario)
-        return RingEanBuildArtifactBuilder(
+        return network_ean_builder_for_cycle(
             switch_cycle=switch_cycle,
             start_builder=KeepEverySecondCabinStartBuilder(
                 ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
@@ -168,7 +168,7 @@ class FiveStationNoWaitExample(FiveStationExample):
         config: EanConfig,
     ) -> EanBuildArtifactBuilder:
         switch_cycle = build_linear_skip_stop_ean_ring_switch_order(scenario)
-        return RingEanBuildArtifactBuilder(
+        return network_ean_builder_for_cycle(
             switch_cycle=switch_cycle,
             start_builder=ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
         )

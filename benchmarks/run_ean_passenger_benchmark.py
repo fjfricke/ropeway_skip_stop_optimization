@@ -84,7 +84,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--ean-artifact-construction",
         choices=tuple(mode.value for mode in EanArtifactConstructionMode),
-        default=EanArtifactConstructionMode.LEGACY_RING.value,
+        default=EanArtifactConstructionMode.NETWORK.value,
     )
     parser.add_argument(
         "--ean-mip-start",

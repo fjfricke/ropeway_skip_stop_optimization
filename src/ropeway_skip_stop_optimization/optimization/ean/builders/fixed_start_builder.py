@@ -164,8 +164,14 @@ def _continuous_all_stop_start_parameters(
     from ropeway_skip_stop_optimization.optimization.ean.builders.headway_duration_builder import (
         OperatingSpeedHeadwayDurationBuilder,
     )
-    from ropeway_skip_stop_optimization.optimization.ean.builders.timing_builder import (
-        PhysicalSkipStopTimingBuilder,
+    from ropeway_skip_stop_optimization.optimization.ean.builders.network_timing_builder import (
+        NetworkSkipStopTimingBuilder,
+    )
+    from ropeway_skip_stop_optimization.optimization.ean.builders.physical_network_builder import (
+        PhysicalMovementNetworkBuilder,
+    )
+    from ropeway_skip_stop_optimization.optimization.ean.network import (
+        EanCirculationPatternDefinition,
     )
 
     scenario.validate()
@@ -176,7 +182,19 @@ def _continuous_all_stop_start_parameters(
             "continuous all-stop starts must target exactly the configured switch_cycle"
         )
 
-    timings = PhysicalSkipStopTimingBuilder().build(scenario, switch_cycle)
+    pattern_definition = EanCirculationPatternDefinition(
+        id="all_stop_start_cycle",
+        state_node_ids=switch_cycle,
+    )
+    network = PhysicalMovementNetworkBuilder().build(
+        scenario,
+        pattern_definition,
+    )
+    timings = NetworkSkipStopTimingBuilder().build(
+        scenario,
+        network,
+        network.pattern(pattern_definition.id),
+    )
     cycle_boundaries = _all_stop_cycle_boundaries(timings, switch_cycle)
     cycle_seconds = cycle_boundaries[-1].seconds
     headway_seconds = _max_all_stop_headway_seconds(

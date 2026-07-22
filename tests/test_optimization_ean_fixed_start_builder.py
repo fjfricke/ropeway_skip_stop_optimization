@@ -28,6 +28,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EarliestAllStopEanMovementPlanBuilder,
     EanCabinStartKind,
     EvenlySpacedAllStopCabinStartBuilder,
+    NetworkEanBuildArtifactBuilder,
     RingEanBuildArtifactBuilder,
     validate_ean_movement_plan_against_artifact,
 )
@@ -115,7 +116,7 @@ def test_evenly_spaced_all_stop_builder_places_feasible_explicit_fleet() -> None
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
     optimized_builder = example.build_ean_artifact_builder(scenario, config)
-    assert isinstance(optimized_builder, RingEanBuildArtifactBuilder)
+    assert isinstance(optimized_builder, NetworkEanBuildArtifactBuilder)
     builder = EvenlySpacedAllStopCabinStartBuilder(
         switch_cycle=optimized_builder.switch_cycle,
         cabin_count=len(scenario.cabins),
@@ -139,7 +140,7 @@ def test_evenly_spaced_all_stop_builder_rejects_fleet_above_ring_capacity() -> N
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
     optimized_builder = example.build_ean_artifact_builder(scenario, config)
-    assert isinstance(optimized_builder, RingEanBuildArtifactBuilder)
+    assert isinstance(optimized_builder, NetworkEanBuildArtifactBuilder)
     maximum_starts = ContinuousAllStopMaxCabinStartBuilder(
         switch_cycle=optimized_builder.switch_cycle,
     ).build(

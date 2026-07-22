@@ -14,6 +14,9 @@ from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArt
 from ropeway_skip_stop_optimization.optimization.ean.builders.artifact_builder import (
     RingEanBuildArtifactBuilder,
 )
+from ropeway_skip_stop_optimization.optimization.ean.builders.network_artifact_builder import (
+    NetworkEanBuildArtifactBuilder,
+)
 from ropeway_skip_stop_optimization.optimization.ean.builders.headway_candidate_builder import (
     SwitchVisitHeadwayCandidateBuilder,
 )
@@ -133,17 +136,17 @@ class EanInitialPlacementMipStart:
 class EanInitialPlacementCapacityProblem:
     scenario: Scenario
     config: EanConfig
-    artifact_builder: RingEanBuildArtifactBuilder
+    artifact_builder: RingEanBuildArtifactBuilder | NetworkEanBuildArtifactBuilder
 
     def validate(self) -> None:
         self.scenario.validate()
         self.config.validate()
-        if not isinstance(
+        if isinstance(self.artifact_builder, RingEanBuildArtifactBuilder) and not isinstance(
             self.artifact_builder.timing_builder, PhysicalSkipStopTimingBuilder
         ):
             raise NotImplementedError(
                 "initial placement capacity certification currently requires "
-                "PhysicalSkipStopTimingBuilder"
+                "physical legacy timing or the canonical network builder"
             )
         if not isinstance(
             self.artifact_builder.headway_candidate_builder,

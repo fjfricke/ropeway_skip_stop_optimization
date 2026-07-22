@@ -227,7 +227,7 @@ def export_artifact_set(
     ),
     ean_build_only: bool = False,
     ean_artifact_construction: EanArtifactConstructionMode = (
-        EanArtifactConstructionMode.LEGACY_RING
+        EanArtifactConstructionMode.NETWORK
     ),
     progress: bool | ProgressReporter = False,
     clean: bool = False,
@@ -280,7 +280,7 @@ def run_artifact_set(
     ),
     ean_build_only: bool = False,
     ean_artifact_construction: EanArtifactConstructionMode = (
-        EanArtifactConstructionMode.LEGACY_RING
+        EanArtifactConstructionMode.NETWORK
     ),
     ean_progress_recorder: object | None = None,
     ean_progress_sample_interval_seconds: float = 5.0,
