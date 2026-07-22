@@ -6,6 +6,7 @@ from pathlib import Path
 from ropeway_skip_stop_optimization.exports.runner import DEFAULT_OUTPUT_ROOT, export_artifact_set, known_artifact_set_ids
 from ropeway_skip_stop_optimization.optimization.discrete_time import MilpV0VariableStrategy
 from ropeway_skip_stop_optimization.optimization.ean import (
+    EanArtifactConstructionMode,
     EanMipStartStrategy,
     ALL_EAN_SELECTION_NAMES,
     EanOptimizationConfig,
@@ -34,6 +35,12 @@ def main() -> None:
     parser.add_argument("--milp-horizon", type=int, default=60, help="Horizon for MILP artifact sets.")
     parser.add_argument("--milp-cabin-count", type=int, default=23, help="Number of cabins for MILP artifact sets.")
     parser.add_argument(
+        "--ean-artifact-construction",
+        choices=tuple(mode.value for mode in EanArtifactConstructionMode),
+        default=EanArtifactConstructionMode.LEGACY_RING.value,
+        help="EAN artifact builder architecture; network is the opt-in compatibility path.",
+    )
+    parser.add_argument(
         "--ean-solver-policy",
         choices=tuple(policy.value for policy in GurobiSolverPolicyPreset),
         default=GurobiSolverPolicyPreset.QUICK_GOOD_SOLUTION.value,
@@ -44,6 +51,11 @@ def main() -> None:
         type=float,
         default=None,
         help="Override the EAN solver-policy time limit in seconds.",
+    )
+    parser.add_argument(
+        "--ean-build-only",
+        action="store_true",
+        help="Build and profile the selected EAN model without calling optimize().",
     )
     parser.add_argument(
         "--ean-checkpoint-dir",
@@ -75,7 +87,7 @@ def main() -> None:
     parser.add_argument(
         "--ean-mip-start",
         choices=tuple(strategy.value for strategy in EanMipStartStrategy),
-        default=EanMipStartStrategy.OPTIMIZED_ALL_STOP.value,
+        default=EanMipStartStrategy.AUTO.value,
     )
     parser.add_argument(
         "--milp-variable-strategy",
@@ -88,6 +100,8 @@ def main() -> None:
         parser.error("--ean-resume-checkpoint and --ean-resume-latest-checkpoint are mutually exclusive")
     if args.ean_resume_latest_checkpoint and args.ean_checkpoint_dir is None:
         parser.error("--ean-resume-latest-checkpoint requires --ean-checkpoint-dir")
+    if args.ean_build_only and args.clean:
+        parser.error("--ean-build-only cannot be combined with --clean")
     try:
         ean_optimization_config = EanOptimizationConfig.from_selection(args.ean_optimizations)
     except ValueError as error:
@@ -110,6 +124,10 @@ def main() -> None:
         ean_resume_latest_checkpoint=args.ean_resume_latest_checkpoint,
         ean_optimization_config=ean_optimization_config,
         ean_mip_start_strategy=EanMipStartStrategy(args.ean_mip_start),
+        ean_build_only=args.ean_build_only,
+        ean_artifact_construction=EanArtifactConstructionMode(
+            args.ean_artifact_construction
+        ),
         progress=args.progress,
         clean=args.clean,
     )

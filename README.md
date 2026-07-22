@@ -89,12 +89,28 @@ uv run python -m ropeway_skip_stop_optimization.exports.cli \
 Useful EAN export options:
 
 ```text
+--ean-artifact-construction legacy_ring|network
 --ean-solver-policy default|debug_short|quick_good_solution|paper_benchmark|exact_optimality
 --ean-time-limit <seconds>
+--ean-build-only
 --ean-optimizations all|none|<comma-separated selections>
 --ean-checkpoint-dir <path>
 --ean-resume-checkpoint <file.sol-or-file.mst>
 --ean-resume-latest-checkpoint
+```
+
+`--ean-build-only` constructs the selected EAN artifact and complete Gurobi
+model, writes `ean_model_build_profile.json`, and exits without calling
+`optimize()`. Combine it with `--progress` to see artifact pairing, headway-row
+construction, model sizes, elapsed time, and peak RSS while the model is built.
+The default `auto` MIP start is disabled in this mode; an explicit
+`optimized_all_stop` start is rejected because it would launch an auxiliary
+solve.
+
+The four standard construction baselines can be reproduced with:
+
+```text
+.venv/bin/python benchmarks/run_ean_build_baselines.py all --progress
 ```
 
 The single `--ean-optimizations` list accepts independently combinable
@@ -102,12 +118,18 @@ optimizations and at most one value from each formulation category:
 
 | Kind | Selections |
 |---|---|
-| Independent optimizations | `candidate_horizon_pruning`, `single_ring_dominated_ride_pruning`, `slot_time_relaxation_strengthening`, `tight_big_m_bounds` |
+| Independent optimizations | `candidate_horizon_pruning`, `single_ring_dominated_ride_pruning`, `slot_time_relaxation_strengthening`, `tight_big_m_bounds`, `fixed_start_headway_precedence` |
 | Horizon formulation | `horizon_legacy`, `horizon_conservative_free_suffix`, `horizon_exact_time_activation` |
 | Time-bound formulation | `time_bounds_legacy_plus_10`, `time_bounds_derived_visit_bounds` |
 | Stop/skip timing formulation | `stop_skip_timing_big_m`, `stop_skip_timing_affine` |
 | Unary-slot activation formulation | `slot_activation_per_slot`, `slot_activation_first_slot` |
 | Journey board-time formulation | `board_time_explicit`, `board_time_projected_journey_time` |
+
+`fixed_start_headway_precedence` is an opt-in exact reduction for fixed-start
+artifacts. It uses conservative propagated visit bounds to replace provably
+directed headway disjunctions by one directed row without an order binary. It
+does not impose a global cabin order. Optimized initial placement is not yet
+supported because its proof requires bounds over selectable boundary states.
 
 `all` means the current production configuration: the three independent
 reductions, affine stop/skip timing, and first-slot activation. For the

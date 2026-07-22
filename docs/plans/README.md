@@ -34,6 +34,8 @@ Current plans:
 - `ean_intermediate_turnbacks.md`: intermediate crossovers, deterministic
   short-turn patterns, dynamic switch-graph operation, and infrastructure
   siting.
+- `ean_network_builder_migration.md`: remaining consumer migration from the
+  parallel canonical network builder and eventual removal of the ring stack.
 - `discrete_time_backlog.md`: low-priority discrete prototype work.
 - `software_visualization_and_delivery.md`: replay, tooling, UI, and delivery work.
 

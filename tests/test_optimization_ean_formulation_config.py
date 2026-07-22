@@ -42,6 +42,19 @@ def test_ean_configuration_parses_independent_and_categorical_selections() -> No
     )
 
 
+def test_fixed_start_headway_precedence_is_independent_and_rejects_oip() -> None:
+    config = EanOptimizationConfig.from_selection(
+        "fixed_start_headway_precedence"
+    )
+
+    assert config.enable_fixed_start_headway_precedence
+    assert config.selection_label() == "fixed_start_headway_precedence"
+    with pytest.raises(NotImplementedError, match="fixed_start_headway_precedence"):
+        config.resolved_for_fleet_mode(
+            EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT
+        )
+
+
 def test_ean_configuration_rejects_multiple_values_in_one_category() -> None:
     with pytest.raises(ValueError, match="at most one EAN horizon"):
         EanOptimizationConfig.from_selection(

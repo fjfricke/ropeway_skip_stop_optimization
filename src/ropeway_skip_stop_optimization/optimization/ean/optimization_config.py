@@ -21,6 +21,7 @@ class EanOptimizationName(StrEnum):
     SINGLE_RING_DOMINATED_RIDE_PRUNING = "single_ring_dominated_ride_pruning"
     SLOT_TIME_RELAXATION_STRENGTHENING = "slot_time_relaxation_strengthening"
     TIGHT_BIG_M_BOUNDS = "tight_big_m_bounds"
+    FIXED_START_HEADWAY_PRECEDENCE = "fixed_start_headway_precedence"
 
 
 class EanOptimizationSelectionOrigin(StrEnum):
@@ -53,6 +54,7 @@ class EanOptimizationConfig:
     enable_single_ring_dominated_ride_pruning: bool = True
     enable_slot_time_relaxation_strengthening: bool = True
     enable_tight_big_m_bounds: bool = False
+    enable_fixed_start_headway_precedence: bool = False
     formulation: EanFormulationConfig = EanFormulationConfig()
     selection_origin: EanOptimizationSelectionOrigin = field(
         default=EanOptimizationSelectionOrigin.AUTO,
@@ -74,6 +76,7 @@ class EanOptimizationConfig:
             enable_single_ring_dominated_ride_pruning=False,
             enable_slot_time_relaxation_strengthening=False,
             enable_tight_big_m_bounds=False,
+            enable_fixed_start_headway_precedence=False,
             formulation=EanFormulationConfig(),
             selection_origin=EanOptimizationSelectionOrigin.EXPLICIT,
         )
@@ -95,6 +98,9 @@ class EanOptimizationConfig:
                 EanOptimizationName.SLOT_TIME_RELAXATION_STRENGTHENING in enabled
             ),
             enable_tight_big_m_bounds=EanOptimizationName.TIGHT_BIG_M_BOUNDS in enabled,
+            enable_fixed_start_headway_precedence=(
+                EanOptimizationName.FIXED_START_HEADWAY_PRECEDENCE in enabled
+            ),
             formulation=formulation or EanFormulationConfig(),
             selection_origin=EanOptimizationSelectionOrigin.EXPLICIT,
         )
@@ -191,6 +197,8 @@ class EanOptimizationConfig:
             names.append(EanOptimizationName.SLOT_TIME_RELAXATION_STRENGTHENING)
         if self.enable_tight_big_m_bounds:
             names.append(EanOptimizationName.TIGHT_BIG_M_BOUNDS)
+        if self.enable_fixed_start_headway_precedence:
+            names.append(EanOptimizationName.FIXED_START_HEADWAY_PRECEDENCE)
         return tuple(names)
 
     def selection_label(self) -> str:
@@ -240,6 +248,10 @@ class EanOptimizationConfig:
             )
         if self.enable_tight_big_m_bounds:
             unsupported.append(EanOptimizationName.TIGHT_BIG_M_BOUNDS.value)
+        if self.enable_fixed_start_headway_precedence:
+            unsupported.append(
+                EanOptimizationName.FIXED_START_HEADWAY_PRECEDENCE.value
+            )
         if (
             self.selection_origin is EanOptimizationSelectionOrigin.EXPLICIT
             and unsupported
@@ -249,7 +261,7 @@ class EanOptimizationConfig:
                 + ", ".join(unsupported)
                 + "; horizon pruning must minimize over boundary states, ring "
                 "dominance must be proven per selected boundary trajectory, "
-                "and tight Big-M values need state-specific negative bounds"
+                "and time/headway reductions need state-specific safe bounds"
             )
 
         explicit_formulations = self.explicit_formulation_names
@@ -281,6 +293,7 @@ class EanOptimizationConfig:
             enable_candidate_horizon_pruning=False,
             enable_single_ring_dominated_ride_pruning=False,
             enable_tight_big_m_bounds=False,
+            enable_fixed_start_headway_precedence=False,
             formulation=replace(
                 self.formulation,
                 horizon=EanHorizonFormulation.EXACT_TIME_ACTIVATION,

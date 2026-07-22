@@ -8,6 +8,8 @@ from ropeway_skip_stop_optimization.examples.three_station_ean import (
     build_three_station_ean_ring_switch_order,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
+    EanBuildProgressKind,
+    EanBuildStage,
     EanCabinStartKind,
     RingEanBuildArtifactBuilder,
     StationWaitingMode,
@@ -65,3 +67,36 @@ def test_ring_ean_build_artifact_builder_rejects_duplicate_switch_cycle() -> Non
 
     with pytest.raises(ValueError, match="duplicate ring EAN switch"):
         RingEanBuildArtifactBuilder(switch_cycle=("M_entry_lr", "M_entry_lr")).build(scenario, config)
+
+
+def test_ring_ean_build_artifact_reports_detailed_build_metrics() -> None:
+    scenario = build_three_station_scenario()
+    config = build_three_station_ean_config(scenario)
+    events = []
+
+    artifact = RingEanBuildArtifactBuilder(
+        switch_cycle=build_three_station_ean_ring_switch_order(scenario)
+    ).build(scenario, config, progress_callback=events.append)
+
+    metrics = artifact.build_metrics
+    assert metrics is not None
+    assert metrics.total_seconds >= sum(
+        (
+            metrics.timing_seconds,
+            metrics.visit_seconds,
+            metrics.checkpoint_seconds,
+            metrics.candidate_seconds,
+            metrics.pair_seconds,
+            metrics.validation_seconds,
+        )
+    )
+    assert metrics.checkpoint_count == len(artifact.headway_checkpoints)
+    assert metrics.candidate_count == len(artifact.headway_candidates)
+    assert metrics.pair_count == len(artifact.headway_pairs)
+    assert metrics.peak_rss_bytes is None or metrics.peak_rss_bytes > 0
+    assert any(
+        event.stage is EanBuildStage.ARTIFACT_PAIRS
+        and event.kind is EanBuildProgressKind.PROGRESS
+        and event.pair_count
+        for event in events
+    )

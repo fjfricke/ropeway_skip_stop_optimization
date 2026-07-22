@@ -347,6 +347,55 @@ class FiveStationOptimizedInitialPlacementDoubleAllStopSkipWaitExample(
         )
 
 
+class FiveStationOptimizedInitialPlacementAllStopSkipWaitExample(
+    FiveStationOptimizedInitialPlacementDoubleAllStopSkipWaitExample
+):
+    """Build-profile reference with the 38-cabin all-stop fleet available."""
+
+    metadata = ScenarioExampleMetadata(
+        id="five_station_optimized_initial_placement_all_stop_skip_wait_v0",
+        label="Five station OIP all-stop fleet skip+wait",
+        description=(
+            "Five-station clockwise ring with optimized initial placement, "
+            "38 available cabins, skipping enabled, and end-of-platform waiting."
+        ),
+        tags=(
+            "circle",
+            "cw",
+            "skip-stop",
+            "optimized-initial-placement",
+            "all-stop-fleet",
+            "waiting",
+        ),
+        family_id="five_station_circle",
+        family_label="Five station circle",
+        variant_id="optimized_initial_placement_all_stop_skip_wait",
+        variant_label="OIP 38 cabins skip+wait",
+    )
+    spec = replace(
+        FiveStationOptimizedInitialPlacementDoubleAllStopSkipWaitExample.spec,
+        scenario_id=metadata.id,
+        label=metadata.label,
+        description=metadata.description,
+    )
+
+    def build_ean_artifact_builder(
+        self,
+        scenario: Scenario,
+        config: EanConfig,
+    ) -> EanBuildArtifactBuilder:
+        return replace(
+            _optimized_initial_placement_artifact_builder(
+                scenario,
+                self.spec.direction,
+            ),
+            fleet_config=EanFleetConfig(
+                mode=EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT,
+                available_fleet_count=38,
+            ),
+        )
+
+
 def _optimized_initial_placement_artifact_builder(
     scenario: Scenario,
     direction: str,

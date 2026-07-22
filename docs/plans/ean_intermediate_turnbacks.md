@@ -1,5 +1,9 @@
 # EAN Intermediate Turnback Plan
 
+> Architecture note: dynamic turnbacks must extend the canonical
+> `EanMovementNetwork` and `EanRouteOption` types introduced by the network
+> builder migration. They must not introduce a second topology architecture.
+
 Status: **future semantic and experimental work**
 
 ## Goal

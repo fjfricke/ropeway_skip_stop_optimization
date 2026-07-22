@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
+from enum import Enum
 from time import perf_counter
 
 from ropeway_skip_stop_optimization.models import Scenario
@@ -15,6 +15,10 @@ from ropeway_skip_stop_optimization.optimization.ean.build_profile import (
 from ropeway_skip_stop_optimization.optimization.ean.builders.artifact_assembler import (
     EanCompatibilityArtifactAssembler,
     ResolvedEanArtifactInputs,
+)
+from ropeway_skip_stop_optimization.optimization.ean.builders.artifact_builder import (
+    EanBuildArtifactBuilder,
+    RingEanBuildArtifactBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ean.builders.fixed_start_builder import (
     DeterministicPhysicalNodeToSwitchStartBuilder,
@@ -32,48 +36,77 @@ from ropeway_skip_stop_optimization.optimization.ean.builders.headway_pair_build
     AllPairsHeadwayPairBuilder,
     HeadwayPairBuilder,
 )
-from ropeway_skip_stop_optimization.optimization.ean.builders.ring_switch_visit_builder import (
-    RingSwitchVisitBuilder,
+from ropeway_skip_stop_optimization.optimization.ean.builders.network_timing_builder import (
+    NetworkSkipStopTimingBuilder,
+)
+from ropeway_skip_stop_optimization.optimization.ean.builders.network_visit_builder import (
+    NetworkVisitBuilder,
+)
+from ropeway_skip_stop_optimization.optimization.ean.builders.physical_network_builder import (
+    PhysicalMovementNetworkBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ean.builders.timing_builder import (
     PhysicalSkipStopTimingBuilder,
-    SkipStopTimingBuilder,
 )
-from ropeway_skip_stop_optimization.optimization.ean.models import EanConfig
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanCabinStart,
     EanCabinStartKind,
+    EanConfig,
     EanFleetConfig,
     EanFleetMode,
+)
+from ropeway_skip_stop_optimization.optimization.ean.network import (
+    EanCirculationPatternDefinition,
 )
 from ropeway_skip_stop_optimization.optimization.ean.fleet import (
     build_initial_placement_parameters,
 )
 
 
-class EanBuildArtifactBuilder(ABC):
-    @abstractmethod
-    def build(
-        self,
-        scenario: Scenario,
-        config: EanConfig,
-        *,
-        progress_callback: EanBuildProgressCallback | None = None,
-    ) -> EanBuildArtifact:
-        """Build an EAN artifact from a physical scenario and EAN config."""
+class EanArtifactConstructionMode(Enum):
+    LEGACY_RING = "legacy_ring"
+    NETWORK = "network"
 
 
 @dataclass(frozen=True)
-class RingEanBuildArtifactBuilder(EanBuildArtifactBuilder):
-    """Build an EAN artifact for a fixed directed ring of skip/stop switches."""
+class NetworkEanBuildArtifactBuilder(EanBuildArtifactBuilder):
+    """Parallel stage-one builder backed by the canonical movement network.
 
-    switch_cycle: tuple[str, ...]
-    timing_builder: SkipStopTimingBuilder = field(default_factory=PhysicalSkipStopTimingBuilder)
+    The compatibility artifact assembly still reuses the stable pair pipeline;
+    network timing and visits are independently derived and checked before they
+    replace the compatibility values. This makes migration failures explicit
+    while keeping all current solver inputs byte-stable.
+    """
+
+    pattern_definition: EanCirculationPatternDefinition
+    network_builder: PhysicalMovementNetworkBuilder = field(default_factory=PhysicalMovementNetworkBuilder)
+    timing_builder: NetworkSkipStopTimingBuilder = field(default_factory=NetworkSkipStopTimingBuilder)
     start_builder: EanCabinStartBuilder = field(default_factory=DeterministicPhysicalNodeToSwitchStartBuilder)
     headway_duration_builder: HeadwayDurationBuilder = field(default_factory=OperatingSpeedHeadwayDurationBuilder)
     headway_candidate_builder: HeadwayCandidateBuilder = field(default_factory=SwitchVisitHeadwayCandidateBuilder)
     headway_pair_builder: HeadwayPairBuilder = field(default_factory=AllPairsHeadwayPairBuilder)
     fleet_config: EanFleetConfig = field(default_factory=EanFleetConfig)
+
+    @classmethod
+    def from_ring(
+        cls, builder: RingEanBuildArtifactBuilder, *, pattern_id: str = "legacy_ring"
+    ) -> NetworkEanBuildArtifactBuilder:
+        if not isinstance(builder.timing_builder, PhysicalSkipStopTimingBuilder):
+            raise ValueError(
+                "network compatibility conversion requires physical timing; "
+                "custom legacy timing builders are not supported"
+            )
+        return cls(
+            pattern_definition=EanCirculationPatternDefinition(
+                id=pattern_id,
+                state_node_ids=builder.switch_cycle,
+            ),
+            start_builder=builder.start_builder,
+            headway_duration_builder=builder.headway_duration_builder,
+            headway_candidate_builder=builder.headway_candidate_builder,
+            headway_pair_builder=builder.headway_pair_builder,
+            fleet_config=builder.fleet_config,
+        )
 
     def build(
         self,
@@ -85,9 +118,8 @@ class RingEanBuildArtifactBuilder(EanBuildArtifactBuilder):
         total_started = perf_counter()
         scenario.validate()
         config.validate()
-        _validate_switch_cycle(self.switch_cycle)
-
         self.fleet_config.validate()
+
         timing_started = perf_counter()
         emit_build_progress(
             progress_callback,
@@ -95,7 +127,9 @@ class RingEanBuildArtifactBuilder(EanBuildArtifactBuilder):
             kind=EanBuildProgressKind.STARTED,
             started=timing_started,
         )
-        timings = self.timing_builder.build(scenario, self.switch_cycle)
+        network = self.network_builder.build(scenario, self.pattern_definition)
+        pattern = network.pattern(self.pattern_definition.id)
+        timings = self.timing_builder.build(scenario, network, pattern)
         timing_seconds = perf_counter() - timing_started
         emit_build_progress(
             progress_callback,
@@ -118,16 +152,14 @@ class RingEanBuildArtifactBuilder(EanBuildArtifactBuilder):
             if available_fleet_count is None:
                 raise ValueError("optimized initial placement requires available_fleet_count")
             initial_placement_parameters = build_initial_placement_parameters(
-                switch_cycle=self.switch_cycle,
+                switch_cycle=pattern.state_ids,
                 available_fleet_count=available_fleet_count,
             )
-            selectable_initial_phase_count = (
-                initial_placement_parameters.initial_phase_visit_count
-            )
+            selectable_initial_phase_count = initial_placement_parameters.initial_phase_visit_count
             cabin_starts = tuple(
                 EanCabinStart(
                     cabin_id=cabin_id,
-                    first_switch_id=self.switch_cycle[0],
+                    first_switch_id=pattern.state_ids[0],
                     kind=EanCabinStartKind.EARLIEST,
                     time_seconds=0.0,
                 )
@@ -137,23 +169,19 @@ class RingEanBuildArtifactBuilder(EanBuildArtifactBuilder):
             cabin_starts = self.start_builder.build(
                 scenario=scenario,
                 config=config,
-                target_switch_ids=frozenset(self.switch_cycle),
+                target_switch_ids=frozenset(pattern.state_ids),
             )
-        switch_visit_result = RingSwitchVisitBuilder(
-            switch_cycle=self.switch_cycle,
+        visit_result = NetworkVisitBuilder(
+            pattern=pattern,
             selectable_initial_phase_count=selectable_initial_phase_count,
-        ).build(
-            config=config,
-            cabin_starts=cabin_starts,
-            timings=timings,
-        )
+        ).build(config=config, cabin_starts=cabin_starts, timings=timings)
         visit_seconds = perf_counter() - visit_started
         emit_build_progress(
             progress_callback,
             stage=EanBuildStage.ARTIFACT_VISITS,
             kind=EanBuildProgressKind.FINISHED,
             started=visit_started,
-            visit_count=len(switch_visit_result.visits),
+            visit_count=len(visit_result.visits),
         )
 
         return EanCompatibilityArtifactAssembler(
@@ -164,30 +192,17 @@ class RingEanBuildArtifactBuilder(EanBuildArtifactBuilder):
             scenario,
             config,
             ResolvedEanArtifactInputs(
-                state_ids=self.switch_cycle,
+                state_ids=pattern.state_ids,
                 timings=timings,
                 cabin_starts=cabin_starts,
-                visits=switch_visit_result,
+                visits=visit_result,
                 fleet_config=self.fleet_config,
                 initial_placement_parameters=initial_placement_parameters,
                 timing_seconds=timing_seconds,
                 visit_seconds=visit_seconds,
                 total_started=total_started,
+                movement_network=network,
+                circulation_pattern_ids=(pattern.id,),
             ),
             progress_callback=progress_callback,
         )
-
-
-def _validate_switch_cycle(switch_cycle: tuple[str, ...]) -> None:
-    if not switch_cycle:
-        raise ValueError("ring EAN build artifact builder needs a nonempty switch_cycle")
-    seen: set[str] = set()
-    duplicates: set[str] = set()
-    for switch_id in switch_cycle:
-        if not switch_id:
-            raise ValueError("ring EAN switch ids must be nonempty")
-        if switch_id in seen:
-            duplicates.add(switch_id)
-        seen.add(switch_id)
-    if duplicates:
-        raise ValueError(f"duplicate ring EAN switch ids: {duplicates}")

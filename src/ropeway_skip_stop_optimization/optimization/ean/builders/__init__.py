@@ -2,6 +2,10 @@ from ropeway_skip_stop_optimization.optimization.ean.builders.artifact_builder i
     EanBuildArtifactBuilder,
     RingEanBuildArtifactBuilder,
 )
+from ropeway_skip_stop_optimization.optimization.ean.builders.artifact_assembler import (
+    EanCompatibilityArtifactAssembler,
+    ResolvedEanArtifactInputs,
+)
 from ropeway_skip_stop_optimization.optimization.ean.builders.headway_checkpoint_builder import (
     HeadwayCheckpointBuilder,
     SkipStopHeadwayCheckpointBuilder,
@@ -54,12 +58,27 @@ from ropeway_skip_stop_optimization.optimization.ean.builders.timing_builder imp
     PhysicalSkipStopTimingBuilder,
     SkipStopTimingBuilder,
 )
+from ropeway_skip_stop_optimization.optimization.ean.builders.network_artifact_builder import (
+    EanArtifactConstructionMode,
+    NetworkEanBuildArtifactBuilder,
+)
+from ropeway_skip_stop_optimization.optimization.ean.builders.network_timing_builder import (
+    NetworkSkipStopTimingBuilder,
+)
+from ropeway_skip_stop_optimization.optimization.ean.builders.network_visit_builder import (
+    NetworkVisitBuilder,
+)
+from ropeway_skip_stop_optimization.optimization.ean.builders.physical_network_builder import (
+    PhysicalMovementNetworkBuilder,
+)
 
 __all__ = [
     "AllPairsHeadwayPairBuilder",
     "ContinuousAllStopMaxCabinStartBuilder",
     "DeterministicPhysicalNodeToSwitchStartBuilder",
     "EanBuildArtifactBuilder",
+    "EanCompatibilityArtifactAssembler",
+    "EanArtifactConstructionMode",
     "EanCabinStartBuilder",
     "EvenlySpacedAllStopCabinStartBuilder",
     "HeadwayCandidateBuilder",
@@ -71,11 +90,16 @@ __all__ = [
     "EanPassengerCandidateBuilder",
     "EanPassengerCandidateBuildResult",
     "OperatingSpeedHeadwayDurationBuilder",
+    "NetworkEanBuildArtifactBuilder",
+    "NetworkSkipStopTimingBuilder",
+    "NetworkVisitBuilder",
+    "PhysicalMovementNetworkBuilder",
     "PhysicalRingTopologyBuilder",
     "RingSwitchVisitBuilder",
     "RingEanBuildArtifactBuilder",
     "RingPhysicalTopology",
     "RingStationTopology",
+    "ResolvedEanArtifactInputs",
     "PhysicalSkipStopTimingBuilder",
     "SkipStopHeadwayCheckpointBuilder",
     "SkipStopTimingBuilder",

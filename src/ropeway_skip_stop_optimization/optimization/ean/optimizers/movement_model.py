@@ -1,10 +1,18 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Any
 
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
+from ropeway_skip_stop_optimization.optimization.ean.build_profile import (
+    EanBuildProgressCallback,
+    EanBuildProgressKind,
+    EanBuildStage,
+    EanMovementBuildMetrics,
+    emit_build_progress,
+)
 from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     HORIZON_ACTIVATION_EPSILON_SECONDS,
     EanHorizonFormulation,
@@ -16,6 +24,10 @@ from ropeway_skip_stop_optimization.optimization.ean.headway_semantics import (
     PLATFORM_EXIT_WAIT_OCCUPANCY_SEMANTICS,
     POINT_HEADWAY_SEMANTICS,
     uses_platform_exit_wait_occupancy,
+)
+from ropeway_skip_stop_optimization.optimization.ean.headway_classification import (
+    EanFixedStartHeadwayClassifier,
+    EanHeadwayPairClassification,
 )
 from ropeway_skip_stop_optimization.optimization.ean.horizon import (
     add_visit_horizon_activation,
@@ -114,11 +126,19 @@ class EanHeadwayConstraintPool:
     horizon_formulation: EanHorizonFormulation
     big_m: float
     headway_order: dict[str, Any]
+    classifier: EanFixedStartHeadwayClassifier | None = None
+    materialized_pair_id_set: set[str] = field(default_factory=set)
+    fixed_pair_count: int = 0
+    disjunctive_pair_count: int = 0
+    redundant_pair_count: int = 0
     accepts_augmentation: bool = True
+    progress_callback: EanBuildProgressCallback | None = None
+    progress_started: float | None = None
+    checkpoint_count: int | None = None
 
     @property
     def materialized_pair_ids(self) -> frozenset[str]:
-        return frozenset(self.headway_order)
+        return frozenset(self.materialized_pair_id_set)
 
     def add_pairs(self, pairs: tuple[HeadwayPair, ...]) -> None:
         if pairs and not self.accepts_augmentation:
@@ -126,11 +146,57 @@ class EanHeadwayConstraintPool:
         pair_ids = [pair.id for pair in pairs]
         if len(pair_ids) != len(set(pair_ids)):
             raise ValueError("headway augmentation batch contains duplicate pairs")
-        duplicates = set(pair_ids) & set(self.headway_order)
+        duplicates = set(pair_ids) & self.materialized_pair_id_set
         if duplicates:
             raise ValueError(f"headway pairs already materialized: {sorted(duplicates)!r}")
-        for pair in pairs:
+        report_started = self.progress_started or perf_counter()
+        initial_pair_count = len(self.materialized_pair_id_set)
+        initial_fixed_pair_count = self.fixed_pair_count
+        initial_disjunctive_pair_count = self.disjunctive_pair_count
+        self.model.update()
+        base_variable_count = int(self.model.NumVars)
+        base_constraint_count = int(self.model.NumConstrs)
+        seen_checkpoint_ids: set[str] = set()
+        for index, pair in enumerate(pairs, start=1):
+            seen_checkpoint_ids.add(pair.checkpoint_id)
             self._add_pair(pair)
+            if (
+                self.progress_callback is not None
+                and (index % 100_000 == 0 or index == len(pairs))
+            ):
+                materialized = initial_pair_count + index
+                emit_build_progress(
+                    self.progress_callback,
+                    stage=EanBuildStage.HEADWAY_CONSTRAINTS,
+                    kind=EanBuildProgressKind.PROGRESS,
+                    started=report_started,
+                    checkpoint_count=self.checkpoint_count,
+                    processed_checkpoint_count=(
+                        len(seen_checkpoint_ids)
+                        if index == len(pairs)
+                        else max(0, len(seen_checkpoint_ids) - 1)
+                    ),
+                    candidate_count=len(self.candidate_by_id),
+                    pair_count=materialized,
+                    fixed_pair_count=self.fixed_pair_count,
+                    disjunctive_pair_count=self.disjunctive_pair_count,
+                    redundant_pair_count=self.redundant_pair_count,
+                    variable_count=(
+                        base_variable_count
+                        + self.disjunctive_pair_count
+                        - initial_disjunctive_pair_count
+                    ),
+                    constraint_count=(
+                        base_constraint_count
+                        + self.fixed_pair_count
+                        - initial_fixed_pair_count
+                        + 2
+                        * (
+                            self.disjunctive_pair_count
+                            - initial_disjunctive_pair_count
+                        )
+                    ),
+                )
         self.model.update()
 
     def _add_pair(self, pair: HeadwayPair) -> None:
@@ -151,6 +217,34 @@ class EanHeadwayConstraintPool:
         if self.horizon_formulation is EanHorizonFormulation.EXACT_TIME_ACTIVATION:
             first_inactive += 1 - self.candidate_within_horizon[first_candidate.id]
             second_inactive += 1 - self.candidate_within_horizon[second_candidate.id]
+        classification = (
+            self.classifier.classify(pair)
+            if self.classifier is not None
+            else EanHeadwayPairClassification.DISJUNCTIVE
+        )
+        self.materialized_pair_id_set.add(pair.id)
+        if classification is EanHeadwayPairClassification.REDUNDANT:
+            self.redundant_pair_count += 1
+            return
+        if classification is EanHeadwayPairClassification.FIXED_FORWARD:
+            self.fixed_pair_count += 1
+            self.model.addConstr(
+                first_times.leader_clear_time + pair.headway_seconds
+                <= second_times.follower_enter_time
+                + self.big_m * (first_inactive + second_inactive),
+                name=f"headway_fixed_forward_{pair.id}_{first_times.semantics_label}",
+            )
+            return
+        if classification is EanHeadwayPairClassification.FIXED_REVERSE:
+            self.fixed_pair_count += 1
+            self.model.addConstr(
+                second_times.leader_clear_time + pair.headway_seconds
+                <= first_times.follower_enter_time
+                + self.big_m * (first_inactive + second_inactive),
+                name=f"headway_fixed_reverse_{pair.id}_{first_times.semantics_label}",
+            )
+            return
+        self.disjunctive_pair_count += 1
         order = self.model.addVar(vtype=self.binary_vtype, name=f"order_{pair.id}")
         self.headway_order[pair.id] = order
         self.model.addConstr(
@@ -183,6 +277,7 @@ class EanMovementModel:
     variable_count: int
     constraint_count: int
     nonzero_count: int
+    build_metrics: EanMovementBuildMetrics
 
     def extract_plan(self) -> EanMovementPlan:
         return extract_movement_plan(self)
@@ -240,7 +335,15 @@ class EanMovementModelBuilder:
         binary_vtype: Any,
         artifact: EanBuildArtifact,
         optimization_config: EanOptimizationConfig,
+        progress_callback: EanBuildProgressCallback | None = None,
     ) -> EanMovementModel:
+        base_started = perf_counter()
+        emit_build_progress(
+            progress_callback,
+            stage=EanBuildStage.MOVEMENT_VARIABLES,
+            kind=EanBuildProgressKind.STARTED,
+            started=base_started,
+        )
         artifact.validate()
         require_supported_waiting_modes(artifact)
 
@@ -376,6 +479,33 @@ class EanMovementModelBuilder:
             visit_active=route_active,
             big_m=big_m,
         )
+        model.update()
+        base_seconds = perf_counter() - base_started
+        emit_build_progress(
+            progress_callback,
+            stage=EanBuildStage.MOVEMENT_VARIABLES,
+            kind=EanBuildProgressKind.FINISHED,
+            started=base_started,
+            candidate_count=len(artifact.headway_candidates),
+            pair_count=0,
+            variable_count=int(model.NumVars),
+            constraint_count=int(model.NumConstrs),
+            nonzero_count=int(model.NumNZs),
+        )
+
+        headway_started = perf_counter()
+        emit_build_progress(
+            progress_callback,
+            stage=EanBuildStage.HEADWAY_CONSTRAINTS,
+            kind=EanBuildProgressKind.STARTED,
+            started=headway_started,
+            checkpoint_count=len(artifact.headway_checkpoints),
+            candidate_count=len(artifact.headway_candidates),
+            pair_count=0,
+            variable_count=int(model.NumVars),
+            constraint_count=int(model.NumConstrs),
+            nonzero_count=int(model.NumNZs),
+        )
         headway_constraint_pool = _add_headway_constraints(
             model=model,
             binary_vtype=binary_vtype,
@@ -392,8 +522,34 @@ class EanMovementModelBuilder:
             big_m=big_m,
             visit_active=route_active,
             horizon_formulation=optimization_config.formulation.horizon,
+            enable_fixed_start_headway_precedence=(
+                optimization_config.enable_fixed_start_headway_precedence
+            ),
+            progress_callback=progress_callback,
+            progress_started=headway_started,
         )
+        headway_seconds = perf_counter() - headway_started
+        emit_build_progress(
+            progress_callback,
+            stage=EanBuildStage.HEADWAY_CONSTRAINTS,
+            kind=EanBuildProgressKind.FINISHED,
+            started=headway_started,
+            checkpoint_count=len(artifact.headway_checkpoints),
+            processed_checkpoint_count=len(artifact.headway_checkpoints),
+            candidate_count=len(artifact.headway_candidates),
+            pair_count=len(artifact.headway_pairs),
+            fixed_pair_count=headway_constraint_pool.fixed_pair_count,
+            disjunctive_pair_count=(
+                headway_constraint_pool.disjunctive_pair_count
+            ),
+            redundant_pair_count=headway_constraint_pool.redundant_pair_count,
+            variable_count=int(model.NumVars),
+            constraint_count=int(model.NumConstrs),
+            nonzero_count=int(model.NumNZs),
+        )
+        final_update_started = perf_counter()
         model.update()
+        final_update_seconds = perf_counter() - final_update_started
         checkpoint_within_horizon = headway_constraint_pool.candidate_within_horizon
         headway_order = headway_constraint_pool.headway_order
         variables = EanMovementVariables(
@@ -421,6 +577,18 @@ class EanMovementModelBuilder:
             variable_count=int(model.NumVars),
             constraint_count=int(model.NumConstrs),
             nonzero_count=int(model.NumNZs),
+            build_metrics=EanMovementBuildMetrics(
+                variables_and_base_constraints_seconds=base_seconds,
+                headway_constraints_seconds=headway_seconds,
+                final_update_seconds=final_update_seconds,
+                fixed_headway_pair_count=headway_constraint_pool.fixed_pair_count,
+                disjunctive_headway_pair_count=(
+                    headway_constraint_pool.disjunctive_pair_count
+                ),
+                redundant_headway_pair_count=(
+                    headway_constraint_pool.redundant_pair_count
+                ),
+            ),
         )
 
 
@@ -621,6 +789,9 @@ def _add_headway_constraints(
     big_m: float,
     visit_active: dict[VisitKey, Any],
     horizon_formulation: EanHorizonFormulation,
+    enable_fixed_start_headway_precedence: bool,
+    progress_callback: EanBuildProgressCallback | None,
+    progress_started: float,
 ) -> EanHeadwayConstraintPool:
     candidate_times_by_id: dict[str, HeadwayTimeExpressions] = {}
     candidate_inactive_by_id: dict[str, Any] = {}
@@ -680,6 +851,14 @@ def _add_headway_constraints(
         horizon_formulation=horizon_formulation,
         big_m=big_m,
         headway_order=headway_order,
+        classifier=(
+            EanFixedStartHeadwayClassifier.build(artifact)
+            if enable_fixed_start_headway_precedence
+            else None
+        ),
+        progress_callback=progress_callback,
+        progress_started=progress_started,
+        checkpoint_count=len(artifact.headway_checkpoints),
     )
     pool.add_pairs(artifact.headway_pairs)
     if artifact.headway_pair_scope is EanHeadwayPairScope.COMPLETE:

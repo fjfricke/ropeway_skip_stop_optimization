@@ -10,6 +10,14 @@ from typing import Any
 
 from ropeway_skip_stop_optimization.models import Scenario
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
+from ropeway_skip_stop_optimization.optimization.ean.build_profile import (
+    EanArtifactBuildMetrics,
+    EanBuildProgressCallback,
+    EanBuildProgressKind,
+    EanBuildStage,
+    emit_build_progress,
+    peak_rss_bytes,
+)
 from ropeway_skip_stop_optimization.optimization.ean.builders.passenger_builder import (
     EanPassengerCandidateBuilder,
 )
@@ -114,6 +122,8 @@ class EanSolveConfig:
     progress_recorder: Any | None = None
     diagnostic_recorders: tuple[Any, ...] = ()
     progress_sample_interval_seconds: float = 5.0
+    build_only: bool = False
+    build_progress_callback: EanBuildProgressCallback | None = None
 
     def validate(self) -> None:
         self.solver_policy.validate()
@@ -179,6 +189,14 @@ class EanModelBuildMetrics:
     mip_start_seconds: float
     mip_start_objective_value_seconds: float | None
     gurobi_setup_total_seconds: float
+    artifact: EanArtifactBuildMetrics | None = None
+    movement_variables_seconds: float = 0.0
+    headway_constraints_seconds: float = 0.0
+    final_model_update_seconds: float = 0.0
+    fixed_headway_pair_count: int = 0
+    disjunctive_headway_pair_count: int = 0
+    redundant_headway_pair_count: int = 0
+    peak_rss_bytes: int | None = None
 
 
 @dataclass(frozen=True)
@@ -334,6 +352,12 @@ class EanOptimizer:
                     "board_time_projected_journey_time requires journey_time objective"
                 )
             candidate_started = perf_counter()
+            emit_build_progress(
+                self.config.build_progress_callback,
+                stage=EanBuildStage.PASSENGER_CANDIDATES,
+                kind=EanBuildProgressKind.STARTED,
+                started=candidate_started,
+            )
             passenger_build = (
                 problem.passenger_builder
                 or EanPassengerCandidateBuilder(
@@ -341,6 +365,13 @@ class EanOptimizer:
                 )
             ).build(problem.scenario, problem.artifact)
             passenger_candidate_runtime = perf_counter() - candidate_started
+            emit_build_progress(
+                self.config.build_progress_callback,
+                stage=EanBuildStage.PASSENGER_CANDIDATES,
+                kind=EanBuildProgressKind.FINISHED,
+                started=candidate_started,
+                candidate_count=len(passenger_build.ride_candidates),
+            )
 
         setup_started = perf_counter()
         if problem.artifact.headway_pair_scope is EanHeadwayPairScope.SPARSE:
@@ -356,6 +387,7 @@ class EanOptimizer:
             binary_vtype=GRB.BINARY,
             artifact=problem.artifact,
             optimization_config=optimization_config,
+            progress_callback=self.config.build_progress_callback,
         )
         movement_runtime = perf_counter() - movement_started
         movement_fixing_runtime = 0.0
@@ -368,9 +400,21 @@ class EanOptimizer:
         mip_start_unserved_count = None
         resolved_mip_start_strategy = None
         if isinstance(problem, EanPassengerServiceProblem):
-            mip_start_strategy = _resolved_mip_start_strategy(problem)
+            mip_start_strategy = _resolved_mip_start_strategy(
+                problem,
+                build_only=self.config.build_only,
+            )
             resolved_mip_start_strategy = mip_start_strategy
             passenger_started = perf_counter()
+            emit_build_progress(
+                self.config.build_progress_callback,
+                stage=EanBuildStage.PASSENGER_MODEL,
+                kind=EanBuildProgressKind.STARTED,
+                started=passenger_started,
+                candidate_count=len(passenger_build.ride_candidates),
+                variable_count=int(model.NumVars),
+                constraint_count=int(model.NumConstrs),
+            )
             passenger_model = EanPassengerModelBuilder().build(
                 scenario=problem.scenario,
                 movement_model=movement_model,
@@ -382,8 +426,26 @@ class EanOptimizer:
                 passenger_build=passenger_build,
             )
             passenger_runtime = perf_counter() - passenger_started
-            if _should_apply_mip_start(problem, self.config.checkpoint):
+            emit_build_progress(
+                self.config.build_progress_callback,
+                stage=EanBuildStage.PASSENGER_MODEL,
+                kind=EanBuildProgressKind.FINISHED,
+                started=passenger_started,
+                candidate_count=len(passenger_build.ride_candidates),
+                variable_count=int(model.NumVars),
+                constraint_count=int(model.NumConstrs),
+                nonzero_count=int(model.NumNZs),
+            )
+            if _should_apply_mip_start(mip_start_strategy, self.config.checkpoint):
                 mip_start_started = perf_counter()
+                emit_build_progress(
+                    self.config.build_progress_callback,
+                    stage=EanBuildStage.MIP_START,
+                    kind=EanBuildProgressKind.STARTED,
+                    started=mip_start_started,
+                    variable_count=int(model.NumVars),
+                    constraint_count=int(model.NumConstrs),
+                )
                 seed = EanAllStopMipStartSeedBuilder().build(
                     problem.artifact,
                     optimization_config.formulation.horizon,
@@ -447,11 +509,39 @@ class EanOptimizer:
                             mip_start_passenger_objective
                         )
                 mip_start_runtime = perf_counter() - mip_start_started
+                emit_build_progress(
+                    self.config.build_progress_callback,
+                    stage=EanBuildStage.MIP_START,
+                    kind=EanBuildProgressKind.FINISHED,
+                    started=mip_start_started,
+                    variable_count=int(model.NumVars),
+                    constraint_count=int(model.NumConstrs),
+                    nonzero_count=int(model.NumNZs),
+                )
         else:
             model.setObjective(0.0, GRB.MINIMIZE)
 
         _configure_checkpoints(model, self.config.checkpoint)
+        final_update_started = perf_counter()
+        emit_build_progress(
+            self.config.build_progress_callback,
+            stage=EanBuildStage.FINAL_MODEL_UPDATE,
+            kind=EanBuildProgressKind.STARTED,
+            started=final_update_started,
+            variable_count=int(model.NumVars),
+            constraint_count=int(model.NumConstrs),
+        )
         model.update()
+        final_update_runtime = perf_counter() - final_update_started
+        emit_build_progress(
+            self.config.build_progress_callback,
+            stage=EanBuildStage.FINAL_MODEL_UPDATE,
+            kind=EanBuildProgressKind.FINISHED,
+            started=final_update_started,
+            variable_count=int(model.NumVars),
+            constraint_count=int(model.NumConstrs),
+            nonzero_count=int(model.NumNZs),
+        )
         _bind_diagnostic_recorders(
             self.config.diagnostic_recorders,
             movement_model,
@@ -469,6 +559,24 @@ class EanOptimizer:
             mip_start_seconds=mip_start_runtime,
             mip_start_objective_value_seconds=mip_start_objective_value,
             gurobi_setup_total_seconds=setup_runtime,
+            artifact=problem.artifact.build_metrics,
+            movement_variables_seconds=(
+                movement_model.build_metrics.variables_and_base_constraints_seconds
+            ),
+            headway_constraints_seconds=(
+                movement_model.build_metrics.headway_constraints_seconds
+            ),
+            final_model_update_seconds=final_update_runtime,
+            fixed_headway_pair_count=(
+                movement_model.build_metrics.fixed_headway_pair_count
+            ),
+            disjunctive_headway_pair_count=(
+                movement_model.build_metrics.disjunctive_headway_pair_count
+            ),
+            redundant_headway_pair_count=(
+                movement_model.build_metrics.redundant_headway_pair_count
+            ),
+            peak_rss_bytes=peak_rss_bytes(),
         )
         _log_model_summary(
             model=model,
@@ -479,31 +587,36 @@ class EanOptimizer:
             solver_policy=self.config.solver_policy,
             enabled=self.config.log_to_console,
         )
-        _prepare_diagnostic_recorders(
-            self.config.diagnostic_recorders,
-            model,
-            GRB,
-        )
-        progress_start = _optimize(
-            model=model,
-            grb=GRB,
-            recorder=self.config.progress_recorder,
-            diagnostic_recorders=self.config.diagnostic_recorders,
-            sample_interval_seconds=self.config.progress_sample_interval_seconds,
-        )
-        _write_final_checkpoint(model, self.config.checkpoint)
-        progress_samples = _progress_samples(
-            self.config.progress_recorder,
-            progress_start,
-        )
-        solve_phase_metrics = _progress_phase_metrics(
-            self.config.progress_recorder
-        )
-        diagnostics = _solver_diagnostics(
-            model,
-            GRB,
-            self.config.solver_policy,
-        )
+        if self.config.build_only:
+            progress_samples = ()
+            solve_phase_metrics = None
+            diagnostics = _build_only_diagnostics(self.config.solver_policy)
+        else:
+            _prepare_diagnostic_recorders(
+                self.config.diagnostic_recorders,
+                model,
+                GRB,
+            )
+            progress_start = _optimize(
+                model=model,
+                grb=GRB,
+                recorder=self.config.progress_recorder,
+                diagnostic_recorders=self.config.diagnostic_recorders,
+                sample_interval_seconds=self.config.progress_sample_interval_seconds,
+            )
+            _write_final_checkpoint(model, self.config.checkpoint)
+            progress_samples = _progress_samples(
+                self.config.progress_recorder,
+                progress_start,
+            )
+            solve_phase_metrics = _progress_phase_metrics(
+                self.config.progress_recorder
+            )
+            diagnostics = _solver_diagnostics(
+                model,
+                GRB,
+                self.config.solver_policy,
+            )
         checkpoint_diagnostics = _checkpoint_diagnostics(self.config.checkpoint)
         if model.SolCount <= 0:
             return EanOptimizationResult(
@@ -824,11 +937,11 @@ def _fixed_movement_metadata(
 
 
 def _should_apply_mip_start(
-    problem: EanPassengerServiceProblem,
+    strategy: EanMipStartStrategy,
     checkpoint: GurobiCheckpointConfig | None,
 ) -> bool:
     return (
-        _resolved_mip_start_strategy(problem) is not EanMipStartStrategy.NONE
+        strategy is not EanMipStartStrategy.NONE
         and (
             checkpoint is None
             or checkpoint.read_solution_path is None
@@ -838,10 +951,21 @@ def _should_apply_mip_start(
 
 def _resolved_mip_start_strategy(
     problem: EanPassengerServiceProblem,
+    *,
+    build_only: bool = False,
 ) -> EanMipStartStrategy:
     strategy = problem.mip_start_strategy
     if strategy is EanMipStartStrategy.AUTO:
-        return EanMipStartStrategy.OPTIMIZED_ALL_STOP
+        return (
+            EanMipStartStrategy.NONE
+            if build_only
+            else EanMipStartStrategy.OPTIMIZED_ALL_STOP
+        )
+    if build_only and strategy is EanMipStartStrategy.OPTIMIZED_ALL_STOP:
+        raise ValueError(
+            "build-only mode cannot run the optimized_all_stop auxiliary solve; "
+            "use --ean-mip-start none or greedy_all_stop"
+        )
     return strategy
 
 
@@ -1195,6 +1319,20 @@ def _solver_diagnostics(
         "runtime_seconds": _safe_finite_float_attr(model, "Runtime"),
         "node_count": _safe_finite_float_attr(model, "NodeCount"),
         "solution_count": solution_count,
+        "mip_gap_target": policy.mip_gap,
+        "time_limit_seconds": policy.time_limit_seconds,
+    }
+
+
+def _build_only_diagnostics(policy: GurobiSolverPolicy) -> dict[str, Any]:
+    return {
+        "status": "build_only",
+        "solver_status": "NOT_STARTED",
+        "best_bound": None,
+        "mip_gap": None,
+        "runtime_seconds": None,
+        "node_count": None,
+        "solution_count": 0,
         "mip_gap_target": policy.mip_gap,
         "time_limit_seconds": policy.time_limit_seconds,
     }

@@ -69,41 +69,14 @@ The following ideas are explicitly outside the implementation scope:
 Those remain research or later formulation alternatives. They must not be
 reported as equivalent build optimizations for the eager model.
 
-## Phase 0: Instrument and Reproduce the Baseline
-
-Add structured timings and peak-memory observations for every major build
-stage:
-
-1. movement artifact and visits;
-2. headway candidates;
-3. pair classification or pair materialization;
-4. movement variables and affine time expressions;
-5. order variables and headway rows;
-6. passenger variables and constraints;
-7. MIP-start application;
-8. final model update;
-9. JSON/export serialization.
-
-Expose these measurements in benchmark metadata and progress output. Progress
-must advance during long construction stages rather than remain silent until
-`optimize()` starts. Report candidate count, processed checkpoint count,
-classified pair count, retained disjunction count, row count, variable count,
-elapsed time, and available memory data where supported.
-
-Add an `--ean-build-only` CLI mode. It must build the selected artifact and
-Gurobi model, report statistics, optionally write the configured artifacts,
-and exit before optimization. This keeps construction experiments independent
-of a 30-minute or longer solve.
-
-Record reproducible baselines for at least:
-
-- the small one-station regression case;
-- the three-station ring;
-- the five-station OIP ring with the all-stop fleet size;
-- the five-station OIP ring with twice the all-stop fleet size, skip enabled,
-  and waiting enabled.
-
 ## Phase 1: Exact Pair Classification
+
+The fixed-start precursor is implemented as the opt-in
+`fixed_start_headway_precedence` reduction. It reuses propagated fixed-start
+visit bounds and currently identifies fixed-forward and fixed-reverse pairs.
+The remaining phase extends the proof to redundant activation/horizon cases
+and to OIP-safe selectable-boundary-state bounds before considering a default
+change.
 
 Replace the assumption that every candidate combination needs an order binary
 with a four-way exact classification:
@@ -334,16 +307,15 @@ benchmark harness produces reproducible data.
 
 Execute the work in this order:
 
-1. instrumentation, progress, and build-only CLI;
-2. safe candidate time-bound component;
-3. exact pair classifier and focused tests;
-4. compact conflict representation behind an explicit mode;
-5. batched Gurobi construction;
-6. compact naming and checkpoint compatibility;
-7. compact export and frontend compatibility;
-8. equivalence suite and full regression suite;
-9. performance benchmark and default-mode decision;
-10. thesis and architecture documentation.
+1. safe candidate time-bound component;
+2. exact pair classifier and focused tests;
+3. compact conflict representation behind an explicit mode;
+4. batched Gurobi construction;
+5. compact naming and checkpoint compatibility;
+6. compact export and frontend compatibility;
+7. equivalence suite and full regression suite;
+8. performance benchmark and default-mode decision;
+9. thesis and architecture documentation.
 
 Each phase must remain independently measurable. Do not combine pruning,
 representation, and matrix construction into one un-attributable benchmark.
@@ -365,7 +337,6 @@ representation, and matrix construction into one un-attributable benchmark.
 ## Exit Condition
 
 The plan is complete when the compact eager builder is proven equivalent to
-the legacy all-pairs model, the full regression suite passes, build-only and
-progress reporting expose all major setup stages, checkpoint and frontend
-workflows remain valid, and reproducible five-station OIP benchmarks quantify
-the time and memory effects.
+the legacy all-pairs model, the full regression suite passes, checkpoint and
+frontend workflows remain valid, and reproducible five-station OIP benchmarks
+quantify the time and memory effects.

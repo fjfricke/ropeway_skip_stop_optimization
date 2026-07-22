@@ -103,7 +103,7 @@ class EanPeriodicRouteCapacityBound:
 
         self.validate()
         artifact.validate()
-        if tuple(leg.switch_id for leg in self.legs) != artifact.switch_cycle:
+        if tuple(leg.switch_id for leg in self.legs) != artifact.circulation_state_ids:
             raise ValueError("periodic route legs do not follow the artifact ring")
         timing_by_switch_id = {
             timing.switch_id: timing for timing in artifact.timings
@@ -114,7 +114,7 @@ class EanPeriodicRouteCapacityBound:
                 for checkpoint in artifact.headway_checkpoints
                 if checkpoint.switch_id == switch_id
             )
-            for switch_id in artifact.switch_cycle
+            for switch_id in artifact.circulation_state_ids
         }
         try:
             expected_legs = tuple(
@@ -156,7 +156,7 @@ class EanPeriodicRouteCapacityBoundBuilder:
                 for checkpoint in artifact.headway_checkpoints
                 if checkpoint.switch_id == switch_id
             )
-            for switch_id in artifact.switch_cycle
+            for switch_id in artifact.circulation_state_ids
         }
         thresholds = tuple(
             sorted({checkpoint.headway_seconds for checkpoint in artifact.headway_checkpoints})
@@ -164,7 +164,7 @@ class EanPeriodicRouteCapacityBoundBuilder:
         best: EanPeriodicRouteCapacityBound | None = None
         for threshold in thresholds:
             legs: list[EanPeriodicRouteLeg] = []
-            for switch_id in artifact.switch_cycle:
+            for switch_id in artifact.circulation_state_ids:
                 leg = _longest_admissible_leg(
                     timing=timings[switch_id],
                     checkpoints=checkpoints_by_switch[switch_id],

@@ -240,8 +240,8 @@ class EanFleetModel:
         )
         if selected_rope is not None:
             phase_index = selected_rope.visit_index
-            previous_switch_id = self.artifact.switch_cycle[
-                (phase_index - 1) % len(self.artifact.switch_cycle)
+            previous_switch_id = self.artifact.circulation_state_ids[
+                (phase_index - 1) % len(self.artifact.circulation_state_ids)
             ]
             rope_seconds = self.timing_by_switch_id[
                 previous_switch_id
@@ -392,8 +392,8 @@ class EanFleetModelBuilder:
                     exit_switch_time[key] >= -big_m * (1 - station),
                     name=f"initial_station_not_cleared_{cabin_id}_{visit.visit_index}",
                 )
-                previous_switch_id = artifact.switch_cycle[
-                    (phase_index - 1) % len(artifact.switch_cycle)
+                previous_switch_id = artifact.circulation_state_ids[
+                    (phase_index - 1) % len(artifact.circulation_state_ids)
                 ]
                 rope_seconds = timing_by_switch_id[
                     previous_switch_id
@@ -495,8 +495,8 @@ def _add_initial_rope_headways(
     cabin_ids = sorted(visits_by_cabin_id)
 
     for phase_index in range(parameters.initial_phase_visit_count):
-        previous_switch_id = artifact.switch_cycle[
-            (phase_index - 1) % len(artifact.switch_cycle)
+        previous_switch_id = artifact.circulation_state_ids[
+            (phase_index - 1) % len(artifact.circulation_state_ids)
         ]
         rope_seconds = timing_by_switch_id[
             previous_switch_id

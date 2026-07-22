@@ -35,6 +35,14 @@ class ProgressReporter:
             return
         yield from tqdm(iterable, desc=label, total=total, leave=False)
 
+    def report(self, label: str, **values: object) -> None:
+        if not self.enabled:
+            return
+        details = " ".join(
+            f"{key}={value}" for key, value in values.items() if value is not None
+        )
+        self.logger.info("%s%s", label, f" {details}" if details else "")
+
 
 def configure_progress_logging() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")

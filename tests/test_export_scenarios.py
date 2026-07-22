@@ -55,6 +55,35 @@ def test_json_codec_sorts_sets_deterministically() -> None:
     assert to_jsonable(frozenset(("z", "a", "m"))) == ["a", "m", "z"]
 
 
+def test_ean_build_only_exports_profile_without_solution_artifacts(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("gurobipy")
+
+    result = export_artifact_set(
+        example_id="three_station_v0",
+        artifact_set_id="ean_passenger_journey_time",
+        output_root=tmp_path,
+        ean_build_only=True,
+    )
+
+    profile_path = tmp_path / "three_station_v0" / "ean_model_build_profile.json"
+    profile = json.loads(profile_path.read_text(encoding="utf-8"))
+    assert result.artifact_set_id == "ean_passenger_journey_time_build_only"
+    assert profile_path in result.artifact_paths
+    assert profile["status"] == "build_only"
+    assert profile["model"]["variable_count"] > 0
+    assert profile["model"]["constraint_count"] > 0
+    assert profile["model"]["build_metrics"]["headway_constraints_seconds"] > 0
+    assert profile["artifact"]["build_metrics"]["pair_count"] > 0
+    assert profile["serialization_seconds_by_path"]
+    assert not (
+        tmp_path
+        / "three_station_v0"
+        / "ean_passenger_service_journey_time_movement_plan.json"
+    ).exists()
+
+
 def test_exports_greedy_all_stop_manifest_and_movement_plan_json(tmp_path: Path) -> None:
     result = export_artifact_set(output_root=tmp_path, artifact_set_id="greedy_all_stop")
     output_path = tmp_path / "three_station_v0" / "greedy_all_stop_movement_plan.json"

@@ -584,7 +584,7 @@ def test_fixed_k_partial_mip_start_leaves_added_cabins_unset() -> None:
 
 
 class _NoHeadwayPairBuilder(HeadwayPairBuilder):
-    def build(self, candidates, checkpoints):
+    def build(self, candidates, checkpoints, *, progress_callback=None):
         return ()
 
 

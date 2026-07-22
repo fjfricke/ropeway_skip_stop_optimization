@@ -28,15 +28,20 @@ from ropeway_skip_stop_optimization.optimization.discrete_time import (
 from ropeway_skip_stop_optimization.optimization.ean import (
     EarliestAllStopEanMovementPlanBuilder,
     EanBuildArtifact,
+    EanBuildProgressEvent,
+    EanArtifactConstructionMode,
     EanMovementPlan,
     EanMipStartStrategy,
     EanMovementFeasibilityProblem,
+    EanOptimizationProblemKind,
     EanOptimizationResult,
     EanOptimizer,
     EanPassengerObjective,
     EanPassengerServiceProblem,
     EanPhysicalReplay,
     EanOptimizationConfig,
+    NetworkEanBuildArtifactBuilder,
+    RingEanBuildArtifactBuilder,
     EanSolveConfig,
     GurobiCheckpointConfig,
     GurobiSolverPolicy,
@@ -59,6 +64,7 @@ class ArtifactKind(StrEnum):
     EAN_INPUT = "ean_input"
     EAN_RESULT = "ean_result"
     EAN_REPLAY = "ean_replay"
+    BUILD_PROFILE = "build_profile"
 
 
 class ArtifactSetBackend(StrEnum):
@@ -84,10 +90,14 @@ class ExportContext:
     ean_checkpoint_config: GurobiCheckpointConfig | None = None
     ean_optimization_config: EanOptimizationConfig = field(default_factory=EanOptimizationConfig)
     ean_mip_start_strategy: EanMipStartStrategy = (
-        EanMipStartStrategy.OPTIMIZED_ALL_STOP
+        EanMipStartStrategy.AUTO
     )
     ean_progress_recorder: Any | None = None
     ean_progress_sample_interval_seconds: float = 5.0
+    ean_build_only: bool = False
+    ean_artifact_construction: EanArtifactConstructionMode = (
+        EanArtifactConstructionMode.LEGACY_RING
+    )
 
     _scenario: Scenario | None = None
     _discrete_scenario: DiscreteScenario | None = None
@@ -98,12 +108,14 @@ class ExportContext:
     _ean_all_stop_plan: EanMovementPlan | None = None
     _ean_physical_replay: EanPhysicalReplay | None = None
     _ean_skip_stop_plan: EanMovementPlan | None = None
+    _ean_skip_stop_result: EanOptimizationResult | None = None
     _ean_skip_stop_replay: EanPhysicalReplay | None = None
     _ean_passenger_service_results: dict[EanPassengerObjective, EanOptimizationResult] = field(default_factory=dict)
     _ean_passenger_service_replays: dict[EanPassengerObjective, EanPhysicalReplay] = field(default_factory=dict)
     _ean_passenger_service_progress_recorders: dict[EanPassengerObjective, GurobiMipProgressRecorder] = field(
         default_factory=dict
     )
+    serialization_metrics: dict[str, float] = field(default_factory=dict)
 
     def scenario(self) -> Scenario:
         if self._scenario is None:
@@ -157,7 +169,17 @@ class ExportContext:
                 scenario = self.scenario()
                 config = example.build_ean_config(scenario)
                 builder = example.build_ean_artifact_builder(scenario, config)
-                self._ean_artifact = builder.build(scenario, config)
+                if self.ean_artifact_construction is EanArtifactConstructionMode.NETWORK:
+                    if not isinstance(builder, RingEanBuildArtifactBuilder):
+                        raise ValueError(
+                            "network EAN construction currently requires a legacy ring builder adapter"
+                        )
+                    builder = NetworkEanBuildArtifactBuilder.from_ring(builder)
+                self._ean_artifact = builder.build(
+                    scenario,
+                    config,
+                    progress_callback=self._ean_build_progress,
+                )
         return self._ean_artifact
 
     def ean_all_stop_plan(self) -> EanMovementPlan:
@@ -182,17 +204,24 @@ class ExportContext:
     def ean_skip_stop_plan(self) -> EanMovementPlan:
         if self._ean_skip_stop_plan is None:
             with self.progress.phase("export.context.ean_skip_stop_plan"):
-                result = EanOptimizer(
-                    EanSolveConfig(
-                        solver_policy=self.ean_solver_policy,
-                        log_to_console=self.progress.enabled,
-                        optimization_config=self.ean_optimization_config,
-                    )
-                ).solve(EanMovementFeasibilityProblem(self.ean_artifact()))
+                result = self.ean_skip_stop_result()
                 if result.movement_plan is None:
                     raise ValueError(f"EAN skip/stop optimizer did not produce a plan; status={result.metadata.status}")
                 self._ean_skip_stop_plan = result.movement_plan
         return self._ean_skip_stop_plan
+
+    def ean_skip_stop_result(self) -> EanOptimizationResult:
+        if self._ean_skip_stop_result is None:
+            self._ean_skip_stop_result = EanOptimizer(
+                EanSolveConfig(
+                    solver_policy=self.ean_solver_policy,
+                    log_to_console=(self.progress.enabled and not self.ean_build_only),
+                    optimization_config=self.ean_optimization_config,
+                    build_only=self.ean_build_only,
+                    build_progress_callback=self._ean_build_progress,
+                )
+            ).solve(EanMovementFeasibilityProblem(self.ean_artifact()))
+        return self._ean_skip_stop_result
 
     def ean_skip_stop_replay(self) -> EanPhysicalReplay:
         if self._ean_skip_stop_replay is None:
@@ -213,11 +242,15 @@ class ExportContext:
                 result = EanOptimizer(
                     EanSolveConfig(
                         solver_policy=self.ean_solver_policy,
-                        log_to_console=self.progress.enabled,
+                        log_to_console=(
+                            self.progress.enabled and not self.ean_build_only
+                        ),
                         checkpoint=self.ean_checkpoint_config,
                         optimization_config=self.ean_optimization_config,
                         progress_recorder=self._ean_progress_recorder(objective),
                         progress_sample_interval_seconds=self.ean_progress_sample_interval_seconds,
+                        build_only=self.ean_build_only,
+                        build_progress_callback=self._ean_build_progress,
                     )
                 ).solve(
                     EanPassengerServiceProblem(
@@ -227,13 +260,45 @@ class ExportContext:
                         mip_start_strategy=self.ean_mip_start_strategy,
                     )
                 )
-                if result.movement_plan is None or result.passenger_plan is None:
+                if (
+                    not self.ean_build_only
+                    and (result.movement_plan is None or result.passenger_plan is None)
+                ):
                     raise ValueError(
                         "EAN passenger service optimizer did not produce a plan; "
                         f"status={result.metadata.status}"
                     )
                 self._ean_passenger_service_results[objective] = result
         return self._ean_passenger_service_results[objective]
+
+    def _ean_build_progress(self, event: EanBuildProgressEvent) -> None:
+        self.progress.report(
+            f"ean.build.{event.stage.value}.{event.kind.value}",
+            elapsed=f"{event.elapsed_seconds:.3f}s",
+            checkpoints=(
+                f"{event.processed_checkpoint_count}/{event.checkpoint_count}"
+                if event.processed_checkpoint_count is not None
+                and event.checkpoint_count is not None
+                else event.checkpoint_count
+            ),
+            candidates=event.candidate_count,
+            visits=event.visit_count,
+            pairs=event.pair_count,
+            fixed_pairs=event.fixed_pair_count,
+            disjunctive_pairs=event.disjunctive_pair_count,
+            redundant_pairs=event.redundant_pair_count,
+            variables=event.variable_count,
+            constraints=event.constraint_count,
+            nonzeros=event.nonzero_count,
+            peak_rss_mb=(
+                f"{event.peak_rss_bytes / (1024 * 1024):.1f}"
+                if event.peak_rss_bytes is not None
+                else None
+            ),
+        )
+
+    def record_serialization(self, relative_path: Path, elapsed_seconds: float) -> None:
+        self.serialization_metrics[relative_path.as_posix()] = elapsed_seconds
 
     def _ean_progress_recorder(self, objective: EanPassengerObjective) -> object:
         if self.ean_progress_recorder is not None:
@@ -271,6 +336,74 @@ class ArtifactBuilder(ABC):
     def _path(self, context: ExportContext, filename: str) -> Path:
         return Path(context.example.metadata.id) / filename
 
+
+@dataclass(frozen=True)
+class EanModelBuildProfileArtifactBuilder(ArtifactBuilder):
+    problem_kind: EanOptimizationProblemKind
+    objective: EanPassengerObjective | None = None
+
+    id = "ean_model_build_profile"
+    kind = ArtifactKind.BUILD_PROFILE
+    label = "EAN model build profile"
+
+    def build(self, context: ExportContext) -> ExportArtifact:
+        if self.problem_kind is EanOptimizationProblemKind.MOVEMENT_FEASIBILITY:
+            result = context.ean_skip_stop_result()
+        elif self.problem_kind is EanOptimizationProblemKind.PASSENGER_SERVICE:
+            if self.objective is None:
+                raise ValueError("passenger build profile needs an objective")
+            result = context.ean_passenger_service_result(self.objective)
+        else:
+            raise ValueError(
+                f"unsupported build-only problem kind: {self.problem_kind.value}"
+            )
+        metadata = result.metadata
+        artifact = context.ean_artifact()
+        return ExportArtifact(
+            self.id,
+            self.kind,
+            Path(context.example.metadata.id) / "ean_model_build_profile.json",
+            {
+                "example_id": context.example.metadata.id,
+                "problem_kind": self.problem_kind,
+                "objective": self.objective,
+                "status": metadata.status,
+                "artifact": {
+                    "fleet_mode": artifact.fleet_mode,
+                    "cabin_count": len(artifact.cabin_starts),
+                    "visit_count": len(artifact.switch_visits),
+                    "checkpoint_count": len(artifact.headway_checkpoints),
+                    "candidate_count": len(artifact.headway_candidates),
+                    "pair_count": len(artifact.headway_pairs),
+                    "build_metrics": artifact.build_metrics,
+                },
+                "model": {
+                    "variable_count": metadata.variable_count,
+                    "constraint_count": metadata.constraint_count,
+                    "nonzero_count": metadata.model_nonzero_count,
+                    "movement_variable_count": metadata.movement_variable_count,
+                    "movement_constraint_count": metadata.movement_constraint_count,
+                    "headway_order_variable_count": metadata.headway_order_variable_count,
+                    "fixed_headway_pair_count": (
+                        metadata.build_metrics.fixed_headway_pair_count
+                    ),
+                    "disjunctive_headway_pair_count": (
+                        metadata.build_metrics.disjunctive_headway_pair_count
+                    ),
+                    "redundant_headway_pair_count": (
+                        metadata.build_metrics.redundant_headway_pair_count
+                    ),
+                    "demand_group_count": metadata.demand_group_count,
+                    "ride_candidate_count": metadata.ride_candidate_count,
+                    "slot_variable_count": metadata.slot_variable_count,
+                    "build_metrics": metadata.build_metrics,
+                },
+                "serialization_seconds_by_path": dict(
+                    context.serialization_metrics
+                ),
+            },
+            self.label,
+        )
 
 @dataclass(frozen=True)
 class ArtifactSet:

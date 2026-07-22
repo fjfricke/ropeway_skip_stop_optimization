@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ropeway_skip_stop_optimization.examples.base import ScenarioExample
 from ropeway_skip_stop_optimization.examples.circular_skip_stop import (
+    FiveStationOptimizedInitialPlacementAllStopSkipWaitExample,
     FiveStationOptimizedInitialPlacementNoSkipNoWaitExample,
     FiveStationOptimizedInitialPlacementDoubleAllStopSkipWaitExample,
     FiveStationOptimizedInitialPlacementSkipNoWaitExample,
@@ -38,6 +39,7 @@ EXAMPLES: dict[str, ScenarioExample] = {
     FiveStationOptimizedInitialPlacementSkipNoWaitExample.metadata.id: FiveStationOptimizedInitialPlacementSkipNoWaitExample(),
     FiveStationOptimizedInitialPlacementNoSkipNoWaitExample.metadata.id: FiveStationOptimizedInitialPlacementNoSkipNoWaitExample(),
     FiveStationOptimizedInitialPlacementDoubleAllStopSkipWaitExample.metadata.id: FiveStationOptimizedInitialPlacementDoubleAllStopSkipWaitExample(),
+    FiveStationOptimizedInitialPlacementAllStopSkipWaitExample.metadata.id: FiveStationOptimizedInitialPlacementAllStopSkipWaitExample(),
 }
 
 

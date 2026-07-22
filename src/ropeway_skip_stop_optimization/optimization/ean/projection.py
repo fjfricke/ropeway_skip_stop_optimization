@@ -63,7 +63,7 @@ def project_ean_movement_plan_to_physical_replay(
     artifact.validate()
     plan.validate()
 
-    route_by_switch_id = _projection_routes_by_switch_id(scenario, artifact.switch_cycle)
+    route_by_switch_id = _projection_routes_by_switch_id(scenario, artifact.circulation_state_ids)
     station_config_by_id = {station_config.station_id: station_config for station_config in artifact.config.station_configs}
     timing_by_switch_id = {timing.switch_id: timing for timing in artifact.timings}
     event_limit_seconds = artifact.config.model_end_seconds if include_events_after_horizon else artifact.config.horizon_seconds
@@ -75,7 +75,7 @@ def project_ean_movement_plan_to_physical_replay(
                 events.extend(
                     _initial_context_events(
                         first_visit=trajectory.visits[0],
-                        switch_cycle=artifact.switch_cycle,
+                        switch_cycle=artifact.circulation_state_ids,
                         timing_by_switch_id=timing_by_switch_id,
                         route_by_switch_id=route_by_switch_id,
                         station_config_by_id=station_config_by_id,
@@ -85,7 +85,7 @@ def project_ean_movement_plan_to_physical_replay(
                 events.append(
                     _initial_placement_event(
                         trajectory.visits,
-                        artifact.switch_cycle,
+                        artifact.circulation_state_ids,
                         route_by_switch_id,
                         timing_by_switch_id,
                     )

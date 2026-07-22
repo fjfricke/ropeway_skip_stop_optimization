@@ -145,7 +145,7 @@ def build_ean_ride_candidates(
                     if ring_span_pruning_enabled and not _is_valid_single_ring_ride_span(
                         board_visit=board_visit,
                         alight_visit=alight_visit,
-                        switch_cycle_length=len(artifact.switch_cycle),
+                        switch_cycle_length=len(artifact.circulation_state_ids),
                     ):
                         continue
                     if optimization_config.enable_candidate_horizon_pruning and not _can_serve_within_horizon(
@@ -294,8 +294,10 @@ def _is_valid_single_ring_ride_span(
 
 def _is_single_directed_ring_artifact(artifact: EanBuildArtifact) -> bool:
     expected_transition_by_from_switch_id = {
-        switch_id: artifact.switch_cycle[(index + 1) % len(artifact.switch_cycle)]
-        for index, switch_id in enumerate(artifact.switch_cycle)
+        switch_id: artifact.circulation_state_ids[
+            (index + 1) % len(artifact.circulation_state_ids)
+        ]
+        for index, switch_id in enumerate(artifact.circulation_state_ids)
     }
     transition_by_from_switch_id = _transition_by_from_switch_id(artifact.switch_transitions)
     return transition_by_from_switch_id == expected_transition_by_from_switch_id

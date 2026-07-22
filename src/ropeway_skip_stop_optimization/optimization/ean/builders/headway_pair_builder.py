@@ -3,6 +3,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from itertools import combinations
+from collections.abc import Callable
 
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanHeadwayPairScope,
@@ -24,6 +25,8 @@ class HeadwayPairBuilder(ABC):
         self,
         candidates: tuple[HeadwayCandidate, ...],
         checkpoints: tuple[HeadwayCheckpointDefinition, ...],
+        *,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[HeadwayPair, ...]:
         """Build candidate conflict pairs for headway ordering."""
 
@@ -38,18 +41,32 @@ class AllPairsHeadwayPairBuilder(HeadwayPairBuilder):
         self,
         candidates: tuple[HeadwayCandidate, ...],
         checkpoints: tuple[HeadwayCheckpointDefinition, ...],
+        *,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[HeadwayPair, ...]:
         candidates_by_id = _candidates_by_id(candidates)
         checkpoints_by_id = _checkpoints_by_id(checkpoints)
         candidates_by_checkpoint_id = _candidates_by_checkpoint_id(tuple(candidates_by_id.values()), checkpoints_by_id)
 
         pairs: list[HeadwayPair] = []
+        processed_checkpoints = 0
+        last_reported_pair_count = 0
         for checkpoint_id, checkpoint_candidates in candidates_by_checkpoint_id.items():
             checkpoint = checkpoints_by_id[checkpoint_id]
             sorted_candidates = tuple(sorted(checkpoint_candidates, key=lambda candidate: candidate.id))
             _validate_no_duplicate_visit_at_checkpoint(sorted_candidates, checkpoint_id)
             for first_candidate, second_candidate in combinations(sorted_candidates, 2):
                 pairs.append(build_headway_pair(checkpoint, first_candidate, second_candidate))
+                if (
+                    progress_callback is not None
+                    and len(pairs) - last_reported_pair_count >= 100_000
+                ):
+                    progress_callback(processed_checkpoints, len(pairs))
+                    last_reported_pair_count = len(pairs)
+            processed_checkpoints += 1
+            if progress_callback is not None:
+                progress_callback(processed_checkpoints, len(pairs))
+                last_reported_pair_count = len(pairs)
 
         pair_ids = [pair.id for pair in pairs]
         duplicate_pair_ids = _duplicates(pair_ids)
@@ -70,16 +87,23 @@ class SparseHeadwayPairBuilder(HeadwayPairBuilder):
         self,
         candidates: tuple[HeadwayCandidate, ...],
         checkpoints: tuple[HeadwayCheckpointDefinition, ...],
+        *,
+        progress_callback: Callable[[int, int], None] | None = None,
     ) -> tuple[HeadwayPair, ...]:
         candidates_by_id = _candidates_by_id(candidates)
         checkpoints_by_id = _checkpoints_by_id(checkpoints)
         grouped = _candidates_by_checkpoint_id(
             tuple(candidates_by_id.values()), checkpoints_by_id
         )
-        for checkpoint_id, checkpoint_candidates in grouped.items():
+        for processed, (checkpoint_id, checkpoint_candidates) in enumerate(
+            grouped.items(),
+            start=1,
+        ):
             _validate_no_duplicate_visit_at_checkpoint(
                 tuple(checkpoint_candidates), checkpoint_id
             )
+            if progress_callback is not None:
+                progress_callback(processed, 0)
         return ()
 
 

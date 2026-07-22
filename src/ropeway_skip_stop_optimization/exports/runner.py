@@ -3,6 +3,7 @@ from __future__ import annotations
 import shutil
 from dataclasses import dataclass, replace
 from pathlib import Path
+from time import perf_counter
 
 from ropeway_skip_stop_optimization.examples.base import ScenarioExample
 from ropeway_skip_stop_optimization.examples.registry import get_example
@@ -13,6 +14,7 @@ from ropeway_skip_stop_optimization.exports.artifacts import (
     DiscreteScenarioArtifactBuilder,
     EanAllStopMovementPlanArtifactBuilder,
     EanBuildArtifactArtifactBuilder,
+    EanModelBuildProfileArtifactBuilder,
     EanPhysicalReplayArtifactBuilder,
     EanPassengerServiceArtifactBuilder,
     EanPassengerServiceMovementPlanArtifactBuilder,
@@ -35,13 +37,18 @@ from ropeway_skip_stop_optimization.optimization.discrete_time import (
     MilpV1PassengerWaitingObjective,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
+    EanArtifactConstructionMode,
     EanMipStartStrategy,
     EanPassengerObjective,
     EanOptimizationConfig,
+    EanOptimizationProblemKind,
     GurobiCheckpointConfig,
     GurobiSolverPolicy,
     GurobiSolverPolicyPreset,
     gurobi_solver_policy_for_preset,
+)
+from ropeway_skip_stop_optimization.optimization.ean.build_profile import (
+    peak_rss_bytes,
 )
 from ropeway_skip_stop_optimization.progress import ProgressReporter
 
@@ -55,6 +62,7 @@ class ExportRunResult:
     artifact_set_id: str
     artifact_paths: tuple[Path, ...]
     manifest_path: Path
+    serialization_seconds_by_path: dict[str, float]
 
 
 def build_artifact_set(
@@ -215,7 +223,11 @@ def export_artifact_set(
     ean_resume_latest_checkpoint: bool = False,
     ean_optimization_config: EanOptimizationConfig | None = None,
     ean_mip_start_strategy: EanMipStartStrategy = (
-        EanMipStartStrategy.OPTIMIZED_ALL_STOP
+        EanMipStartStrategy.AUTO
+    ),
+    ean_build_only: bool = False,
+    ean_artifact_construction: EanArtifactConstructionMode = (
+        EanArtifactConstructionMode.LEGACY_RING
     ),
     progress: bool | ProgressReporter = False,
     clean: bool = False,
@@ -246,6 +258,8 @@ def export_artifact_set(
         ean_resume_latest_checkpoint=ean_resume_latest_checkpoint,
         ean_optimization_config=ean_optimization_config,
         ean_mip_start_strategy=ean_mip_start_strategy,
+        ean_build_only=ean_build_only,
+        ean_artifact_construction=ean_artifact_construction,
         progress=reporter,
         clean=clean,
     )
@@ -262,13 +276,24 @@ def run_artifact_set(
     ean_resume_latest_checkpoint: bool = False,
     ean_optimization_config: EanOptimizationConfig | None = None,
     ean_mip_start_strategy: EanMipStartStrategy = (
-        EanMipStartStrategy.OPTIMIZED_ALL_STOP
+        EanMipStartStrategy.AUTO
+    ),
+    ean_build_only: bool = False,
+    ean_artifact_construction: EanArtifactConstructionMode = (
+        EanArtifactConstructionMode.LEGACY_RING
     ),
     ean_progress_recorder: object | None = None,
     ean_progress_sample_interval_seconds: float = 5.0,
     progress: ProgressReporter,
     clean: bool = False,
 ) -> ExportRunResult:
+    if ean_build_only and clean:
+        raise ValueError("EAN build-only runs must not clean normal frontend artifacts")
+    if ean_build_only and not any(
+        isinstance(builder, EanModelBuildProfileArtifactBuilder)
+        for builder in artifact_set.builders
+    ):
+        artifact_set = _ean_build_only_artifact_set(artifact_set)
     checkpoint_config = _ean_checkpoint_config(
         example=example,
         artifact_set=artifact_set,
@@ -291,6 +316,8 @@ def run_artifact_set(
         ean_mip_start_strategy=ean_mip_start_strategy,
         ean_progress_recorder=ean_progress_recorder,
         ean_progress_sample_interval_seconds=ean_progress_sample_interval_seconds,
+        ean_build_only=ean_build_only,
+        ean_artifact_construction=ean_artifact_construction,
     )
     artifacts: list[ExportArtifact] = []
     artifact_paths: list[Path] = []
@@ -300,7 +327,28 @@ def run_artifact_set(
             artifact = builder.build(context)
         output_path = output_root / artifact.relative_path
         with progress.phase(f"write_json {artifact.relative_path.as_posix()}"):
+            serialization_started = perf_counter()
+            progress.report(
+                "ean.build.serialization.started",
+                path=artifact.relative_path.as_posix(),
+            )
             write_json(output_path, artifact.payload)
+            serialization_seconds = perf_counter() - serialization_started
+            context.record_serialization(
+                artifact.relative_path,
+                serialization_seconds,
+            )
+            peak_rss = peak_rss_bytes()
+            progress.report(
+                "ean.build.serialization.finished",
+                path=artifact.relative_path.as_posix(),
+                elapsed=f"{serialization_seconds:.3f}s",
+                peak_rss_mb=(
+                    f"{peak_rss / (1024 * 1024):.1f}"
+                    if peak_rss is not None
+                    else None
+                ),
+            )
         artifacts.append(artifact)
         artifact_paths.append(output_path)
 
@@ -311,6 +359,51 @@ def run_artifact_set(
         artifact_set_id=artifact_set.id,
         artifact_paths=tuple(artifact_paths),
         manifest_path=manifest_path,
+        serialization_seconds_by_path=dict(context.serialization_metrics),
+    )
+
+
+def _ean_build_only_artifact_set(artifact_set: ArtifactSet) -> ArtifactSet:
+    if artifact_set.backend is not ArtifactSetBackend.EAN:
+        raise ValueError("--ean-build-only requires an EAN artifact set")
+    if artifact_set.id == "ean_skip_stop_feasibility":
+        profile = EanModelBuildProfileArtifactBuilder(
+            problem_kind=EanOptimizationProblemKind.MOVEMENT_FEASIBILITY,
+        )
+    elif artifact_set.id in {
+        "ean_passenger_waiting_time",
+        "ean_passenger_journey_time",
+    }:
+        profile = EanModelBuildProfileArtifactBuilder(
+            problem_kind=EanOptimizationProblemKind.PASSENGER_SERVICE,
+            objective=(
+                EanPassengerObjective.WAITING_TIME
+                if artifact_set.id == "ean_passenger_waiting_time"
+                else EanPassengerObjective.JOURNEY_TIME
+            ),
+        )
+    else:
+        raise ValueError(
+            "--ean-build-only supports ean_skip_stop_feasibility and the "
+            "two EAN passenger artifact sets"
+        )
+    retained = tuple(
+        builder
+        for builder in artifact_set.builders
+        if isinstance(
+            builder,
+            (
+                PhysicalScenarioArtifactBuilder,
+                DiscreteScenarioArtifactBuilder,
+                EanBuildArtifactArtifactBuilder,
+            ),
+        )
+    )
+    return ArtifactSet(
+        id=f"{artifact_set.id}_build_only",
+        label=f"{artifact_set.label} build profile",
+        builders=(*retained, profile),
+        backend=ArtifactSetBackend.EAN,
     )
 
 

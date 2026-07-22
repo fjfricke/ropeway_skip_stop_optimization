@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ropeway_skip_stop_optimization.optimization.ean.build_profile import (
+    EanArtifactBuildMetrics,
+)
 from ropeway_skip_stop_optimization.optimization.ean.fleet import (
     EanInitialPlacementParameters,
 )
@@ -18,6 +21,10 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
     SkipStopTiming,
     SwitchTransition,
     SwitchVisitDefinition,
+)
+from ropeway_skip_stop_optimization.optimization.ean.network import (
+    EanMovementNetwork,
+    EanResourceConflictIndex,
 )
 
 
@@ -39,13 +46,28 @@ class EanBuildArtifact:
         EanFleetCardinalityMode.UP_TO_AVAILABLE
     )
     initial_placement_parameters: EanInitialPlacementParameters | None = None
+    build_metrics: EanArtifactBuildMetrics | None = None
+    movement_network: EanMovementNetwork | None = None
+    circulation_pattern_ids: tuple[str, ...] = ()
+    resource_conflict_index: EanResourceConflictIndex | None = None
+
+    @property
+    def circulation_state_ids(self) -> tuple[str, ...]:
+        """Canonical state order, with legacy fallback during migration."""
+
+        if self.movement_network is None or not self.circulation_pattern_ids:
+            return self.switch_cycle
+        return self.movement_network.pattern(self.circulation_pattern_ids[0]).state_ids
 
     def validate(self) -> None:
         _require_id("EAN build artifact scenario_id", self.scenario_id)
         if not isinstance(self.headway_pair_scope, EanHeadwayPairScope):
             raise ValueError("EAN build artifact needs a valid headway pair scope")
+        if self.build_metrics is not None:
+            self.build_metrics.validate()
         self.config.validate()
         _validate_switch_cycle(self.switch_cycle)
+        self.validate_network_compatibility()
 
         timing_by_switch_id = _validate_timings(self.timings)
         _require_exact_keys(
@@ -87,6 +109,41 @@ class EanBuildArtifact:
             candidate_checkpoint_by_id=candidate_checkpoint_by_id,
         )
 
+    def validate_network_compatibility(
+        self, *, validate_conflict_index: bool = True
+    ) -> None:
+        """Validate additive network provenance without rescanning all pairs."""
+        if self.movement_network is None:
+            if self.circulation_pattern_ids:
+                raise ValueError("artifact pattern ids require a movement network")
+            if self.resource_conflict_index is not None:
+                raise ValueError("resource conflict index requires a movement network")
+            return
+        self.movement_network.validate()
+        if not self.circulation_pattern_ids:
+            raise ValueError("network artifact needs at least one circulation pattern id")
+        network_pattern_ids = {
+            pattern.id for pattern in self.movement_network.circulation_patterns
+        }
+        unknown = set(self.circulation_pattern_ids) - network_pattern_ids
+        if unknown:
+            raise ValueError(f"artifact references unknown circulation patterns: {unknown}")
+        if len(self.circulation_pattern_ids) != 1:
+            raise ValueError("stage-one EAN artifacts support exactly one circulation pattern")
+        pattern = self.movement_network.pattern(self.circulation_pattern_ids[0])
+        if pattern.state_ids != self.switch_cycle:
+            raise ValueError("stage-one circulation pattern must reproduce switch_cycle exactly")
+        if self.resource_conflict_index is None:
+            raise ValueError("network artifact needs a resource conflict index")
+        if validate_conflict_index:
+            expected_conflict_index = EanResourceConflictIndex.build(
+                self.movement_network,
+                self.headway_checkpoints,
+                self.headway_candidates,
+            )
+            if self.resource_conflict_index != expected_conflict_index:
+                raise ValueError("network artifact resource conflict index is inconsistent")
+
 
 def _validate_fleet_definition(
     artifact: EanBuildArtifact,
@@ -108,12 +165,12 @@ def _validate_fleet_definition(
         raise ValueError("EAN fleet count does not match potential cabin starts")
     if set(starts_by_cabin_id) != set(range(parameters.available_fleet_count)):
         raise ValueError("initial placement potential cabin ids must be contiguous from zero")
-    if parameters.initial_phase_visit_count != len(artifact.switch_cycle):
+    if parameters.initial_phase_visit_count != len(artifact.circulation_state_ids):
         raise ValueError("initial placement phase count must match switch_cycle")
     for start in starts_by_cabin_id.values():
         if (
             start.kind is not EanCabinStartKind.EARLIEST
-            or start.first_switch_id != artifact.switch_cycle[0]
+            or start.first_switch_id != artifact.circulation_state_ids[0]
             or start.time_seconds != 0.0
         ):
             raise ValueError("initial placement cabin starts must use the canonical ring origin")

@@ -27,6 +27,16 @@ The EAN builder derives route timing, cabin starts, switch visits and
 transitions, headway checkpoints, headway candidates, and headway pairs before
 Gurobi model construction.
 
+EAN construction currently has two selectable architecture paths. The default
+`legacy_ring` path preserves the established ring builders. The opt-in `network`
+path first derives a canonical `EanMovementNetwork` with movement states, route
+options, shared physical resources, compatibility headway resources, and one
+deterministic `EanCirculationPattern`. It then verifies exact compatibility with
+the established timings, visits, candidates, and pairs. Network artifacts retain
+`switch_cycle` only as a migration field; new topology work should target the
+network and selected pattern instead. Stage one deliberately rejects dynamic
+route destinations with a clear `dynamic routing not yet supported` error.
+
 `EanOptimizer` is the single public continuous-EAN solver API. It accepts one
 of three typed problem objects:
 
@@ -71,6 +81,15 @@ Implemented default optimizations:
 
 Tight passenger and stop/skip Big-M bounds are implemented behind the opt-in
 `tight_big_m_bounds` selection.
+
+The opt-in `fixed_start_headway_precedence` reduction reuses conservative
+per-visit bounds for fixed-start artifacts. At each checkpoint it classifies a
+pair as fixed forward, fixed reverse, or still disjunctive. A fixed pair keeps
+one activation-aware directed headway row and removes its order binary and the
+opposite row. Classification is local to the two checkpoint occurrences and
+therefore does not impose a global cabin order or prohibit later overtaking.
+OIP artifacts reject the explicit selection until selectable-boundary-state
+bounds support the same proof.
 
 Stop/skip timing is a mutually exclusive formulation category:
 
@@ -197,6 +216,21 @@ The setup timer covers Gurobi model materialization, objective and MIP-start or
 checkpoint assignment through the final `model.update()`. Candidate generation
 and EAN preprocessing happen before the timer; presolve and solver search happen
 after it.
+
+EAN construction additionally emits structured phase metrics for physical
+timing, visit generation, headway candidates, eager pair materialization,
+movement variables and base rows, headway order variables and rows, passenger
+candidates and rows, MIP-start application, final synchronization, and JSON
+serialization. Progress events include checkpoint and pair progress, current
+model dimensions, elapsed time, and process peak RSS where supported.
+
+The export CLI's `--ean-build-only` mode writes an
+`ean_model_build_profile.json` diagnostic artifact and returns before any main
+model optimization. Its `auto` MIP-start policy resolves to `none`; a greedy
+all-stop start may be measured explicitly, while `optimized_all_stop` is
+rejected because that strategy contains an auxiliary optimization. The
+baseline runner covers one-station regression, three-station, five-station OIP
+with 38 cabins, and five-station OIP with 76 cabins.
 
 Integrated passenger solves support `none`, `greedy_all_stop`, and
 `optimized_all_stop` MIP-start strategies. The production default first fixes

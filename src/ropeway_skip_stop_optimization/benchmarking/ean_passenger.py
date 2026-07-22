@@ -24,6 +24,7 @@ from ropeway_skip_stop_optimization.exports.runner import (
     run_artifact_set,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
+    EanArtifactConstructionMode,
     EanMipStartStrategy,
     EanOptimizationConfig,
     GurobiSolverPolicy,
@@ -51,6 +52,9 @@ class BenchmarkRunConfig:
     ean_optimization_config: EanOptimizationConfig = field(default_factory=EanOptimizationConfig)
     ean_mip_start_strategy: EanMipStartStrategy = (
         EanMipStartStrategy.OPTIMIZED_ALL_STOP
+    )
+    ean_artifact_construction: EanArtifactConstructionMode = (
+        EanArtifactConstructionMode.LEGACY_RING
     )
     label: str | None = None
     output_dir: Path = DEFAULT_BENCHMARK_OUTPUT_DIR
@@ -86,6 +90,7 @@ class BenchmarkRunResult:
     ean_optimization_config: dict[str, Any]
     ean_formulation_config: dict[str, Any]
     ean_mip_start_strategy: str
+    ean_artifact_construction: str
     resolved_mip_start_strategy: str | None
     mip_start_active_cabin_count: int | None
     mip_start_unserved_passenger_count: int | None
@@ -95,6 +100,8 @@ class BenchmarkRunResult:
     model_constraint_count: int | None
     model_nonzero_count: int | None
     model_setup_runtime_seconds: float | None
+    model_build_metrics: dict[str, Any] | None
+    serialization_seconds_by_path: dict[str, float]
     demand_group_count: int | None
     ride_candidate_count: int | None
     slot_variable_count: int | None
@@ -144,6 +151,7 @@ def run_ean_passenger_benchmark(config: BenchmarkRunConfig) -> tuple[BenchmarkRu
         ean_resume_checkpoint=resume_checkpoint,
         ean_optimization_config=config.ean_optimization_config,
         ean_mip_start_strategy=config.ean_mip_start_strategy,
+        ean_artifact_construction=config.ean_artifact_construction,
         ean_progress_recorder=recorder,
         ean_progress_sample_interval_seconds=config.sample_interval_seconds,
         progress=ProgressReporter(enabled=config.progress),
@@ -178,6 +186,7 @@ def run_ean_passenger_benchmark(config: BenchmarkRunConfig) -> tuple[BenchmarkRu
         ean_optimization_config=resolved_optimization_config,
         ean_formulation_config=resolved_formulation_config,
         ean_mip_start_strategy=config.ean_mip_start_strategy.value,
+        ean_artifact_construction=config.ean_artifact_construction.value,
         resolved_mip_start_strategy=metadata.get(
             "resolved_mip_start_strategy"
         ),
@@ -197,6 +206,10 @@ def run_ean_passenger_benchmark(config: BenchmarkRunConfig) -> tuple[BenchmarkRu
         model_constraint_count=metadata.get("constraint_count"),
         model_nonzero_count=metadata.get("model_nonzero_count"),
         model_setup_runtime_seconds=metadata.get("model_setup_runtime_seconds"),
+        model_build_metrics=metadata.get("build_metrics"),
+        serialization_seconds_by_path=(
+            export_result.serialization_seconds_by_path
+        ),
         demand_group_count=metadata.get("demand_group_count"),
         ride_candidate_count=metadata.get("ride_candidate_count"),
         slot_variable_count=metadata.get("slot_variable_count"),
@@ -264,6 +277,7 @@ def _run_id(config: BenchmarkRunConfig) -> str:
             _safe_checkpoint_part(config.artifact_set_id),
             _safe_checkpoint_part(str(config.ean_solver_policy.value)),
             _safe_checkpoint_part(config.ean_mip_start_strategy.value),
+            _safe_checkpoint_part(config.ean_artifact_construction.value),
             _short_run_id_part(selection),
         )
     )

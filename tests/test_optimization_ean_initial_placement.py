@@ -5,6 +5,7 @@ from dataclasses import replace
 import pytest
 
 from ropeway_skip_stop_optimization.examples.circular_skip_stop import (
+    FiveStationOptimizedInitialPlacementAllStopSkipWaitExample,
     FiveStationOptimizedInitialPlacementDoubleAllStopSkipWaitExample,
     FiveStationOptimizedInitialPlacementNoSkipNoWaitExample,
     FiveStationOptimizedInitialPlacementSkipNoWaitExample,
@@ -81,6 +82,16 @@ def test_five_station_initial_placement_examples_use_explicit_fleet_limits() -> 
         double_config,
     )
     assert double_builder.fleet_config.available_fleet_count == 76
+    all_stop = FiveStationOptimizedInitialPlacementAllStopSkipWaitExample()
+    all_stop_scenario = all_stop.build_scenario()
+    all_stop_config = all_stop.build_ean_config(all_stop_scenario)
+    assert (
+        all_stop.build_ean_artifact_builder(
+            all_stop_scenario,
+            all_stop_config,
+        ).fleet_config.available_fleet_count
+        == 38
+    )
     assert {
         station_config.waiting_mode
         for station_config in double_config.station_configs

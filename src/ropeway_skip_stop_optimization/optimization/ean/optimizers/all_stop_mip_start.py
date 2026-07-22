@@ -171,9 +171,10 @@ def _build_initial_placement_seed(
 
     timing_by_switch_id = {timing.switch_id: timing for timing in artifact.timings}
     decisions = decisions_by_switch_id or {
-        switch_id: EanRouteDecision.STOP for switch_id in artifact.switch_cycle
+        switch_id: EanRouteDecision.STOP
+        for switch_id in artifact.circulation_state_ids
     }
-    if set(decisions) != set(artifact.switch_cycle):
+    if set(decisions) != set(artifact.circulation_state_ids):
         raise ValueError("periodic seed decisions must cover the ring exactly")
     route_seconds = {
         switch_id: (
@@ -188,7 +189,7 @@ def _build_initial_placement_seed(
     if any(
         decisions[switch_id] is EanRouteDecision.SKIP
         and not timing_by_switch_id[switch_id].skip_allowed
-        for switch_id in artifact.switch_cycle
+        for switch_id in artifact.circulation_state_ids
     ):
         raise ValueError("periodic seed selects an unavailable skip route")
     transition_seconds = {
@@ -196,7 +197,7 @@ def _build_initial_placement_seed(
             route_seconds[switch_id]
             + timing_by_switch_id[switch_id].rope_to_next_switch_seconds
         )
-        for switch_id in artifact.switch_cycle
+        for switch_id in artifact.circulation_state_ids
     }
     cycle_seconds = sum(transition_seconds.values())
     canonical_capacity = route_capacity or canonical_all_stop_fleet_count(artifact)
@@ -206,7 +207,7 @@ def _build_initial_placement_seed(
     )
 
     boundaries = [0.0]
-    for switch_id in artifact.switch_cycle:
+    for switch_id in artifact.circulation_state_ids:
         boundaries.append(boundaries[-1] + transition_seconds[switch_id])
 
     visits_by_cabin_id = _visits_by_cabin_id(artifact)
@@ -334,7 +335,7 @@ def _project_phase_to_boundary(
     decisions_by_switch_id: dict[str, EanRouteDecision],
     timing_by_switch_id: dict[str, SkipStopTiming],
 ) -> tuple[EanInitialPlacementState, int, float]:
-    cycle_length = len(artifact.switch_cycle)
+    cycle_length = len(artifact.circulation_state_ids)
     boundary_index = next(
         (
             index
@@ -348,7 +349,7 @@ def _project_phase_to_boundary(
         None,
     )
     if boundary_index is not None:
-        switch_id = artifact.switch_cycle[boundary_index]
+        switch_id = artifact.circulation_state_ids[boundary_index]
         return (
             EanInitialPlacementState(
                 cabin_id=cabin_id,
@@ -370,7 +371,7 @@ def _project_phase_to_boundary(
     )
     next_phase_index = next_index % cycle_length
     previous_phase_index = (next_phase_index - 1) % cycle_length
-    previous_switch_id = artifact.switch_cycle[previous_phase_index]
+    previous_switch_id = artifact.circulation_state_ids[previous_phase_index]
     next_switch_time = boundaries[next_index] - phase_seconds
     rope_seconds = timing_by_switch_id[previous_switch_id].rope_to_next_switch_seconds
     previous_exit_time = next_switch_time - rope_seconds
