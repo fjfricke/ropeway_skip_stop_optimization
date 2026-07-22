@@ -48,22 +48,16 @@ non-reconverging service/skip routes, and multiple or unexpected continuations
 with `dynamic routing not yet supported`. Shared physical resource IDs are
 preserved in the canonical network but do not yet create new headways.
 
-## Remaining migration sequence
+## Completed compatibility migration
 
-1. Change fixed-start and OIP phase inputs from `switch_cycle` to the selected
-   `EanCirculationPattern`.
-2. Change capacity preparation and packing bounds to network/pattern queries;
-   movement, passenger, validation, replay, and export consumers already use
-   the canonical artifact pattern order.
-3. Change the remaining physical timing and visit kernels to neutral network
-   services.
-4. Register all production examples with pattern selections and switch the
-   default to `network` after the full regression and performance gate.
-5. Reconstruct `switch_cycle` only in a legacy export adapter, then remove it
-   from the canonical artifact.
-6. Delete `RingEanBuildArtifactBuilder`, `PhysicalRingTopologyBuilder`,
-   `PhysicalSkipStopTimingBuilder`, and `RingSwitchVisitBuilder` once no
-   production or test caller remains.
+The network path is the only artifact-construction path and all production
+examples select deterministic circulation patterns. The canonical artifact now
+stores `state_ids`; timing and visits use neutral network/pattern services.
+`RingEanBuildArtifactBuilder`, `PhysicalRingTopologyBuilder`,
+`PhysicalSkipStopTimingBuilder`, and `RingSwitchVisitBuilder` have been deleted.
+Some fixed-start algorithms still accept an ordered state tuple under the local
+name `switch_cycle`; this is algorithm input rather than artifact schema or a
+second topology model.
 
 Only after this removal does the dynamic-routing stage add indexed visit and
 route decisions. Passenger assignment remains outside that first movement-only

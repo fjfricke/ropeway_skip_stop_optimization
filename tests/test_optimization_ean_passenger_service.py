@@ -1169,7 +1169,7 @@ def _minimal_artifact(
     return EanBuildArtifact(
         scenario_id="minimal_ean",
         config=config,
-        switch_cycle=("A_entry", "B_entry"),
+        state_ids=("A_entry", "B_entry"),
         timings=(
             SkipStopTiming(
                 switch_id="A_entry",
@@ -1310,7 +1310,7 @@ def _odd_cycle_fixed_movement_case() -> tuple[
     artifact = EanBuildArtifact(
         scenario_id=scenario.id,
         config=config,
-        switch_cycle=switch_ids,
+        state_ids=switch_ids,
         timings=timings,
         cabin_starts=(
             EanCabinStart(
@@ -1431,7 +1431,7 @@ def _artifact_with_earliest_start(
     return EanBuildArtifact(
         scenario_id=artifact.scenario_id,
         config=artifact.config,
-        switch_cycle=artifact.switch_cycle,
+        state_ids=artifact.circulation_state_ids,
         timings=artifact.timings,
         cabin_starts=(
             EanCabinStart(

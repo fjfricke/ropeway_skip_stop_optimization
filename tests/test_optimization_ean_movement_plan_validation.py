@@ -315,7 +315,7 @@ def _artifact_and_plan() -> tuple[EanBuildArtifact, EanMovementPlan]:
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
     artifact = network_ean_builder_for_cycle(
-        switch_cycle=build_three_station_ean_ring_switch_order(scenario),
+        state_ids=build_three_station_ean_ring_switch_order(scenario),
     ).build(scenario, config)
     plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)
     return artifact, plan
@@ -332,7 +332,7 @@ def _platform_exit_wait_occupancy_artifact_and_plan() -> tuple[EanBuildArtifact,
                 StationEanConfig(station_id="S", waiting_mode=StationWaitingMode.END_OF_PLATFORM_WAIT),
             ),
         ),
-        switch_cycle=("S_entry",),
+        state_ids=("S_entry",),
         timings=(
             SkipStopTiming(
                 switch_id="S_entry",

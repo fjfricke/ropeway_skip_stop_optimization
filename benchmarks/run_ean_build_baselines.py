@@ -251,7 +251,7 @@ class _OneStationBuildBaselineExample(ScenarioExample):
         scenario: Scenario,
         config: EanConfig,
     ) -> network_ean_builder_for_cycle:
-        return network_ean_builder_for_cycle(switch_cycle=("entry",))
+        return network_ean_builder_for_cycle(state_ids=("entry",))
 
 
 if __name__ == "__main__":

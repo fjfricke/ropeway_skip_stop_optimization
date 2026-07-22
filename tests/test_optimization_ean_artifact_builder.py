@@ -21,11 +21,11 @@ def test_ring_ean_build_artifact_builder_builds_three_station_artifact() -> None
     config = build_three_station_ean_config(scenario)
     switch_cycle = build_three_station_ean_ring_switch_order(scenario)
 
-    artifact = network_ean_builder_for_cycle(switch_cycle=switch_cycle).build(scenario, config)
+    artifact = network_ean_builder_for_cycle(state_ids=switch_cycle).build(scenario, config)
 
     artifact.validate()
     assert artifact.scenario_id == scenario.id
-    assert artifact.switch_cycle == switch_cycle
+    assert artifact.circulation_state_ids == switch_cycle
     assert tuple(timing.switch_id for timing in artifact.timings) == switch_cycle
     assert {start.cabin_id for start in artifact.cabin_starts} == {0, 1, 2, 3}
     assert artifact.switch_visits
@@ -66,7 +66,7 @@ def test_network_ean_build_artifact_builder_rejects_duplicate_pattern_states() -
     config = build_three_station_ean_config(scenario)
 
     with pytest.raises(ValueError, match="node ids must be nonempty and unique"):
-        network_ean_builder_for_cycle(switch_cycle=("M_entry_lr", "M_entry_lr")).build(scenario, config)
+        network_ean_builder_for_cycle(state_ids=("M_entry_lr", "M_entry_lr")).build(scenario, config)
 
 
 def test_ring_ean_build_artifact_reports_detailed_build_metrics() -> None:
@@ -75,7 +75,7 @@ def test_ring_ean_build_artifact_reports_detailed_build_metrics() -> None:
     events = []
 
     artifact = network_ean_builder_for_cycle(
-        switch_cycle=build_three_station_ean_ring_switch_order(scenario)
+        state_ids=build_three_station_ean_ring_switch_order(scenario)
     ).build(scenario, config, progress_callback=events.append)
 
     metrics = artifact.build_metrics

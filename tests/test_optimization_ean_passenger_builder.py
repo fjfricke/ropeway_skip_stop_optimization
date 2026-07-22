@@ -193,7 +193,7 @@ def _two_station_artifact(non_ring: bool, horizon_seconds: float) -> EanBuildArt
                 StationEanConfig(station_id="B", waiting_mode=StationWaitingMode.NO_WAITING),
             ),
         ),
-        switch_cycle=("A_entry", "B_entry"),
+        state_ids=("A_entry", "B_entry"),
         timings=(
             SkipStopTiming(
                 switch_id="A_entry",

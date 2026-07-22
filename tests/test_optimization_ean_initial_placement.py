@@ -568,8 +568,8 @@ def test_ring_list_supports_forced_initial_states(
     fleet_variables = movement.fleet_model.variables
     if state_kind is EanInitialPlacementStateKind.ROPE:
         model.addConstr(fleet_variables.rope_selected[key] == 1)
-        previous_switch_id = artifact.switch_cycle[
-            (phase_visit.visit_index - 1) % len(artifact.switch_cycle)
+        previous_switch_id = artifact.circulation_state_ids[
+            (phase_visit.visit_index - 1) % len(artifact.circulation_state_ids)
         ]
         rope_seconds = timing_by_switch_id[
             previous_switch_id
@@ -641,7 +641,7 @@ def test_initial_rope_order_uses_one_directed_cabin_id_headway() -> None:
 
     phase_index = next(
         index
-        for index, switch_id in enumerate(artifact.switch_cycle)
+        for index, switch_id in enumerate(artifact.circulation_state_ids)
         if (
             next(
                 timing for timing in artifact.timings if timing.switch_id == switch_id
@@ -665,8 +665,8 @@ def test_initial_rope_order_uses_one_directed_cabin_id_headway() -> None:
     model.addConstr(movement.variables.stop[(0, phase_index)] == 1)
     model.addConstr(movement.variables.wait_time[(0, phase_index)] == 20)
     model.addConstr(movement.variables.stop[(1, phase_index)] == 0)
-    previous_switch_id = artifact.switch_cycle[
-        (phase_index - 1) % len(artifact.switch_cycle)
+    previous_switch_id = artifact.circulation_state_ids[
+        (phase_index - 1) % len(artifact.circulation_state_ids)
     ]
     headway_seconds = next(
         checkpoint.headway_seconds
@@ -806,14 +806,14 @@ def test_fixed_starts_and_initial_placement_use_same_k_with_comparable_tail_mode
     config = build_three_station_ean_config(scenario, tail_seconds=300.0)
     switch_cycle = build_three_station_ean_ring_switch_order(scenario)
     fixed_artifact = network_ean_builder_for_cycle(
-        switch_cycle=switch_cycle,
+        state_ids=switch_cycle,
         start_builder=EvenlySpacedAllStopCabinStartBuilder(
             switch_cycle=switch_cycle,
             cabin_count=len(scenario.cabins),
         ),
     ).build(scenario, config)
     initial_placement_artifact = network_ean_builder_for_cycle(
-        switch_cycle=switch_cycle,
+        state_ids=switch_cycle,
         fleet_config=EanFleetConfig(
             mode=EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT,
             available_fleet_count=len(fixed_artifact.cabin_starts),

@@ -65,7 +65,7 @@ class EanArtifactConstructionMode(Enum):
 
 def network_ean_builder_for_cycle(
     *,
-    switch_cycle: tuple[str, ...],
+    state_ids: tuple[str, ...],
     pattern_id: str = "selected_cycle",
     start_builder: EanCabinStartBuilder | None = None,
     headway_duration_builder: HeadwayDurationBuilder | None = None,
@@ -73,12 +73,12 @@ def network_ean_builder_for_cycle(
     headway_pair_builder: HeadwayPairBuilder | None = None,
     fleet_config: EanFleetConfig | None = None,
 ) -> NetworkEanBuildArtifactBuilder:
-    """Compatibility factory while examples migrate from cycle tuples."""
+    """Build the stage-one network builder for one deterministic pattern."""
 
     return NetworkEanBuildArtifactBuilder(
         pattern_definition=EanCirculationPatternDefinition(
             id=pattern_id,
-            state_node_ids=switch_cycle,
+            state_node_ids=state_ids,
         ),
         start_builder=(
             start_builder or DeterministicPhysicalNodeToSwitchStartBuilder()
@@ -112,12 +112,6 @@ class NetworkEanBuildArtifactBuilder(EanBuildArtifactBuilder):
     headway_candidate_builder: HeadwayCandidateBuilder = field(default_factory=SwitchVisitHeadwayCandidateBuilder)
     headway_pair_builder: HeadwayPairBuilder = field(default_factory=AllPairsHeadwayPairBuilder)
     fleet_config: EanFleetConfig = field(default_factory=EanFleetConfig)
-
-    @property
-    def switch_cycle(self) -> tuple[str, ...]:
-        """Temporary source compatibility for callers not yet pattern-aware."""
-
-        return self.pattern_definition.state_node_ids
 
     def build(
         self,

@@ -7,14 +7,18 @@ import pytest
 from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
 from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_ring_switch_order
 from ropeway_skip_stop_optimization.models import PhysicalNodeKind, TrackSegmentKind
-from ropeway_skip_stop_optimization.optimization.ean import PhysicalSkipStopTimingBuilder
+from ropeway_skip_stop_optimization.optimization.ean import (
+    EanCirculationPatternDefinition,
+    NetworkSkipStopTimingBuilder,
+    PhysicalMovementNetworkBuilder,
+)
 
 
-def test_physical_skip_stop_timing_builder_derives_three_station_timings() -> None:
+def test_network_skip_stop_timing_builder_derives_three_station_timings() -> None:
     scenario = build_three_station_scenario()
     switch_cycle = build_three_station_ean_ring_switch_order(scenario)
 
-    timings = PhysicalSkipStopTimingBuilder().build(scenario, switch_cycle)
+    timings = _build_timings(scenario, switch_cycle)
 
     timing_by_switch = {timing.switch_id: timing for timing in timings}
     assert tuple(timing_by_switch) == switch_cycle
@@ -42,7 +46,7 @@ def test_physical_skip_stop_timing_builder_derives_three_station_timings() -> No
     assert right_terminal.rope_to_next_switch_seconds == pytest.approx(150 / 5)
 
 
-def test_physical_skip_stop_timing_builder_rejects_service_route_without_station_segment() -> None:
+def test_network_skip_stop_timing_builder_rejects_service_route_without_station_segment() -> None:
     scenario = build_three_station_scenario()
     broken_segments = tuple(
         replace(segment, kind=TrackSegmentKind.CONNECTOR) if segment.id == "M_lr_platform" else segment
@@ -50,21 +54,21 @@ def test_physical_skip_stop_timing_builder_rejects_service_route_without_station
     )
     broken_scenario = replace(scenario, track_segments=broken_segments)
 
-    with pytest.raises(ValueError, match="needs at least one station segment"):
-        PhysicalSkipStopTimingBuilder().build(
+    with pytest.raises(ValueError, match="needs a station segment"):
+        _build_timings(
             broken_scenario,
             build_three_station_ean_ring_switch_order(scenario),
         )
 
 
-def test_physical_skip_stop_timing_builder_rejects_unknown_switch_cycle_node() -> None:
+def test_network_skip_stop_timing_builder_rejects_unknown_pattern_node() -> None:
     scenario = build_three_station_scenario()
 
     with pytest.raises(ValueError, match="unknown physical node"):
-        PhysicalSkipStopTimingBuilder().build(scenario, ("unknown_switch",))
+        _build_timings(scenario, ("unknown_switch",))
 
 
-def test_physical_skip_stop_timing_builder_rejects_non_entry_switch_cycle_node() -> None:
+def test_network_skip_stop_timing_builder_rejects_non_entry_pattern_node() -> None:
     scenario = build_three_station_scenario()
     broken_nodes = tuple(
         replace(node, kind=PhysicalNodeKind.CONNECTOR) if node.id == "M_entry_lr" else node
@@ -73,7 +77,20 @@ def test_physical_skip_stop_timing_builder_rejects_non_entry_switch_cycle_node()
     broken_scenario = replace(scenario, physical_nodes=broken_nodes)
 
     with pytest.raises(ValueError, match="not an entry switch"):
-        PhysicalSkipStopTimingBuilder().build(
+        _build_timings(
             broken_scenario,
             build_three_station_ean_ring_switch_order(scenario),
         )
+
+
+def _build_timings(scenario, state_ids):
+    definition = EanCirculationPatternDefinition(
+        id="test_pattern",
+        state_node_ids=state_ids,
+    )
+    network = PhysicalMovementNetworkBuilder().build(scenario, definition)
+    return NetworkSkipStopTimingBuilder().build(
+        scenario,
+        network,
+        network.pattern(definition.id),
+    )

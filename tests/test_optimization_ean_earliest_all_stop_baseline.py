@@ -18,7 +18,7 @@ def test_earliest_all_stop_baseline_builds_plan_from_three_station_artifact() ->
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
     artifact = network_ean_builder_for_cycle(
-        switch_cycle=build_three_station_ean_ring_switch_order(scenario),
+        state_ids=build_three_station_ean_ring_switch_order(scenario),
     ).build(scenario, config)
 
     plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)
@@ -44,7 +44,7 @@ def test_earliest_all_stop_baseline_propagates_first_visit_times_from_starts_and
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
     artifact = network_ean_builder_for_cycle(
-        switch_cycle=build_three_station_ean_ring_switch_order(scenario),
+        state_ids=build_three_station_ean_ring_switch_order(scenario),
     ).build(scenario, config)
 
     plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)
@@ -76,7 +76,7 @@ def test_earliest_all_stop_baseline_keeps_trajectory_times_monotonic() -> None:
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
     artifact = network_ean_builder_for_cycle(
-        switch_cycle=build_three_station_ean_ring_switch_order(scenario),
+        state_ids=build_three_station_ean_ring_switch_order(scenario),
     ).build(scenario, config)
 
     plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)

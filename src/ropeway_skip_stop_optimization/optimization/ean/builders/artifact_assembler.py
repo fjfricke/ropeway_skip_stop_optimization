@@ -174,7 +174,7 @@ class EanCompatibilityArtifactAssembler:
         artifact = EanBuildArtifact(
             scenario_id=scenario.id,
             config=config,
-            switch_cycle=inputs.state_ids,
+            state_ids=inputs.state_ids,
             timings=inputs.timings,
             cabin_starts=inputs.cabin_starts,
             switch_visits=inputs.visits.visits,

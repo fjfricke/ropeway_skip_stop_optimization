@@ -127,7 +127,7 @@ def _artifact() -> EanBuildArtifact:
                 StationEanConfig("B", StationWaitingMode.NO_WAITING),
             ),
         ),
-        switch_cycle=("sw_a", "sw_b"),
+        state_ids=("sw_a", "sw_b"),
         timings=(_timing("sw_a", "A"), _timing("sw_b", "B")),
         cabin_starts=(EanCabinStart(0, "sw_a", EanCabinStartKind.FIXED, 0.0),),
         switch_visits=(

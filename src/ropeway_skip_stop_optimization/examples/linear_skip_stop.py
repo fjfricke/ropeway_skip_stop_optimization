@@ -127,7 +127,7 @@ class FiveStationExample(ScenarioExample):
     ) -> EanBuildArtifactBuilder:
         switch_cycle = build_linear_skip_stop_ean_ring_switch_order(scenario)
         return network_ean_builder_for_cycle(
-            switch_cycle=switch_cycle,
+            state_ids=switch_cycle,
             start_builder=KeepEverySecondCabinStartBuilder(
                 ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
             ),
@@ -169,7 +169,7 @@ class FiveStationNoWaitExample(FiveStationExample):
     ) -> EanBuildArtifactBuilder:
         switch_cycle = build_linear_skip_stop_ean_ring_switch_order(scenario)
         return network_ean_builder_for_cycle(
-            switch_cycle=switch_cycle,
+            state_ids=switch_cycle,
             start_builder=ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
         )
 

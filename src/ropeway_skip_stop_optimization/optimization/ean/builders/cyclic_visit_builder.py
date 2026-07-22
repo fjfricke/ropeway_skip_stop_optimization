@@ -183,6 +183,32 @@ def build_cyclic_switch_transitions(
     return tuple(transitions)
 
 
+def count_visits_by_cabin(
+    visits: tuple[SwitchVisitDefinition, ...],
+) -> dict[int, int]:
+    result: dict[int, int] = {}
+    for visit in visits:
+        result[visit.cabin_id] = result.get(visit.cabin_id, 0) + 1
+    return result
+
+
+def transition_by_from_switch_id(
+    transitions: tuple[SwitchTransition, ...],
+) -> dict[str, SwitchTransition]:
+    result: dict[str, SwitchTransition] = {}
+    duplicates: set[str] = set()
+    for transition in transitions:
+        transition.validate()
+        if transition.from_switch_id in result:
+            duplicates.add(transition.from_switch_id)
+        result[transition.from_switch_id] = transition
+    if duplicates:
+        raise ValueError(
+            f"duplicate transition from state ids: {sorted(duplicates)}"
+        )
+    return result
+
+
 def _visit_count_for_horizon(
     *,
     start_index: int,

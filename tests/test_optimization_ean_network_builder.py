@@ -28,26 +28,17 @@ from ropeway_skip_stop_optimization.optimization.ean import (
         "five_station_circle_cw_half_skip_wait_v0",
     ),
 )
-def test_network_builder_reproduces_legacy_artifact(example_id: str) -> None:
+def test_network_builder_produces_self_consistent_artifact(example_id: str) -> None:
     example = get_example(example_id)
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
     network_builder = example.build_ean_artifact_builder(scenario, config)
     assert isinstance(network_builder, NetworkEanBuildArtifactBuilder)
-    legacy_builder = network_builder
-
-    legacy = legacy_builder.build(scenario, config)
     network = network_builder.build(scenario, config)
 
-    assert network.switch_cycle == legacy.switch_cycle
-    assert network.timings == legacy.timings
-    assert network.cabin_starts == legacy.cabin_starts
-    assert network.switch_visits == legacy.switch_visits
-    assert network.switch_transitions == legacy.switch_transitions
-    assert network.headway_checkpoints == legacy.headway_checkpoints
-    assert network.headway_candidates == legacy.headway_candidates
-    assert network.headway_pairs == legacy.headway_pairs
-    assert network.headway_pair_scope is legacy.headway_pair_scope
+    state_ids = network_builder.pattern_definition.state_node_ids
+    assert network.state_ids == state_ids
+    assert tuple(timing.switch_id for timing in network.timings) == state_ids
     assert network.movement_network is not None
     assert network.circulation_pattern_ids == (
         network_builder.pattern_definition.id,
@@ -56,10 +47,10 @@ def test_network_builder_reproduces_legacy_artifact(example_id: str) -> None:
     assert tuple(
         resource_id
         for resource_id, _ in network.resource_conflict_index.candidate_ids_by_resource_id
-    ) == tuple(checkpoint.id for checkpoint in legacy.headway_checkpoints)
+    ) == tuple(checkpoint.id for checkpoint in network.headway_checkpoints)
     assert (
         network.resource_conflict_index.complete_headway_pair_count
-        == len(legacy.headway_pairs)
+        == len(network.headway_pairs)
     )
 
 
@@ -86,7 +77,7 @@ def test_physical_network_builder_preserves_shared_physical_resource_id() -> Non
         scenario,
         EanCirculationPatternDefinition(
             id="test_pattern",
-            state_node_ids=network_builder.switch_cycle,
+            state_node_ids=network_builder.pattern_definition.state_node_ids,
         ),
     )
 
@@ -130,7 +121,7 @@ def test_physical_network_builder_rejects_dynamic_route_choice_clearly() -> None
         route
         for route in scenario.station_routes
         if segments_by_id[route.segment_ids[0]].from_node_id
-        == network_builder.switch_cycle[0]
+        == network_builder.pattern_definition.state_node_ids[0]
         and route.kind.value == "service"
     )
     additional_route = StationRoute(
@@ -151,24 +142,23 @@ def test_physical_network_builder_rejects_dynamic_route_choice_clearly() -> None
             scenario,
             EanCirculationPatternDefinition(
                 id="test_pattern",
-                state_node_ids=network_builder.switch_cycle,
+                state_node_ids=network_builder.pattern_definition.state_node_ids,
             ),
         )
 
 
-def test_network_and_legacy_build_identical_movement_model_dimensions() -> None:
+def test_repeated_network_builds_have_identical_movement_model_dimensions() -> None:
     pytest.importorskip("gurobipy")
     example = get_example("three_station_v0")
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
     network_builder = example.build_ean_artifact_builder(scenario, config)
     assert isinstance(network_builder, NetworkEanBuildArtifactBuilder)
-    legacy_builder = network_builder
-    legacy_artifact = legacy_builder.build(scenario, config)
+    first_artifact = network_builder.build(scenario, config)
     network_artifact = network_builder.build(scenario, config)
 
     optimizer = EanOptimizer(EanSolveConfig(build_only=True))
-    legacy = optimizer.solve(EanMovementFeasibilityProblem(legacy_artifact))
+    first = optimizer.solve(EanMovementFeasibilityProblem(first_artifact))
     network = optimizer.solve(EanMovementFeasibilityProblem(network_artifact))
 
     assert (
@@ -176,9 +166,9 @@ def test_network_and_legacy_build_identical_movement_model_dimensions() -> None:
         network.metadata.constraint_count,
         network.metadata.model_nonzero_count,
     ) == (
-        legacy.metadata.variable_count,
-        legacy.metadata.constraint_count,
-        legacy.metadata.model_nonzero_count,
+        first.metadata.variable_count,
+        first.metadata.constraint_count,
+        first.metadata.model_nonzero_count,
     )
 
 
@@ -196,16 +186,17 @@ def test_all_registered_ean_examples_have_a_deterministic_network_pattern(
     pattern = network.pattern(builder.pattern_definition.id)
     timings = builder.timing_builder.build(scenario, network, pattern)
 
-    assert pattern.state_ids == builder.switch_cycle
-    assert tuple(timing.switch_id for timing in timings) == builder.switch_cycle
+    state_ids = builder.pattern_definition.state_node_ids
+    assert pattern.state_ids == state_ids
+    assert tuple(timing.switch_id for timing in timings) == state_ids
 
     discovered = builder.network_builder.discover_pattern_definitions(scenario)
     assert len(discovered) == 1
-    assert set(discovered[0].state_node_ids) == set(builder.switch_cycle)
+    assert set(discovered[0].state_node_ids) == set(state_ids)
     assert discovered == builder.network_builder.discover_pattern_definitions(scenario)
 
 
-def test_network_and_legacy_solver_classification_is_identical() -> None:
+def test_repeated_network_builds_have_identical_solver_classification() -> None:
     pytest.importorskip("gurobipy")
     example = get_example("three_station_half_no_skip_no_wait_v0")
     scenario = example.build_scenario()

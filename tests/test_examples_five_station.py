@@ -108,7 +108,7 @@ def test_five_station_example_builds_ean_artifact() -> None:
     artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
 
     assert artifact.scenario_id == "five_station_v0"
-    assert artifact.switch_cycle == build_five_station_ean_ring_switch_order(scenario)
+    assert artifact.circulation_state_ids == build_five_station_ean_ring_switch_order(scenario)
     assert len(artifact.timings) == 8
     assert {
         timing.switch_id

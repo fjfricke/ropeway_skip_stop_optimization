@@ -111,7 +111,7 @@ def test_five_station_circle_cw_full_examples_build_ean_artifacts_with_all_start
     artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
 
     assert artifact.scenario_id == scenario.id
-    assert artifact.switch_cycle == switch_cycle
+    assert artifact.circulation_state_ids == switch_cycle
     assert len(artifact.timings) == 5
     assert artifact.cabin_starts == max_starts
     assert artifact.cabin_starts
@@ -134,7 +134,7 @@ def test_five_station_circle_cw_half_examples_build_ean_artifacts_with_every_sec
         artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
 
         assert artifact.scenario_id == scenario.id
-        assert artifact.switch_cycle == switch_cycle
+        assert artifact.circulation_state_ids == switch_cycle
         assert len(artifact.timings) == 5
         assert artifact.cabin_starts == max_starts[::2]
         assert artifact.cabin_starts
@@ -165,15 +165,15 @@ def _assert_uniform_demand_reaches_all_stop_capacity(
     config = example.build_ean_config(scenario)
     artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
     transition_by_switch_id = {transition.from_switch_id: transition for transition in artifact.switch_transitions}
-    switch_index_by_id = {switch_id: index for index, switch_id in enumerate(artifact.switch_cycle)}
-    complete_traversals_by_switch_id = {switch_id: 0 for switch_id in artifact.switch_cycle}
+    switch_index_by_id = {switch_id: index for index, switch_id in enumerate(artifact.circulation_state_ids)}
+    complete_traversals_by_switch_id = {switch_id: 0 for switch_id in artifact.circulation_state_ids}
 
     for start in artifact.cabin_starts:
         switch_index = switch_index_by_id[start.first_switch_id]
         elapsed_seconds = start.time_seconds
         visit_offset = 0
         while elapsed_seconds <= config.model_end_seconds:
-            switch_id = artifact.switch_cycle[(switch_index + visit_offset) % len(artifact.switch_cycle)]
+            switch_id = artifact.circulation_state_ids[(switch_index + visit_offset) % len(artifact.circulation_state_ids)]
             transition = transition_by_switch_id[switch_id]
             if elapsed_seconds + transition.min_seconds <= config.model_end_seconds:
                 complete_traversals_by_switch_id[switch_id] += 1

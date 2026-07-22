@@ -91,7 +91,7 @@ def test_continuous_all_stop_max_start_builder_places_maximum_three_station_cabi
     assert all(start.time_seconds >= 0 for start in starts)
 
     artifact = network_ean_builder_for_cycle(
-        switch_cycle=switch_cycle,
+        state_ids=switch_cycle,
         start_builder=builder,
     ).build(scenario, config)
     plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)
@@ -117,13 +117,14 @@ def test_evenly_spaced_all_stop_builder_places_feasible_explicit_fleet() -> None
     config = example.build_ean_config(scenario)
     optimized_builder = example.build_ean_artifact_builder(scenario, config)
     assert isinstance(optimized_builder, NetworkEanBuildArtifactBuilder)
+    state_ids = optimized_builder.pattern_definition.state_node_ids
     builder = EvenlySpacedAllStopCabinStartBuilder(
-        switch_cycle=optimized_builder.switch_cycle,
+        switch_cycle=state_ids,
         cabin_count=len(scenario.cabins),
     )
 
     artifact = network_ean_builder_for_cycle(
-        switch_cycle=optimized_builder.switch_cycle,
+        state_ids=state_ids,
         start_builder=builder,
     ).build(scenario, config)
 
@@ -141,22 +142,23 @@ def test_evenly_spaced_all_stop_builder_rejects_fleet_above_ring_capacity() -> N
     config = example.build_ean_config(scenario)
     optimized_builder = example.build_ean_artifact_builder(scenario, config)
     assert isinstance(optimized_builder, NetworkEanBuildArtifactBuilder)
+    state_ids = optimized_builder.pattern_definition.state_node_ids
     maximum_starts = ContinuousAllStopMaxCabinStartBuilder(
-        switch_cycle=optimized_builder.switch_cycle,
+        switch_cycle=state_ids,
     ).build(
         scenario,
         config,
-        frozenset(optimized_builder.switch_cycle),
+        frozenset(state_ids),
     )
 
     with pytest.raises(ValueError, match="exceeds the canonical ring capacity"):
         EvenlySpacedAllStopCabinStartBuilder(
-            switch_cycle=optimized_builder.switch_cycle,
+            switch_cycle=state_ids,
             cabin_count=len(maximum_starts) + 1,
         ).build(
             scenario,
             config,
-            frozenset(optimized_builder.switch_cycle),
+            frozenset(state_ids),
         )
 
 

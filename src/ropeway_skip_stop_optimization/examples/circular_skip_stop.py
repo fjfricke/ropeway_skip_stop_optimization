@@ -137,7 +137,7 @@ class FiveStationCircleCwFullNoSkipNoWaitExample(ScenarioExample):
     ) -> EanBuildArtifactBuilder:
         switch_cycle = build_circular_skip_stop_ean_ring_switch_order(scenario, direction=self.spec.direction)
         return network_ean_builder_for_cycle(
-            switch_cycle=switch_cycle,
+            state_ids=switch_cycle,
             start_builder=ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
         )
 
@@ -174,7 +174,7 @@ class FiveStationCircleCwHalfNoSkipNoWaitExample(FiveStationCircleCwFullNoSkipNo
     ) -> EanBuildArtifactBuilder:
         switch_cycle = build_circular_skip_stop_ean_ring_switch_order(scenario, direction=self.spec.direction)
         return network_ean_builder_for_cycle(
-            switch_cycle=switch_cycle,
+            state_ids=switch_cycle,
             start_builder=KeepEverySecondCabinStartBuilder(
                 ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
             ),
@@ -402,7 +402,7 @@ def _optimized_initial_placement_artifact_builder(
     direction: str,
 ) -> NetworkEanBuildArtifactBuilder:
     return network_ean_builder_for_cycle(
-        switch_cycle=build_circular_skip_stop_ean_ring_switch_order(
+        state_ids=build_circular_skip_stop_ean_ring_switch_order(
             scenario,
             direction=direction,
         ),

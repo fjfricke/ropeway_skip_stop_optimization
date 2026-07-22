@@ -32,7 +32,7 @@ from ropeway_skip_stop_optimization.optimization.ean.network import (
 class EanBuildArtifact:
     scenario_id: str
     config: EanConfig
-    switch_cycle: tuple[str, ...]
+    state_ids: tuple[str, ...]
     timings: tuple[SkipStopTiming, ...]
     cabin_starts: tuple[EanCabinStart, ...]
     switch_visits: tuple[SwitchVisitDefinition, ...]
@@ -53,10 +53,10 @@ class EanBuildArtifact:
 
     @property
     def circulation_state_ids(self) -> tuple[str, ...]:
-        """Canonical state order, with legacy fallback during migration."""
+        """Canonical state order, sourced from network provenance when present."""
 
         if self.movement_network is None or not self.circulation_pattern_ids:
-            return self.switch_cycle
+            return self.state_ids
         return self.movement_network.pattern(self.circulation_pattern_ids[0]).state_ids
 
     def validate(self) -> None:
@@ -66,14 +66,14 @@ class EanBuildArtifact:
         if self.build_metrics is not None:
             self.build_metrics.validate()
         self.config.validate()
-        _validate_switch_cycle(self.switch_cycle)
+        _validate_state_ids(self.state_ids)
         self.validate_network_compatibility()
 
         timing_by_switch_id = _validate_timings(self.timings)
         _require_exact_keys(
             "EAN build artifact timings",
             set(timing_by_switch_id),
-            set(self.switch_cycle),
+            set(self.state_ids),
         )
 
         station_config_ids = {station_config.station_id for station_config in self.config.station_configs}
@@ -82,7 +82,7 @@ class EanBuildArtifact:
         if missing_station_configs:
             raise ValueError(f"EAN build artifact timings reference stations without config: {missing_station_configs}")
 
-        cabin_start_by_cabin_id = _validate_cabin_starts(self.cabin_starts, set(self.switch_cycle))
+        cabin_start_by_cabin_id = _validate_cabin_starts(self.cabin_starts, set(self.state_ids))
         _validate_fleet_definition(
             self,
             cabin_start_by_cabin_id,
@@ -90,12 +90,12 @@ class EanBuildArtifact:
         visit_keys = _validate_switch_visits(
             self.switch_visits,
             cabin_ids=set(cabin_start_by_cabin_id),
-            switch_ids=set(self.switch_cycle),
+            switch_ids=set(self.state_ids),
         )
-        _validate_switch_transitions(self.switch_transitions, set(self.switch_cycle))
+        _validate_switch_transitions(self.switch_transitions, set(self.state_ids))
         checkpoint_ids = _validate_headway_checkpoints(
             self.headway_checkpoints,
-            switch_ids=set(self.switch_cycle),
+            switch_ids=set(self.state_ids),
             timing_by_switch_id=timing_by_switch_id,
         )
         candidate_checkpoint_by_id = _validate_headway_candidates(
@@ -131,8 +131,10 @@ class EanBuildArtifact:
         if len(self.circulation_pattern_ids) != 1:
             raise ValueError("stage-one EAN artifacts support exactly one circulation pattern")
         pattern = self.movement_network.pattern(self.circulation_pattern_ids[0])
-        if pattern.state_ids != self.switch_cycle:
-            raise ValueError("stage-one circulation pattern must reproduce switch_cycle exactly")
+        if pattern.state_ids != self.state_ids:
+            raise ValueError(
+                "stage-one circulation pattern must reproduce artifact state_ids exactly"
+            )
         if self.resource_conflict_index is None:
             raise ValueError("network artifact needs a resource conflict index")
         if validate_conflict_index:
@@ -166,24 +168,26 @@ def _validate_fleet_definition(
     if set(starts_by_cabin_id) != set(range(parameters.available_fleet_count)):
         raise ValueError("initial placement potential cabin ids must be contiguous from zero")
     if parameters.initial_phase_visit_count != len(artifact.circulation_state_ids):
-        raise ValueError("initial placement phase count must match switch_cycle")
+        raise ValueError("initial placement phase count must match circulation states")
     for start in starts_by_cabin_id.values():
         if (
             start.kind is not EanCabinStartKind.EARLIEST
             or start.first_switch_id != artifact.circulation_state_ids[0]
             or start.time_seconds != 0.0
         ):
-            raise ValueError("initial placement cabin starts must use the canonical ring origin")
+            raise ValueError(
+                "initial placement cabin starts must use the canonical pattern origin"
+            )
 
 
-def _validate_switch_cycle(switch_cycle: tuple[str, ...]) -> None:
-    if not switch_cycle:
-        raise ValueError("EAN build artifact switch_cycle must not be empty")
-    duplicate_switch_ids = _duplicates(list(switch_cycle))
+def _validate_state_ids(state_ids: tuple[str, ...]) -> None:
+    if not state_ids:
+        raise ValueError("EAN build artifact state_ids must not be empty")
+    duplicate_switch_ids = _duplicates(list(state_ids))
     if duplicate_switch_ids:
-        raise ValueError(f"EAN build artifact switch_cycle has duplicate ids: {duplicate_switch_ids}")
-    for switch_id in switch_cycle:
-        _require_id("EAN build artifact switch_cycle id", switch_id)
+        raise ValueError(f"EAN build artifact state_ids has duplicate ids: {duplicate_switch_ids}")
+    for switch_id in state_ids:
+        _require_id("EAN build artifact state_ids id", switch_id)
 
 
 def _validate_timings(timings: tuple[SkipStopTiming, ...]) -> dict[str, SkipStopTiming]:

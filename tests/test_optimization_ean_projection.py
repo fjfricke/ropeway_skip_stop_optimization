@@ -183,7 +183,7 @@ def _scenario_artifact_plan():
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
     artifact = network_ean_builder_for_cycle(
-        switch_cycle=build_three_station_ean_ring_switch_order(scenario),
+        state_ids=build_three_station_ean_ring_switch_order(scenario),
     ).build(scenario, config)
     plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)
     return scenario, artifact, plan

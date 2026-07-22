@@ -31,10 +31,11 @@ EAN construction uses the `network` path, which first derives a canonical
 `EanMovementNetwork` with movement states, route
 options, shared physical resources, compatibility headway resources, and one
 deterministic `EanCirculationPattern`. It then verifies exact compatibility with
-the established timings, visits, candidates, and pairs. Network artifacts retain
-`switch_cycle` only as a migration field; new topology work should target the
-network and selected pattern instead. Stage one deliberately rejects dynamic
-route destinations with a clear `dynamic routing not yet supported` error.
+the established timings, visits, candidates, and pairs. The canonical artifact
+stores `state_ids` and pattern provenance; the former ring-specific builders and
+`switch_cycle` artifact field have been removed. Stage one deliberately rejects
+dynamic route destinations with a clear `dynamic routing not yet supported`
+error.
 
 `EanOptimizer` is the single public continuous-EAN solver API. It accepts one
 of three typed problem objects:

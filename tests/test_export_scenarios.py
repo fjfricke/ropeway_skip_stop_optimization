@@ -747,7 +747,7 @@ class _TinyThreeStationSkipNoWaitEanExample(ThreeStationExample):
 
         switch_cycle = build_three_station_ean_ring_switch_order(scenario)
         return network_ean_builder_for_cycle(
-            switch_cycle=switch_cycle,
+            state_ids=switch_cycle,
             start_builder=DeterministicPhysicalNodeToSwitchStartBuilder(),
         )
 

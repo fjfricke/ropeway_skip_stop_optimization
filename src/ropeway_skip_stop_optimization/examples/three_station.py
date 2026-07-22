@@ -91,7 +91,7 @@ class ThreeStationExample(ScenarioExample):
 
         switch_cycle = build_three_station_ean_ring_switch_order(scenario)
         return network_ean_builder_for_cycle(
-            switch_cycle=switch_cycle,
+            state_ids=switch_cycle,
             start_builder=KeepEverySecondCabinStartBuilder(
                 ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
             ),
@@ -139,7 +139,7 @@ class ThreeStationFullNoSkipNoWaitExample(ThreeStationExample):
 
         switch_cycle = build_three_station_ean_ring_switch_order(scenario)
         return network_ean_builder_for_cycle(
-            switch_cycle=switch_cycle,
+            state_ids=switch_cycle,
             start_builder=ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
         )
 
@@ -168,7 +168,7 @@ class ThreeStationHalfNoSkipNoWaitExample(ThreeStationFullNoSkipNoWaitExample):
 
         switch_cycle = build_three_station_ean_ring_switch_order(scenario)
         return network_ean_builder_for_cycle(
-            switch_cycle=switch_cycle,
+            state_ids=switch_cycle,
             start_builder=KeepEverySecondCabinStartBuilder(
                 ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
             ),
@@ -203,7 +203,7 @@ class ThreeStationOptimizedInitialPlacementExample(ThreeStationExample):
         )
 
         return network_ean_builder_for_cycle(
-            switch_cycle=build_three_station_ean_ring_switch_order(scenario),
+            state_ids=build_three_station_ean_ring_switch_order(scenario),
             fleet_config=EanFleetConfig(
                 mode=EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT,
                 available_fleet_count=len(scenario.cabins),
