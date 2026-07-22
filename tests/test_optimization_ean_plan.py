@@ -54,8 +54,19 @@ def test_ean_trajectory_requires_ordered_contiguous_visits_for_one_cabin() -> No
 
     trajectory.validate()
 
+    EanCabinTrajectory(
+        cabin_id=0,
+        visits=(_stop_visit(visit_index=1),),
+    ).validate()
+
     with pytest.raises(ValueError, match="contiguous"):
-        EanCabinTrajectory(cabin_id=0, visits=(_stop_visit(visit_index=1),)).validate()
+        EanCabinTrajectory(
+            cabin_id=0,
+            visits=(
+                _stop_visit(visit_index=1),
+                _stop_visit(visit_index=3),
+            ),
+        ).validate()
 
     with pytest.raises(ValueError, match="another cabin"):
         EanCabinTrajectory(cabin_id=0, visits=(_stop_visit(cabin_id=1),)).validate()

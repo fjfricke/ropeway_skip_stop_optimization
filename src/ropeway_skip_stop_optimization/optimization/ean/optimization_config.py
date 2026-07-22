@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from typing import Iterable
 
@@ -13,6 +13,7 @@ from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     EanStopSkipTimingFormulation,
     EanTimeBoundFormulation,
 )
+from ropeway_skip_stop_optimization.optimization.ean.models import EanFleetMode
 
 
 class EanOptimizationName(StrEnum):
@@ -20,6 +21,11 @@ class EanOptimizationName(StrEnum):
     SINGLE_RING_DOMINATED_RIDE_PRUNING = "single_ring_dominated_ride_pruning"
     SLOT_TIME_RELAXATION_STRENGTHENING = "slot_time_relaxation_strengthening"
     TIGHT_BIG_M_BOUNDS = "tight_big_m_bounds"
+
+
+class EanOptimizationSelectionOrigin(StrEnum):
+    AUTO = "auto"
+    EXPLICIT = "explicit"
 
 
 ALL_EAN_OPTIMIZATION_NAMES: tuple[EanOptimizationName, ...] = tuple(EanOptimizationName)
@@ -48,6 +54,14 @@ class EanOptimizationConfig:
     enable_slot_time_relaxation_strengthening: bool = True
     enable_tight_big_m_bounds: bool = False
     formulation: EanFormulationConfig = EanFormulationConfig()
+    selection_origin: EanOptimizationSelectionOrigin = field(
+        default=EanOptimizationSelectionOrigin.AUTO,
+        compare=False,
+    )
+    explicit_formulation_names: frozenset[str] = field(
+        default_factory=frozenset,
+        compare=False,
+    )
 
     @classmethod
     def all(cls) -> EanOptimizationConfig:
@@ -61,6 +75,7 @@ class EanOptimizationConfig:
             enable_slot_time_relaxation_strengthening=False,
             enable_tight_big_m_bounds=False,
             formulation=EanFormulationConfig(),
+            selection_origin=EanOptimizationSelectionOrigin.EXPLICIT,
         )
 
     @classmethod
@@ -81,6 +96,7 @@ class EanOptimizationConfig:
             ),
             enable_tight_big_m_bounds=EanOptimizationName.TIGHT_BIG_M_BOUNDS in enabled,
             formulation=formulation or EanFormulationConfig(),
+            selection_origin=EanOptimizationSelectionOrigin.EXPLICIT,
         )
 
     @classmethod
@@ -95,6 +111,10 @@ class EanOptimizationConfig:
             raise ValueError(f"unknown EAN configuration selections: {', '.join(unknown)}")
         if "all" in names and "none" in names:
             raise ValueError("EAN configuration selection cannot combine 'all' and 'none'")
+        if names == ["all"]:
+            # The CLI default is the objective/fleet-aware production default,
+            # not an explicit request to force every fixed-start reduction.
+            return cls.all()
 
         horizon_values = [EanHorizonFormulation(name) for name in names if name in EanHorizonFormulation]
         time_bound_values = [EanTimeBoundFormulation(name) for name in names if name in EanTimeBoundFormulation]
@@ -154,7 +174,12 @@ class EanOptimizationConfig:
         if "all" in names:
             optimization_names.extend(DEFAULT_EAN_OPTIMIZATION_NAMES)
         optimization_names.extend(name for name in names if name in EanOptimizationName)
-        return cls.from_enabled_names(optimization_names, formulation=formulation)
+        return replace(
+            cls.from_enabled_names(optimization_names, formulation=formulation),
+            explicit_formulation_names=frozenset(
+                name for name in names if name in ALL_EAN_FORMULATION_SELECTION_NAMES
+            ),
+        )
 
     def enabled_names(self) -> tuple[EanOptimizationName, ...]:
         names: list[EanOptimizationName] = []
@@ -195,4 +220,70 @@ class EanOptimizationConfig:
         return replace(
             self,
             formulation=replace(self.formulation, board_time=board_time),
+        )
+
+    def resolved_for_fleet_mode(
+        self,
+        fleet_mode: EanFleetMode,
+    ) -> EanOptimizationConfig:
+        if fleet_mode is EanFleetMode.FIXED_STARTS:
+            return self
+        if fleet_mode is not EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT:
+            raise ValueError(f"unsupported EAN fleet mode: {fleet_mode}")
+
+        unsupported = []
+        if self.enable_candidate_horizon_pruning:
+            unsupported.append(EanOptimizationName.CANDIDATE_HORIZON_PRUNING.value)
+        if self.enable_single_ring_dominated_ride_pruning:
+            unsupported.append(
+                EanOptimizationName.SINGLE_RING_DOMINATED_RIDE_PRUNING.value
+            )
+        if self.enable_tight_big_m_bounds:
+            unsupported.append(EanOptimizationName.TIGHT_BIG_M_BOUNDS.value)
+        if (
+            self.selection_origin is EanOptimizationSelectionOrigin.EXPLICIT
+            and unsupported
+        ):
+            raise NotImplementedError(
+                "optimized initial placement does not yet implement "
+                + ", ".join(unsupported)
+                + "; horizon pruning must minimize over boundary states, ring "
+                "dominance must be proven per selected boundary trajectory, "
+                "and tight Big-M values need state-specific negative bounds"
+            )
+
+        explicit_formulations = self.explicit_formulation_names
+        if (
+            EanHorizonFormulation.EXACT_TIME_ACTIVATION.value
+            not in explicit_formulations
+            and any(
+                name in explicit_formulations
+                for name in EanHorizonFormulation
+            )
+        ):
+            raise NotImplementedError(
+                "optimized initial placement currently requires "
+                "horizon_exact_time_activation"
+            )
+        if any(name in explicit_formulations for name in EanTimeBoundFormulation):
+            if (
+                EanTimeBoundFormulation.INITIAL_PLACEMENT_SAFE.value
+                not in explicit_formulations
+            ):
+                raise NotImplementedError(
+                    "optimized initial placement requires boundary-state time "
+                    "bounds; derived fixed-start bounds can later be adapted "
+                    "per selected initial state"
+                )
+
+        return replace(
+            self,
+            enable_candidate_horizon_pruning=False,
+            enable_single_ring_dominated_ride_pruning=False,
+            enable_tight_big_m_bounds=False,
+            formulation=replace(
+                self.formulation,
+                horizon=EanHorizonFormulation.EXACT_TIME_ACTIVATION,
+                time_bounds=EanTimeBoundFormulation.INITIAL_PLACEMENT_SAFE,
+            ),
         )

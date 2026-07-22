@@ -17,6 +17,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanCabinVisit,
     EanConfig,
     EanHorizonFormulation,
+    EanHeadwayPairScope,
     EanMovementPlan,
     EanRouteDecision,
     EanTimeReference,
@@ -31,6 +32,11 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     SwitchTransition,
     SwitchVisitDefinition,
     validate_ean_movement_plan_against_artifact,
+)
+from ropeway_skip_stop_optimization.optimization.ean.headway_separator import (
+    EanHeadwayViolation,
+    select_headway_violation_batch,
+    separate_all_headway_violations,
 )
 
 
@@ -207,6 +213,102 @@ def test_exact_horizon_validates_occupancy_clearing_after_horizon() -> None:
     report = validate_ean_movement_plan_against_artifact(artifact, plan)
 
     assert "EAN_HEADWAY_VIOLATION" in _error_codes(report)
+
+
+def test_sparse_separator_finds_point_headway_violation() -> None:
+    artifact, plan = _artifact_and_plan()
+    cabin_0_first = _first_visit_with_cabin(plan, 0)
+    cabin_2_first = _first_visit_with_cabin(plan, 2)
+    plan = _replace_visit(
+        plan,
+        replace(
+            cabin_2_first,
+            switch_time_seconds=cabin_0_first.switch_time_seconds,
+            platform_entry_time_seconds=cabin_0_first.platform_entry_time_seconds,
+            platform_exit_time_seconds=cabin_0_first.platform_exit_time_seconds,
+            exit_switch_time_seconds=cabin_0_first.exit_switch_time_seconds,
+            next_switch_time_seconds=cabin_0_first.next_switch_time_seconds,
+        ),
+    )
+    sparse = replace(
+        artifact, headway_pairs=(), headway_pair_scope=EanHeadwayPairScope.SPARSE
+    )
+
+    violations = separate_all_headway_violations(sparse, plan)
+
+    assert violations
+    assert all(item.violation_seconds > 1e-5 for item in violations)
+
+
+def test_sparse_separator_uses_platform_wait_occupancy() -> None:
+    artifact, plan = _platform_exit_wait_occupancy_artifact_and_plan()
+    sparse = replace(
+        artifact, headway_pairs=(), headway_pair_scope=EanHeadwayPairScope.SPARSE
+    )
+
+    violations = separate_all_headway_violations(sparse, plan)
+
+    assert len(violations) == 1
+    assert violations[0].semantics_label == "platform_exit_wait_occupancy"
+
+
+def test_sparse_separator_respects_stop_skip_activation() -> None:
+    artifact, plan = _platform_exit_wait_occupancy_artifact_and_plan()
+    skip_only = tuple(
+        replace(candidate, activation_reference=EanActivationReference.SKIP)
+        for candidate in artifact.headway_candidates
+    )
+    sparse = replace(
+        artifact,
+        headway_candidates=skip_only,
+        headway_pairs=(),
+        headway_pair_scope=EanHeadwayPairScope.SPARSE,
+    )
+
+    assert separate_all_headway_violations(sparse, plan) == ()
+
+
+def test_sparse_separator_filters_candidates_after_operational_horizon() -> None:
+    artifact, plan = _horizon_crossing_headway_artifact_and_plan()
+    shifted_trajectories = tuple(
+        replace(
+            trajectory,
+            visits=tuple(
+                replace(
+                    visit,
+                    switch_time_seconds=visit.switch_time_seconds + 10.0,
+                    platform_entry_time_seconds=visit.platform_entry_time_seconds + 10.0,
+                    platform_exit_time_seconds=visit.platform_exit_time_seconds + 10.0,
+                    exit_switch_time_seconds=visit.exit_switch_time_seconds + 10.0,
+                    next_switch_time_seconds=visit.next_switch_time_seconds + 10.0,
+                )
+                for visit in trajectory.visits
+            ),
+        )
+        for trajectory in plan.trajectories
+    )
+    sparse = replace(
+        artifact, headway_pairs=(), headway_pair_scope=EanHeadwayPairScope.SPARSE
+    )
+
+    assert separate_all_headway_violations(
+        sparse, replace(plan, trajectories=shifted_trajectories)
+    ) == ()
+
+
+def test_violation_batch_is_deterministic_by_strength_then_pair_id() -> None:
+    artifact, _ = _platform_exit_wait_occupancy_artifact_and_plan()
+    pair = artifact.headway_pairs[0]
+    weaker_pair = replace(pair, id="a")
+    stronger_pair = replace(pair, id="z")
+    violations = (
+        EanHeadwayViolation(weaker_pair, 0.0, 0.0, 1.0, "point_headway"),
+        EanHeadwayViolation(stronger_pair, 0.0, 0.0, 2.0, "point_headway"),
+    )
+
+    selected = select_headway_violation_batch(violations, limit=2)
+
+    assert tuple(item.pair.id for item in selected) == ("z", "a")
 
 
 def _artifact_and_plan() -> tuple[EanBuildArtifact, EanMovementPlan]:

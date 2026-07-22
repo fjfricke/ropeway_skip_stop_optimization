@@ -13,19 +13,21 @@ from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArt
 from ropeway_skip_stop_optimization.optimization.ean.builders.passenger_builder import (
     EanPassengerCandidateBuilder,
 )
-from ropeway_skip_stop_optimization.optimization.ean.baselines import (
-    EarliestAllStopEanMovementPlanBuilder,
-)
 from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     EanBoardTimeFormulation,
     EanHorizonFormulation,
-    EanTimeBoundFormulation,
 )
+from ropeway_skip_stop_optimization.optimization.ean.fleet import EanFleetPlan
+from ropeway_skip_stop_optimization.optimization.ean.models import EanHeadwayPairScope
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.fixed_movement_passenger_model import (
     EanFixedMovementPassengerModel,
     EanFixedMovementPassengerModelBuilder,
     EanPassengerAssignment,
     EanPassengerAssignmentDomain,
+)
+from ropeway_skip_stop_optimization.optimization.ean.optimizers.all_stop_mip_start import (
+    EanAllStopMipStartSeed,
+    EanAllStopMipStartSeedBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ean.optimization_config import (
     EanOptimizationConfig,
@@ -47,12 +49,8 @@ from ropeway_skip_stop_optimization.optimization.ean.passenger_plan import (
     EanPassengerServicePlan,
 )
 from ropeway_skip_stop_optimization.optimization.ean.plan import (
-    EanCabinTrajectory,
     EanMovementPlan,
     EanRouteDecision,
-)
-from ropeway_skip_stop_optimization.optimization.ean.time_bounds import (
-    build_ean_model_time_bounds,
 )
 from ropeway_skip_stop_optimization.optimization.ean.validation import (
     validate_ean_movement_plan_against_artifact,
@@ -75,6 +73,7 @@ class EanOptimizationProblemKind(StrEnum):
 class EanMipStartStrategy(StrEnum):
     """Primal-start strategy for integrated passenger-service solves."""
 
+    AUTO = "auto"
     NONE = "none"
     GREEDY_ALL_STOP = "greedy_all_stop"
     OPTIMIZED_ALL_STOP = "optimized_all_stop"
@@ -140,7 +139,7 @@ class EanPassengerServiceProblem:
     objective: EanPassengerObjective = EanPassengerObjective.WAITING_TIME
     passenger_builder: EanPassengerCandidateBuilder | None = None
     mip_start_strategy: EanMipStartStrategy = (
-        EanMipStartStrategy.OPTIMIZED_ALL_STOP
+        EanMipStartStrategy.AUTO
     )
 
     @property
@@ -226,6 +225,11 @@ class EanOptimizationMetadata:
     fractional_ride_count: int | None = None
     fractional_distance_sum: float | None = None
     maximum_fractional_distance: float | None = None
+    resolved_mip_start_strategy: EanMipStartStrategy | None = None
+    mip_start_active_cabin_count: int | None = None
+    mip_start_unserved_passenger_count: int | None = None
+    mip_start_passenger_objective_seconds: float | None = None
+    mip_start_generation_seconds: float | None = None
 
     def passenger_export_dict(self) -> dict[str, Any]:
         """Preserve the established passenger-result JSON metadata contract."""
@@ -257,6 +261,11 @@ class EanOptimizationMetadata:
             "checkpoint_read_path",
             "checkpoint_solution_file_prefix",
             "checkpoint_final_solution_path",
+            "resolved_mip_start_strategy",
+            "mip_start_active_cabin_count",
+            "mip_start_unserved_passenger_count",
+            "mip_start_passenger_objective_seconds",
+            "mip_start_generation_seconds",
             "optimization_config",
             "progress_samples",
         }
@@ -274,6 +283,7 @@ class EanOptimizationResult:
     passenger_plan: EanPassengerServicePlan | None
     metadata: EanOptimizationMetadata
     passenger_assignment: EanPassengerAssignment | None = None
+    fleet_plan: EanFleetPlan | None = None
 
 
 @dataclass(frozen=True)
@@ -296,7 +306,11 @@ class EanOptimizer:
                 gp=gp,
                 grb=GRB,
             )
-        optimization_config = self.config.optimization_config
+        optimization_config = (
+            self.config.optimization_config.resolved_for_fleet_mode(
+                problem.artifact.fleet_mode
+            )
+        )
         passenger_build = None
         passenger_candidate_runtime = 0.0
         if isinstance(problem, EanPassengerServiceProblem):
@@ -329,6 +343,10 @@ class EanOptimizer:
             passenger_candidate_runtime = perf_counter() - candidate_started
 
         setup_started = perf_counter()
+        if problem.artifact.headway_pair_scope is EanHeadwayPairScope.SPARSE:
+            raise ValueError(
+                "sparse headway artifacts require the delayed fixed-K capacity optimizer"
+            )
         model = gp.Model(f"ean_{problem.kind.value}")
         model.Params.OutputFlag = 1 if self.config.log_to_console else 0
         apply_gurobi_solver_policy(model, self.config.solver_policy)
@@ -345,7 +363,13 @@ class EanOptimizer:
         passenger_runtime = 0.0
         mip_start_runtime = 0.0
         mip_start_objective_value = None
+        mip_start_passenger_objective = None
+        mip_start_active_cabin_count = None
+        mip_start_unserved_count = None
+        resolved_mip_start_strategy = None
         if isinstance(problem, EanPassengerServiceProblem):
+            mip_start_strategy = _resolved_mip_start_strategy(problem)
+            resolved_mip_start_strategy = mip_start_strategy
             passenger_started = perf_counter()
             passenger_model = EanPassengerModelBuilder().build(
                 scenario=problem.scenario,
@@ -360,18 +384,31 @@ class EanOptimizer:
             passenger_runtime = perf_counter() - passenger_started
             if _should_apply_mip_start(problem, self.config.checkpoint):
                 mip_start_started = perf_counter()
+                seed = EanAllStopMipStartSeedBuilder().build(
+                    problem.artifact,
+                    optimization_config.formulation.horizon,
+                )
+                mip_start_active_cabin_count = _seed_active_cabin_count(seed)
                 if (
-                    problem.mip_start_strategy
+                    mip_start_strategy
                     is EanMipStartStrategy.GREEDY_ALL_STOP
                 ):
-                    passenger_model.apply_all_stop_mip_start()
+                    (
+                        mip_start_unserved_count,
+                        mip_start_passenger_objective,
+                    ) = passenger_model.apply_all_stop_mip_start(
+                        seed.movement_plan,
+                        seed.fleet_plan,
+                    )
+                    mip_start_objective_value = mip_start_passenger_objective
                 elif (
-                    problem.mip_start_strategy
+                    mip_start_strategy
                     is EanMipStartStrategy.OPTIMIZED_ALL_STOP
                 ):
                     optimized_start = _solve_optimized_all_stop_start(
                         optimizer=self,
                         problem=problem,
+                        seed=seed,
                     )
                     if (
                         optimized_start.movement_plan is not None
@@ -380,16 +417,35 @@ class EanOptimizer:
                         passenger_model.apply_mip_start(
                             optimized_start.movement_plan,
                             optimized_start.passenger_plan,
+                            seed.fleet_plan,
                         )
                         mip_start_objective_value = (
                             optimized_start.metadata.objective_value_seconds
+                        )
+                        mip_start_unserved_count = (
+                            optimized_start.metadata.unserved_passenger_count
+                        )
+                        mip_start_passenger_objective = (
+                            _seed_passenger_objective_seconds(
+                                passenger_model,
+                                optimized_start.passenger_plan,
+                            )
                         )
                     else:
                         LOGGER.warning(
                             "Optimized all-stop MIP start produced no solution; "
                             "falling back to greedy all-stop"
                         )
-                        passenger_model.apply_all_stop_mip_start()
+                        (
+                            mip_start_unserved_count,
+                            mip_start_passenger_objective,
+                        ) = passenger_model.apply_all_stop_mip_start(
+                            seed.movement_plan,
+                            seed.fleet_plan,
+                        )
+                        mip_start_objective_value = (
+                            mip_start_passenger_objective
+                        )
                 mip_start_runtime = perf_counter() - mip_start_started
         else:
             model.setObjective(0.0, GRB.MINIMIZE)
@@ -467,6 +523,12 @@ class EanOptimizer:
                     build_metrics=build_metrics,
                     solve_phase_metrics=solve_phase_metrics,
                     progress_samples=progress_samples,
+                    resolved_mip_start_strategy=resolved_mip_start_strategy,
+                    mip_start_active_cabin_count=mip_start_active_cabin_count,
+                    mip_start_unserved_passenger_count=mip_start_unserved_count,
+                    mip_start_passenger_objective_seconds=(
+                        mip_start_passenger_objective
+                    ),
                 ),
             )
 
@@ -506,6 +568,17 @@ class EanOptimizer:
                 progress_samples=progress_samples,
                 movement_plan=movement_plan,
                 passenger_plan=passenger_plan,
+                resolved_mip_start_strategy=resolved_mip_start_strategy,
+                mip_start_active_cabin_count=mip_start_active_cabin_count,
+                mip_start_unserved_passenger_count=mip_start_unserved_count,
+                mip_start_passenger_objective_seconds=(
+                    mip_start_passenger_objective
+                ),
+            ),
+            fleet_plan=(
+                movement_model.fleet_model.extract_plan()
+                if movement_model.fleet_model is not None
+                else None
             ),
         )
 
@@ -538,9 +611,9 @@ def _solve_fixed_movement_passenger(
         )
 
     optimization_config = (
-        config.optimization_config.resolved_for_passenger_objective(
-            problem.objective
-        )
+        config.optimization_config.resolved_for_fleet_mode(
+            problem.artifact.fleet_mode
+        ).resolved_for_passenger_objective(problem.objective)
     )
     candidate_started = perf_counter()
     passenger_build = (
@@ -755,7 +828,7 @@ def _should_apply_mip_start(
     checkpoint: GurobiCheckpointConfig | None,
 ) -> bool:
     return (
-        problem.mip_start_strategy is not EanMipStartStrategy.NONE
+        _resolved_mip_start_strategy(problem) is not EanMipStartStrategy.NONE
         and (
             checkpoint is None
             or checkpoint.read_solution_path is None
@@ -763,10 +836,20 @@ def _should_apply_mip_start(
     )
 
 
+def _resolved_mip_start_strategy(
+    problem: EanPassengerServiceProblem,
+) -> EanMipStartStrategy:
+    strategy = problem.mip_start_strategy
+    if strategy is EanMipStartStrategy.AUTO:
+        return EanMipStartStrategy.OPTIMIZED_ALL_STOP
+    return strategy
+
+
 def _solve_optimized_all_stop_start(
     *,
     optimizer: EanOptimizer,
     problem: EanPassengerServiceProblem,
+    seed: EanAllStopMipStartSeed,
 ) -> EanOptimizationResult:
     """Optimize passenger service for the deterministic all-stop movement.
 
@@ -776,10 +859,6 @@ def _solve_optimized_all_stop_start(
     from consuming an unbounded share of the main run.
     """
 
-    all_stop_plan = _all_stop_plan_for_formulation(
-        problem.artifact,
-        optimizer.config.optimization_config.formulation.horizon,
-    )
     main_limit = optimizer.config.solver_policy.time_limit_seconds
     start_limit = min(main_limit, 60.0) if main_limit is not None else 60.0
     start_policy = replace(
@@ -797,67 +876,35 @@ def _solve_optimized_all_stop_start(
         EanFixedMovementPassengerProblem(
             scenario=problem.scenario,
             artifact=problem.artifact,
-            movement_plan=all_stop_plan,
+            movement_plan=seed.movement_plan,
             objective=problem.objective,
             passenger_builder=problem.passenger_builder,
         )
     )
 
 
-def _all_stop_plan_for_formulation(
-    artifact: EanBuildArtifact,
-    horizon_formulation: EanHorizonFormulation,
-) -> EanMovementPlan:
-    plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)
-    if horizon_formulation is EanHorizonFormulation.LEGACY:
-        return plan
+def _seed_active_cabin_count(seed: EanAllStopMipStartSeed) -> int:
+    if seed.fleet_plan is not None:
+        return len(seed.fleet_plan.active_cabin_ids)
+    return sum(bool(trajectory.visits) for trajectory in seed.movement_plan.trajectories)
 
-    active_keys: set[tuple[int, int]]
-    if (
-        horizon_formulation
-        is EanHorizonFormulation.CONSERVATIVE_FREE_SUFFIX
-    ):
-        bounds = build_ean_model_time_bounds(
-            artifact,
-            EanTimeBoundFormulation.DERIVED_VISIT_BOUNDS,
-        )
-        active_keys = {
-            key
-            for key, visit_bounds in bounds.by_visit.items()
-            if visit_bounds.switch_lower
-            <= artifact.config.operational_end_seconds
-        }
-    elif (
-        horizon_formulation
-        is EanHorizonFormulation.EXACT_TIME_ACTIVATION
-    ):
-        active_keys = {
-            (visit.cabin_id, visit.visit_index)
-            for trajectory in plan.trajectories
-            for visit in trajectory.visits
-            if visit.switch_time_seconds
-            <= artifact.config.operational_end_seconds
-        }
-    else:
-        raise ValueError(
-            f"unsupported EAN horizon formulation: {horizon_formulation}"
-        )
 
-    return replace(
-        plan,
-        trajectories=tuple(
-            EanCabinTrajectory(
-                cabin_id=trajectory.cabin_id,
-                visits=tuple(
-                    visit
-                    for visit in trajectory.visits
-                    if (visit.cabin_id, visit.visit_index) in active_keys
-                ),
-            )
-            for trajectory in plan.trajectories
-        ),
-        horizon_formulation=horizon_formulation,
-    )
+def _seed_passenger_objective_seconds(
+    passenger_model: EanPassengerModel,
+    passenger_plan: EanPassengerServicePlan,
+) -> float:
+    total = 0.0
+    for ride in passenger_plan.served_rides:
+        group = passenger_model.group_by_id[ride.demand_group_id]
+        service_time = (
+            ride.boarding_time_seconds
+            if passenger_model.objective is EanPassengerObjective.WAITING_TIME
+            else ride.alighting_time_seconds
+        )
+        total += ride.count * (
+            service_time - group.release_time_seconds
+        )
+    return total
 
 
 def _metadata(
@@ -876,6 +923,10 @@ def _metadata(
     progress_samples: tuple[GurobiMipProgressSample, ...],
     movement_plan: EanMovementPlan | None = None,
     passenger_plan: EanPassengerServicePlan | None = None,
+    resolved_mip_start_strategy: EanMipStartStrategy | None = None,
+    mip_start_active_cabin_count: int | None = None,
+    mip_start_unserved_passenger_count: int | None = None,
+    mip_start_passenger_objective_seconds: float | None = None,
 ) -> EanOptimizationMetadata:
     if passenger_model is None:
         objective_kind = None
@@ -888,7 +939,9 @@ def _metadata(
     else:
         objective_kind = passenger_model.objective
         objective_value = (
-            float(model.ObjVal) if int(model.SolCount) > 0 else None
+            float(passenger_model.objective_expression.getValue())
+            if int(model.SolCount) > 0
+            else None
         )
         demand_group_count = len(passenger_model.passenger_build.demand_groups)
         ride_candidate_count = len(passenger_model.passenger_build.ride_candidates)
@@ -954,6 +1007,17 @@ def _metadata(
         **checkpoint_diagnostics,
         optimization_config=optimization_config,
         progress_samples=progress_samples,
+        resolved_mip_start_strategy=resolved_mip_start_strategy,
+        mip_start_active_cabin_count=mip_start_active_cabin_count,
+        mip_start_unserved_passenger_count=mip_start_unserved_passenger_count,
+        mip_start_passenger_objective_seconds=(
+            mip_start_passenger_objective_seconds
+        ),
+        mip_start_generation_seconds=(
+            build_metrics.mip_start_seconds
+            if resolved_mip_start_strategy is not None
+            else None
+        ),
     )
 
 

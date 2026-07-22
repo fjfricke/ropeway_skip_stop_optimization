@@ -98,6 +98,34 @@ def test_ring_switch_visit_builder_respects_start_switch_and_margin() -> None:
     assert count_visits_by_cabin(result.visits) == {0: 4, 1: 3}
 
 
+def test_ring_switch_visit_builder_covers_every_selectable_initial_phase() -> None:
+    builder = RingSwitchVisitBuilder(
+        switch_cycle=("sw_a", "sw_b", "sw_c"),
+        safety_visit_margin=0,
+        selectable_initial_phase_count=3,
+    )
+
+    result = builder.build(
+        config=_config(horizon_seconds=41.0),
+        cabin_starts=(
+            EanCabinStart(0, "sw_a", EanCabinStartKind.EARLIEST, 0.0),
+        ),
+        timings=(
+            _timing("sw_a", "A"),
+            _timing("sw_b", "B"),
+            _timing("sw_c", "C"),
+        ),
+    )
+
+    assert tuple(visit.switch_id for visit in result.visits) == (
+        "sw_a",
+        "sw_b",
+        "sw_c",
+        "sw_a",
+        "sw_b",
+    )
+
+
 def test_ring_switch_visit_builder_rejects_invalid_inputs() -> None:
     builder = RingSwitchVisitBuilder(switch_cycle=("sw_a", "sw_a"), safety_visit_margin=0)
     with pytest.raises(ValueError, match="duplicate switch_cycle"):
@@ -130,6 +158,19 @@ def test_ring_switch_visit_builder_rejects_invalid_inputs() -> None:
             config=_config(horizon_seconds=42.0),
             cabin_starts=(EanCabinStart(0, "sw_a", EanCabinStartKind.FIXED, 0.0),),
             timings=(_timing("sw_a", "A"),),
+        )
+
+    builder = RingSwitchVisitBuilder(
+        switch_cycle=("sw_a", "sw_b"),
+        selectable_initial_phase_count=3,
+    )
+    with pytest.raises(ValueError, match="selectable_initial_phase_count"):
+        builder.build(
+            config=_config(horizon_seconds=42.0),
+            cabin_starts=(
+                EanCabinStart(0, "sw_a", EanCabinStartKind.EARLIEST, 0.0),
+            ),
+            timings=(_timing("sw_a", "A"), _timing("sw_b", "B")),
         )
 
 

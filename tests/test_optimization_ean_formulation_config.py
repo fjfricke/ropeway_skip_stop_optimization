@@ -5,6 +5,7 @@ import pytest
 from ropeway_skip_stop_optimization.optimization.ean import (
     EanBoardTimeFormulation,
     EanFormulationConfig,
+    EanFleetMode,
     EanHorizonFormulation,
     EanOptimizationConfig,
     EanPassengerObjective,
@@ -79,6 +80,12 @@ def test_ean_configuration_all_and_none_use_current_formulation_defaults() -> No
     assert EanOptimizationConfig.from_selection("none").formulation == default_formulation
     assert EanOptimizationConfig.from_selection("all").selection_label() == "all"
     assert EanOptimizationConfig.from_selection("none").selection_label() == "none"
+    resolved_oip = EanOptimizationConfig.from_selection("all").resolved_for_fleet_mode(
+        EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT
+    )
+    assert not resolved_oip.enable_candidate_horizon_pruning
+    assert not resolved_oip.enable_single_ring_dominated_ride_pruning
+    assert resolved_oip.enable_slot_time_relaxation_strengthening
 
 
 def test_ean_configuration_all_accepts_formulation_override() -> None:

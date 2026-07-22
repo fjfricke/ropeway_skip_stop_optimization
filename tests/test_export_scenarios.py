@@ -4,19 +4,29 @@ import json
 import os
 import subprocess
 import sys
+from dataclasses import replace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from ropeway_skip_stop_optimization.examples.base import ScenarioExample, ScenarioExampleMetadata
 from ropeway_skip_stop_optimization.examples.registry import get_example
-from ropeway_skip_stop_optimization.examples.three_station import ThreeStationExample, build_three_station_scenario
+from ropeway_skip_stop_optimization.examples.three_station import (
+    ThreeStationExample,
+    ThreeStationOptimizedInitialPlacementExample,
+    build_three_station_scenario,
+)
+from ropeway_skip_stop_optimization.examples.three_station_ean import (
+    build_three_station_ean_config,
+)
 from ropeway_skip_stop_optimization.exports.artifacts import (
     ArtifactSet,
     DiscreteScenarioArtifactBuilder,
     ExportContext,
     PhysicalScenarioArtifactBuilder,
 )
+from ropeway_skip_stop_optimization.exports.json_codec import to_jsonable
 from ropeway_skip_stop_optimization.exports.runner import build_artifact_set, export_artifact_set
 from ropeway_skip_stop_optimization.exports.runner import _latest_ean_checkpoint_path
 from ropeway_skip_stop_optimization.exports.runner import run_artifact_set
@@ -25,17 +35,24 @@ from ropeway_skip_stop_optimization.optimization.discrete_time import MilpV0Vari
 from ropeway_skip_stop_optimization.optimization.ean import (
     DeterministicPhysicalNodeToSwitchStartBuilder,
     EanConfig,
+    EanFleetMode,
+    EanMipStartStrategy,
     EanModelBuildMetrics,
     EanOptimizationMetadata,
     EanOptimizationProblemKind,
     EanOptimizationConfig,
     EanOptimizationResult,
     EanPassengerObjective,
+    GurobiSolverPolicy,
     RingEanBuildArtifactBuilder,
     StationEanConfig,
     StationWaitingMode,
 )
 from ropeway_skip_stop_optimization.progress import ProgressReporter
+
+
+def test_json_codec_sorts_sets_deterministically() -> None:
+    assert to_jsonable(frozenset(("z", "a", "m"))) == ["a", "m", "z"]
 
 
 def test_exports_greedy_all_stop_manifest_and_movement_plan_json(tmp_path: Path) -> None:
@@ -196,6 +213,42 @@ def test_exports_ean_skip_stop_feasibility_json(tmp_path: Path) -> None:
     assert replay_payload["events"]
 
 
+def test_exports_initial_placement_tail_passenger_result_without_fixed_start_mip_start(
+    tmp_path: Path,
+) -> None:
+    pytest.importorskip("gurobipy")
+
+    result = run_artifact_set(
+        _TinyThreeStationInitialPlacementTailExample(),
+        build_artifact_set("ean_passenger_waiting_time"),
+        output_root=tmp_path,
+        ean_solver_policy=GurobiSolverPolicy(time_limit_seconds=10.0),
+        ean_mip_start_strategy=EanMipStartStrategy.OPTIMIZED_ALL_STOP,
+        progress=ProgressReporter(enabled=False),
+    )
+
+    result_path = (
+        tmp_path
+        / "three_station_initial_placement_tail_test"
+        / "ean_passenger_service_waiting_time.json"
+    )
+    replay_path = (
+        tmp_path
+        / "three_station_initial_placement_tail_test"
+        / "ean_passenger_service_physical_replay.json"
+    )
+    payload = json.loads(result_path.read_text(encoding="utf-8"))
+    replay_payload = json.loads(replay_path.read_text(encoding="utf-8"))
+
+    assert result_path in result.artifact_paths
+    assert payload["movement_plan"]["model_end_seconds"] == 1500.0
+    assert payload["fleet_plan"]["mode"] == EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT.value
+    assert payload["fleet_plan"]["available_fleet_count"] == 4
+    assert len(payload["fleet_plan"]["initial_states"]) == 1
+    assert sum(payload["passenger_plan"]["unserved_counts_by_demand_group_id"].values()) == 0
+    assert replay_payload["model_end_seconds"] == 1500.0
+
+
 def test_export_context_auto_injects_per_objective_ean_progress_recorders(monkeypatch: pytest.MonkeyPatch) -> None:
     captured_recorders: dict[EanPassengerObjective, object] = {}
 
@@ -213,7 +266,7 @@ def test_export_context_auto_injects_per_objective_ean_progress_recorders(monkey
         progress=ProgressReporter(enabled=False),
     )
     context._scenario = build_three_station_scenario()
-    context._ean_artifact = object()
+    context._ean_artifact = SimpleNamespace(fleet_mode=EanFleetMode.FIXED_STARTS)
 
     context.ean_passenger_service_result(EanPassengerObjective.WAITING_TIME)
     context.ean_passenger_service_result(EanPassengerObjective.JOURNEY_TIME)
@@ -258,6 +311,11 @@ def test_unified_passenger_metadata_adapter_preserves_export_contract() -> None:
         "checkpoint_read_path",
         "checkpoint_solution_file_prefix",
         "checkpoint_final_solution_path",
+        "resolved_mip_start_strategy",
+        "mip_start_active_cabin_count",
+        "mip_start_unserved_passenger_count",
+        "mip_start_passenger_objective_seconds",
+        "mip_start_generation_seconds",
         "optimization_config",
         "progress_samples",
     }
@@ -663,6 +721,32 @@ class _TinyThreeStationSkipNoWaitEanExample(ThreeStationExample):
             switch_cycle=switch_cycle,
             start_builder=DeterministicPhysicalNodeToSwitchStartBuilder(),
         )
+
+
+class _TinyThreeStationInitialPlacementTailExample(
+    ThreeStationOptimizedInitialPlacementExample
+):
+    metadata = ScenarioExampleMetadata(
+        id="three_station_initial_placement_tail_test",
+        label="Three station initial placement tail test",
+        description="Small optimized-initial-placement export test with a certification tail.",
+        tags=("ring", "optimized-initial-placement", "tail", "test"),
+        family_id="three_station_ring",
+        family_label="Three station ring",
+        variant_id="initial_placement_tail_test",
+        variant_label="Initial placement tail test",
+    )
+
+    def build_scenario(self):
+        scenario = super().build_scenario()
+        return replace(
+            scenario,
+            id=self.metadata.id,
+            demands=(replace(scenario.demands[0], count=1),),
+        )
+
+    def build_ean_config(self, scenario) -> EanConfig:
+        return build_three_station_ean_config(scenario, tail_seconds=300.0)
 
 
 class _ManifestVariantExample(ScenarioExample):

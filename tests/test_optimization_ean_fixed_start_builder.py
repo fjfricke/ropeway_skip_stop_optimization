@@ -5,6 +5,9 @@ from datetime import time
 
 import pytest
 
+from ropeway_skip_stop_optimization.examples.circular_skip_stop import (
+    FiveStationOptimizedInitialPlacementNoSkipNoWaitExample,
+)
 from ropeway_skip_stop_optimization.examples.three_station import build_three_station_scenario
 from ropeway_skip_stop_optimization.examples.three_station_ean import (
     build_three_station_ean_config,
@@ -24,6 +27,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     DeterministicPhysicalNodeToSwitchStartBuilder,
     EarliestAllStopEanMovementPlanBuilder,
     EanCabinStartKind,
+    EvenlySpacedAllStopCabinStartBuilder,
     RingEanBuildArtifactBuilder,
     validate_ean_movement_plan_against_artifact,
 )
@@ -103,6 +107,55 @@ def test_continuous_all_stop_max_start_builder_rejects_mismatched_targets() -> N
             scenario,
             config,
             frozenset({"M_entry_lr"}),
+        )
+
+
+def test_evenly_spaced_all_stop_builder_places_feasible_explicit_fleet() -> None:
+    example = FiveStationOptimizedInitialPlacementNoSkipNoWaitExample()
+    scenario = example.build_scenario()
+    config = example.build_ean_config(scenario)
+    optimized_builder = example.build_ean_artifact_builder(scenario, config)
+    assert isinstance(optimized_builder, RingEanBuildArtifactBuilder)
+    builder = EvenlySpacedAllStopCabinStartBuilder(
+        switch_cycle=optimized_builder.switch_cycle,
+        cabin_count=len(scenario.cabins),
+    )
+
+    artifact = RingEanBuildArtifactBuilder(
+        switch_cycle=optimized_builder.switch_cycle,
+        start_builder=builder,
+    ).build(scenario, config)
+
+    assert len(artifact.cabin_starts) == 8
+    plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)
+    validate_ean_movement_plan_against_artifact(
+        artifact,
+        plan,
+    ).raise_for_errors()
+
+
+def test_evenly_spaced_all_stop_builder_rejects_fleet_above_ring_capacity() -> None:
+    example = FiveStationOptimizedInitialPlacementNoSkipNoWaitExample()
+    scenario = example.build_scenario()
+    config = example.build_ean_config(scenario)
+    optimized_builder = example.build_ean_artifact_builder(scenario, config)
+    assert isinstance(optimized_builder, RingEanBuildArtifactBuilder)
+    maximum_starts = ContinuousAllStopMaxCabinStartBuilder(
+        switch_cycle=optimized_builder.switch_cycle,
+    ).build(
+        scenario,
+        config,
+        frozenset(optimized_builder.switch_cycle),
+    )
+
+    with pytest.raises(ValueError, match="exceeds the canonical ring capacity"):
+        EvenlySpacedAllStopCabinStartBuilder(
+            switch_cycle=optimized_builder.switch_cycle,
+            cabin_count=len(maximum_starts) + 1,
+        ).build(
+            scenario,
+            config,
+            frozenset(optimized_builder.switch_cycle),
         )
 
 

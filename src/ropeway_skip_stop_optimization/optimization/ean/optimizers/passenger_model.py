@@ -7,9 +7,7 @@ from typing import Any
 
 from ropeway_skip_stop_optimization.models import Scenario
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
-from ropeway_skip_stop_optimization.optimization.ean.baselines import (
-    EarliestAllStopEanMovementPlanBuilder,
-)
+from ropeway_skip_stop_optimization.optimization.ean.fleet import EanFleetPlan
 from ropeway_skip_stop_optimization.optimization.ean.builders.passenger_builder import (
     EanPassengerCandidateBuildResult,
     EanPassengerCandidateBuilder,
@@ -66,28 +64,31 @@ class EanPassengerModel:
     group_by_id: dict[str, EanDemandGroup]
     variables: EanPassengerVariables
     objective: EanPassengerObjective
+    objective_expression: Any
 
-    def apply_all_stop_mip_start(self) -> None:
-        movement_variables = self.movement.variables
-        _set_all_stop_mip_start(
+    def apply_all_stop_mip_start(
+        self,
+        movement_plan: EanMovementPlan,
+        fleet_plan: EanFleetPlan | None,
+    ) -> tuple[int, float]:
+        self.movement.apply_mip_start(movement_plan, fleet_plan)
+        return _set_all_stop_mip_start(
             artifact=self.movement.artifact,
             passenger_build=self.passenger_build,
             group_by_id=self.group_by_id,
-            switch_time=movement_variables.switch_time,
-            exit_switch_time=movement_variables.exit_switch_time,
-            wait_time=movement_variables.wait_time,
-            stop=movement_variables.stop,
+            movement_plan=movement_plan,
+            objective=self.objective,
             slot=self.variables.slot,
             slot_board_time=self.variables.slot_board_time,
             slot_alight_time=self.variables.slot_alight_time,
             unserved=self.variables.unserved,
-            visit_active=movement_variables.visit_active,
         )
 
     def apply_mip_start(
         self,
         movement_plan: EanMovementPlan,
         passenger_plan: EanPassengerServicePlan,
+        fleet_plan: EanFleetPlan | None = None,
     ) -> None:
         """Apply an extracted feasible solution as a partial Gurobi MIP start."""
 
@@ -104,7 +105,7 @@ class EanPassengerModel:
                 f"artifact: {passenger_plan.horizon_seconds} != "
                 f"{artifact.config.horizon_seconds}"
             )
-        self.movement.apply_mip_start(movement_plan)
+        self.movement.apply_mip_start(movement_plan, fleet_plan)
         _set_passenger_plan_mip_start(
             passenger_plan=passenger_plan,
             passenger_build=self.passenger_build,
@@ -207,6 +208,29 @@ class EanPassengerModelBuilder:
         model.update()
 
         movement_variables = movement_model.variables
+        board_time_nonnegative_by_key = {
+            key: (
+                movement_model.model_time_bounds.by_visit[key].switch_lower
+                + movement_model.timing_by_switch_id[
+                    movement_model.visits_by_key[key].switch_id
+                ].entry_to_platform_entry_seconds
+                + movement_model.timing_by_switch_id[
+                    movement_model.visits_by_key[key].switch_id
+                ].min_platform_entry_to_platform_exit_seconds
+                >= 0.0
+            )
+            for key in movement_model.visits_by_key
+        }
+        alight_time_nonnegative_by_key = {
+            key: (
+                movement_model.model_time_bounds.by_visit[key].switch_lower
+                + movement_model.timing_by_switch_id[
+                    movement_model.visits_by_key[key].switch_id
+                ].entry_to_platform_entry_seconds
+                >= 0.0
+            )
+            for key in movement_model.visits_by_key
+        }
         _add_passenger_constraints(
             model=model,
             passenger_build=passenger_build,
@@ -229,6 +253,8 @@ class EanPassengerModelBuilder:
             ),
             enable_tight_big_m_bounds=optimization_config.enable_tight_big_m_bounds,
             slot_activation_formulation=optimization_config.formulation.slot_activation,
+            board_time_nonnegative_by_key=board_time_nonnegative_by_key,
+            alight_time_nonnegative_by_key=alight_time_nonnegative_by_key,
         )
         variables = EanPassengerVariables(
             slot=slot,
@@ -246,8 +272,31 @@ class EanPassengerModelBuilder:
             unserved=unserved,
             horizon_seconds=artifact.config.horizon_seconds,
             gp=gp,
+            penalize_unserved=movement_model.fleet_model is None,
         )
-        model.setObjective(objective_expression, grb.MINIMIZE)
+        if movement_model.fleet_model is None:
+            model.setObjective(objective_expression, grb.MINIMIZE)
+        else:
+            fleet_variables = movement_model.fleet_model.variables
+            model.ModelSense = grb.MINIMIZE
+            model.setObjectiveN(
+                gp.quicksum(unserved.values()),
+                index=0,
+                priority=5,
+                name="unserved_demand",
+            )
+            model.setObjectiveN(
+                objective_expression,
+                index=1,
+                priority=4,
+                name=objective.value,
+            )
+            model.setObjectiveN(
+                gp.quicksum(fleet_variables.cabin_active.values()),
+                index=2,
+                priority=3,
+                name="active_cabins",
+            )
         model.update()
         return EanPassengerModel(
             movement=movement_model,
@@ -255,6 +304,7 @@ class EanPassengerModelBuilder:
             group_by_id=group_by_id,
             variables=variables,
             objective=objective,
+            objective_expression=objective_expression,
         )
 
 
@@ -278,6 +328,8 @@ def _add_passenger_constraints(
     enable_slot_time_relaxation_strengthening: bool,
     enable_tight_big_m_bounds: bool,
     slot_activation_formulation: EanSlotActivationFormulation,
+    board_time_nonnegative_by_key: dict[tuple[int, int], bool],
+    alight_time_nonnegative_by_key: dict[tuple[int, int], bool],
 ) -> None:
     ride_by_group_id: dict[str, list[EanRideCandidate]] = {group.id: [] for group in passenger_build.demand_groups}
     for ride_candidate in passenger_build.ride_candidates:
@@ -301,6 +353,12 @@ def _add_passenger_constraints(
             enable_slot_time_relaxation_strengthening=enable_slot_time_relaxation_strengthening,
             enable_tight_big_m_bounds=enable_tight_big_m_bounds,
             slot_activation_formulation=slot_activation_formulation,
+            board_time_nonnegative=board_time_nonnegative_by_key[
+                (ride_candidate.cabin_id, ride_candidate.board_visit_index)
+            ],
+            alight_time_nonnegative=alight_time_nonnegative_by_key[
+                (ride_candidate.cabin_id, ride_candidate.alight_visit_index)
+            ],
         )
 
     for group in passenger_build.demand_groups:
@@ -351,6 +409,8 @@ def _add_ride_slot_constraints(
     enable_slot_time_relaxation_strengthening: bool,
     enable_tight_big_m_bounds: bool,
     slot_activation_formulation: EanSlotActivationFormulation,
+    board_time_nonnegative: bool,
+    alight_time_nonnegative: bool,
 ) -> None:
     board_key = (ride_candidate.cabin_id, ride_candidate.board_visit_index)
     alight_key = (ride_candidate.cabin_id, ride_candidate.alight_visit_index)
@@ -384,7 +444,9 @@ def _add_ride_slot_constraints(
                 horizon_seconds=horizon_seconds,
                 big_m=big_m,
                 release_big_m=release_big_m,
-                omit_zero_release=compact_activation,
+                omit_zero_release=(
+                    compact_activation and board_time_nonnegative
+                ),
             )
         if slot_board_time is not None:
             slot_time = slot_board_time[key]
@@ -393,7 +455,13 @@ def _add_ride_slot_constraints(
                 name=f"slot_time_active_{_var_id(ride_candidate.id)}_{slot_index}",
             )
             model.addConstr(
-                slot_time <= board_time,
+                slot_time
+                <= board_time
+                + (
+                    0.0
+                    if board_time_nonnegative
+                    else big_m * (1 - slot_var)
+                ),
                 name=f"slot_time_board_ub_{_var_id(ride_candidate.id)}_{slot_index}",
             )
             model.addConstr(
@@ -407,7 +475,13 @@ def _add_ride_slot_constraints(
                 name=f"slot_alight_time_active_{_var_id(ride_candidate.id)}_{slot_index}",
             )
             model.addConstr(
-                alight_slot_time <= alight_time,
+                alight_slot_time
+                <= alight_time
+                + (
+                    0.0
+                    if alight_time_nonnegative
+                    else big_m * (1 - slot_var)
+                ),
                 name=f"slot_time_alight_ub_{_var_id(ride_candidate.id)}_{slot_index}",
             )
             model.addConstr(
@@ -468,9 +542,10 @@ def _add_ride_slot_activation_constraints(
 
     With unary ordering, the first slot dominates all later slot binaries.
     Attaching these rows only to that first slot therefore preserves the full
-    LP relaxation. At zero release, the release implication is redundant
-    because platform-departure expressions are nonnegative in every supported
-    time-bound formulation.
+    LP relaxation. At zero release, the release implication is redundant only
+    when the selected time-bound formulation proves that this visit's platform
+    departure cannot occur before service start. Optimized initial placement
+    deliberately permits negative initial-phase event times.
     """
 
     variable_id = _var_id(ride_candidate.id)
@@ -615,6 +690,7 @@ def _passenger_service_objective(
     unserved: dict[str, Any],
     horizon_seconds: float,
     gp: Any,
+    penalize_unserved: bool = True,
 ) -> Any:
     if objective is EanPassengerObjective.WAITING_TIME:
         if slot_board_time is None:
@@ -627,6 +703,7 @@ def _passenger_service_objective(
             unserved=unserved,
             horizon_seconds=horizon_seconds,
             gp=gp,
+            penalize_unserved=penalize_unserved,
         )
     if objective is EanPassengerObjective.JOURNEY_TIME:
         if slot_alight_time is None:
@@ -639,6 +716,7 @@ def _passenger_service_objective(
             unserved=unserved,
             horizon_seconds=horizon_seconds,
             gp=gp,
+            penalize_unserved=penalize_unserved,
         )
     raise ValueError(f"unsupported EAN passenger service objective: {objective}")
 
@@ -647,37 +725,18 @@ def _set_all_stop_mip_start(
     artifact: EanBuildArtifact,
     passenger_build: EanPassengerCandidateBuildResult,
     group_by_id: dict[str, EanDemandGroup],
-    switch_time: dict[tuple[int, int], Any],
-    exit_switch_time: dict[tuple[int, int], Any],
-    wait_time: dict[tuple[int, int], Any],
-    stop: dict[tuple[int, int], Any],
+    movement_plan: EanMovementPlan,
     slot: dict[tuple[str, int], Any],
     slot_board_time: dict[tuple[str, int], Any] | None,
     slot_alight_time: dict[tuple[str, int], Any] | None,
     unserved: dict[str, Any],
-    visit_active: dict[tuple[int, int], Any],
-) -> None:
-    all_stop_plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)
+    objective: EanPassengerObjective,
+) -> tuple[int, float]:
     visit_start_by_key = {
         (visit.cabin_id, visit.visit_index): visit
-        for trajectory in all_stop_plan.trajectories
+        for trajectory in movement_plan.trajectories
         for visit in trajectory.visits
     }
-
-    for key, variable in switch_time.items():
-        visit = visit_start_by_key[key]
-        active_start = float(
-            visit.switch_time_seconds <= artifact.config.operational_end_seconds
-        )
-        if not isinstance(visit_active[key], int | float):
-            visit_active[key].Start = active_start
-            route_active_start = active_start
-        else:
-            route_active_start = float(visit_active[key])
-        variable.Start = visit.switch_time_seconds
-        exit_switch_time[key].Start = visit.exit_switch_time_seconds
-        wait_time[key].Start = 0.0
-        stop[key].Start = route_active_start
 
     for key, variable in slot.items():
         variable.Start = 0.0
@@ -694,6 +753,7 @@ def _set_all_stop_mip_start(
     }
     load_by_interval: dict[tuple[int, int], int] = {}
     served_slot_keys: set[tuple[str, int]] = set()
+    passenger_time_objective = 0.0
 
     for ride_candidate in _all_stop_mip_start_candidate_order(
         passenger_build.ride_candidates,
@@ -737,6 +797,14 @@ def _set_all_stop_mip_start(
             if slot_alight_time is not None:
                 slot_alight_time[slot_key].Start = alight_time
             served_slot_keys.add(slot_key)
+        passenger_time_objective += assign_count * (
+            (
+                board_time
+                if objective is EanPassengerObjective.WAITING_TIME
+                else alight_time
+            )
+            - group.release_time_seconds
+        )
 
         for interval_key in interval_keys:
             load_by_interval[interval_key] = load_by_interval.get(interval_key, 0) + assign_count
@@ -753,6 +821,7 @@ def _set_all_stop_mip_start(
             slot_board_time[key].Start = 0.0
         if slot_alight_time is not None:
             slot_alight_time[key].Start = 0.0
+    return sum(remaining_by_group_id.values()), passenger_time_objective
 
 
 def _set_passenger_plan_mip_start(
@@ -925,6 +994,7 @@ def _served_time_minus_release_objective(
     unserved: dict[str, Any],
     horizon_seconds: float,
     gp: Any,
+    penalize_unserved: bool = True,
 ) -> Any:
     candidate_by_id = {candidate.id: candidate for candidate in passenger_build.ride_candidates}
     served_terms = []
@@ -933,10 +1003,15 @@ def _served_time_minus_release_objective(
         group = group_by_id[ride_candidate.demand_group_id]
         served_terms.append(slot_time[key] - group.release_time_seconds * slot_var)
 
-    unserved_terms = [
-        max(0.0, horizon_seconds - group.release_time_seconds) * unserved[group.id]
-        for group in passenger_build.demand_groups
-    ]
+    unserved_terms = (
+        [
+            max(0.0, horizon_seconds - group.release_time_seconds)
+            * unserved[group.id]
+            for group in passenger_build.demand_groups
+        ]
+        if penalize_unserved
+        else []
+    )
     return gp.quicksum(served_terms + unserved_terms)
 
 

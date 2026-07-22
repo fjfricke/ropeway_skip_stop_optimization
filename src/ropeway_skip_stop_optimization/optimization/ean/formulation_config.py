@@ -45,6 +45,7 @@ class EanTimeBoundFormulation(StrEnum):
 
     LEGACY_PLUS_10 = "time_bounds_legacy_plus_10"
     DERIVED_VISIT_BOUNDS = "time_bounds_derived_visit_bounds"
+    INITIAL_PLACEMENT_SAFE = "time_bounds_initial_placement_safe"
 
 
 class EanStopSkipTimingFormulation(StrEnum):

@@ -9,7 +9,9 @@ from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     HORIZON_ACTIVATION_EPSILON_SECONDS,
     EanHorizonFormulation,
     EanStopSkipTimingFormulation,
+    EanTimeBoundFormulation,
 )
+from ropeway_skip_stop_optimization.optimization.ean.fleet import EanFleetPlan
 from ropeway_skip_stop_optimization.optimization.ean.headway_semantics import (
     PLATFORM_EXIT_WAIT_OCCUPANCY_SEMANTICS,
     POINT_HEADWAY_SEMANTICS,
@@ -22,9 +24,12 @@ from ropeway_skip_stop_optimization.optimization.ean.horizon import (
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanActivationReference,
     EanCabinStartKind,
+    EanFleetMode,
+    EanHeadwayPairScope,
     EanTimeReference,
     HeadwayCandidate,
     HeadwayCheckpointDefinition,
+    HeadwayPair,
     SkipStopTiming,
     StationEanConfig,
     StationWaitingMode,
@@ -32,6 +37,10 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
 )
 from ropeway_skip_stop_optimization.optimization.ean.optimization_config import (
     EanOptimizationConfig,
+)
+from ropeway_skip_stop_optimization.optimization.ean.optimizers.fleet_model import (
+    EanFleetModel,
+    EanFleetModelBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ean.plan import (
     EanCabinTrajectory,
@@ -73,11 +82,12 @@ class EanMovementVariables:
     wait_time: dict[VisitKey, Any]
     stop: dict[VisitKey, Any]
     visit_active: dict[VisitKey, Any]
+    route_active: dict[VisitKey, Any]
     checkpoint_within_horizon: dict[str, Any]
     headway_order: dict[str, Any]
 
     def all_variables(self) -> tuple[Any, ...]:
-        groups = (
+        groups = [
             self.switch_time,
             self.exit_switch_time,
             self.wait_time,
@@ -85,8 +95,76 @@ class EanMovementVariables:
             self.visit_active,
             self.checkpoint_within_horizon,
             self.headway_order,
-        )
+        ]
+        if self.route_active is not self.visit_active:
+            groups.append(self.route_active)
         return tuple(variable for group in groups for variable in group.values())
+
+
+@dataclass
+class EanHeadwayConstraintPool:
+    """Mutable pool for adding original headway disjunctions after a solve."""
+
+    model: Any
+    binary_vtype: Any
+    candidate_by_id: dict[str, HeadwayCandidate]
+    candidate_times_by_id: dict[str, HeadwayTimeExpressions]
+    candidate_inactive_by_id: dict[str, Any]
+    candidate_within_horizon: dict[str, Any]
+    horizon_formulation: EanHorizonFormulation
+    big_m: float
+    headway_order: dict[str, Any]
+    accepts_augmentation: bool = True
+
+    @property
+    def materialized_pair_ids(self) -> frozenset[str]:
+        return frozenset(self.headway_order)
+
+    def add_pairs(self, pairs: tuple[HeadwayPair, ...]) -> None:
+        if pairs and not self.accepts_augmentation:
+            raise ValueError("complete headway pool does not accept augmentation")
+        pair_ids = [pair.id for pair in pairs]
+        if len(pair_ids) != len(set(pair_ids)):
+            raise ValueError("headway augmentation batch contains duplicate pairs")
+        duplicates = set(pair_ids) & set(self.headway_order)
+        if duplicates:
+            raise ValueError(f"headway pairs already materialized: {sorted(duplicates)!r}")
+        for pair in pairs:
+            self._add_pair(pair)
+        self.model.update()
+
+    def _add_pair(self, pair: HeadwayPair) -> None:
+        pair.validate()
+        first_candidate = self.candidate_by_id.get(pair.first_candidate_id)
+        second_candidate = self.candidate_by_id.get(pair.second_candidate_id)
+        if first_candidate is None or second_candidate is None:
+            raise ValueError(f"headway pair {pair.id!r} references unknown candidate")
+        if (
+            first_candidate.checkpoint_id != pair.checkpoint_id
+            or second_candidate.checkpoint_id != pair.checkpoint_id
+        ):
+            raise ValueError(f"headway pair {pair.id!r} checkpoint mismatch")
+        first_times = self.candidate_times_by_id[first_candidate.id]
+        second_times = self.candidate_times_by_id[second_candidate.id]
+        first_inactive = self.candidate_inactive_by_id[first_candidate.id]
+        second_inactive = self.candidate_inactive_by_id[second_candidate.id]
+        if self.horizon_formulation is EanHorizonFormulation.EXACT_TIME_ACTIVATION:
+            first_inactive += 1 - self.candidate_within_horizon[first_candidate.id]
+            second_inactive += 1 - self.candidate_within_horizon[second_candidate.id]
+        order = self.model.addVar(vtype=self.binary_vtype, name=f"order_{pair.id}")
+        self.headway_order[pair.id] = order
+        self.model.addConstr(
+            first_times.leader_clear_time + pair.headway_seconds
+            <= second_times.follower_enter_time
+            + self.big_m * (1 - order + first_inactive + second_inactive),
+            name=f"headway_forward_{pair.id}_{first_times.semantics_label}",
+        )
+        self.model.addConstr(
+            second_times.leader_clear_time + pair.headway_seconds
+            <= first_times.follower_enter_time
+            + self.big_m * (order + first_inactive + second_inactive),
+            name=f"headway_reverse_{pair.id}_{first_times.semantics_label}",
+        )
 
 
 @dataclass(frozen=True)
@@ -95,6 +173,8 @@ class EanMovementModel:
     artifact: EanBuildArtifact
     optimization_config: EanOptimizationConfig
     variables: EanMovementVariables
+    headway_constraint_pool: EanHeadwayConstraintPool
+    fleet_model: EanFleetModel | None
     visits_by_key: dict[VisitKey, SwitchVisitDefinition]
     visits_by_cabin_id: dict[int, tuple[SwitchVisitDefinition, ...]]
     timing_by_switch_id: dict[str, SkipStopTiming]
@@ -118,10 +198,35 @@ class EanMovementModel:
 
         fix_movement_model_to_plan(self, plan)
 
-    def apply_mip_start(self, plan: EanMovementPlan) -> None:
+    def apply_mip_start(
+        self,
+        plan: EanMovementPlan,
+        fleet_plan: EanFleetPlan | None = None,
+    ) -> None:
         """Apply route and timing decisions as a partial Gurobi MIP start."""
 
+        if self.fleet_model is not None:
+            if fleet_plan is None:
+                raise ValueError(
+                    "optimized initial placement MIP start needs a fleet plan"
+                )
+            self.fleet_model.apply_mip_start(fleet_plan, plan)
+        elif fleet_plan is not None:
+            raise ValueError("fixed-start MIP start must not define a fleet plan")
         apply_movement_plan_mip_start(self, plan)
+
+    def apply_partial_mip_start(
+        self,
+        plan: EanMovementPlan,
+        fleet_plan: EanFleetPlan,
+    ) -> None:
+        """Apply a MIP start only for the active cabins in ``fleet_plan``."""
+
+        if self.fleet_model is None:
+            raise ValueError("partial fleet MIP starts require fleet variables")
+        cabin_ids = frozenset(fleet_plan.active_cabin_ids)
+        self.fleet_model.apply_partial_mip_start(fleet_plan, plan)
+        apply_movement_plan_mip_start(self, plan, cabin_ids=cabin_ids)
 
 
 @dataclass(frozen=True)
@@ -196,25 +301,57 @@ class EanMovementModelBuilder:
             selected_time_bounds=model_time_bounds,
             big_m=big_m,
         )
+        fleet_model = None
+        route_active = visit_active
+        if artifact.fleet_mode is EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT:
+            if (
+                optimization_config.formulation.horizon
+                is not EanHorizonFormulation.EXACT_TIME_ACTIVATION
+            ):
+                raise ValueError(
+                    "optimized initial placement requires horizon_exact_time_activation"
+                )
+            if (
+                optimization_config.formulation.time_bounds
+                is not EanTimeBoundFormulation.INITIAL_PLACEMENT_SAFE
+            ):
+                raise ValueError(
+                    "optimized initial placement requires time_bounds_initial_placement_safe"
+                )
+            fleet_model = EanFleetModelBuilder().build_activation(
+                model=model,
+                binary_vtype=binary_vtype,
+                artifact=artifact,
+                switch_time=switch_time,
+                exit_switch_time=exit_switch_time,
+                wait_time=wait_time,
+                stop=stop,
+                visit_reached=visit_active,
+                visits_by_cabin_id=visits_by_cabin_id,
+                timing_by_switch_id=timing_by_switch_id,
+                big_m=big_m,
+            )
+            route_active = fleet_model.variables.route_active
         for key, visit in visits_by_key.items():
             timing = timing_by_switch_id[visit.switch_id]
             if timing.skip_allowed:
                 model.addConstr(
-                    stop[key] <= visit_active[key],
+                    stop[key] <= route_active[key],
                     name=f"stop_only_active_{key[0]}_{key[1]}",
                 )
             else:
                 model.addConstr(
-                    stop[key] == visit_active[key],
+                    stop[key] == route_active[key],
                     name=f"force_stop_if_active_{key[0]}_{key[1]}",
                 )
 
-        _add_start_constraints(
-            model,
-            switch_time,
-            starts_by_cabin_id,
-            visits_by_cabin_id,
-        )
+        if fleet_model is None:
+            _add_start_constraints(
+                model,
+                switch_time,
+                starts_by_cabin_id,
+                visits_by_cabin_id,
+            )
         _add_timing_constraints(
             model=model,
             switch_time=switch_time,
@@ -227,7 +364,7 @@ class EanMovementModelBuilder:
             model_time_bounds=model_time_bounds,
             big_m=big_m,
             enable_tight_big_m_bounds=optimization_config.enable_tight_big_m_bounds,
-            visit_active=visit_active,
+            visit_active=route_active,
             formulation=optimization_config.formulation.stop_skip_timing,
         )
         _add_chain_constraints(
@@ -236,10 +373,10 @@ class EanMovementModelBuilder:
             exit_switch_time=exit_switch_time,
             visits_by_cabin_id=visits_by_cabin_id,
             timing_by_switch_id=timing_by_switch_id,
-            visit_active=visit_active,
+            visit_active=route_active,
             big_m=big_m,
         )
-        checkpoint_within_horizon, headway_order = _add_headway_constraints(
+        headway_constraint_pool = _add_headway_constraints(
             model=model,
             binary_vtype=binary_vtype,
             switch_time=switch_time,
@@ -253,16 +390,19 @@ class EanMovementModelBuilder:
             visits_by_key=visits_by_key,
             timing_by_switch_id=timing_by_switch_id,
             big_m=big_m,
-            visit_active=visit_active,
+            visit_active=route_active,
             horizon_formulation=optimization_config.formulation.horizon,
         )
         model.update()
+        checkpoint_within_horizon = headway_constraint_pool.candidate_within_horizon
+        headway_order = headway_constraint_pool.headway_order
         variables = EanMovementVariables(
             switch_time=switch_time,
             exit_switch_time=exit_switch_time,
             wait_time=wait_time,
             stop=stop,
             visit_active=visit_active,
+            route_active=route_active,
             checkpoint_within_horizon=checkpoint_within_horizon,
             headway_order=headway_order,
         )
@@ -271,6 +411,8 @@ class EanMovementModelBuilder:
             artifact=artifact,
             optimization_config=optimization_config,
             variables=variables,
+            headway_constraint_pool=headway_constraint_pool,
+            fleet_model=fleet_model,
             visits_by_key=visits_by_key,
             visits_by_cabin_id=visits_by_cabin_id,
             timing_by_switch_id=timing_by_switch_id,
@@ -356,7 +498,9 @@ def _add_timing_constraints(
             )
             continue
         if formulation is not EanStopSkipTimingFormulation.BIG_M:
-            raise ValueError(f"unsupported EAN stop/skip timing formulation: {formulation}")
+            raise ValueError(
+                f"unsupported EAN stop/skip timing formulation: {formulation}"
+            )
 
         bounds_for_branch = stop_skip_big_m_bounds(
             timing=timing,
@@ -477,7 +621,7 @@ def _add_headway_constraints(
     big_m: float,
     visit_active: dict[VisitKey, Any],
     horizon_formulation: EanHorizonFormulation,
-) -> tuple[dict[str, Any], dict[str, Any]]:
+) -> EanHeadwayConstraintPool:
     candidate_times_by_id: dict[str, HeadwayTimeExpressions] = {}
     candidate_inactive_by_id: dict[str, Any] = {}
     candidate_within_horizon: dict[str, Any] = {}
@@ -526,31 +670,26 @@ def _add_headway_constraints(
                 name=f"checkpoint_after_horizon_if_inactive_{candidate.id}",
             )
 
-    for pair in artifact.headway_pairs:
-        first_candidate = candidate_by_id[pair.first_candidate_id]
-        second_candidate = candidate_by_id[pair.second_candidate_id]
-        first_times = candidate_times_by_id[first_candidate.id]
-        second_times = candidate_times_by_id[second_candidate.id]
-        first_inactive = candidate_inactive_by_id[first_candidate.id]
-        second_inactive = candidate_inactive_by_id[second_candidate.id]
-        if horizon_formulation is EanHorizonFormulation.EXACT_TIME_ACTIVATION:
-            first_inactive += 1 - candidate_within_horizon[first_candidate.id]
-            second_inactive += 1 - candidate_within_horizon[second_candidate.id]
-        order = model.addVar(vtype=binary_vtype, name=f"order_{pair.id}")
-        headway_order[pair.id] = order
-        model.addConstr(
-            first_times.leader_clear_time + pair.headway_seconds
-            <= second_times.follower_enter_time
-            + big_m * (1 - order + first_inactive + second_inactive),
-            name=f"headway_forward_{pair.id}_{first_times.semantics_label}",
-        )
-        model.addConstr(
-            second_times.leader_clear_time + pair.headway_seconds
-            <= first_times.follower_enter_time
-            + big_m * (order + first_inactive + second_inactive),
-            name=f"headway_reverse_{pair.id}_{first_times.semantics_label}",
-        )
-    return candidate_within_horizon, headway_order
+    pool = EanHeadwayConstraintPool(
+        model=model,
+        binary_vtype=binary_vtype,
+        candidate_by_id=candidate_by_id,
+        candidate_times_by_id=candidate_times_by_id,
+        candidate_inactive_by_id=candidate_inactive_by_id,
+        candidate_within_horizon=candidate_within_horizon,
+        horizon_formulation=horizon_formulation,
+        big_m=big_m,
+        headway_order=headway_order,
+    )
+    pool.add_pairs(artifact.headway_pairs)
+    if artifact.headway_pair_scope is EanHeadwayPairScope.COMPLETE:
+        # Complete models never augment. Drop temporary expression indexes so
+        # the long-lived movement model has the same memory shape as before.
+        pool.accepts_augmentation = False
+        pool.candidate_by_id.clear()
+        pool.candidate_times_by_id.clear()
+        pool.candidate_inactive_by_id.clear()
+    return pool
 
 
 def headway_time_expressions(
@@ -625,7 +764,9 @@ def candidate_time_expr(
         return exit_switch_time[key]
     if candidate.time_reference is EanTimeReference.ENTRY_TIME:
         return switch_time[key]
-    raise ValueError(f"unsupported candidate time reference: {candidate.time_reference}")
+    raise ValueError(
+        f"unsupported candidate time reference: {candidate.time_reference}"
+    )
 
 
 def candidate_inactive_expr(
@@ -646,7 +787,9 @@ def candidate_inactive_expr(
             return 1 - stop[key]
         if checkpoint.applies_to_skip:
             return stop[key] + 1 - visit_active[key]
-    raise ValueError(f"unsupported candidate activation reference: {candidate.activation_reference}")
+    raise ValueError(
+        f"unsupported candidate activation reference: {candidate.activation_reference}"
+    )
 
 
 def platform_entry_time_expr(
@@ -701,29 +844,43 @@ def extract_movement_plan(movement_model: EanMovementModel) -> EanMovementPlan:
             visit
             for visit in movement_model.visits_by_cabin_id[cabin_id]
             if visit_is_active_in_solution(
-                variables.visit_active[(visit.cabin_id, visit.visit_index)]
+                variables.route_active[(visit.cabin_id, visit.visit_index)]
             )
         )
-        for active_index, visit in enumerate(active_visits):
+        for visit in active_visits:
             key = (visit.cabin_id, visit.visit_index)
             timing = movement_model.timing_by_switch_id[visit.switch_id]
             switch_seconds = variable_value(variables.switch_time[key])
             exit_seconds = variable_value(variables.exit_switch_time[key])
-            if active_index + 1 < len(active_visits):
-                next_visit = active_visits[active_index + 1]
+            next_visit = next(
+                (
+                    candidate
+                    for candidate in movement_model.visits_by_cabin_id[cabin_id]
+                    if candidate.visit_index == visit.visit_index + 1
+                    and visit_is_active_in_solution(
+                        variables.route_active[
+                            (candidate.cabin_id, candidate.visit_index)
+                        ]
+                    )
+                ),
+                None,
+            )
+            if next_visit is not None:
                 next_seconds = variable_value(
-                    variables.switch_time[
-                        (next_visit.cabin_id, next_visit.visit_index)
-                    ]
+                    variables.switch_time[(next_visit.cabin_id, next_visit.visit_index)]
                 )
             else:
                 next_seconds = exit_seconds + timing.rope_to_next_switch_seconds
             is_stop = variable_value(variables.stop[key]) >= 0.5
-            wait_seconds = variable_value(variables.wait_time[key]) if is_stop else 0.0
-            if is_stop:
-                platform_entry = (
-                    switch_seconds + timing.entry_to_platform_entry_seconds
+            wait_seconds = (
+                nonnegative_variable_value(
+                    variables.wait_time[key], label=f"wait_time[{key!r}]"
                 )
+                if is_stop
+                else 0.0
+            )
+            if is_stop:
+                platform_entry = switch_seconds + timing.entry_to_platform_entry_seconds
                 platform_exit = (
                     platform_entry
                     + timing.min_platform_entry_to_platform_exit_seconds
@@ -759,6 +916,7 @@ def extract_movement_plan(movement_model: EanMovementModel) -> EanMovementPlan:
         model_end_seconds=artifact.config.model_end_seconds,
         trajectories=tuple(trajectories),
         horizon_formulation=movement_model.optimization_config.formulation.horizon,
+        fleet_mode=artifact.fleet_mode,
     )
     plan.validate()
     return plan
@@ -791,8 +949,7 @@ def fix_movement_model_to_plan(
     unknown_keys = set(plan_visits) - set(movement_model.visits_by_key)
     if unknown_keys:
         raise ValueError(
-            "fixed EAN movement plan contains unknown visits: "
-            f"{sorted(unknown_keys)}"
+            f"fixed EAN movement plan contains unknown visits: {sorted(unknown_keys)}"
         )
 
     variables = movement_model.variables
@@ -843,6 +1000,8 @@ def fix_movement_model_to_plan(
 def apply_movement_plan_mip_start(
     movement_model: EanMovementModel,
     plan: EanMovementPlan,
+    *,
+    cabin_ids: frozenset[int] | None = None,
 ) -> None:
     """Transfer an extracted movement plan without fixing model variables.
 
@@ -872,10 +1031,14 @@ def apply_movement_plan_mip_start(
     }
     variables = movement_model.variables
     for key, visit_definition in movement_model.visits_by_key.items():
+        if cabin_ids is not None and key[0] not in cabin_ids:
+            continue
         plan_visit = plan_visits.get(key)
         if plan_visit is None:
             variables.stop[key].Start = 0.0
-            if not isinstance(variables.visit_active[key], int | float):
+            if movement_model.fleet_model is None and not isinstance(
+                variables.visit_active[key], int | float
+            ):
                 variables.visit_active[key].Start = 0.0
             continue
         if plan_visit.switch_id != visit_definition.switch_id:
@@ -885,13 +1048,9 @@ def apply_movement_plan_mip_start(
                 f"{visit_definition.switch_id!r}"
             )
         variables.switch_time[key].Start = plan_visit.switch_time_seconds
-        variables.exit_switch_time[key].Start = (
-            plan_visit.exit_switch_time_seconds
-        )
+        variables.exit_switch_time[key].Start = plan_visit.exit_switch_time_seconds
         variables.wait_time[key].Start = plan_visit.wait_seconds
-        variables.stop[key].Start = float(
-            plan_visit.decision is EanRouteDecision.STOP
-        )
+        variables.stop[key].Start = float(plan_visit.decision is EanRouteDecision.STOP)
         if not isinstance(variables.visit_active[key], int | float):
             variables.visit_active[key].Start = 1.0
 
@@ -902,9 +1061,7 @@ def _fix_variable(variable: Any, value: float, *, label: str) -> None:
         variable.UB = value
         return
     if not math.isclose(float(variable), value, abs_tol=1e-8):
-        raise ValueError(
-            f"cannot fix constant {label}={float(variable)} to {value}"
-        )
+        raise ValueError(f"cannot fix constant {label}={float(variable)} to {value}")
 
 
 def visits_by_key_for(
@@ -941,9 +1098,9 @@ def service_entry_to_next_switch_seconds(timing: SkipStopTiming) -> float:
 
 
 def max_headway_seconds(artifact: EanBuildArtifact) -> float:
-    if not artifact.headway_pairs:
+    if not artifact.headway_checkpoints:
         return 0.0
-    return max(pair.headway_seconds for pair in artifact.headway_pairs)
+    return max(checkpoint.headway_seconds for checkpoint in artifact.headway_checkpoints)
 
 
 def require_supported_waiting_modes(artifact: EanBuildArtifact) -> None:
@@ -958,6 +1115,8 @@ def require_supported_waiting_modes(artifact: EanBuildArtifact) -> None:
     }
     if unsupported_modes:
         labels = ", ".join(sorted(mode.value for mode in unsupported_modes))
+        # Adding FIFO requires both physical occupancy constraints here and a
+        # matching q_a term in the OIP packing upper-bound certificate.
         raise NotImplementedError(
             "EAN optimization only supports no-waiting and end-of-platform "
             f"waiting stations, got: {labels}"
@@ -969,3 +1128,12 @@ def variable_value(variable: Any) -> float:
     if math.isclose(value, round(value), abs_tol=1e-8):
         return float(round(value))
     return value
+
+
+def nonnegative_variable_value(
+    variable: Any, *, label: str, tolerance: float = 1e-5
+) -> float:
+    value = variable_value(variable)
+    if value < -tolerance:
+        raise ValueError(f"solver returned materially negative {label}: {value}")
+    return max(0.0, value)

@@ -12,6 +12,7 @@ from ropeway_skip_stop_optimization.models import (
 )
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
 from ropeway_skip_stop_optimization.optimization.ean.models import SkipStopTiming
+from ropeway_skip_stop_optimization.optimization.ean.models import EanFleetMode
 from ropeway_skip_stop_optimization.optimization.ean.models import StationEanConfig
 from ropeway_skip_stop_optimization.optimization.ean.models import StationWaitingMode
 from ropeway_skip_stop_optimization.optimization.ean.plan import (
@@ -22,6 +23,7 @@ from ropeway_skip_stop_optimization.optimization.ean.plan import (
 
 
 class EanPhysicalEventKind(Enum):
+    INITIAL_PLACEMENT = "initial_placement"
     ENTER_SWITCH = "enter_switch"
     ENTER_PLATFORM = "enter_platform"
     ENTER_WAIT = "enter_wait"
@@ -69,15 +71,25 @@ def project_ean_movement_plan_to_physical_replay(
     events: list[EanPhysicalEvent] = []
     for trajectory in plan.trajectories:
         if trajectory.visits:
-            events.extend(
-                _initial_context_events(
-                    first_visit=trajectory.visits[0],
-                    switch_cycle=artifact.switch_cycle,
-                    timing_by_switch_id=timing_by_switch_id,
-                    route_by_switch_id=route_by_switch_id,
-                    station_config_by_id=station_config_by_id,
+            if artifact.fleet_mode is EanFleetMode.FIXED_STARTS:
+                events.extend(
+                    _initial_context_events(
+                        first_visit=trajectory.visits[0],
+                        switch_cycle=artifact.switch_cycle,
+                        timing_by_switch_id=timing_by_switch_id,
+                        route_by_switch_id=route_by_switch_id,
+                        station_config_by_id=station_config_by_id,
+                    )
                 )
-            )
+            else:
+                events.append(
+                    _initial_placement_event(
+                        trajectory.visits,
+                        artifact.switch_cycle,
+                        route_by_switch_id,
+                        timing_by_switch_id,
+                    )
+                )
         for visit in trajectory.visits:
             route = route_by_switch_id[visit.switch_id]
             waiting_mode = station_config_by_id[visit.station_id].waiting_mode
@@ -92,12 +104,90 @@ def project_ean_movement_plan_to_physical_replay(
     )
 
 
+def _initial_placement_event(
+    visits: tuple[EanCabinVisit, ...],
+    switch_cycle: tuple[str, ...],
+    route_by_switch_id: dict[str, "_ProjectionRoute"],
+    timing_by_switch_id: dict[str, SkipStopTiming],
+) -> EanPhysicalEvent:
+    visit = next(
+        (
+            candidate
+            for candidate in visits
+            if abs(candidate.switch_time_seconds) <= 1e-5
+        ),
+        None,
+    )
+    if visit is None:
+        visit = next(
+            (
+                candidate
+                for candidate in visits
+                if candidate.switch_time_seconds
+                <= 0
+                <= candidate.exit_switch_time_seconds
+            ),
+            None,
+        )
+    if visit is not None:
+        route = route_by_switch_id[visit.switch_id]
+        timing = timing_by_switch_id[visit.switch_id]
+        if abs(visit.exit_switch_time_seconds) <= 1e-5:
+            physical_node_id = route.exit_switch_node_id
+            source_segment_ids = ()
+        else:
+            physical_node_id = visit.switch_id
+            source_segment_ids = (
+                route.service_segment_ids
+                if visit.decision is EanRouteDecision.STOP
+                else route.skip_segment_ids or ()
+            )
+        return EanPhysicalEvent(
+            time_seconds=0.0,
+            cabin_id=visit.cabin_id,
+            visit_index=visit.visit_index,
+            event_kind=EanPhysicalEventKind.INITIAL_PLACEMENT,
+            switch_id=visit.switch_id,
+            station_id=timing.station_id,
+            physical_node_id=physical_node_id,
+            source_segment_ids=source_segment_ids,
+        )
+
+    first_visit = visits[0]
+    previous_switch_id = _previous_switch_id(
+        first_visit.switch_id,
+        switch_cycle,
+    )
+    route = route_by_switch_id[previous_switch_id]
+    timing = timing_by_switch_id[previous_switch_id]
+    previous_exit_seconds = (
+        first_visit.switch_time_seconds
+        - timing.rope_to_next_switch_seconds
+    )
+    if not previous_exit_seconds <= 0 <= first_visit.switch_time_seconds:
+        raise ValueError("initial placement trajectory has no state at time zero")
+    return EanPhysicalEvent(
+        time_seconds=0.0,
+        cabin_id=first_visit.cabin_id,
+        visit_index=first_visit.visit_index,
+        event_kind=EanPhysicalEventKind.INITIAL_PLACEMENT,
+        switch_id=previous_switch_id,
+        station_id=timing.station_id,
+        physical_node_id=route.exit_switch_node_id,
+        source_segment_ids=(route.rope_segment_id,),
+    )
+
+
 def _with_boundary_context_events(
     events: list[EanPhysicalEvent],
     event_limit_seconds: float,
 ) -> tuple[EanPhysicalEvent, ...]:
     """Keep visible events plus one post-limit interpolation target per cabin."""
-    filtered_events = [event for event in events if event.time_seconds <= event_limit_seconds]
+    filtered_events = [
+        event
+        for event in events
+        if 0.0 <= event.time_seconds <= event_limit_seconds
+    ]
     first_after_limit_by_cabin_id: dict[int, EanPhysicalEvent] = {}
     for event in sorted(events, key=_event_sort_key):
         if event.time_seconds <= event_limit_seconds:

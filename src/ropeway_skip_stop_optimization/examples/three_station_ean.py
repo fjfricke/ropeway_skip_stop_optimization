@@ -25,9 +25,9 @@ def build_three_station_ean_config(
 ) -> EanConfig:
     """Build the v0 EAN config.
 
-    The current baseline treats the passenger horizon as the physical model
-    boundary, so example exports keep tail_seconds at 0.0. Nonzero tails are
-    left as an explicit caller override until horizon-tail semantics are needed.
+    Examples keep tail_seconds at 0.0 by default. Callers may supply a
+    nonzero certification tail to extend physical movement and headway
+    certification without extending passenger service.
     """
     scenario = scenario or build_three_station_scenario()
     scenario.validate()

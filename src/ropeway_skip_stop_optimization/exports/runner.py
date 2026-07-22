@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ropeway_skip_stop_optimization.examples.base import ScenarioExample
@@ -209,6 +209,7 @@ def export_artifact_set(
     milp_cabin_count: int = 23,
     milp_variable_strategy: MilpV0VariableStrategy = MilpV0VariableStrategy.DENSE,
     ean_solver_policy_preset: GurobiSolverPolicyPreset = GurobiSolverPolicyPreset.QUICK_GOOD_SOLUTION,
+    ean_time_limit_seconds: float | None = None,
     ean_checkpoint_dir: Path | None = None,
     ean_resume_checkpoint: Path | None = None,
     ean_resume_latest_checkpoint: bool = False,
@@ -227,11 +228,19 @@ def export_artifact_set(
         milp_variable_strategy=milp_variable_strategy,
     )
     reporter = _progress_reporter(progress)
+    solver_policy = gurobi_solver_policy_for_preset(ean_solver_policy_preset)
+    if ean_time_limit_seconds is not None:
+        if ean_time_limit_seconds <= 0:
+            raise ValueError("EAN time limit must be positive")
+        solver_policy = replace(
+            solver_policy,
+            time_limit_seconds=ean_time_limit_seconds,
+        )
     return run_artifact_set(
         example,
         artifact_set,
         output_root=output_root,
-        ean_solver_policy=gurobi_solver_policy_for_preset(ean_solver_policy_preset),
+        ean_solver_policy=solver_policy,
         ean_checkpoint_dir=ean_checkpoint_dir,
         ean_resume_checkpoint=ean_resume_checkpoint,
         ean_resume_latest_checkpoint=ean_resume_latest_checkpoint,

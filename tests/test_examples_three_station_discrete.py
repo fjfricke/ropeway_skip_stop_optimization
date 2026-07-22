@@ -5,6 +5,7 @@ from ropeway_skip_stop_optimization.examples.three_station import (
     ThreeStationExample,
     ThreeStationFullNoSkipNoWaitExample,
     ThreeStationHalfNoSkipNoWaitExample,
+    ThreeStationOptimizedInitialPlacementExample,
     build_three_station_no_skip_no_wait_scenario,
     build_three_station_scenario,
 )
@@ -47,6 +48,10 @@ def test_three_station_family_variants_are_registered() -> None:
     assert isinstance(get_example("three_station_v0"), ThreeStationExample)
     assert isinstance(get_example("three_station_full_no_skip_no_wait_v0"), ThreeStationFullNoSkipNoWaitExample)
     assert isinstance(get_example("three_station_half_no_skip_no_wait_v0"), ThreeStationHalfNoSkipNoWaitExample)
+    assert isinstance(
+        get_example("three_station_optimized_initial_placement_v0"),
+        ThreeStationOptimizedInitialPlacementExample,
+    )
     assert {
         example_id
         for example_id, example in EXAMPLES.items()
@@ -55,4 +60,5 @@ def test_three_station_family_variants_are_registered() -> None:
         "three_station_v0",
         "three_station_full_no_skip_no_wait_v0",
         "three_station_half_no_skip_no_wait_v0",
+        "three_station_optimized_initial_placement_v0",
     }

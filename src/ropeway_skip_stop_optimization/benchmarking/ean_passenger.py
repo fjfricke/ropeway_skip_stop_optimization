@@ -86,6 +86,11 @@ class BenchmarkRunResult:
     ean_optimization_config: dict[str, Any]
     ean_formulation_config: dict[str, Any]
     ean_mip_start_strategy: str
+    resolved_mip_start_strategy: str | None
+    mip_start_active_cabin_count: int | None
+    mip_start_unserved_passenger_count: int | None
+    mip_start_passenger_objective_seconds: float | None
+    mip_start_generation_seconds: float | None
     model_variable_count: int | None
     model_constraint_count: int | None
     model_nonzero_count: int | None
@@ -173,6 +178,21 @@ def run_ean_passenger_benchmark(config: BenchmarkRunConfig) -> tuple[BenchmarkRu
         ean_optimization_config=resolved_optimization_config,
         ean_formulation_config=resolved_formulation_config,
         ean_mip_start_strategy=config.ean_mip_start_strategy.value,
+        resolved_mip_start_strategy=metadata.get(
+            "resolved_mip_start_strategy"
+        ),
+        mip_start_active_cabin_count=metadata.get(
+            "mip_start_active_cabin_count"
+        ),
+        mip_start_unserved_passenger_count=metadata.get(
+            "mip_start_unserved_passenger_count"
+        ),
+        mip_start_passenger_objective_seconds=metadata.get(
+            "mip_start_passenger_objective_seconds"
+        ),
+        mip_start_generation_seconds=metadata.get(
+            "mip_start_generation_seconds"
+        ),
         model_variable_count=metadata.get("variable_count"),
         model_constraint_count=metadata.get("constraint_count"),
         model_nonzero_count=metadata.get("model_nonzero_count"),

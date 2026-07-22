@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from ropeway_skip_stop_optimization.examples.base import ScenarioExample
 from ropeway_skip_stop_optimization.examples.circular_skip_stop import (
+    FiveStationOptimizedInitialPlacementNoSkipNoWaitExample,
+    FiveStationOptimizedInitialPlacementDoubleAllStopSkipWaitExample,
+    FiveStationOptimizedInitialPlacementSkipNoWaitExample,
     FiveStationCircleCwFullNoSkipNoWaitExample,
     FiveStationCircleCwHalfNoSkipNoWaitExample,
     FiveStationCircleCwHalfSkipNoWaitExample,
@@ -13,6 +16,7 @@ from ropeway_skip_stop_optimization.examples.linear_skip_stop import (
     FiveStationNoWaitExample,
 )
 from ropeway_skip_stop_optimization.examples.three_station import (
+    ThreeStationOptimizedInitialPlacementExample,
     ThreeStationExample,
     ThreeStationFullNoSkipNoWaitExample,
     ThreeStationHalfNoSkipNoWaitExample,
@@ -23,6 +27,7 @@ EXAMPLES: dict[str, ScenarioExample] = {
     ThreeStationExample.metadata.id: ThreeStationExample(),
     ThreeStationFullNoSkipNoWaitExample.metadata.id: ThreeStationFullNoSkipNoWaitExample(),
     ThreeStationHalfNoSkipNoWaitExample.metadata.id: ThreeStationHalfNoSkipNoWaitExample(),
+    ThreeStationOptimizedInitialPlacementExample.metadata.id: ThreeStationOptimizedInitialPlacementExample(),
     FiveStationExample.metadata.id: FiveStationExample(),
     FiveStationNoWaitExample.metadata.id: FiveStationNoWaitExample(),
     FiveStationHalfNoSkipNoWaitExample.metadata.id: FiveStationHalfNoSkipNoWaitExample(),
@@ -30,6 +35,9 @@ EXAMPLES: dict[str, ScenarioExample] = {
     FiveStationCircleCwHalfNoSkipNoWaitExample.metadata.id: FiveStationCircleCwHalfNoSkipNoWaitExample(),
     FiveStationCircleCwHalfSkipNoWaitExample.metadata.id: FiveStationCircleCwHalfSkipNoWaitExample(),
     FiveStationCircleCwHalfSkipWaitExample.metadata.id: FiveStationCircleCwHalfSkipWaitExample(),
+    FiveStationOptimizedInitialPlacementSkipNoWaitExample.metadata.id: FiveStationOptimizedInitialPlacementSkipNoWaitExample(),
+    FiveStationOptimizedInitialPlacementNoSkipNoWaitExample.metadata.id: FiveStationOptimizedInitialPlacementNoSkipNoWaitExample(),
+    FiveStationOptimizedInitialPlacementDoubleAllStopSkipWaitExample.metadata.id: FiveStationOptimizedInitialPlacementDoubleAllStopSkipWaitExample(),
 }
 
 

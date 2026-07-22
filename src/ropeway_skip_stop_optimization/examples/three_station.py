@@ -28,6 +28,8 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanCabinStartBuilder,
     EanBuildArtifactBuilder,
     EanConfig,
+    EanFleetConfig,
+    EanFleetMode,
     RingEanBuildArtifactBuilder,
     StationEanConfig,
     StationWaitingMode,
@@ -169,6 +171,42 @@ class ThreeStationHalfNoSkipNoWaitExample(ThreeStationFullNoSkipNoWaitExample):
             switch_cycle=switch_cycle,
             start_builder=KeepEverySecondCabinStartBuilder(
                 ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
+            ),
+        )
+
+
+class ThreeStationOptimizedInitialPlacementExample(ThreeStationExample):
+    metadata = ScenarioExampleMetadata(
+        id="three_station_optimized_initial_placement_v0",
+        label="Three station optimized initial placement",
+        description=(
+            "Three-station ring with an optimized physical fleet state at "
+            "passenger-service start."
+        ),
+        tags=("ring", "skip-stop", "optimized-initial-placement"),
+        family_id="three_station_ring",
+        family_label="Three station ring",
+        variant_id="optimized_initial_placement",
+        variant_label="Optimized initial placement",
+    )
+
+    def build_scenario(self) -> Scenario:
+        return replace(build_three_station_scenario(), id=self.metadata.id)
+
+    def build_ean_artifact_builder(
+        self,
+        scenario: Scenario,
+        config: EanConfig,
+    ) -> EanBuildArtifactBuilder:
+        from ropeway_skip_stop_optimization.examples.three_station_ean import (
+            build_three_station_ean_ring_switch_order,
+        )
+
+        return RingEanBuildArtifactBuilder(
+            switch_cycle=build_three_station_ean_ring_switch_order(scenario),
+            fleet_config=EanFleetConfig(
+                mode=EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT,
+                available_fleet_count=len(scenario.cabins),
             ),
         )
 

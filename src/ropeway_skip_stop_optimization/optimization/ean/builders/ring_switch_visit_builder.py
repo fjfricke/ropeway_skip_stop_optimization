@@ -34,6 +34,7 @@ class RingSwitchVisitBuilder(SwitchVisitBuilder):
 
     switch_cycle: tuple[str, ...]
     safety_visit_margin: int = 1
+    selectable_initial_phase_count: int = 0
 
     def build(
         self,
@@ -45,6 +46,10 @@ class RingSwitchVisitBuilder(SwitchVisitBuilder):
         _validate_cabin_starts(cabin_starts)
         if self.safety_visit_margin < 0:
             raise ValueError("safety_visit_margin must be nonnegative")
+        if not 0 <= self.selectable_initial_phase_count <= len(self.switch_cycle):
+            raise ValueError(
+                "selectable_initial_phase_count must lie between zero and the switch cycle length"
+            )
 
         transitions = build_ring_switch_transitions(
             timings=timings,
@@ -65,15 +70,28 @@ class RingSwitchVisitBuilder(SwitchVisitBuilder):
                 raise ValueError(f"cabin {start.cabin_id!r} starts after model_end_seconds")
 
             start_index = switch_index_by_id[start.first_switch_id]
-            full_rotations = math.floor(remaining_seconds / cycle_min_seconds)
-            partial_remaining = remaining_seconds - full_rotations * cycle_min_seconds
-            partial_visits = _count_partial_rotation_visits(
-                start_index=start_index,
-                partial_remaining=partial_remaining,
-                switch_cycle=self.switch_cycle,
-                transition_by_switch_id=transition_by_switch_id,
-            )
-            visit_count = full_rotations * len(self.switch_cycle) + partial_visits + self.safety_visit_margin
+            if self.selectable_initial_phase_count:
+                visit_count = max(
+                    phase_index
+                    + _visit_count_for_horizon(
+                        start_index=(start_index + phase_index) % len(self.switch_cycle),
+                        remaining_seconds=remaining_seconds,
+                        cycle_min_seconds=cycle_min_seconds,
+                        switch_cycle=self.switch_cycle,
+                        transition_by_switch_id=transition_by_switch_id,
+                        safety_visit_margin=self.safety_visit_margin,
+                    )
+                    for phase_index in range(self.selectable_initial_phase_count)
+                )
+            else:
+                visit_count = _visit_count_for_horizon(
+                    start_index=start_index,
+                    remaining_seconds=remaining_seconds,
+                    cycle_min_seconds=cycle_min_seconds,
+                    switch_cycle=self.switch_cycle,
+                    transition_by_switch_id=transition_by_switch_id,
+                    safety_visit_margin=self.safety_visit_margin,
+                )
 
             for visit_index in range(visit_count):
                 switch_id = self.switch_cycle[(start_index + visit_index) % len(self.switch_cycle)]
@@ -190,6 +208,30 @@ def _count_partial_rotation_visits(
         count += 1
         elapsed += transition_by_switch_id[current_switch_id].min_seconds
     return count
+
+
+def _visit_count_for_horizon(
+    *,
+    start_index: int,
+    remaining_seconds: float,
+    cycle_min_seconds: float,
+    switch_cycle: tuple[str, ...],
+    transition_by_switch_id: dict[str, SwitchTransition],
+    safety_visit_margin: int,
+) -> int:
+    full_rotations = math.floor(remaining_seconds / cycle_min_seconds)
+    partial_remaining = remaining_seconds - full_rotations * cycle_min_seconds
+    partial_visits = _count_partial_rotation_visits(
+        start_index=start_index,
+        partial_remaining=partial_remaining,
+        switch_cycle=switch_cycle,
+        transition_by_switch_id=transition_by_switch_id,
+    )
+    return (
+        full_rotations * len(switch_cycle)
+        + partial_visits
+        + safety_visit_margin
+    )
 
 
 def _validate_cabin_starts(cabin_starts: tuple[EanCabinStart, ...]) -> None:

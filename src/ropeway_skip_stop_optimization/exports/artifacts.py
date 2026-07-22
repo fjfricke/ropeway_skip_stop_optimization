@@ -451,6 +451,7 @@ class EanPassengerServiceArtifactBuilder(ArtifactBuilder):
             {
                 "movement_plan": result.movement_plan,
                 "passenger_plan": result.passenger_plan,
+                "fleet_plan": result.fleet_plan,
                 "metadata": result.metadata.passenger_export_dict(),
             },
             self.label,

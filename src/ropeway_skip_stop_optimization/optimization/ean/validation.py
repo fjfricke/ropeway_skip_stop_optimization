@@ -17,6 +17,8 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanActivationReference,
     EanCabinStart,
     EanCabinStartKind,
+    EanFleetMode,
+    EanHeadwayPairScope,
     EanTimeReference,
     HeadwayCandidate,
     HeadwayCheckpointDefinition,
@@ -24,6 +26,9 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
     SkipStopTiming,
     StationEanConfig,
     SwitchVisitDefinition,
+)
+from ropeway_skip_stop_optimization.optimization.ean.headway_separator import (
+    separate_all_headway_violations,
 )
 from ropeway_skip_stop_optimization.optimization.ean.plan import (
     EanCabinTrajectory,
@@ -81,6 +86,16 @@ def validate_ean_movement_plan_against_artifact(
     candidate_by_id = _candidate_by_id(artifact.headway_candidates)
 
     _validate_trajectory_cabin_set(starts_by_cabin_id, plan.trajectories, issues)
+    if artifact.fleet_mode is EanFleetMode.FIXED_STARTS:
+        for key, visit in visit_by_key.items():
+            if _has_negative_event_time(visit):
+                _add_issue(
+                    issues,
+                    "EAN_TIME_WINDOW_VIOLATION",
+                    f"visit {key!r} contains a negative event time",
+                    "ean_visit",
+                    _visit_entity_id(key),
+                )
     _validate_visits_against_artifact(
         visit_by_key=visit_by_key,
         expected_visit_by_key=expected_visit_by_key,
@@ -91,21 +106,40 @@ def validate_ean_movement_plan_against_artifact(
         issues=issues,
         tolerance_seconds=tolerance_seconds,
     )
-    _validate_start_times(starts_by_cabin_id, plan.trajectories, issues, tolerance_seconds)
+    if artifact.fleet_mode is EanFleetMode.FIXED_STARTS:
+        _validate_start_times(
+            starts_by_cabin_id,
+            plan.trajectories,
+            issues,
+            tolerance_seconds,
+        )
     _validate_trajectory_chains(plan.trajectories, issues, tolerance_seconds)
     _validate_checkpoint_modes(checkpoint_by_id, station_config_by_id, issues)
-    _validate_headways(
-        pairs=artifact.headway_pairs,
-        candidate_by_id=candidate_by_id,
-        checkpoint_by_id=checkpoint_by_id,
-        station_config_by_id=station_config_by_id,
-        timing_by_switch_id=timing_by_switch_id,
-        visit_by_key=visit_by_key,
-        model_end_seconds=artifact.config.model_end_seconds,
-        horizon_formulation=plan.horizon_formulation,
-        issues=issues,
-        tolerance_seconds=tolerance_seconds,
-    )
+    if artifact.headway_pair_scope is EanHeadwayPairScope.SPARSE:
+        for violation in separate_all_headway_violations(
+            artifact, plan, tolerance_seconds=tolerance_seconds
+        ):
+            _add_issue(
+                issues,
+                "EAN_HEADWAY_VIOLATION",
+                f"headway pair {violation.pair.id!r} has violation_seconds="
+                f"{violation.violation_seconds}",
+                "ean_headway_pair",
+                violation.pair.id,
+            )
+    else:
+        _validate_headways(
+            pairs=artifact.headway_pairs,
+            candidate_by_id=candidate_by_id,
+            checkpoint_by_id=checkpoint_by_id,
+            station_config_by_id=station_config_by_id,
+            timing_by_switch_id=timing_by_switch_id,
+            visit_by_key=visit_by_key,
+            model_end_seconds=artifact.config.model_end_seconds,
+            horizon_formulation=plan.horizon_formulation,
+            issues=issues,
+            tolerance_seconds=tolerance_seconds,
+        )
 
     return ValidationReport(tuple(issues))
 
@@ -121,6 +155,15 @@ def _validate_plan_identity(
             issues,
             "EAN_PLAN_ID_MISMATCH",
             f"plan scenario_id {plan.scenario_id!r} does not match artifact {artifact.scenario_id!r}",
+            "ean_plan",
+            plan.scenario_id,
+        )
+    if plan.fleet_mode is not artifact.fleet_mode:
+        _add_issue(
+            issues,
+            "EAN_PLAN_FLEET_MODE_MISMATCH",
+            f"plan fleet mode {plan.fleet_mode.value!r} does not match artifact "
+            f"{artifact.fleet_mode.value!r}",
             "ean_plan",
             plan.scenario_id,
         )
@@ -237,15 +280,6 @@ def _validate_visit_decision_and_timing(
     issues: list[ValidationIssue],
     tolerance_seconds: float,
 ) -> None:
-    if _has_negative_event_time(visit):
-        _add_issue(
-            issues,
-            "EAN_TIME_WINDOW_VIOLATION",
-            f"visit {visit.cabin_id!r}/{visit.visit_index!r} contains a negative event time",
-            "ean_visit",
-            _visit_entity_id((visit.cabin_id, visit.visit_index)),
-        )
-
     if visit.decision is EanRouteDecision.SKIP and not timing.skip_allowed:
         _add_issue(
             issues,

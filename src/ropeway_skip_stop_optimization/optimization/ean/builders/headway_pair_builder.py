@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from itertools import combinations
 
 from ropeway_skip_stop_optimization.optimization.ean.models import (
+    EanHeadwayPairScope,
     HeadwayCandidate,
     HeadwayCheckpointDefinition,
     HeadwayPair,
@@ -12,6 +13,12 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
 
 
 class HeadwayPairBuilder(ABC):
+    @property
+    def pair_scope(self) -> EanHeadwayPairScope:
+        """Describe whether ``build`` returns the complete pair set."""
+
+        return EanHeadwayPairScope.COMPLETE
+
     @abstractmethod
     def build(
         self,
@@ -23,6 +30,10 @@ class HeadwayPairBuilder(ABC):
 
 @dataclass(frozen=True)
 class AllPairsHeadwayPairBuilder(HeadwayPairBuilder):
+    @property
+    def pair_scope(self) -> EanHeadwayPairScope:
+        return EanHeadwayPairScope.COMPLETE
+
     def build(
         self,
         candidates: tuple[HeadwayCandidate, ...],
@@ -38,21 +49,61 @@ class AllPairsHeadwayPairBuilder(HeadwayPairBuilder):
             sorted_candidates = tuple(sorted(checkpoint_candidates, key=lambda candidate: candidate.id))
             _validate_no_duplicate_visit_at_checkpoint(sorted_candidates, checkpoint_id)
             for first_candidate, second_candidate in combinations(sorted_candidates, 2):
-                pair = HeadwayPair(
-                    id=_pair_id(checkpoint_id, first_candidate.id, second_candidate.id),
-                    checkpoint_id=checkpoint_id,
-                    first_candidate_id=first_candidate.id,
-                    second_candidate_id=second_candidate.id,
-                    headway_seconds=checkpoint.headway_seconds,
-                )
-                pair.validate()
-                pairs.append(pair)
+                pairs.append(build_headway_pair(checkpoint, first_candidate, second_candidate))
 
         pair_ids = [pair.id for pair in pairs]
         duplicate_pair_ids = _duplicates(pair_ids)
         if duplicate_pair_ids:
             raise ValueError(f"duplicate headway pair ids: {duplicate_pair_ids}")
         return tuple(pairs)
+
+
+@dataclass(frozen=True)
+class SparseHeadwayPairBuilder(HeadwayPairBuilder):
+    """Build candidates/checkpoints without eagerly materialising conflicts."""
+
+    @property
+    def pair_scope(self) -> EanHeadwayPairScope:
+        return EanHeadwayPairScope.SPARSE
+
+    def build(
+        self,
+        candidates: tuple[HeadwayCandidate, ...],
+        checkpoints: tuple[HeadwayCheckpointDefinition, ...],
+    ) -> tuple[HeadwayPair, ...]:
+        candidates_by_id = _candidates_by_id(candidates)
+        checkpoints_by_id = _checkpoints_by_id(checkpoints)
+        grouped = _candidates_by_checkpoint_id(
+            tuple(candidates_by_id.values()), checkpoints_by_id
+        )
+        for checkpoint_id, checkpoint_candidates in grouped.items():
+            _validate_no_duplicate_visit_at_checkpoint(
+                tuple(checkpoint_candidates), checkpoint_id
+            )
+        return ()
+
+
+def build_headway_pair(
+    checkpoint: HeadwayCheckpointDefinition,
+    first_candidate: HeadwayCandidate,
+    second_candidate: HeadwayCandidate,
+) -> HeadwayPair:
+    """Build the canonical, deterministically ordered pair for two candidates."""
+
+    if first_candidate.checkpoint_id != checkpoint.id or second_candidate.checkpoint_id != checkpoint.id:
+        raise ValueError("headway pair candidates must belong to the checkpoint")
+    first, second = sorted((first_candidate, second_candidate), key=lambda item: item.id)
+    if first.id == second.id:
+        raise ValueError("headway pair candidates must be distinct")
+    pair = HeadwayPair(
+        id=_pair_id(checkpoint.id, first.id, second.id),
+        checkpoint_id=checkpoint.id,
+        first_candidate_id=first.id,
+        second_candidate_id=second.id,
+        headway_seconds=checkpoint.headway_seconds,
+    )
+    pair.validate()
+    return pair
 
 
 def _pair_id(checkpoint_id: str, first_candidate_id: str, second_candidate_id: str) -> str:

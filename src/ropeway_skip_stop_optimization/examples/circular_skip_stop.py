@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, time, timedelta
 
 from ropeway_skip_stop_optimization.examples.base import ScenarioExample, ScenarioExampleMetadata
@@ -28,6 +28,8 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanCabinStartBuilder,
     EanBuildArtifactBuilder,
     EanConfig,
+    EanFleetConfig,
+    EanFleetMode,
     RingEanBuildArtifactBuilder,
     StationEanConfig,
     StationWaitingMode,
@@ -227,6 +229,137 @@ class FiveStationCircleCwHalfSkipWaitExample(FiveStationCircleCwHalfNoSkipNoWait
         include_skip_routes=True,
         service_station_waiting_mode=StationWaitingMode.END_OF_PLATFORM_WAIT,
         demand_count_per_od_pair=64,
+    )
+
+
+class FiveStationOptimizedInitialPlacementNoSkipNoWaitExample(
+    FiveStationCircleCwFullNoSkipNoWaitExample
+):
+    metadata = ScenarioExampleMetadata(
+        id="five_station_optimized_initial_placement_no_skip_no_wait_v0",
+        label="Five station optimized initial placement no_skip+no_wait",
+        description=(
+            "Five-station clockwise ring with optimized initial placement, "
+            "explicit fleet limit, no skipping, and no waiting."
+        ),
+        tags=("circle", "cw", "optimized-initial-placement", "no-skip", "no-waiting"),
+        family_id="five_station_circle",
+        family_label="Five station circle",
+        variant_id="optimized_initial_placement_no_skip_no_wait",
+        variant_label="Initial placement no_skip+no_wait",
+    )
+    spec = CircularSkipStopSpec(
+        scenario_id=metadata.id,
+        station_ids=FiveStationCircleCwFullNoSkipNoWaitExample.spec.station_ids,
+        label=metadata.label,
+        description=metadata.description,
+        include_skip_routes=False,
+        service_station_waiting_mode=StationWaitingMode.NO_WAITING,
+    )
+
+    def build_ean_artifact_builder(
+        self,
+        scenario: Scenario,
+        config: EanConfig,
+    ) -> EanBuildArtifactBuilder:
+        return _optimized_initial_placement_artifact_builder(scenario, self.spec.direction)
+
+
+class FiveStationOptimizedInitialPlacementSkipNoWaitExample(
+    FiveStationCircleCwHalfSkipNoWaitExample
+):
+    metadata = ScenarioExampleMetadata(
+        id="five_station_optimized_initial_placement_skip_no_wait_v0",
+        label="Five station optimized initial placement skip+no_wait",
+        description=(
+            "Five-station clockwise ring with optimized initial placement, "
+            "explicit fleet limit, skipping enabled, and no waiting."
+        ),
+        tags=("circle", "cw", "skip-stop", "optimized-initial-placement", "no-waiting"),
+        family_id="five_station_circle",
+        family_label="Five station circle",
+        variant_id="optimized_initial_placement_skip_no_wait",
+        variant_label="Initial placement skip+no_wait",
+    )
+    spec = CircularSkipStopSpec(
+        scenario_id=metadata.id,
+        station_ids=FiveStationCircleCwFullNoSkipNoWaitExample.spec.station_ids,
+        label=metadata.label,
+        description=metadata.description,
+        include_skip_routes=True,
+        service_station_waiting_mode=StationWaitingMode.NO_WAITING,
+    )
+
+    def build_ean_artifact_builder(
+        self,
+        scenario: Scenario,
+        config: EanConfig,
+    ) -> EanBuildArtifactBuilder:
+        return _optimized_initial_placement_artifact_builder(scenario, self.spec.direction)
+
+
+class FiveStationOptimizedInitialPlacementDoubleAllStopSkipWaitExample(
+    FiveStationCircleCwHalfSkipWaitExample
+):
+    """Passenger experiment with twice the canonical all-stop fleet available."""
+
+    metadata = ScenarioExampleMetadata(
+        id="five_station_optimized_initial_placement_double_all_stop_skip_wait_v0",
+        label="Five station OIP 2x all-stop skip+wait",
+        description=(
+            "Five-station clockwise ring with optimized initial placement, "
+            "76 available cabins, skipping enabled, and end-of-platform waiting."
+        ),
+        tags=(
+            "circle",
+            "cw",
+            "skip-stop",
+            "optimized-initial-placement",
+            "double-all-stop-fleet",
+            "waiting",
+        ),
+        family_id="five_station_circle",
+        family_label="Five station circle",
+        variant_id="optimized_initial_placement_double_all_stop_skip_wait",
+        variant_label="OIP 76 cabins skip+wait",
+    )
+    spec = replace(
+        FiveStationCircleCwHalfSkipWaitExample.spec,
+        scenario_id=metadata.id,
+        label=metadata.label,
+        description=metadata.description,
+    )
+
+    def build_ean_artifact_builder(
+        self,
+        scenario: Scenario,
+        config: EanConfig,
+    ) -> EanBuildArtifactBuilder:
+        return replace(
+            _optimized_initial_placement_artifact_builder(
+                scenario,
+                self.spec.direction,
+            ),
+            fleet_config=EanFleetConfig(
+                mode=EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT,
+                available_fleet_count=76,
+            ),
+        )
+
+
+def _optimized_initial_placement_artifact_builder(
+    scenario: Scenario,
+    direction: str,
+) -> RingEanBuildArtifactBuilder:
+    return RingEanBuildArtifactBuilder(
+        switch_cycle=build_circular_skip_stop_ean_ring_switch_order(
+            scenario,
+            direction=direction,
+        ),
+        fleet_config=EanFleetConfig(
+            mode=EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT,
+            available_fleet_count=len(scenario.cabins),
+        ),
     )
 
 

@@ -87,6 +87,41 @@ class DeterministicPhysicalNodeToSwitchStartBuilder(EanCabinStartBuilder):
 
 
 @dataclass(frozen=True)
+class EvenlySpacedAllStopCabinStartBuilder(EanCabinStartBuilder):
+    """Place a fixed number of evenly spaced all-stop cabins on a switch ring."""
+
+    switch_cycle: tuple[str, ...]
+    cabin_count: int
+
+    def build(
+        self,
+        scenario: Scenario,
+        config: EanConfig,
+        target_switch_ids: frozenset[str],
+    ) -> tuple[EanCabinStart, ...]:
+        cycle_boundaries, cycle_seconds, maximum_cabin_count = (
+            _continuous_all_stop_start_parameters(
+                scenario=scenario,
+                config=config,
+                switch_cycle=self.switch_cycle,
+                target_switch_ids=target_switch_ids,
+            )
+        )
+        if self.cabin_count <= 0:
+            raise ValueError("evenly spaced all-stop cabin_count must be positive")
+        if self.cabin_count > maximum_cabin_count:
+            raise ValueError(
+                "evenly spaced all-stop cabin_count exceeds the canonical "
+                f"ring capacity: {self.cabin_count} > {maximum_cabin_count}"
+            )
+        return _evenly_spaced_all_stop_starts(
+            cabin_count=self.cabin_count,
+            cycle_seconds=cycle_seconds,
+            cycle_boundaries=cycle_boundaries,
+        )
+
+
+@dataclass(frozen=True)
 class ContinuousAllStopMaxCabinStartBuilder(EanCabinStartBuilder):
     """Place the maximum number of all-stop cabins on a continuous switch ring.
 
@@ -104,41 +139,74 @@ class ContinuousAllStopMaxCabinStartBuilder(EanCabinStartBuilder):
         config: EanConfig,
         target_switch_ids: frozenset[str],
     ) -> tuple[EanCabinStart, ...]:
-        from ropeway_skip_stop_optimization.optimization.ean.builders.headway_duration_builder import (
-            OperatingSpeedHeadwayDurationBuilder,
-        )
-        from ropeway_skip_stop_optimization.optimization.ean.builders.timing_builder import (
-            PhysicalSkipStopTimingBuilder,
-        )
-
-        scenario.validate()
-        config.validate()
-        _validate_switch_cycle(self.switch_cycle)
-        if target_switch_ids != frozenset(self.switch_cycle):
-            raise ValueError("continuous all-stop starts must target exactly the configured switch_cycle")
-
-        timings = PhysicalSkipStopTimingBuilder().build(scenario, self.switch_cycle)
-        cycle_boundaries = _all_stop_cycle_boundaries(timings, self.switch_cycle)
-        cycle_seconds = cycle_boundaries[-1].seconds
-        headway_seconds = _max_all_stop_headway_seconds(
-            OperatingSpeedHeadwayDurationBuilder().build(scenario, timings),
-        )
-        cabin_count = max(1, math.floor((cycle_seconds + 1e-9) / headway_seconds))
-        phase_spacing_seconds = cycle_seconds / cabin_count
-
-        starts: list[EanCabinStart] = []
-        for cabin_id in range(cabin_count):
-            phase_seconds = cabin_id * phase_spacing_seconds
-            start = _start_for_phase(
-                cabin_id=cabin_id,
-                phase_seconds=phase_seconds,
-                cycle_seconds=cycle_seconds,
-                cycle_boundaries=cycle_boundaries,
+        cycle_boundaries, cycle_seconds, cabin_count = (
+            _continuous_all_stop_start_parameters(
+                scenario=scenario,
+                config=config,
+                switch_cycle=self.switch_cycle,
+                target_switch_ids=target_switch_ids,
             )
-            start.validate()
-            starts.append(start)
+        )
+        return _evenly_spaced_all_stop_starts(
+            cabin_count=cabin_count,
+            cycle_seconds=cycle_seconds,
+            cycle_boundaries=cycle_boundaries,
+        )
 
-        return tuple(starts)
+
+def _continuous_all_stop_start_parameters(
+    *,
+    scenario: Scenario,
+    config: EanConfig,
+    switch_cycle: tuple[str, ...],
+    target_switch_ids: frozenset[str],
+) -> tuple[tuple[_CycleBoundary, ...], float, int]:
+    from ropeway_skip_stop_optimization.optimization.ean.builders.headway_duration_builder import (
+        OperatingSpeedHeadwayDurationBuilder,
+    )
+    from ropeway_skip_stop_optimization.optimization.ean.builders.timing_builder import (
+        PhysicalSkipStopTimingBuilder,
+    )
+
+    scenario.validate()
+    config.validate()
+    _validate_switch_cycle(switch_cycle)
+    if target_switch_ids != frozenset(switch_cycle):
+        raise ValueError(
+            "continuous all-stop starts must target exactly the configured switch_cycle"
+        )
+
+    timings = PhysicalSkipStopTimingBuilder().build(scenario, switch_cycle)
+    cycle_boundaries = _all_stop_cycle_boundaries(timings, switch_cycle)
+    cycle_seconds = cycle_boundaries[-1].seconds
+    headway_seconds = _max_all_stop_headway_seconds(
+        OperatingSpeedHeadwayDurationBuilder().build(scenario, timings),
+    )
+    maximum_cabin_count = max(
+        1,
+        math.floor((cycle_seconds + 1e-9) / headway_seconds),
+    )
+    return cycle_boundaries, cycle_seconds, maximum_cabin_count
+
+
+def _evenly_spaced_all_stop_starts(
+    *,
+    cabin_count: int,
+    cycle_seconds: float,
+    cycle_boundaries: tuple[_CycleBoundary, ...],
+) -> tuple[EanCabinStart, ...]:
+    phase_spacing_seconds = cycle_seconds / cabin_count
+    starts: list[EanCabinStart] = []
+    for cabin_id in range(cabin_count):
+        start = _start_for_phase(
+            cabin_id=cabin_id,
+            phase_seconds=cabin_id * phase_spacing_seconds,
+            cycle_seconds=cycle_seconds,
+            cycle_boundaries=cycle_boundaries,
+        )
+        start.validate()
+        starts.append(start)
+    return tuple(starts)
 
 
 @dataclass(frozen=True)

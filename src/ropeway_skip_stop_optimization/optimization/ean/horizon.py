@@ -10,6 +10,7 @@ from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
 )
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanCabinStartKind,
+    EanFleetMode,
     SwitchVisitDefinition,
 )
 from ropeway_skip_stop_optimization.optimization.ean.time_bounds import (
@@ -93,13 +94,14 @@ def add_visit_horizon_activation(
                 - local_m * active[key],
                 name=f"visit_after_horizon_if_inactive_{key[0]}_{key[1]}",
             )
-        for previous, current in zip(visits, visits[1:]):
-            previous_key = (cabin_id, previous.visit_index)
-            current_key = (cabin_id, current.visit_index)
-            model.addConstr(
-                active[current_key] <= active[previous_key],
-                name=f"visit_activation_prefix_{cabin_id}_{current.visit_index}",
-            )
+        if artifact.fleet_mode is EanFleetMode.FIXED_STARTS:
+            for previous, current in zip(visits, visits[1:]):
+                previous_key = (cabin_id, previous.visit_index)
+                current_key = (cabin_id, current.visit_index)
+                model.addConstr(
+                    active[current_key] <= active[previous_key],
+                    name=f"visit_activation_prefix_{cabin_id}_{current.visit_index}",
+                )
     return active
 
 

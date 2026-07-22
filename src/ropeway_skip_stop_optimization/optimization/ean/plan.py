@@ -6,6 +6,7 @@ from enum import Enum
 from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     EanHorizonFormulation,
 )
+from ropeway_skip_stop_optimization.optimization.ean.models import EanFleetMode
 
 
 class EanRouteDecision(Enum):
@@ -32,16 +33,11 @@ class EanCabinVisit:
         _require_nonnegative_int("EAN cabin visit visit_index", self.visit_index)
         _require_id("EAN cabin visit switch_id", self.switch_id)
         _require_id("EAN cabin visit station_id", self.station_id)
-        _require_nonnegative("EAN cabin visit switch_time_seconds", self.switch_time_seconds)
-        _require_nonnegative("EAN cabin visit exit_switch_time_seconds", self.exit_switch_time_seconds)
-        _require_nonnegative("EAN cabin visit next_switch_time_seconds", self.next_switch_time_seconds)
         _require_nonnegative("EAN cabin visit wait_seconds", self.wait_seconds)
 
         if self.decision is EanRouteDecision.STOP:
             if self.platform_entry_time_seconds is None or self.platform_exit_time_seconds is None:
                 raise ValueError("STOP visits need platform entry and exit times")
-            _require_nonnegative("EAN cabin visit platform_entry_time_seconds", self.platform_entry_time_seconds)
-            _require_nonnegative("EAN cabin visit platform_exit_time_seconds", self.platform_exit_time_seconds)
             if not (
                 self.switch_time_seconds
                 <= self.platform_entry_time_seconds
@@ -72,10 +68,13 @@ class EanCabinTrajectory:
     def validate(self) -> None:
         _require_nonnegative_int("EAN cabin trajectory cabin_id", self.cabin_id)
 
-        expected_visit_indices = tuple(range(len(self.visits)))
         actual_visit_indices = tuple(visit.visit_index for visit in self.visits)
+        first_visit_index = actual_visit_indices[0] if actual_visit_indices else 0
+        expected_visit_indices = tuple(
+            range(first_visit_index, first_visit_index + len(self.visits))
+        )
         if actual_visit_indices != expected_visit_indices:
-            raise ValueError("EAN cabin trajectory visits must be contiguous and ordered from visit_index 0")
+            raise ValueError("EAN cabin trajectory visits must be contiguous and ordered")
 
         previous_visit: EanCabinVisit | None = None
         for visit in self.visits:
@@ -96,6 +95,7 @@ class EanMovementPlan:
     model_end_seconds: float
     trajectories: tuple[EanCabinTrajectory, ...]
     horizon_formulation: EanHorizonFormulation = EanHorizonFormulation.LEGACY
+    fleet_mode: EanFleetMode = EanFleetMode.FIXED_STARTS
 
     def validate(self) -> None:
         _require_id("EAN movement plan scenario_id", self.scenario_id)
@@ -109,6 +109,16 @@ class EanMovementPlan:
         cabin_ids: list[int] = []
         for trajectory in self.trajectories:
             trajectory.validate()
+            if self.fleet_mode is EanFleetMode.FIXED_STARTS:
+                if (
+                    trajectory.visits
+                    and trajectory.visits[0].visit_index != 0
+                ):
+                    raise ValueError(
+                        "fixed-start EAN trajectories must begin at visit_index 0"
+                    )
+                for visit in trajectory.visits:
+                    _validate_nonnegative_visit_times(visit)
             if (
                 not trajectory.visits
                 and self.horizon_formulation
@@ -122,6 +132,18 @@ class EanMovementPlan:
         duplicate_cabin_ids = _duplicates(cabin_ids)
         if duplicate_cabin_ids:
             raise ValueError(f"EAN movement plan has duplicate cabin trajectories: {duplicate_cabin_ids}")
+
+
+def _validate_nonnegative_visit_times(visit: EanCabinVisit) -> None:
+    event_times = (
+        visit.switch_time_seconds,
+        visit.platform_entry_time_seconds,
+        visit.platform_exit_time_seconds,
+        visit.exit_switch_time_seconds,
+        visit.next_switch_time_seconds,
+    )
+    if any(value is not None and value < 0 for value in event_times):
+        raise ValueError("fixed-start EAN visits must not contain negative event times")
 
 
 def _require_id(label: str, value: str) -> None:

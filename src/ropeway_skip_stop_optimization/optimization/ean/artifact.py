@@ -2,9 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ropeway_skip_stop_optimization.optimization.ean.fleet import (
+    EanInitialPlacementParameters,
+)
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanCabinStart,
+    EanCabinStartKind,
     EanConfig,
+    EanFleetCardinalityMode,
+    EanFleetMode,
+    EanHeadwayPairScope,
     HeadwayCandidate,
     HeadwayCheckpointDefinition,
     HeadwayPair,
@@ -26,9 +33,17 @@ class EanBuildArtifact:
     headway_checkpoints: tuple[HeadwayCheckpointDefinition, ...]
     headway_candidates: tuple[HeadwayCandidate, ...]
     headway_pairs: tuple[HeadwayPair, ...]
+    headway_pair_scope: EanHeadwayPairScope = EanHeadwayPairScope.COMPLETE
+    fleet_mode: EanFleetMode = EanFleetMode.FIXED_STARTS
+    fleet_cardinality_mode: EanFleetCardinalityMode = (
+        EanFleetCardinalityMode.UP_TO_AVAILABLE
+    )
+    initial_placement_parameters: EanInitialPlacementParameters | None = None
 
     def validate(self) -> None:
         _require_id("EAN build artifact scenario_id", self.scenario_id)
+        if not isinstance(self.headway_pair_scope, EanHeadwayPairScope):
+            raise ValueError("EAN build artifact needs a valid headway pair scope")
         self.config.validate()
         _validate_switch_cycle(self.switch_cycle)
 
@@ -46,6 +61,10 @@ class EanBuildArtifact:
             raise ValueError(f"EAN build artifact timings reference stations without config: {missing_station_configs}")
 
         cabin_start_by_cabin_id = _validate_cabin_starts(self.cabin_starts, set(self.switch_cycle))
+        _validate_fleet_definition(
+            self,
+            cabin_start_by_cabin_id,
+        )
         visit_keys = _validate_switch_visits(
             self.switch_visits,
             cabin_ids=set(cabin_start_by_cabin_id),
@@ -67,6 +86,37 @@ class EanBuildArtifact:
             checkpoint_ids=checkpoint_ids,
             candidate_checkpoint_by_id=candidate_checkpoint_by_id,
         )
+
+
+def _validate_fleet_definition(
+    artifact: EanBuildArtifact,
+    starts_by_cabin_id: dict[int, EanCabinStart],
+) -> None:
+    parameters = artifact.initial_placement_parameters
+    if artifact.fleet_mode is EanFleetMode.FIXED_STARTS:
+        if parameters is not None:
+            raise ValueError("fixed-start artifacts must not define initial placement parameters")
+        if artifact.fleet_cardinality_mode is not EanFleetCardinalityMode.UP_TO_AVAILABLE:
+            raise ValueError("fixed-start artifacts must use up_to_available cardinality")
+        return
+    if artifact.fleet_mode is not EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT:
+        raise ValueError(f"unsupported EAN fleet mode: {artifact.fleet_mode}")
+    if parameters is None:
+        raise ValueError("optimized initial placement artifact needs fleet parameters")
+    parameters.validate()
+    if parameters.available_fleet_count != len(starts_by_cabin_id):
+        raise ValueError("EAN fleet count does not match potential cabin starts")
+    if set(starts_by_cabin_id) != set(range(parameters.available_fleet_count)):
+        raise ValueError("initial placement potential cabin ids must be contiguous from zero")
+    if parameters.initial_phase_visit_count != len(artifact.switch_cycle):
+        raise ValueError("initial placement phase count must match switch_cycle")
+    for start in starts_by_cabin_id.values():
+        if (
+            start.kind is not EanCabinStartKind.EARLIEST
+            or start.first_switch_id != artifact.switch_cycle[0]
+            or start.time_seconds != 0.0
+        ):
+            raise ValueError("initial placement cabin starts must use the canonical ring origin")
 
 
 def _validate_switch_cycle(switch_cycle: tuple[str, ...]) -> None:

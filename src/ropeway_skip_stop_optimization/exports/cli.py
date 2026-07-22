@@ -40,6 +40,12 @@ def main() -> None:
         help="Gurobi solver policy preset for EAN passenger optimization artifact sets.",
     )
     parser.add_argument(
+        "--ean-time-limit",
+        type=float,
+        default=None,
+        help="Override the EAN solver-policy time limit in seconds.",
+    )
+    parser.add_argument(
         "--ean-checkpoint-dir",
         type=Path,
         default=None,
@@ -98,6 +104,7 @@ def main() -> None:
         milp_cabin_count=args.milp_cabin_count,
         milp_variable_strategy=MilpV0VariableStrategy(args.milp_variable_strategy),
         ean_solver_policy_preset=GurobiSolverPolicyPreset(args.ean_solver_policy),
+        ean_time_limit_seconds=args.ean_time_limit,
         ean_checkpoint_dir=args.ean_checkpoint_dir,
         ean_resume_checkpoint=args.ean_resume_checkpoint,
         ean_resume_latest_checkpoint=args.ean_resume_latest_checkpoint,

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, StrEnum
 
 
 class StationWaitingMode(Enum):
@@ -13,6 +13,48 @@ class StationWaitingMode(Enum):
 class EanCabinStartKind(Enum):
     FIXED = "fixed"
     EARLIEST = "earliest"
+
+
+class EanFleetMode(StrEnum):
+    FIXED_STARTS = "fixed_starts"
+    OPTIMIZED_INITIAL_PLACEMENT = "optimized_initial_placement"
+
+
+class EanFleetCardinalityMode(StrEnum):
+    """Whether optimized initial placement may deactivate candidate cabins."""
+
+    UP_TO_AVAILABLE = "up_to_available"
+    EXACT = "exact"
+
+
+class EanHeadwayPairScope(StrEnum):
+    """Whether an artifact contains every candidate pair or only a subset."""
+
+    COMPLETE = "complete"
+    SPARSE = "sparse"
+
+
+@dataclass(frozen=True)
+class EanFleetConfig:
+    mode: EanFleetMode = EanFleetMode.FIXED_STARTS
+    available_fleet_count: int | None = None
+    cardinality_mode: EanFleetCardinalityMode = (
+        EanFleetCardinalityMode.UP_TO_AVAILABLE
+    )
+
+    def validate(self) -> None:
+        if self.available_fleet_count is not None and self.available_fleet_count <= 0:
+            raise ValueError("available_fleet_count must be positive when set")
+        if self.mode is EanFleetMode.FIXED_STARTS:
+            if self.available_fleet_count is not None:
+                raise ValueError("fixed-start fleet config must not define a fleet limit")
+            if self.cardinality_mode is not EanFleetCardinalityMode.UP_TO_AVAILABLE:
+                raise ValueError("fixed-start fleet config must use up_to_available cardinality")
+            return
+        if self.mode is not EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT:
+            raise ValueError(f"unsupported EAN fleet mode: {self.mode}")
+        if self.available_fleet_count is None:
+            raise ValueError("optimized initial placement requires available_fleet_count")
 
 
 class HeadwayCheckpointKind(Enum):
@@ -44,10 +86,13 @@ class SkipStopTiming:
     skip_entry_to_exit_switch_seconds: float
     rope_to_next_switch_seconds: float
     skip_allowed: bool = True
+    exit_switch_id: str | None = None
 
     def validate(self) -> None:
         _require_id("skip/stop timing switch_id", self.switch_id)
         _require_id("skip/stop timing station_id", self.station_id)
+        if self.exit_switch_id is not None:
+            _require_id("skip/stop timing exit_switch_id", self.exit_switch_id)
         _require_positive("entry_to_platform_entry_seconds", self.entry_to_platform_entry_seconds)
         _require_positive(
             "min_platform_entry_to_platform_exit_seconds",

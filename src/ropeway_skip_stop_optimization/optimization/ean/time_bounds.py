@@ -9,6 +9,7 @@ from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
 )
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanCabinStartKind,
+    EanFleetMode,
     SkipStopTiming,
     StationEanConfig,
     StationWaitingMode,
@@ -40,6 +41,8 @@ def build_ean_model_time_bounds(
         return _legacy_time_bounds(artifact)
     if formulation is EanTimeBoundFormulation.DERIVED_VISIT_BOUNDS:
         return _derived_time_bounds(artifact)
+    if formulation is EanTimeBoundFormulation.INITIAL_PLACEMENT_SAFE:
+        return _initial_placement_time_bounds(artifact)
     raise ValueError(f"unsupported EAN time-bound formulation: {formulation}")
 
 
@@ -135,6 +138,72 @@ def _derived_time_bounds(artifact: EanBuildArtifact) -> EanModelTimeBounds:
             switch_lower = bounds.exit_lower + timing.rope_to_next_switch_seconds
             switch_upper = bounds.exit_upper + timing.rope_to_next_switch_seconds
             global_upper = max(global_upper, switch_upper)
+
+    return EanModelTimeBounds(by_visit=by_visit, global_upper=global_upper)
+
+
+def _initial_placement_time_bounds(
+    artifact: EanBuildArtifact,
+) -> EanModelTimeBounds:
+    """Build conservative finite bounds for selectable initial ring phases."""
+    if artifact.fleet_mode is not EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT:
+        raise ValueError(
+            "time_bounds_initial_placement_safe requires optimized_initial_placement"
+        )
+    if artifact.initial_placement_parameters is None:
+        raise ValueError("initial placement time bounds need fleet parameters")
+
+    timings_by_switch_id = {timing.switch_id: timing for timing in artifact.timings}
+    station_config_by_id = {
+        station_config.station_id: station_config
+        for station_config in artifact.config.station_configs
+    }
+    visits_by_cabin_id = _visits_by_cabin_id(artifact.switch_visits)
+    by_visit: dict[tuple[int, int], EanVisitTimeBounds] = {}
+    maximum_chain_seconds = max(
+        sum(
+            _maximum_entry_to_exit_seconds(
+                timings_by_switch_id[visit.switch_id],
+                station_wait_upper_bound(
+                    station_config_by_id[
+                        timings_by_switch_id[visit.switch_id].station_id
+                    ],
+                    artifact.config.operational_end_seconds,
+                ),
+            )
+            + timings_by_switch_id[visit.switch_id].rope_to_next_switch_seconds
+            for visit in visits
+        )
+        for visits in visits_by_cabin_id.values()
+    )
+    switch_upper = (
+        artifact.config.operational_end_seconds
+        + HORIZON_ACTIVATION_EPSILON_SECONDS
+        + maximum_chain_seconds
+    )
+    global_upper = switch_upper
+
+    for visits in visits_by_cabin_id.values():
+        for visit in visits:
+            timing = timings_by_switch_id[visit.switch_id]
+            station_config = station_config_by_id[timing.station_id]
+            wait_upper = station_wait_upper_bound(
+                station_config,
+                artifact.config.operational_end_seconds,
+            )
+            exit_increment_lower = _minimum_entry_to_exit_seconds(timing)
+            exit_increment_upper = _maximum_entry_to_exit_seconds(timing, wait_upper)
+            switch_lower = -exit_increment_upper
+            bounds = EanVisitTimeBounds(
+                switch_lower=switch_lower,
+                switch_upper=switch_upper,
+                exit_lower=switch_lower + exit_increment_lower,
+                exit_upper=switch_upper + exit_increment_upper,
+                wait_upper=wait_upper,
+            )
+            key = (visit.cabin_id, visit.visit_index)
+            by_visit[key] = bounds
+            global_upper = max(global_upper, bounds.exit_upper)
 
     return EanModelTimeBounds(by_visit=by_visit, global_upper=global_upper)
 
