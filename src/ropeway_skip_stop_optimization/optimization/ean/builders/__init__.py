@@ -1,6 +1,5 @@
 from ropeway_skip_stop_optimization.optimization.ean.builders.artifact_builder import (
     EanBuildArtifactBuilder,
-    RingEanBuildArtifactBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ean.builders.cyclic_visit_builder import (
     CyclicPatternVisitBuilder,
@@ -104,7 +103,6 @@ __all__ = [
     "PhysicalMovementNetworkBuilder",
     "PhysicalRingTopologyBuilder",
     "RingSwitchVisitBuilder",
-    "RingEanBuildArtifactBuilder",
     "RingPhysicalTopology",
     "RingStationTopology",
     "ResolvedEanArtifactInputs",

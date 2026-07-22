@@ -16,7 +16,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanMovementPlan,
     EanPhysicalEventKind,
     EanRouteDecision,
-    RingEanBuildArtifactBuilder,
+    network_ean_builder_for_cycle,
     StationEanConfig,
     StationWaitingMode,
     project_ean_movement_plan_to_physical_replay,
@@ -182,7 +182,7 @@ def test_ean_projection_keeps_one_post_horizon_event_per_cabin_for_interpolation
 def _scenario_artifact_plan():
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
-    artifact = RingEanBuildArtifactBuilder(
+    artifact = network_ean_builder_for_cycle(
         switch_cycle=build_three_station_ean_ring_switch_order(scenario),
     ).build(scenario, config)
     plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)

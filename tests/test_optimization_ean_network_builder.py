@@ -34,7 +34,7 @@ def test_network_builder_reproduces_legacy_artifact(example_id: str) -> None:
     config = example.build_ean_config(scenario)
     network_builder = example.build_ean_artifact_builder(scenario, config)
     assert isinstance(network_builder, NetworkEanBuildArtifactBuilder)
-    legacy_builder = network_builder.to_ring()
+    legacy_builder = network_builder
 
     legacy = legacy_builder.build(scenario, config)
     network = network_builder.build(scenario, config)
@@ -108,7 +108,7 @@ def test_physical_network_builder_preserves_shared_physical_resource_id() -> Non
         if shared.id in {usage.resource_id for usage in option.resource_usages}
     )
     assert options_using_shared
-    artifact = network_builder.to_ring().build(scenario, config)
+    artifact = network_builder.build(scenario, config)
     indexed = dict(
         EanResourceConflictIndex.build(
             network,
@@ -163,7 +163,7 @@ def test_network_and_legacy_build_identical_movement_model_dimensions() -> None:
     config = example.build_ean_config(scenario)
     network_builder = example.build_ean_artifact_builder(scenario, config)
     assert isinstance(network_builder, NetworkEanBuildArtifactBuilder)
-    legacy_builder = network_builder.to_ring()
+    legacy_builder = network_builder
     legacy_artifact = legacy_builder.build(scenario, config)
     network_artifact = network_builder.build(scenario, config)
 
@@ -213,7 +213,7 @@ def test_network_and_legacy_solver_classification_is_identical() -> None:
     network_builder = example.build_ean_artifact_builder(scenario, config)
     assert isinstance(network_builder, NetworkEanBuildArtifactBuilder)
     artifacts = (
-        network_builder.to_ring().build(scenario, config),
+        network_builder.build(scenario, config),
         network_builder.build(scenario, config),
     )
 

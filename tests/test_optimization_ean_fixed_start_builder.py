@@ -29,7 +29,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanCabinStartKind,
     EvenlySpacedAllStopCabinStartBuilder,
     NetworkEanBuildArtifactBuilder,
-    RingEanBuildArtifactBuilder,
+    network_ean_builder_for_cycle,
     validate_ean_movement_plan_against_artifact,
 )
 
@@ -90,7 +90,7 @@ def test_continuous_all_stop_max_start_builder_places_maximum_three_station_cabi
     assert {start.kind for start in starts} == {EanCabinStartKind.FIXED}
     assert all(start.time_seconds >= 0 for start in starts)
 
-    artifact = RingEanBuildArtifactBuilder(
+    artifact = network_ean_builder_for_cycle(
         switch_cycle=switch_cycle,
         start_builder=builder,
     ).build(scenario, config)
@@ -122,7 +122,7 @@ def test_evenly_spaced_all_stop_builder_places_feasible_explicit_fleet() -> None
         cabin_count=len(scenario.cabins),
     )
 
-    artifact = RingEanBuildArtifactBuilder(
+    artifact = network_ean_builder_for_cycle(
         switch_cycle=optimized_builder.switch_cycle,
         start_builder=builder,
     ).build(scenario, config)

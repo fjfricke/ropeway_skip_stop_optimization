@@ -41,7 +41,6 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanPhysicalReplay,
     EanOptimizationConfig,
     NetworkEanBuildArtifactBuilder,
-    RingEanBuildArtifactBuilder,
     EanSolveConfig,
     GurobiCheckpointConfig,
     GurobiSolverPolicy,
@@ -169,15 +168,8 @@ class ExportContext:
                 scenario = self.scenario()
                 config = example.build_ean_config(scenario)
                 builder = example.build_ean_artifact_builder(scenario, config)
-                if self.ean_artifact_construction is EanArtifactConstructionMode.NETWORK:
-                    if isinstance(builder, RingEanBuildArtifactBuilder):
-                        builder = NetworkEanBuildArtifactBuilder.from_ring(builder)
-                    elif not isinstance(builder, NetworkEanBuildArtifactBuilder):
-                        raise ValueError(
-                            "network EAN construction requires a network or legacy ring builder"
-                        )
-                elif isinstance(builder, NetworkEanBuildArtifactBuilder):
-                    builder = builder.to_ring()
+                if not isinstance(builder, NetworkEanBuildArtifactBuilder):
+                    raise ValueError("EAN examples must use the network artifact builder")
                 self._ean_artifact = builder.build(
                     scenario,
                     config,

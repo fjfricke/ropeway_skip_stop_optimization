@@ -40,7 +40,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanArtifactConstructionMode,
     EanConfig,
     EanOptimizationProblemKind,
-    RingEanBuildArtifactBuilder,
+    network_ean_builder_for_cycle,
     StationEanConfig,
     StationWaitingMode,
 )
@@ -250,8 +250,8 @@ class _OneStationBuildBaselineExample(ScenarioExample):
         self,
         scenario: Scenario,
         config: EanConfig,
-    ) -> RingEanBuildArtifactBuilder:
-        return RingEanBuildArtifactBuilder(switch_cycle=("entry",))
+    ) -> network_ean_builder_for_cycle:
+        return network_ean_builder_for_cycle(switch_cycle=("entry",))
 
 
 if __name__ == "__main__":

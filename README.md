@@ -99,8 +99,7 @@ Useful EAN export options:
 --ean-resume-latest-checkpoint
 ```
 
-`network` is the default construction path. `legacy_ring` remains available
-temporarily for equivalence regression and compatibility exports.
+`network` is the only supported artifact-construction path.
 
 `--ean-build-only` constructs the selected EAN artifact and complete Gurobi
 model, writes `ean_model_build_profile.json`, and exits without calling

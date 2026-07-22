@@ -17,7 +17,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanPeriodicRouteMipStartSeedBuilder,
     EanRouteDecision,
     EanHorizonFormulation,
-    RingEanBuildArtifactBuilder,
+    network_ean_builder_for_cycle,
     SparseHeadwayPairBuilder,
     StationWaitingMode,
 )
@@ -30,7 +30,7 @@ def test_periodic_route_finds_the_all_skip_rope_certificate() -> None:
     example = FiveStationOptimizedInitialPlacementSkipNoWaitExample()
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
-    artifact = RingEanBuildArtifactBuilder(
+    artifact = network_ean_builder_for_cycle(
         switch_cycle=build_five_station_circle_cw_ean_ring_switch_order(scenario),
         fleet_config=EanFleetConfig(
             mode=EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT,
@@ -160,7 +160,7 @@ def test_periodic_no_wait_seed_is_valid_with_end_waiting_semantics() -> None:
             for station_config in config.station_configs
         ),
     )
-    artifact = RingEanBuildArtifactBuilder(
+    artifact = network_ean_builder_for_cycle(
         switch_cycle=build_five_station_circle_cw_ean_ring_switch_order(scenario),
         fleet_config=EanFleetConfig(
             mode=EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT,
@@ -184,7 +184,7 @@ def test_periodic_no_wait_seed_is_valid_with_end_waiting_semantics() -> None:
 def _artifact(example, *, fleet_count: int = 1, sparse: bool = False):
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
-    return RingEanBuildArtifactBuilder(
+    return network_ean_builder_for_cycle(
         switch_cycle=build_five_station_circle_cw_ean_ring_switch_order(scenario),
         fleet_config=EanFleetConfig(
             mode=EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT,

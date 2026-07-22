@@ -10,14 +10,14 @@ from ropeway_skip_stop_optimization.examples.three_station_ean import (
 from ropeway_skip_stop_optimization.optimization.ean import (
     EarliestAllStopEanMovementPlanBuilder,
     EanRouteDecision,
-    RingEanBuildArtifactBuilder,
+    network_ean_builder_for_cycle,
 )
 
 
 def test_earliest_all_stop_baseline_builds_plan_from_three_station_artifact() -> None:
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
-    artifact = RingEanBuildArtifactBuilder(
+    artifact = network_ean_builder_for_cycle(
         switch_cycle=build_three_station_ean_ring_switch_order(scenario),
     ).build(scenario, config)
 
@@ -43,7 +43,7 @@ def test_earliest_all_stop_baseline_builds_plan_from_three_station_artifact() ->
 def test_earliest_all_stop_baseline_propagates_first_visit_times_from_starts_and_timings() -> None:
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
-    artifact = RingEanBuildArtifactBuilder(
+    artifact = network_ean_builder_for_cycle(
         switch_cycle=build_three_station_ean_ring_switch_order(scenario),
     ).build(scenario, config)
 
@@ -75,7 +75,7 @@ def test_earliest_all_stop_baseline_propagates_first_visit_times_from_starts_and
 def test_earliest_all_stop_baseline_keeps_trajectory_times_monotonic() -> None:
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
-    artifact = RingEanBuildArtifactBuilder(
+    artifact = network_ean_builder_for_cycle(
         switch_cycle=build_three_station_ean_ring_switch_order(scenario),
     ).build(scenario, config)
 

@@ -37,7 +37,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EvenlySpacedAllStopCabinStartBuilder,
     GurobiSolverPolicy,
     NetworkEanBuildArtifactBuilder,
-    RingEanBuildArtifactBuilder,
+    network_ean_builder_for_cycle,
     StationWaitingMode,
     project_ean_movement_plan_to_physical_replay,
     validate_ean_movement_plan_against_artifact,
@@ -805,14 +805,14 @@ def test_fixed_starts_and_initial_placement_use_same_k_with_comparable_tail_mode
     scenario = example.build_scenario()
     config = build_three_station_ean_config(scenario, tail_seconds=300.0)
     switch_cycle = build_three_station_ean_ring_switch_order(scenario)
-    fixed_artifact = RingEanBuildArtifactBuilder(
+    fixed_artifact = network_ean_builder_for_cycle(
         switch_cycle=switch_cycle,
         start_builder=EvenlySpacedAllStopCabinStartBuilder(
             switch_cycle=switch_cycle,
             cabin_count=len(scenario.cabins),
         ),
     ).build(scenario, config)
-    initial_placement_artifact = RingEanBuildArtifactBuilder(
+    initial_placement_artifact = network_ean_builder_for_cycle(
         switch_cycle=switch_cycle,
         fleet_config=EanFleetConfig(
             mode=EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT,

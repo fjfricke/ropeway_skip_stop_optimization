@@ -44,7 +44,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanInitialPlacementMipStartSource,
     EanInitialPlacementPackingBoundBuilder,
     HeadwayPairBuilder,
-    RingEanBuildArtifactBuilder,
+    network_ean_builder_for_cycle,
     SparseHeadwayPairBuilder,
     StationEanConfig,
     StationWaitingMode,
@@ -294,7 +294,7 @@ def test_capacity_certificate_rejects_incomplete_headway_pairs() -> None:
         scenario=scenario,
         config=_config(),
         artifact_builder=replace(
-            RingEanBuildArtifactBuilder(switch_cycle=("entry",)),
+            network_ean_builder_for_cycle(switch_cycle=("entry",)),
             headway_pair_builder=_NoHeadwayPairBuilder(),
         ),
     )
@@ -311,7 +311,7 @@ def test_capacity_optimizer_closes_small_ring_capacity() -> None:
         EanInitialPlacementCapacityProblem(
             scenario=scenario,
             config=config,
-            artifact_builder=RingEanBuildArtifactBuilder(
+            artifact_builder=network_ean_builder_for_cycle(
                 switch_cycle=("entry",),
             ),
         )
@@ -334,7 +334,7 @@ def test_fixed_k_feasibility_keeps_every_cabin_active() -> None:
     capacity_problem = EanInitialPlacementCapacityProblem(
         scenario=_single_station_ring(),
         config=_config(),
-        artifact_builder=RingEanBuildArtifactBuilder(switch_cycle=("entry",)),
+        artifact_builder=network_ean_builder_for_cycle(switch_cycle=("entry",)),
     )
 
     result = EanInitialPlacementFeasibilityOptimizer().solve(
@@ -387,7 +387,7 @@ def test_fixed_k_feasibility_needs_no_periodic_certificate_for_short_horizon() -
     capacity_problem = EanInitialPlacementCapacityProblem(
         scenario=scenario,
         config=replace(_config(), horizon_seconds=1.0),
-        artifact_builder=RingEanBuildArtifactBuilder(switch_cycle=("entry",)),
+        artifact_builder=network_ean_builder_for_cycle(switch_cycle=("entry",)),
     )
 
     result = EanInitialPlacementFeasibilityOptimizer().solve(
@@ -407,7 +407,7 @@ def test_delayed_fixed_k_matches_eager_and_certifies_full_separation() -> None:
     capacity_problem = EanInitialPlacementCapacityProblem(
         scenario=_single_station_ring(),
         config=_config(),
-        artifact_builder=RingEanBuildArtifactBuilder(switch_cycle=("entry",)),
+        artifact_builder=network_ean_builder_for_cycle(switch_cycle=("entry",)),
     )
     optimizer = EanInitialPlacementFeasibilityOptimizer(
         EanInitialPlacementCapacitySolveConfig(
@@ -438,7 +438,7 @@ def test_delayed_fixed_k_total_budget_can_return_unknown() -> None:
     capacity_problem = EanInitialPlacementCapacityProblem(
         scenario=_single_station_ring(),
         config=_config(),
-        artifact_builder=RingEanBuildArtifactBuilder(switch_cycle=("entry",)),
+        artifact_builder=network_ean_builder_for_cycle(switch_cycle=("entry",)),
     )
     optimizer = EanInitialPlacementFeasibilityOptimizer(
         EanInitialPlacementCapacitySolveConfig(
@@ -468,7 +468,7 @@ def test_dynamic_headway_pool_adds_one_binary_and_two_constraints() -> None:
         available_fleet_count=2,
         cardinality_mode=EanFleetCardinalityMode.EXACT,
     )
-    base_builder = RingEanBuildArtifactBuilder(
+    base_builder = network_ean_builder_for_cycle(
         switch_cycle=("entry",), fleet_config=fleet_config
     )
     complete = base_builder.build(scenario, config)
@@ -502,7 +502,7 @@ def test_capacity_optimizer_reuses_previous_feasible_probe() -> None:
         EanInitialPlacementCapacityProblem(
             scenario=_single_station_ring(with_skip=True),
             config=_config(),
-            artifact_builder=RingEanBuildArtifactBuilder(switch_cycle=("entry",)),
+            artifact_builder=network_ean_builder_for_cycle(switch_cycle=("entry",)),
         )
     )
 
@@ -528,7 +528,7 @@ def test_capacity_progress_mode_uses_tqdm_without_gurobi_log(capsys) -> None:
         EanInitialPlacementCapacityProblem(
             scenario=_single_station_ring(),
             config=_config(),
-            artifact_builder=RingEanBuildArtifactBuilder(switch_cycle=("entry",)),
+            artifact_builder=network_ean_builder_for_cycle(switch_cycle=("entry",)),
         )
     )
 
@@ -541,7 +541,7 @@ def test_fixed_k_partial_mip_start_leaves_added_cabins_unset() -> None:
     gp = pytest.importorskip("gurobipy")
     scenario = _single_station_ring()
     config = _config()
-    artifact = RingEanBuildArtifactBuilder(
+    artifact = network_ean_builder_for_cycle(
         switch_cycle=("entry",),
         fleet_config=EanFleetConfig(
             mode=EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT,

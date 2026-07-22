@@ -25,7 +25,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     HeadwayCheckpointDefinition,
     HeadwayCheckpointKind,
     HeadwayPair,
-    RingEanBuildArtifactBuilder,
+    network_ean_builder_for_cycle,
     SkipStopTiming,
     StationEanConfig,
     StationWaitingMode,
@@ -314,7 +314,7 @@ def test_violation_batch_is_deterministic_by_strength_then_pair_id() -> None:
 def _artifact_and_plan() -> tuple[EanBuildArtifact, EanMovementPlan]:
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
-    artifact = RingEanBuildArtifactBuilder(
+    artifact = network_ean_builder_for_cycle(
         switch_cycle=build_three_station_ean_ring_switch_order(scenario),
     ).build(scenario, config)
     plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)

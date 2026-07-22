@@ -5,14 +5,8 @@ from dataclasses import dataclass, field, replace
 
 from ropeway_skip_stop_optimization.models import Scenario
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
-from ropeway_skip_stop_optimization.optimization.ean.builders.artifact_builder import (
-    RingEanBuildArtifactBuilder,
-)
 from ropeway_skip_stop_optimization.optimization.ean.builders.network_artifact_builder import (
     NetworkEanBuildArtifactBuilder,
-)
-from ropeway_skip_stop_optimization.optimization.ean.builders.timing_builder import (
-    PhysicalSkipStopTimingBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanConfig,
@@ -79,31 +73,18 @@ class EanPreparedRingBuilder:
         *,
         scenario: Scenario,
         config: EanConfig,
-        artifact_builder: RingEanBuildArtifactBuilder
-        | NetworkEanBuildArtifactBuilder,
+        artifact_builder: NetworkEanBuildArtifactBuilder,
     ) -> EanPreparedRing:
-        if isinstance(artifact_builder, NetworkEanBuildArtifactBuilder):
-            network = artifact_builder.network_builder.build(
-                scenario,
-                artifact_builder.pattern_definition,
-            )
-            packing_bound = self.packing_bound_builder.build_for_network(
-                scenario=scenario,
-                config=config,
-                network=network,
-                pattern_id=artifact_builder.pattern_definition.id,
-            )
-        else:
-            timing_builder = artifact_builder.timing_builder
-            if not isinstance(timing_builder, PhysicalSkipStopTimingBuilder):
-                raise NotImplementedError(
-                    "legacy capacity preparation requires PhysicalSkipStopTimingBuilder"
-                )
-            packing_bound = self.packing_bound_builder.build(
-                scenario=scenario,
-                config=config,
-                switch_cycle=artifact_builder.switch_cycle,
-            )
+        network = artifact_builder.network_builder.build(
+            scenario,
+            artifact_builder.pattern_definition,
+        )
+        packing_bound = self.packing_bound_builder.build_for_network(
+            scenario=scenario,
+            config=config,
+            network=network,
+            pattern_id=artifact_builder.pattern_definition.id,
+        )
         seed_artifact = replace(
             artifact_builder,
             fleet_config=EanFleetConfig(

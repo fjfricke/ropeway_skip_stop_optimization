@@ -11,9 +11,6 @@ from tqdm.auto import tqdm
 
 from ropeway_skip_stop_optimization.models import Scenario
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
-from ropeway_skip_stop_optimization.optimization.ean.builders.artifact_builder import (
-    RingEanBuildArtifactBuilder,
-)
 from ropeway_skip_stop_optimization.optimization.ean.builders.network_artifact_builder import (
     NetworkEanBuildArtifactBuilder,
 )
@@ -23,9 +20,6 @@ from ropeway_skip_stop_optimization.optimization.ean.builders.headway_candidate_
 from ropeway_skip_stop_optimization.optimization.ean.builders.headway_pair_builder import (
     AllPairsHeadwayPairBuilder,
     SparseHeadwayPairBuilder,
-)
-from ropeway_skip_stop_optimization.optimization.ean.builders.timing_builder import (
-    PhysicalSkipStopTimingBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ean.capacity_preparation import (
     EanPreparedRingBuilder,
@@ -136,18 +130,11 @@ class EanInitialPlacementMipStart:
 class EanInitialPlacementCapacityProblem:
     scenario: Scenario
     config: EanConfig
-    artifact_builder: RingEanBuildArtifactBuilder | NetworkEanBuildArtifactBuilder
+    artifact_builder: NetworkEanBuildArtifactBuilder
 
     def validate(self) -> None:
         self.scenario.validate()
         self.config.validate()
-        if isinstance(self.artifact_builder, RingEanBuildArtifactBuilder) and not isinstance(
-            self.artifact_builder.timing_builder, PhysicalSkipStopTimingBuilder
-        ):
-            raise NotImplementedError(
-                "initial placement capacity certification currently requires "
-                "physical legacy timing or the canonical network builder"
-            )
         if not isinstance(
             self.artifact_builder.headway_candidate_builder,
             SwitchVisitHeadwayCandidateBuilder,

@@ -18,7 +18,6 @@ from ropeway_skip_stop_optimization.optimization.ean.builders.artifact_assembler
 )
 from ropeway_skip_stop_optimization.optimization.ean.builders.artifact_builder import (
     EanBuildArtifactBuilder,
-    RingEanBuildArtifactBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ean.builders.fixed_start_builder import (
     DeterministicPhysicalNodeToSwitchStartBuilder,
@@ -45,9 +44,6 @@ from ropeway_skip_stop_optimization.optimization.ean.builders.network_visit_buil
 from ropeway_skip_stop_optimization.optimization.ean.builders.physical_network_builder import (
     PhysicalMovementNetworkBuilder,
 )
-from ropeway_skip_stop_optimization.optimization.ean.builders.timing_builder import (
-    PhysicalSkipStopTimingBuilder,
-)
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanCabinStart,
     EanCabinStartKind,
@@ -64,7 +60,6 @@ from ropeway_skip_stop_optimization.optimization.ean.fleet import (
 
 
 class EanArtifactConstructionMode(Enum):
-    LEGACY_RING = "legacy_ring"
     NETWORK = "network"
 
 
@@ -123,39 +118,6 @@ class NetworkEanBuildArtifactBuilder(EanBuildArtifactBuilder):
         """Temporary source compatibility for callers not yet pattern-aware."""
 
         return self.pattern_definition.state_node_ids
-
-    @classmethod
-    def from_ring(
-        cls, builder: RingEanBuildArtifactBuilder, *, pattern_id: str = "legacy_ring"
-    ) -> NetworkEanBuildArtifactBuilder:
-        if not isinstance(builder.timing_builder, PhysicalSkipStopTimingBuilder):
-            raise ValueError(
-                "network compatibility conversion requires physical timing; "
-                "custom legacy timing builders are not supported"
-            )
-        return cls(
-            pattern_definition=EanCirculationPatternDefinition(
-                id=pattern_id,
-                state_node_ids=builder.switch_cycle,
-            ),
-            start_builder=builder.start_builder,
-            headway_duration_builder=builder.headway_duration_builder,
-            headway_candidate_builder=builder.headway_candidate_builder,
-            headway_pair_builder=builder.headway_pair_builder,
-            fleet_config=builder.fleet_config,
-        )
-
-    def to_ring(self) -> RingEanBuildArtifactBuilder:
-        """Construct the legacy adapter while the parallel path is supported."""
-
-        return RingEanBuildArtifactBuilder(
-            switch_cycle=self.pattern_definition.state_node_ids,
-            start_builder=self.start_builder,
-            headway_duration_builder=self.headway_duration_builder,
-            headway_candidate_builder=self.headway_candidate_builder,
-            headway_pair_builder=self.headway_pair_builder,
-            fleet_config=self.fleet_config,
-        )
 
     def build(
         self,

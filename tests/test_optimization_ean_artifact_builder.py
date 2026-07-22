@@ -11,7 +11,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanBuildProgressKind,
     EanBuildStage,
     EanCabinStartKind,
-    RingEanBuildArtifactBuilder,
+    network_ean_builder_for_cycle,
     StationWaitingMode,
 )
 
@@ -21,7 +21,7 @@ def test_ring_ean_build_artifact_builder_builds_three_station_artifact() -> None
     config = build_three_station_ean_config(scenario)
     switch_cycle = build_three_station_ean_ring_switch_order(scenario)
 
-    artifact = RingEanBuildArtifactBuilder(switch_cycle=switch_cycle).build(scenario, config)
+    artifact = network_ean_builder_for_cycle(switch_cycle=switch_cycle).build(scenario, config)
 
     artifact.validate()
     assert artifact.scenario_id == scenario.id
@@ -61,12 +61,12 @@ def test_ring_ean_build_artifact_builder_builds_three_station_artifact() -> None
     assert "platform_exit::M_entry_lr" in checkpoint_ids
 
 
-def test_ring_ean_build_artifact_builder_rejects_duplicate_switch_cycle() -> None:
+def test_network_ean_build_artifact_builder_rejects_duplicate_pattern_states() -> None:
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
 
-    with pytest.raises(ValueError, match="duplicate ring EAN switch"):
-        RingEanBuildArtifactBuilder(switch_cycle=("M_entry_lr", "M_entry_lr")).build(scenario, config)
+    with pytest.raises(ValueError, match="node ids must be nonempty and unique"):
+        network_ean_builder_for_cycle(switch_cycle=("M_entry_lr", "M_entry_lr")).build(scenario, config)
 
 
 def test_ring_ean_build_artifact_reports_detailed_build_metrics() -> None:
@@ -74,7 +74,7 @@ def test_ring_ean_build_artifact_reports_detailed_build_metrics() -> None:
     config = build_three_station_ean_config(scenario)
     events = []
 
-    artifact = RingEanBuildArtifactBuilder(
+    artifact = network_ean_builder_for_cycle(
         switch_cycle=build_three_station_ean_ring_switch_order(scenario)
     ).build(scenario, config, progress_callback=events.append)
 
