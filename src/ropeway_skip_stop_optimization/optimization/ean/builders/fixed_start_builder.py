@@ -18,6 +18,10 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanCabinStartKind,
     EanConfig,
 )
+from ropeway_skip_stop_optimization.optimization.ean.network import (
+    EanCirculationPattern,
+    EanMovementNetwork,
+)
 
 if TYPE_CHECKING:
     from ropeway_skip_stop_optimization.optimization.ean.builders.headway_duration_builder import (
@@ -32,7 +36,8 @@ class EanCabinStartBuilder(ABC):
         self,
         scenario: Scenario,
         config: EanConfig,
-        target_switch_ids: frozenset[str],
+        network: EanMovementNetwork,
+        pattern: EanCirculationPattern,
     ) -> tuple[EanCabinStart, ...]:
         """Derive EAN cabin starts from scenario-specific start data."""
 
@@ -50,10 +55,13 @@ class DeterministicPhysicalNodeToSwitchStartBuilder(EanCabinStartBuilder):
         self,
         scenario: Scenario,
         config: EanConfig,
-        target_switch_ids: frozenset[str],
+        network: EanMovementNetwork,
+        pattern: EanCirculationPattern,
     ) -> tuple[EanCabinStart, ...]:
         scenario.validate()
         config.validate()
+        _validate_selected_pattern(network, pattern)
+        target_switch_ids = frozenset(pattern.state_ids)
 
         nodes_by_id = {node.id: node for node in scenario.physical_nodes}
         _validate_target_switches(target_switch_ids, nodes_by_id)
@@ -88,31 +96,31 @@ class DeterministicPhysicalNodeToSwitchStartBuilder(EanCabinStartBuilder):
 
 @dataclass(frozen=True)
 class EvenlySpacedAllStopCabinStartBuilder(EanCabinStartBuilder):
-    """Place a fixed number of evenly spaced all-stop cabins on a switch ring."""
+    """Place a fixed number of evenly spaced cabins on an all-stop pattern."""
 
-    switch_cycle: tuple[str, ...]
     cabin_count: int
 
     def build(
         self,
         scenario: Scenario,
         config: EanConfig,
-        target_switch_ids: frozenset[str],
+        network: EanMovementNetwork,
+        pattern: EanCirculationPattern,
     ) -> tuple[EanCabinStart, ...]:
         cycle_boundaries, cycle_seconds, maximum_cabin_count = (
             _continuous_all_stop_start_parameters(
                 scenario=scenario,
                 config=config,
-                switch_cycle=self.switch_cycle,
-                target_switch_ids=target_switch_ids,
+                network=network,
+                pattern=pattern,
             )
         )
         if self.cabin_count <= 0:
             raise ValueError("evenly spaced all-stop cabin_count must be positive")
         if self.cabin_count > maximum_cabin_count:
             raise ValueError(
-                "evenly spaced all-stop cabin_count exceeds the canonical "
-                f"ring capacity: {self.cabin_count} > {maximum_cabin_count}"
+                "evenly spaced all-stop cabin_count exceeds the circulation "
+                f"capacity: {self.cabin_count} > {maximum_cabin_count}"
             )
         return _evenly_spaced_all_stop_starts(
             cabin_count=self.cabin_count,
@@ -123,28 +131,27 @@ class EvenlySpacedAllStopCabinStartBuilder(EanCabinStartBuilder):
 
 @dataclass(frozen=True)
 class ContinuousAllStopMaxCabinStartBuilder(EanCabinStartBuilder):
-    """Place the maximum number of all-stop cabins on a continuous switch ring.
+    """Place the maximum number of cabins on a continuous all-stop pattern.
 
-    This builder is for ring examples with a fixed switch order and all cabins
+    This builder is for deterministic circulation patterns with all cabins
     serving every station. It does not use discrete cells. Cabin starts are
     generated from equal continuous phases around the all-stop cycle and mapped
     to each cabin's next switch arrival at or after t=0.
     """
 
-    switch_cycle: tuple[str, ...]
-
     def build(
         self,
         scenario: Scenario,
         config: EanConfig,
-        target_switch_ids: frozenset[str],
+        network: EanMovementNetwork,
+        pattern: EanCirculationPattern,
     ) -> tuple[EanCabinStart, ...]:
         cycle_boundaries, cycle_seconds, cabin_count = (
             _continuous_all_stop_start_parameters(
                 scenario=scenario,
                 config=config,
-                switch_cycle=self.switch_cycle,
-                target_switch_ids=target_switch_ids,
+                network=network,
+                pattern=pattern,
             )
         )
         return _evenly_spaced_all_stop_starts(
@@ -158,8 +165,8 @@ def _continuous_all_stop_start_parameters(
     *,
     scenario: Scenario,
     config: EanConfig,
-    switch_cycle: tuple[str, ...],
-    target_switch_ids: frozenset[str],
+    network: EanMovementNetwork,
+    pattern: EanCirculationPattern,
 ) -> tuple[tuple[_CycleBoundary, ...], float, int]:
     from ropeway_skip_stop_optimization.optimization.ean.builders.headway_duration_builder import (
         OperatingSpeedHeadwayDurationBuilder,
@@ -167,35 +174,15 @@ def _continuous_all_stop_start_parameters(
     from ropeway_skip_stop_optimization.optimization.ean.builders.network_timing_builder import (
         NetworkSkipStopTimingBuilder,
     )
-    from ropeway_skip_stop_optimization.optimization.ean.builders.physical_network_builder import (
-        PhysicalMovementNetworkBuilder,
-    )
-    from ropeway_skip_stop_optimization.optimization.ean.network import (
-        EanCirculationPatternDefinition,
-    )
-
     scenario.validate()
     config.validate()
-    _validate_switch_cycle(switch_cycle)
-    if target_switch_ids != frozenset(switch_cycle):
-        raise ValueError(
-            "continuous all-stop starts must target exactly the configured switch_cycle"
-        )
-
-    pattern_definition = EanCirculationPatternDefinition(
-        id="all_stop_start_cycle",
-        state_node_ids=switch_cycle,
-    )
-    network = PhysicalMovementNetworkBuilder().build(
-        scenario,
-        pattern_definition,
-    )
+    _validate_selected_pattern(network, pattern)
     timings = NetworkSkipStopTimingBuilder().build(
         scenario,
         network,
-        network.pattern(pattern_definition.id),
+        pattern,
     )
-    cycle_boundaries = _all_stop_cycle_boundaries(timings, switch_cycle)
+    cycle_boundaries = _all_stop_cycle_boundaries(timings, pattern.state_ids)
     cycle_seconds = cycle_boundaries[-1].seconds
     headway_seconds = _max_all_stop_headway_seconds(
         OperatingSpeedHeadwayDurationBuilder().build(scenario, timings),
@@ -241,15 +228,15 @@ class _CycleBoundary:
 
 def _all_stop_cycle_boundaries(
     timings: tuple["SkipStopTiming", ...],
-    switch_cycle: tuple[str, ...],
+    state_ids: tuple[str, ...],
 ) -> tuple[_CycleBoundary, ...]:
     timings_by_switch_id = {timing.switch_id: timing for timing in timings}
-    boundaries = [_CycleBoundary(switch_id=switch_cycle[0], seconds=0.0)]
+    boundaries = [_CycleBoundary(switch_id=state_ids[0], seconds=0.0)]
     elapsed = 0.0
-    for index, switch_id in enumerate(switch_cycle):
+    for index, switch_id in enumerate(state_ids):
         timing = timings_by_switch_id[switch_id]
         elapsed += _all_stop_switch_to_next_seconds(timing)
-        next_switch_id = switch_cycle[(index + 1) % len(switch_cycle)]
+        next_switch_id = state_ids[(index + 1) % len(state_ids)]
         boundaries.append(_CycleBoundary(switch_id=next_switch_id, seconds=elapsed))
     if elapsed <= 0:
         raise ValueError("continuous all-stop cycle duration must be positive")
@@ -376,16 +363,11 @@ def _seconds_since_service_start(service_start_time: time, value: time) -> float
     return (target - start).total_seconds()
 
 
-def _validate_switch_cycle(switch_cycle: tuple[str, ...]) -> None:
-    if not switch_cycle:
-        raise ValueError("continuous all-stop start builder needs a nonempty switch_cycle")
-    seen: set[str] = set()
-    duplicates: set[str] = set()
-    for switch_id in switch_cycle:
-        if not switch_id:
-            raise ValueError("continuous all-stop switch ids must be nonempty")
-        if switch_id in seen:
-            duplicates.add(switch_id)
-        seen.add(switch_id)
-    if duplicates:
-        raise ValueError(f"duplicate continuous all-stop switch ids: {duplicates}")
+def _validate_selected_pattern(
+    network: EanMovementNetwork,
+    pattern: EanCirculationPattern,
+) -> None:
+    network.validate()
+    pattern.validate()
+    if network.pattern(pattern.id) != pattern:
+        raise ValueError("selected circulation pattern does not match the movement network")

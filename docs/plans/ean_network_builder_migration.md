@@ -55,9 +55,10 @@ examples select deterministic circulation patterns. The canonical artifact now
 stores `state_ids`; timing and visits use neutral network/pattern services.
 `RingEanBuildArtifactBuilder`, `PhysicalRingTopologyBuilder`,
 `PhysicalSkipStopTimingBuilder`, and `RingSwitchVisitBuilder` have been deleted.
-Some fixed-start algorithms still accept an ordered state tuple under the local
-name `switch_cycle`; this is algorithm input rather than artifact schema or a
-second topology model.
+Fixed-start builders receive the already extracted movement network and selected
+circulation pattern directly. This removes their former ordered `switch_cycle`
+input and avoids rebuilding the physical network while generating all-stop
+starts.
 
 Only after this removal does the dynamic-routing stage add indexed visit and
 route decisions. Passenger assignment remains outside that first movement-only

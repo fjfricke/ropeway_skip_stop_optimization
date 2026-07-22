@@ -17,6 +17,7 @@ from ropeway_skip_stop_optimization.models import (
     CabinInitialState,
     PhysicalNode,
     PhysicalNodeKind,
+    Scenario,
     SpeedProfile,
     SpeedProfileKind,
     TrackSegment,
@@ -27,8 +28,10 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     DeterministicPhysicalNodeToSwitchStartBuilder,
     EarliestAllStopEanMovementPlanBuilder,
     EanCabinStartKind,
+    EanCirculationPatternDefinition,
     EvenlySpacedAllStopCabinStartBuilder,
     NetworkEanBuildArtifactBuilder,
+    PhysicalMovementNetworkBuilder,
     network_ean_builder_for_cycle,
     validate_ean_movement_plan_against_artifact,
 )
@@ -37,9 +40,11 @@ from ropeway_skip_stop_optimization.optimization.ean import (
 def test_deterministic_physical_start_builder_maps_three_station_starts() -> None:
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
-    target_switch_ids = frozenset(build_three_station_ean_ring_switch_order(scenario))
+    network, pattern = _network_and_pattern(scenario)
 
-    starts = DeterministicPhysicalNodeToSwitchStartBuilder().build(scenario, config, target_switch_ids)
+    starts = DeterministicPhysicalNodeToSwitchStartBuilder().build(
+        scenario, config, network, pattern
+    )
 
     starts_by_cabin = {start.cabin_id: start for start in starts}
     assert starts_by_cabin[0].first_switch_id == "M_entry_lr"
@@ -66,9 +71,11 @@ def test_deterministic_physical_start_builder_keeps_start_on_target_switch_at_av
         ),
     )
     config = build_three_station_ean_config(scenario)
-    target_switch_ids = frozenset(build_three_station_ean_ring_switch_order(scenario))
+    network, pattern = _network_and_pattern(scenario)
 
-    starts = DeterministicPhysicalNodeToSwitchStartBuilder().build(scenario, config, target_switch_ids)
+    starts = DeterministicPhysicalNodeToSwitchStartBuilder().build(
+        scenario, config, network, pattern
+    )
 
     assert starts[0].cabin_id == 0
     assert starts[0].first_switch_id == "M_entry_lr"
@@ -79,35 +86,41 @@ def test_deterministic_physical_start_builder_keeps_start_on_target_switch_at_av
 def test_continuous_all_stop_max_start_builder_places_maximum_three_station_cabins() -> None:
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
-    switch_cycle = build_three_station_ean_ring_switch_order(scenario)
-    builder = ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle)
+    state_ids = build_three_station_ean_ring_switch_order(scenario)
+    network, pattern = _network_and_pattern(scenario, state_ids)
+    builder = ContinuousAllStopMaxCabinStartBuilder()
 
-    starts = builder.build(scenario, config, frozenset(switch_cycle))
+    starts = builder.build(scenario, config, network, pattern)
 
     assert len(starts) == 30
     assert {start.cabin_id for start in starts} == set(range(30))
-    assert {start.first_switch_id for start in starts} == set(switch_cycle)
+    assert {start.first_switch_id for start in starts} == set(state_ids)
     assert {start.kind for start in starts} == {EanCabinStartKind.FIXED}
     assert all(start.time_seconds >= 0 for start in starts)
 
     artifact = network_ean_builder_for_cycle(
-        state_ids=switch_cycle,
+        state_ids=state_ids,
         start_builder=builder,
     ).build(scenario, config)
     plan = EarliestAllStopEanMovementPlanBuilder().build(artifact)
     validate_ean_movement_plan_against_artifact(artifact, plan).raise_for_errors()
 
 
-def test_continuous_all_stop_max_start_builder_rejects_mismatched_targets() -> None:
+def test_continuous_all_stop_max_start_builder_rejects_foreign_pattern() -> None:
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)
-    switch_cycle = build_three_station_ean_ring_switch_order(scenario)
+    network, _ = _network_and_pattern(scenario)
+    _, foreign_pattern = _network_and_pattern(
+        scenario,
+        pattern_id="foreign_pattern",
+    )
 
-    with pytest.raises(ValueError, match="target exactly"):
-        ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle).build(
+    with pytest.raises(ValueError, match="no unique pattern"):
+        ContinuousAllStopMaxCabinStartBuilder().build(
             scenario,
             config,
-            frozenset({"M_entry_lr"}),
+            network,
+            foreign_pattern,
         )
 
 
@@ -118,10 +131,7 @@ def test_evenly_spaced_all_stop_builder_places_feasible_explicit_fleet() -> None
     optimized_builder = example.build_ean_artifact_builder(scenario, config)
     assert isinstance(optimized_builder, NetworkEanBuildArtifactBuilder)
     state_ids = optimized_builder.pattern_definition.state_node_ids
-    builder = EvenlySpacedAllStopCabinStartBuilder(
-        switch_cycle=state_ids,
-        cabin_count=len(scenario.cabins),
-    )
+    builder = EvenlySpacedAllStopCabinStartBuilder(cabin_count=len(scenario.cabins))
 
     artifact = network_ean_builder_for_cycle(
         state_ids=state_ids,
@@ -143,42 +153,33 @@ def test_evenly_spaced_all_stop_builder_rejects_fleet_above_ring_capacity() -> N
     optimized_builder = example.build_ean_artifact_builder(scenario, config)
     assert isinstance(optimized_builder, NetworkEanBuildArtifactBuilder)
     state_ids = optimized_builder.pattern_definition.state_node_ids
-    maximum_starts = ContinuousAllStopMaxCabinStartBuilder(
-        switch_cycle=state_ids,
-    ).build(
+    network, pattern = _network_and_pattern(scenario, state_ids)
+    maximum_starts = ContinuousAllStopMaxCabinStartBuilder().build(
         scenario,
         config,
-        frozenset(state_ids),
+        network,
+        pattern,
     )
 
-    with pytest.raises(ValueError, match="exceeds the canonical ring capacity"):
+    with pytest.raises(ValueError, match="exceeds the circulation capacity"):
         EvenlySpacedAllStopCabinStartBuilder(
-            switch_cycle=state_ids,
             cabin_count=len(maximum_starts) + 1,
         ).build(
             scenario,
             config,
-            frozenset(state_ids),
+            network,
+            pattern,
         )
 
 
-def test_deterministic_physical_start_builder_rejects_unknown_or_non_entry_targets() -> None:
+def test_physical_network_rejects_unknown_or_non_entry_pattern_states() -> None:
     scenario = build_three_station_scenario()
-    config = build_three_station_ean_config(scenario)
 
     with pytest.raises(ValueError, match="unknown physical node"):
-        DeterministicPhysicalNodeToSwitchStartBuilder().build(
-            scenario,
-            config,
-            frozenset({"unknown_switch"}),
-        )
+        _network_and_pattern(scenario, ("unknown_switch",))
 
     with pytest.raises(ValueError, match="not an entry switch"):
-        DeterministicPhysicalNodeToSwitchStartBuilder().build(
-            scenario,
-            config,
-            frozenset({"L_platform_exit"}),
-        )
+        _network_and_pattern(scenario, ("L_platform_exit",))
 
 
 def test_deterministic_physical_start_builder_rejects_branch_before_target() -> None:
@@ -198,10 +199,12 @@ def test_deterministic_physical_start_builder_rejects_branch_before_target() -> 
         track_segments=(*scenario.track_segments, extra_segment),
     )
     config = build_three_station_ean_config(scenario)
-    target_switch_ids = frozenset(build_three_station_ean_ring_switch_order(scenario))
+    network, pattern = _network_and_pattern(scenario)
 
     with pytest.raises(ValueError, match="ambiguous path"):
-        DeterministicPhysicalNodeToSwitchStartBuilder().build(scenario, config, target_switch_ids)
+        DeterministicPhysicalNodeToSwitchStartBuilder().build(
+            scenario, config, network, pattern
+        )
 
 
 def test_deterministic_physical_start_builder_rejects_cycle_before_target() -> None:
@@ -237,7 +240,27 @@ def test_deterministic_physical_start_builder_rejects_cycle_before_target() -> N
         ),
     )
     config = build_three_station_ean_config(scenario)
-    target_switch_ids = frozenset(build_three_station_ean_ring_switch_order(scenario))
+    network, pattern = _network_and_pattern(scenario)
 
     with pytest.raises(ValueError, match="cycle before first EAN target switch"):
-        DeterministicPhysicalNodeToSwitchStartBuilder().build(scenario, config, target_switch_ids)
+        DeterministicPhysicalNodeToSwitchStartBuilder().build(
+            scenario, config, network, pattern
+        )
+
+
+def _network_and_pattern(
+    scenario: Scenario,
+    state_ids: tuple[str, ...] | None = None,
+    *,
+    pattern_id: str = "test_pattern",
+):
+    definition = EanCirculationPatternDefinition(
+        id=pattern_id,
+        state_node_ids=(
+            state_ids
+            if state_ids is not None
+            else build_three_station_ean_ring_switch_order(scenario)
+        ),
+    )
+    network = PhysicalMovementNetworkBuilder().build(scenario, definition)
+    return network, network.pattern(definition.id)

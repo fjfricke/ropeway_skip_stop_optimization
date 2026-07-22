@@ -30,6 +30,8 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanConfig,
     EanFleetConfig,
     EanFleetMode,
+    EanCirculationPattern,
+    EanMovementNetwork,
     NetworkEanBuildArtifactBuilder,
     network_ean_builder_for_cycle,
     StationEanConfig,
@@ -82,12 +84,14 @@ class KeepEverySecondCabinStartBuilder(EanCabinStartBuilder):
         self,
         scenario: Scenario,
         config: EanConfig,
-        target_switch_ids: frozenset[str],
+        network: EanMovementNetwork,
+        pattern: EanCirculationPattern,
     ) -> tuple[EanCabinStart, ...]:
         starts = self.base_builder.build(
             scenario=scenario,
             config=config,
-            target_switch_ids=target_switch_ids,
+            network=network,
+            pattern=pattern,
         )
         return tuple(start for index, start in enumerate(starts) if index % 2 == 0)
 
@@ -138,7 +142,7 @@ class FiveStationCircleCwFullNoSkipNoWaitExample(ScenarioExample):
         switch_cycle = build_circular_skip_stop_ean_ring_switch_order(scenario, direction=self.spec.direction)
         return network_ean_builder_for_cycle(
             state_ids=switch_cycle,
-            start_builder=ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
+            start_builder=ContinuousAllStopMaxCabinStartBuilder(),
         )
 
 
@@ -176,7 +180,7 @@ class FiveStationCircleCwHalfNoSkipNoWaitExample(FiveStationCircleCwFullNoSkipNo
         return network_ean_builder_for_cycle(
             state_ids=switch_cycle,
             start_builder=KeepEverySecondCabinStartBuilder(
-                ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
+                ContinuousAllStopMaxCabinStartBuilder(),
             ),
         )
 

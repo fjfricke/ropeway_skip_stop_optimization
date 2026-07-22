@@ -174,7 +174,8 @@ class NetworkEanBuildArtifactBuilder(EanBuildArtifactBuilder):
             cabin_starts = self.start_builder.build(
                 scenario=scenario,
                 config=config,
-                target_switch_ids=frozenset(pattern.state_ids),
+                network=network,
+                pattern=pattern,
             )
         visit_result = NetworkVisitBuilder(
             pattern=pattern,

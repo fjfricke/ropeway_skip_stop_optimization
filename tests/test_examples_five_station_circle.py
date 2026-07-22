@@ -103,12 +103,15 @@ def test_five_station_circle_cw_full_examples_build_ean_artifacts_with_all_start
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
     switch_cycle = build_five_station_circle_cw_ean_ring_switch_order(scenario)
-    max_starts = ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle).build(
+    artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
+    assert artifact.movement_network is not None
+    pattern = artifact.movement_network.pattern(artifact.circulation_pattern_ids[0])
+    max_starts = ContinuousAllStopMaxCabinStartBuilder().build(
         scenario=scenario,
         config=config,
-        target_switch_ids=frozenset(switch_cycle),
+        network=artifact.movement_network,
+        pattern=pattern,
     )
-    artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
 
     assert artifact.scenario_id == scenario.id
     assert artifact.circulation_state_ids == switch_cycle
@@ -126,12 +129,15 @@ def test_five_station_circle_cw_half_examples_build_ean_artifacts_with_every_sec
         scenario = example.build_scenario()
         config = example.build_ean_config(scenario)
         switch_cycle = build_five_station_circle_cw_ean_ring_switch_order(scenario)
-        max_starts = ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle).build(
+        artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
+        assert artifact.movement_network is not None
+        pattern = artifact.movement_network.pattern(artifact.circulation_pattern_ids[0])
+        max_starts = ContinuousAllStopMaxCabinStartBuilder().build(
             scenario=scenario,
             config=config,
-            target_switch_ids=frozenset(switch_cycle),
+            network=artifact.movement_network,
+            pattern=pattern,
         )
-        artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
 
         assert artifact.scenario_id == scenario.id
         assert artifact.circulation_state_ids == switch_cycle

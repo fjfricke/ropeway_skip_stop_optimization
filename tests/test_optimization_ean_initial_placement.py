@@ -808,7 +808,6 @@ def test_fixed_starts_and_initial_placement_use_same_k_with_comparable_tail_mode
     fixed_artifact = network_ean_builder_for_cycle(
         state_ids=switch_cycle,
         start_builder=EvenlySpacedAllStopCabinStartBuilder(
-            switch_cycle=switch_cycle,
             cabin_count=len(scenario.cabins),
         ),
     ).build(scenario, config)

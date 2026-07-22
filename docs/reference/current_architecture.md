@@ -37,6 +37,11 @@ stores `state_ids` and pattern provenance; the former ring-specific builders and
 dynamic route destinations with a clear `dynamic routing not yet supported`
 error.
 
+Fixed-start construction shares that same network instance and selected pattern.
+The deterministic physical-start mapper derives its target states from the
+pattern, while the all-stop builders derive timing and capacity without
+constructing a second topology.
+
 `EanOptimizer` is the single public continuous-EAN solver API. It accepts one
 of three typed problem objects:
 

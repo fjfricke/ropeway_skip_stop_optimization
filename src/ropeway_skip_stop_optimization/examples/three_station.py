@@ -30,6 +30,8 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanConfig,
     EanFleetConfig,
     EanFleetMode,
+    EanCirculationPattern,
+    EanMovementNetwork,
     network_ean_builder_for_cycle,
     StationEanConfig,
     StationWaitingMode,
@@ -44,12 +46,14 @@ class KeepEverySecondCabinStartBuilder(EanCabinStartBuilder):
         self,
         scenario: Scenario,
         config: EanConfig,
-        target_switch_ids: frozenset[str],
+        network: EanMovementNetwork,
+        pattern: EanCirculationPattern,
     ) -> tuple[EanCabinStart, ...]:
         starts = self.base_builder.build(
             scenario=scenario,
             config=config,
-            target_switch_ids=target_switch_ids,
+            network=network,
+            pattern=pattern,
         )
         return tuple(start for index, start in enumerate(starts) if index % 2 == 0)
 
@@ -93,7 +97,7 @@ class ThreeStationExample(ScenarioExample):
         return network_ean_builder_for_cycle(
             state_ids=switch_cycle,
             start_builder=KeepEverySecondCabinStartBuilder(
-                ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
+                ContinuousAllStopMaxCabinStartBuilder(),
             ),
         )
 
@@ -140,7 +144,7 @@ class ThreeStationFullNoSkipNoWaitExample(ThreeStationExample):
         switch_cycle = build_three_station_ean_ring_switch_order(scenario)
         return network_ean_builder_for_cycle(
             state_ids=switch_cycle,
-            start_builder=ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
+            start_builder=ContinuousAllStopMaxCabinStartBuilder(),
         )
 
 
@@ -170,7 +174,7 @@ class ThreeStationHalfNoSkipNoWaitExample(ThreeStationFullNoSkipNoWaitExample):
         return network_ean_builder_for_cycle(
             state_ids=switch_cycle,
             start_builder=KeepEverySecondCabinStartBuilder(
-                ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle),
+                ContinuousAllStopMaxCabinStartBuilder(),
             ),
         )
 

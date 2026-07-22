@@ -129,14 +129,15 @@ def test_five_station_example_uses_every_second_max_start_cabin() -> None:
     example = FiveStationExample()
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
-    switch_cycle = build_five_station_ean_ring_switch_order(scenario)
-
-    max_starts = ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle).build(
+    artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
+    assert artifact.movement_network is not None
+    pattern = artifact.movement_network.pattern(artifact.circulation_pattern_ids[0])
+    max_starts = ContinuousAllStopMaxCabinStartBuilder().build(
         scenario=scenario,
         config=config,
-        target_switch_ids=frozenset(switch_cycle),
+        network=artifact.movement_network,
+        pattern=pattern,
     )
-    artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
 
     assert artifact.cabin_starts == max_starts[::2]
 
@@ -145,14 +146,15 @@ def test_five_station_no_wait_example_uses_all_max_start_cabins_with_skip_but_no
     example = FiveStationNoWaitExample()
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
-    switch_cycle = build_five_station_ean_ring_switch_order(scenario)
-
-    max_starts = ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle).build(
+    artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
+    assert artifact.movement_network is not None
+    pattern = artifact.movement_network.pattern(artifact.circulation_pattern_ids[0])
+    max_starts = ContinuousAllStopMaxCabinStartBuilder().build(
         scenario=scenario,
         config=config,
-        target_switch_ids=frozenset(switch_cycle),
+        network=artifact.movement_network,
+        pattern=pattern,
     )
-    artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
 
     assert artifact.cabin_starts == max_starts
     assert {
@@ -198,14 +200,15 @@ def test_five_station_half_no_skip_no_wait_example_uses_half_max_start_cabins_wi
     example = FiveStationHalfNoSkipNoWaitExample()
     scenario = example.build_scenario()
     config = example.build_ean_config(scenario)
-    switch_cycle = build_five_station_ean_ring_switch_order(scenario)
-
-    max_starts = ContinuousAllStopMaxCabinStartBuilder(switch_cycle=switch_cycle).build(
+    artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
+    assert artifact.movement_network is not None
+    pattern = artifact.movement_network.pattern(artifact.circulation_pattern_ids[0])
+    max_starts = ContinuousAllStopMaxCabinStartBuilder().build(
         scenario=scenario,
         config=config,
-        target_switch_ids=frozenset(switch_cycle),
+        network=artifact.movement_network,
+        pattern=pattern,
     )
-    artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
 
     assert artifact.cabin_starts == max_starts[::2]
     assert not {timing.switch_id for timing in artifact.timings if timing.skip_allowed}
