@@ -15,6 +15,14 @@ from ropeway_skip_stop_optimization.optimization.ddd.models import (
 )
 
 
+class DddReferenceHorizonCoverageError(ValueError):
+    pass
+
+
+class DddReferenceResourceConflictError(ValueError):
+    pass
+
+
 class DddReferenceStatus(StrEnum):
     FEASIBLE = "feasible"
     INFEASIBLE = "infeasible"
@@ -383,7 +391,9 @@ def validate_ddd_reference_solution(
             expected_state = option.to_state_id
             expected_time = rebuilt.next_switch_time_seconds
         if expected_time <= problem.operational_end_seconds + tolerance_seconds:
-            raise ValueError("DDD trajectory ends before covering the operational horizon")
+            raise DddReferenceHorizonCoverageError(
+                "DDD trajectory ends before covering the operational horizon"
+            )
         if len(trajectory.visits) > start.max_visit_count:
             raise ValueError("DDD trajectory exceeds its certified visit bound")
         all_occurrences.extend(expected_occurrences)
@@ -393,7 +403,9 @@ def validate_ddd_reference_solution(
         tolerance_seconds=tolerance_seconds,
     )
     if conflicts:
-        raise ValueError(f"DDD reference solution has resource conflicts: {conflicts[0]}")
+        raise DddReferenceResourceConflictError(
+            f"DDD reference solution has resource conflicts: {conflicts[0]}"
+        )
 
 
 def find_ddd_reference_conflicts(

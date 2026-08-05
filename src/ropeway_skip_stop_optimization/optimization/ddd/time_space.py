@@ -15,7 +15,15 @@ class DddTimeBoundaryError(ValueError):
 
 
 def _time_token(value: float) -> str:
-    return format(value, ".12g").replace("-", "m").replace(".", "p")
+    return format(ddd_normalize_time_seconds(value), ".12g").replace(
+        "-", "m"
+    ).replace(".", "p")
+
+
+def ddd_normalize_time_seconds(value: float) -> float:
+    if not math.isfinite(value):
+        raise ValueError("DDD time value must be finite")
+    return float(format(value, ".12g"))
 
 
 @dataclass(frozen=True, order=True)
@@ -31,7 +39,9 @@ class DddTimeCell:
             self.upper_seconds
         ):
             raise ValueError("DDD time cell bounds must be finite")
-        if self.lower_seconds >= self.upper_seconds:
+        if ddd_normalize_time_seconds(
+            self.lower_seconds
+        ) >= ddd_normalize_time_seconds(self.upper_seconds):
             raise ValueError("DDD time cell must have positive width")
 
     @property
@@ -49,7 +59,12 @@ class DddTimeCell:
             raise ValueError("DDD time cell query must be finite")
         # Membership is exact and half-open. Tolerance is deliberately not
         # applied here because gaps or overlaps could invalidate projection.
-        return self.lower_seconds <= time_seconds < self.upper_seconds
+        normalized_time = ddd_normalize_time_seconds(time_seconds)
+        return (
+            ddd_normalize_time_seconds(self.lower_seconds)
+            <= normalized_time
+            < ddd_normalize_time_seconds(self.upper_seconds)
+        )
 
 
 @dataclass(frozen=True)
@@ -64,11 +79,14 @@ class DddTimePartition:
             raise ValueError("DDD time partition needs at least two boundaries")
         if any(not math.isfinite(value) for value in self.boundaries_seconds):
             raise ValueError("DDD time partition boundaries must be finite")
+        normalized = tuple(
+            ddd_normalize_time_seconds(value) for value in self.boundaries_seconds
+        )
         if any(
             left >= right
             for left, right in zip(
-                self.boundaries_seconds[:-1],
-                self.boundaries_seconds[1:],
+                normalized[:-1],
+                normalized[1:],
                 strict=True,
             )
         ):
@@ -78,7 +96,11 @@ class DddTimePartition:
     def cells(self) -> tuple[DddTimeCell, ...]:
         self.validate()
         return tuple(
-            DddTimeCell(self.state_id, lower, upper)
+            DddTimeCell(
+                self.state_id,
+                ddd_normalize_time_seconds(lower),
+                ddd_normalize_time_seconds(upper),
+            )
             for lower, upper in zip(
                 self.boundaries_seconds[:-1],
                 self.boundaries_seconds[1:],
@@ -97,30 +119,34 @@ class DddTimePartition:
             raise DddTimeBoundaryError("DDD split tolerance must be nonnegative")
         if not math.isfinite(boundary_seconds):
             raise DddTimeBoundaryError("DDD split boundary must be finite")
+        normalized_boundary = ddd_normalize_time_seconds(boundary_seconds)
+        normalized_existing = tuple(
+            ddd_normalize_time_seconds(value) for value in self.boundaries_seconds
+        )
         if any(
             math.isclose(
-                boundary_seconds,
+                normalized_boundary,
                 existing,
                 rel_tol=0.0,
                 abs_tol=tolerance_seconds,
             )
-            for existing in self.boundaries_seconds
+            for existing in normalized_existing
         ):
             raise DddTimeBoundaryError(
                 f"DDD split boundary already exists at {boundary_seconds}"
             )
         if not (
-            self.boundaries_seconds[0] + tolerance_seconds
-            < boundary_seconds
-            < self.boundaries_seconds[-1] - tolerance_seconds
+            normalized_existing[0] + tolerance_seconds
+            < normalized_boundary
+            < normalized_existing[-1] - tolerance_seconds
         ):
             raise DddTimeBoundaryError(
-                f"DDD split boundary {boundary_seconds} lies outside partition interior"
+                f"DDD split boundary {normalized_boundary} lies outside partition interior"
             )
         result = DddTimePartition(
             state_id=self.state_id,
             boundaries_seconds=tuple(
-                sorted((*self.boundaries_seconds, boundary_seconds))
+                sorted((*normalized_existing, normalized_boundary))
             ),
         )
         result.validate()
@@ -219,7 +245,8 @@ class DddTerminalThresholdCost:
             raise ValueError("DDD terminal cost tolerance must be nonnegative")
         return (
             self.before_cost
-            if time_seconds < self.threshold_seconds
+            if ddd_normalize_time_seconds(time_seconds)
+            < ddd_normalize_time_seconds(self.threshold_seconds)
             else self.at_or_after_cost
         )
 
@@ -228,9 +255,12 @@ class DddTerminalThresholdCost:
             raise ValueError("DDD terminal cost tolerance must be nonnegative")
         if cell.state_id != self.state_id:
             raise ValueError("DDD terminal cost evaluated for another state")
-        if cell.upper_seconds <= self.threshold_seconds:
+        upper = ddd_normalize_time_seconds(cell.upper_seconds)
+        lower = ddd_normalize_time_seconds(cell.lower_seconds)
+        threshold = ddd_normalize_time_seconds(self.threshold_seconds)
+        if upper <= threshold:
             return self.before_cost
-        if cell.lower_seconds >= self.threshold_seconds:
+        if lower >= threshold:
             return self.at_or_after_cost
         return min(self.before_cost, self.at_or_after_cost)
 
@@ -489,36 +519,41 @@ def ddd_partial_arc_is_compatible(
     operational_end_seconds: float,
     tolerance_seconds: float,
 ) -> bool:
+    duration = ddd_normalize_time_seconds(option.duration_seconds)
+    horizon = ddd_normalize_time_seconds(operational_end_seconds)
     if fixed_source_time is not None:
-        if fixed_source_time > operational_end_seconds + tolerance_seconds:
+        normalized_source = ddd_normalize_time_seconds(fixed_source_time)
+        if normalized_source > horizon:
             return False
         return target_cell.contains(
-            fixed_source_time + option.duration_seconds,
+            ddd_normalize_time_seconds(normalized_source + duration),
             tolerance_seconds=tolerance_seconds,
         )
     if source_cell is None:
         raise ValueError("DDD partial arc needs a source cell or fixed source time")
     if source_cell.contains(
-        operational_end_seconds,
+        horizon,
         tolerance_seconds=tolerance_seconds,
     ) and target_cell.contains(
-        operational_end_seconds + option.duration_seconds,
+        ddd_normalize_time_seconds(horizon + duration),
         tolerance_seconds=tolerance_seconds,
     ):
         # Route entry at exactly H is active even though the interval below is
         # open at its operational-horizon truncation.
         return True
-    source_lower = source_cell.lower_seconds
+    source_lower = ddd_normalize_time_seconds(source_cell.lower_seconds)
     source_upper = min(
-        source_cell.upper_seconds,
-        operational_end_seconds,
+        ddd_normalize_time_seconds(source_cell.upper_seconds),
+        horizon,
     )
     compatible_lower = max(
         source_lower,
-        target_cell.lower_seconds - option.duration_seconds,
+        ddd_normalize_time_seconds(target_cell.lower_seconds) - duration,
     )
     compatible_upper = min(
         source_upper,
-        target_cell.upper_seconds - option.duration_seconds,
+        ddd_normalize_time_seconds(target_cell.upper_seconds) - duration,
     )
-    return compatible_lower < compatible_upper
+    return ddd_normalize_time_seconds(compatible_lower) < ddd_normalize_time_seconds(
+        compatible_upper
+    )

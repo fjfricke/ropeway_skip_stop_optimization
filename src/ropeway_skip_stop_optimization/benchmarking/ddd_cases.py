@@ -182,21 +182,36 @@ def build_three_station_network_time_refinement_probe() -> DddNetworkTimeProblem
     skip_terminal = skip_arrival + continuation.duration_seconds
     stop_terminal = stop_arrival + continuation.duration_seconds
     terminal_threshold = (skip_terminal + stop_terminal) / 2.0
-    sentinel = stop_terminal + 10.0
+    sentinel = (
+        movement.operational_end_seconds
+        + max(option.duration_seconds for option in movement.route_options)
+        + 10.0
+    )
     if not (
         stop_arrival < movement.operational_end_seconds < skip_terminal
     ):
         raise ValueError("physical DDD time probe horizon does not separate visits")
 
-    broad_upper = sentinel + 100.0
     partitions = []
     for state in movement.states:
         if state.id == stop.to_state_id:
-            boundaries = (skip_arrival, stop_arrival + 5.0)
+            boundaries = (
+                0.0,
+                skip_arrival,
+                stop_arrival + 5.0,
+                movement.operational_end_seconds,
+                sentinel,
+            )
         elif state.id == continuation.to_state_id:
-            boundaries = (skip_terminal, terminal_threshold, sentinel)
+            boundaries = (
+                0.0,
+                movement.operational_end_seconds,
+                skip_terminal,
+                terminal_threshold,
+                sentinel,
+            )
         else:
-            boundaries = (0.0, broad_upper)
+            boundaries = (0.0, movement.operational_end_seconds, sentinel)
         partitions.append(DddTimePartition(state.id, boundaries))
 
     result = DddNetworkTimeProblem(

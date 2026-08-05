@@ -19,6 +19,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
     DddTimeCell,
     DddTimeDiscretization,
     DddTimeSpaceObjective,
+    ddd_normalize_time_seconds,
     ddd_partial_arc_is_compatible,
 )
 
@@ -112,12 +113,41 @@ class DddNetworkTimeProblem:
     def validate(self) -> None:
         self.movement_problem.validate()
         self.discretization.validate()
+        operational_end = ddd_normalize_time_seconds(
+            self.movement_problem.operational_end_seconds
+        )
+        required_sentinel_lower_bound = ddd_normalize_time_seconds(
+            operational_end
+            + max(
+                option.duration_seconds
+                for option in self.movement_problem.route_options
+            )
+        )
         target_state_ids = {
             option.to_state_id for option in self.movement_problem.route_options
         }
         missing = target_state_ids - set(self.discretization.by_state_id)
         if missing:
             raise ValueError(f"DDD target states lack time partitions: {missing}")
+        for partition in self.discretization.partitions:
+            normalized_boundaries = tuple(
+                ddd_normalize_time_seconds(value)
+                for value in partition.boundaries_seconds
+            )
+            if normalized_boundaries[0] != 0.0:
+                raise ValueError(
+                    f"DDD partition {partition.state_id!r} must start at zero"
+                )
+            if operational_end not in normalized_boundaries:
+                raise ValueError(
+                    f"DDD partition {partition.state_id!r} must contain the "
+                    "operational horizon boundary"
+                )
+            if normalized_boundaries[-1] <= required_sentinel_lower_bound:
+                raise ValueError(
+                    f"DDD partition {partition.state_id!r} sentinel must exceed "
+                    "the latest attainable completion"
+                )
         self.objective.validate(self.movement_problem)
 
     def with_discretization(
@@ -529,7 +559,13 @@ class DddAnonymousFlowDecomposer:
 
 @dataclass(frozen=True)
 class DddNetworkPathProblemAdapter:
-    """Restrict a network master path to the existing strict-lift contract."""
+    """Build the resource-free, per-path problem used only for cell lifting.
+
+    Resource usages are deliberately stripped because this adapter checks exact
+    event times against selected cells. A successful lift is not a complete
+    feasibility certificate; the network refinement solver must subsequently
+    validate all lifted paths together against the original movement problem.
+    """
 
     def build(
         self,

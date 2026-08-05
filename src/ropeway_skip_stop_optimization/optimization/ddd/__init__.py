@@ -15,6 +15,8 @@ from ropeway_skip_stop_optimization.optimization.ddd.network_refinement import (
     DddNetworkTimeRefinementResult,
     DddNetworkTimeRefinementSolver,
     DddNetworkTimeRefinementStatus,
+    DddNetworkValidationResult,
+    DddNetworkValidationStatus,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
     DddAnonymousFlowDecomposer,
@@ -48,7 +50,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.lifting import (
 )
 from ropeway_skip_stop_optimization.optimization.ddd.reference import (
     DddReferenceConflict,
+    DddReferenceHorizonCoverageError,
     DddReferenceResult,
+    DddReferenceResourceConflictError,
     DddReferenceSearchLimitError,
     DddReferenceSearchMetrics,
     DddReferenceSolution,
@@ -101,6 +105,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
     DddTimeDiscretization,
     DddTimePartition,
     DddTimeSpaceObjective,
+    ddd_normalize_time_seconds,
     ddd_partial_arc_is_compatible,
 )
 
@@ -135,6 +140,8 @@ __all__ = [
     "DddNetworkTimeRefinementResult",
     "DddNetworkTimeRefinementSolver",
     "DddNetworkTimeRefinementStatus",
+    "DddNetworkValidationResult",
+    "DddNetworkValidationStatus",
     "DddPartialTimedArc",
     "DddPartialTimedPath",
     "DddPartialTimeMaster",
@@ -145,7 +152,9 @@ __all__ = [
     "DddPrimalRecoveryStatus",
     "DddRecoveredSchedule",
     "DddReferenceConflict",
+    "DddReferenceHorizonCoverageError",
     "DddReferenceResult",
+    "DddReferenceResourceConflictError",
     "DddReferenceSearchLimitError",
     "DddReferenceSearchMetrics",
     "DddReferenceSolution",
@@ -184,6 +193,7 @@ __all__ = [
     "DddTimeSpaceObjective",
     "EanArtifactToDddMovementProblemAdapter",
     "build_ddd_reference_visit",
+    "ddd_normalize_time_seconds",
     "ddd_partial_arc_is_compatible",
     "find_ddd_reference_conflicts",
     "validate_ddd_recovered_schedule",

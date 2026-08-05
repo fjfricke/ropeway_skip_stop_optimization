@@ -13,6 +13,8 @@ from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
     DddNetworkTimeProblem,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.reference import (
+    DddReferenceHorizonCoverageError,
+    DddReferenceResourceConflictError,
     DddReferenceSolution,
     DddReferenceTrajectory,
     build_ddd_reference_visit,
@@ -39,6 +41,23 @@ class DddNetworkTimeRefinementStatus(StrEnum):
     INVALID_INTERNAL = "invalid_internal"
 
 
+class DddNetworkValidationStatus(StrEnum):
+    """Outcome of validation against the complete physical movement problem."""
+
+    NOT_RUN = "not_run"
+    FEASIBLE = "feasible"
+    HORIZON_INCOMPLETE = "horizon_incomplete"
+    RESOURCE_CONFLICT = "resource_conflict"
+    INVALID = "invalid"
+
+
+@dataclass(frozen=True)
+class DddNetworkValidationResult:
+    status: DddNetworkValidationStatus
+    solution: DddReferenceSolution | None
+    detail: str | None
+
+
 @dataclass(frozen=True)
 class DddNetworkTimeRefinementIteration:
     round_index: int
@@ -52,8 +71,11 @@ class DddNetworkTimeRefinementIteration:
     global_lower_bound: float | None
     recovery_feasible: bool
     recovery_objective: float | None
+    recovery_validation_status: DddNetworkValidationStatus
     global_upper_bound: float | None
-    strict_lift_statuses: tuple[DddStrictTimeLiftStatus, ...]
+    cell_lift_statuses: tuple[DddStrictTimeLiftStatus, ...]
+    cell_lift_validation_status: DddNetworkValidationStatus
+    cell_lift_validation_detail: str | None
     split_state_id: str | None
     split_boundary_seconds: float | None
 
@@ -92,7 +114,7 @@ class DddNetworkTimeRefinementSolver:
         master = DddAnonymousFlowMaster(output_flag=self.output_flag)
         decomposer = DddAnonymousFlowDecomposer()
         path_adapter = DddNetworkPathProblemAdapter()
-        lifter = DddStrictTimeCellLifter(
+        cell_lifter = DddStrictTimeCellLifter(
             tolerance_seconds=self.tolerance_seconds
         )
         recovery = DddCellFreeSupportRecovery(
@@ -122,8 +144,12 @@ class DddNetworkTimeRefinementSolver:
                         lower_bound=lower_bound,
                         recovery_feasible=False,
                         recovery_objective=None,
+                        recovery_validation_status=(
+                            DddNetworkValidationStatus.NOT_RUN
+                        ),
                         upper_bound=upper_bound,
-                        strict_statuses=(),
+                        cell_lift_statuses=(),
+                        cell_lift_validation=_not_run_validation(),
                         inconsistency=None,
                     )
                 )
@@ -160,13 +186,14 @@ class DddNetworkTimeRefinementSolver:
                     break
                 recovered_schedules.append(recovered.schedule)
             recovery_objective: float | None = None
+            recovery_validation = _not_run_validation()
             if recovery_feasible:
-                recovered_reference = _validated_reference_solution(
+                recovery_validation = _validate_reference_solution(
                     current,
                     tuple(recovered_schedules),
                     tolerance_seconds=self.tolerance_seconds,
                 )
-                if recovered_reference is None:
+                if recovery_validation.solution is None:
                     recovery_feasible = False
                 else:
                     recovery_objective = sum(
@@ -176,32 +203,33 @@ class DddNetworkTimeRefinementSolver:
                     if recovery_objective < upper_bound:
                         upper_bound = recovery_objective
                         best_schedules = tuple(recovered_schedules)
-                        best_reference = recovered_reference
+                        best_reference = recovery_validation.solution
 
-            strict_statuses: list[DddStrictTimeLiftStatus] = []
-            strict_schedules: list[DddRecoveredSchedule] = []
+            cell_lift_statuses: list[DddStrictTimeLiftStatus] = []
+            cell_lift_schedules: list[DddRecoveredSchedule] = []
             inconsistencies: list[DddEventCellInconsistency] = []
             for path_problem, path in zip(path_problems, paths, strict=True):
-                strict = lifter.lift(path_problem, path)
-                strict_statuses.append(strict.status)
-                if strict.schedule is not None:
-                    strict_schedules.append(strict.schedule)
-                if strict.inconsistency is not None:
-                    inconsistencies.append(strict.inconsistency)
-            if len(strict_schedules) == len(paths):
-                strict_reference = _validated_reference_solution(
+                cell_lift = cell_lifter.lift(path_problem, path)
+                cell_lift_statuses.append(cell_lift.status)
+                if cell_lift.schedule is not None:
+                    cell_lift_schedules.append(cell_lift.schedule)
+                if cell_lift.inconsistency is not None:
+                    inconsistencies.append(cell_lift.inconsistency)
+            cell_lift_validation = _not_run_validation()
+            if len(cell_lift_schedules) == len(paths):
+                cell_lift_validation = _validate_reference_solution(
                     current,
-                    tuple(strict_schedules),
+                    tuple(cell_lift_schedules),
                     tolerance_seconds=self.tolerance_seconds,
                 )
-                if strict_reference is not None:
-                    strict_objective = sum(
-                        schedule.objective_value for schedule in strict_schedules
+                if cell_lift_validation.solution is not None:
+                    cell_lift_objective = sum(
+                        schedule.objective_value for schedule in cell_lift_schedules
                     )
-                    if strict_objective < upper_bound:
-                        upper_bound = strict_objective
-                        best_schedules = tuple(strict_schedules)
-                        best_reference = strict_reference
+                    if cell_lift_objective < upper_bound:
+                        upper_bound = cell_lift_objective
+                        best_schedules = tuple(cell_lift_schedules)
+                        best_reference = cell_lift_validation.solution
 
             inconsistency = min(
                 inconsistencies,
@@ -225,8 +253,10 @@ class DddNetworkTimeRefinementSolver:
                     lower_bound=lower_bound,
                     recovery_feasible=recovery_feasible,
                     recovery_objective=recovery_objective,
+                    recovery_validation_status=recovery_validation.status,
                     upper_bound=upper_bound,
-                    strict_statuses=tuple(strict_statuses),
+                    cell_lift_statuses=tuple(cell_lift_statuses),
+                    cell_lift_validation=cell_lift_validation,
                     inconsistency=inconsistency,
                 )
             )
@@ -287,12 +317,12 @@ class DddNetworkTimeRefinementSolver:
         )
 
 
-def _validated_reference_solution(
+def _validate_reference_solution(
     problem: DddNetworkTimeProblem,
     schedules: tuple[DddRecoveredSchedule, ...],
     *,
     tolerance_seconds: float,
-) -> DddReferenceSolution | None:
+) -> DddNetworkValidationResult:
     starts_by_cabin = {
         start.cabin_id: start for start in problem.movement_problem.starts
     }
@@ -328,9 +358,43 @@ def _validated_reference_solution(
             solution,
             tolerance_seconds=tolerance_seconds,
         )
-    except (KeyError, ValueError):
-        return None
-    return solution
+    except KeyError as error:
+        return DddNetworkValidationResult(
+            status=DddNetworkValidationStatus.INVALID,
+            solution=None,
+            detail=str(error),
+        )
+    except DddReferenceHorizonCoverageError as error:
+        return DddNetworkValidationResult(
+            status=DddNetworkValidationStatus.HORIZON_INCOMPLETE,
+            solution=None,
+            detail=str(error),
+        )
+    except DddReferenceResourceConflictError as error:
+        return DddNetworkValidationResult(
+            status=DddNetworkValidationStatus.RESOURCE_CONFLICT,
+            solution=None,
+            detail=str(error),
+        )
+    except ValueError as error:
+        return DddNetworkValidationResult(
+            status=DddNetworkValidationStatus.INVALID,
+            solution=None,
+            detail=str(error),
+        )
+    return DddNetworkValidationResult(
+        status=DddNetworkValidationStatus.FEASIBLE,
+        solution=solution,
+        detail=None,
+    )
+
+
+def _not_run_validation() -> DddNetworkValidationResult:
+    return DddNetworkValidationResult(
+        status=DddNetworkValidationStatus.NOT_RUN,
+        solution=None,
+        detail=None,
+    )
 
 
 def _iteration(
@@ -346,8 +410,10 @@ def _iteration(
     lower_bound: float,
     recovery_feasible: bool,
     recovery_objective: float | None,
+    recovery_validation_status: DddNetworkValidationStatus,
     upper_bound: float,
-    strict_statuses: tuple[DddStrictTimeLiftStatus, ...],
+    cell_lift_statuses: tuple[DddStrictTimeLiftStatus, ...],
+    cell_lift_validation: DddNetworkValidationResult,
     inconsistency: DddEventCellInconsistency | None,
 ) -> DddNetworkTimeRefinementIteration:
     return DddNetworkTimeRefinementIteration(
@@ -362,8 +428,11 @@ def _iteration(
         global_lower_bound=_finite_or_none(lower_bound),
         recovery_feasible=recovery_feasible,
         recovery_objective=recovery_objective,
+        recovery_validation_status=recovery_validation_status,
         global_upper_bound=_finite_or_none(upper_bound),
-        strict_lift_statuses=strict_statuses,
+        cell_lift_statuses=cell_lift_statuses,
+        cell_lift_validation_status=cell_lift_validation.status,
+        cell_lift_validation_detail=cell_lift_validation.detail,
         split_state_id=(inconsistency.state_id if inconsistency else None),
         split_boundary_seconds=(
             inconsistency.split_boundary_seconds if inconsistency else None

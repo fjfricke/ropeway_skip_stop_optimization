@@ -803,7 +803,7 @@ Implemented Phase-0 reference infrastructure:
   `RESOURCE_HEADWAY_CONFLICT` evidence, and whose prefix cut excludes exactly
   the proven conflict before a validated second-round solution is accepted.
 - a genuine time-partition fixture whose initial partial path splices two
-  incompatible witnesses in one coarse event cell, whose strict lift derives
+  incompatible witnesses in one coarse event cell, whose cell lift derives
   the exact split boundary, and whose rebuilt master raises the certified
   lower bound from zero to one;
 - a separate cell-free support recovery that validates an objective-one
@@ -815,7 +815,10 @@ The network-derived Phase-0 gate is now implemented. A layered partial graph
 is built from the network-backed DDD movement problem, and a Gurobi integer
 flow master chooses anonymous cabin flow without enumerating complete paths.
 Its integral solution is decomposed deterministically and passed to the same
-strict lift and cell-free recovery contracts. On the physical Three-Station
+cell lift and cell-free recovery contracts. The per-path cell lift intentionally
+ignores shared resources and therefore cannot certify feasibility by itself;
+all lifted paths are checked together against the complete horizon and resource
+model before an upper bound is accepted. On the physical Three-Station
 fixture, the initial graph has three reachable nodes and six arcs; one split
 at `R_entry_lr` raises the certified lower bound from zero to one and closes
 `LB = UB = 1` in round two. The recovered trajectory passes complete sparse
@@ -1096,7 +1099,8 @@ bound-driven discretization refinement.
 
 Completed Phase-0 foundations are the movement contract, proof note, model-size
 census, exhaustive oracle, delayed resource-conflict loop, safe time-cell
-split, strict lift, cell-free primal recovery, and the first complete
+split, cell lift, independent full validation, cell-free primal recovery, and
+the first complete
 `LB/lift/refine/UB` certificate.
 
 Completed additionally: visit-layer partial graph construction from the

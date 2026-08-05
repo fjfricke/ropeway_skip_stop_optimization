@@ -55,7 +55,7 @@ uv run python benchmarks/run_ddd_phase0_time_refinement.py
 
 The initial master combines an exact Stop arrival with an outgoing arc whose
 existential witness uses an earlier time in the same coarse cell. Its valid
-optimistic bound is zero. The strict lift returns
+optimistic bound is zero. The cell lift returns
 `EVENT_CELL_INCONSISTENCY`, while cell-free support recovery immediately
 produces and validates a full schedule with objective one. Splitting the
 shared state cell at the derived boundary raises the master bound to one and
@@ -71,10 +71,11 @@ network with an anonymous integer-flow master:
 
 The builder derives reachable visit layers and partial timed arcs from the
 network-backed DDD movement problem. The first flow solve has three reachable
-nodes, six arcs, and lower bound zero. Strict lifting derives a split at the
+nodes, six arcs, and lower bound zero. Cell lifting derives a split at the
 physical `R_entry_lr` state while cell-free recovery supplies objective one.
 After rebuilding, the second flow solve proves `LB = UB = 1`; the reconstructed
-two-visit trajectory passes complete sparse EAN validation. This closes the
+paths pass complete horizon/resource validation and the final two-visit
+trajectory passes complete sparse EAN validation. This closes the
 physical anonymous-flow Phase-0 gate, but it does not yet combine multiple
 cabins with delayed merge-conflict rows.
 

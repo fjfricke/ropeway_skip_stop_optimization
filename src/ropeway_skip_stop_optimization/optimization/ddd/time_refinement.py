@@ -10,6 +10,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
     DddPartialTimeMasterStatus,
     DddPartialTimeProblem,
     DddTimeDiscretization,
+    ddd_normalize_time_seconds,
 )
 
 
@@ -218,13 +219,13 @@ class DddStrictTimeCellLifter:
                 if cell.id == arc.source_cell_id
             )
             option = options_by_id[arc.route_option_id]
-            required_lower = (
+            required_lower = ddd_normalize_time_seconds(
                 arc.target_cell.lower_seconds - option.duration_seconds
             )
-            required_upper = (
+            required_upper = ddd_normalize_time_seconds(
                 arc.target_cell.upper_seconds - option.duration_seconds
             )
-            split_boundary = (
+            split_boundary = ddd_normalize_time_seconds(
                 required_lower
                 if source_event.time_seconds < required_lower
                 else required_upper

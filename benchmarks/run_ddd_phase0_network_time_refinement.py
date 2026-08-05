@@ -64,6 +64,9 @@ def main() -> None:
     )
 
     for iteration in result.iterations:
+        cell_lifts = ",".join(
+            status.value for status in iteration.cell_lift_statuses
+        )
         print(
             f"round={iteration.round_index} "
             f"nodes={iteration.node_count} arcs={iteration.arc_count} "
@@ -71,6 +74,11 @@ def main() -> None:
             f"constraints={iteration.constraint_count} "
             f"lb={iteration.global_lower_bound} "
             f"ub={iteration.global_upper_bound} "
+            f"cell_lift={cell_lifts or 'not_run'} "
+            f"cell_full_validation="
+            f"{iteration.cell_lift_validation_status.value} "
+            f"recovery_full_validation="
+            f"{iteration.recovery_validation_status.value} "
             f"split={iteration.split_state_id}@{iteration.split_boundary_seconds}"
         )
     print(

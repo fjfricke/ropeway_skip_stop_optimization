@@ -262,8 +262,11 @@ from a network-backed `DddMovementProblem` and state-dependent partitions.
 `DddAnonymousFlowMaster` places one integer flow unit per fixed start on source
 arcs, aggregates those units on shared internal movement and sink arcs, and
 uses ordinary flow conservation. `DddAnonymousFlowDecomposer` deterministically
-recovers one path per source cabin; the recovered paths feed the unchanged
-strict lift and cell-free recovery adapters.
+recovers one path per source cabin; the recovered paths feed a resource-free
+per-path cell lift and cell-free recovery. A successful cell lift means only
+that exact event times agree with the selected cells. Horizon coverage and all
+shared physical resources are subsequently validated on the combined paths;
+only that complete validation can certify an incumbent or upper bound.
 
 The physical `three_station_time_refinement_v0` fixture uses the actual
 Three-Station route durations and resources. Round one builds three reachable
