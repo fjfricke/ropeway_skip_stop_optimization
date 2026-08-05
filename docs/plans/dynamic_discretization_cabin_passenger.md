@@ -824,9 +824,17 @@ at `R_entry_lr` raises the certified lower bound from zero to one and closes
 `LB = UB = 1` in round two. The recovered trajectory passes complete sparse
 EAN validation.
 
-This result proves the physical network/flow plumbing, not multi-cabin scale.
-The next missing mechanism is the combined loop in which time-cell splits and
-delayed exact-prefix merge-conflict rows refine the same anonymous-flow master.
+The combined movement-only loop is now implemented. Exact-prefix conflict rows
+trigger delayed partial disaggregation: only cabins and visit depths referenced
+by active cuts receive binary prefix-flow variables, linked below the anonymous
+arc multiplicities. Early termination is represented explicitly, so a cabin is
+not forced to reach the deepest visit of another support. Decomposition consumes
+the solved prefix arcs before assigning residual anonymous flow, preventing a
+different post-solve cabin matching from bypassing or falsely repeating a cut.
+The physical
+two-cabin Three-Station fixture combines two time splits and two conflict rows,
+then closes `LB = UB = 4` with six prefix variables. This proves integration;
+multi-cabin scaling remains open.
 
 Gate:
 
@@ -1105,18 +1113,16 @@ the first complete
 
 Completed additionally: visit-layer partial graph construction from the
 canonical network, anonymous integer flow, deterministic path decomposition,
-and the two-round physical Three-Station bound certificate.
+the two-round physical Three-Station bound certificate, and the four-round
+combined time/conflict certificate with delayed partial disaggregation.
 
 Next:
 
-1. express exact-prefix conflict rows over decomposed anonymous-flow paths;
-2. add those rows back to the flow master without introducing cabin copies on
-   every internal arc;
-3. run a two-cabin physical case that requires both a time split and a merge
-   cut;
-4. compare graph, row, and solve growth against enumerated support and eager
+1. measure how prefix-variable growth behaves on larger fixed-start cases;
+2. add mandatory-core resource rows before delayed separation;
+3. compare graph, row, and solve growth against enumerated support and eager
    EAN references;
-5. only after that gate, introduce bounded station waiting.
+4. only after that gate, introduce bounded station waiting.
 
 This sequence is intentionally conservative. The main value of the approach
 is the certificate

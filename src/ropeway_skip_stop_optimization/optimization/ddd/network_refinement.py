@@ -12,13 +12,22 @@ from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
     DddNetworkPathProblemAdapter,
     DddNetworkTimeProblem,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.lifting import (
+    build_ddd_prefix_conflict_cuts,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.reference import (
+    DddReferenceConflict,
     DddReferenceHorizonCoverageError,
     DddReferenceResourceConflictError,
     DddReferenceSolution,
     DddReferenceTrajectory,
     build_ddd_reference_visit,
+    find_ddd_reference_conflicts,
     validate_ddd_reference_solution,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.support_master import (
+    DddSupportConflictCut,
+    DddSupportSelection,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_refinement import (
     DddCellFreeSupportRecovery,
@@ -56,6 +65,8 @@ class DddNetworkValidationResult:
     status: DddNetworkValidationStatus
     solution: DddReferenceSolution | None
     detail: str | None
+    conflicts: tuple[DddReferenceConflict, ...]
+    cuts: tuple[DddSupportConflictCut, ...]
 
 
 @dataclass(frozen=True)
@@ -66,6 +77,9 @@ class DddNetworkTimeRefinementIteration:
     arc_count: int
     variable_count: int
     constraint_count: int
+    prefix_variable_count: int
+    conflict_constraint_count: int
+    tracked_prefix_cabin_count: int
     decomposed_path_count: int
     master_lower_bound: float | None
     global_lower_bound: float | None
@@ -76,6 +90,9 @@ class DddNetworkTimeRefinementIteration:
     cell_lift_statuses: tuple[DddStrictTimeLiftStatus, ...]
     cell_lift_validation_status: DddNetworkValidationStatus
     cell_lift_validation_detail: str | None
+    conflict_count: int
+    added_cut_ids: tuple[str, ...]
+    total_conflict_cut_count: int
     split_state_id: str | None
     split_boundary_seconds: float | None
 
@@ -90,6 +107,7 @@ class DddNetworkTimeRefinementResult:
     absolute_gap: float | None
     iterations: tuple[DddNetworkTimeRefinementIteration, ...]
     final_discretization: DddTimeDiscretization
+    conflict_cuts: tuple[DddSupportConflictCut, ...]
 
 
 @dataclass(frozen=True)
@@ -98,6 +116,7 @@ class DddNetworkTimeRefinementSolver:
     tolerance_seconds: float = 1e-9
     bound_tolerance: float = 1e-9
     output_flag: bool = False
+    max_new_cuts_per_iteration: int = 10_000
 
     def solve(
         self,
@@ -106,6 +125,10 @@ class DddNetworkTimeRefinementSolver:
         problem.validate()
         if self.max_iterations <= 0:
             raise ValueError("DDD network refinement max_iterations must be positive")
+        if self.max_new_cuts_per_iteration <= 0:
+            raise ValueError(
+                "DDD network refinement max_new_cuts_per_iteration must be positive"
+            )
         if self.tolerance_seconds < 0 or self.bound_tolerance < 0:
             raise ValueError("DDD network refinement tolerances must be nonnegative")
         builder = DddLayeredTimeNetworkBuilder(
@@ -126,10 +149,12 @@ class DddNetworkTimeRefinementSolver:
         best_schedules: tuple[DddRecoveredSchedule, ...] = ()
         best_reference: DddReferenceSolution | None = None
         iterations: list[DddNetworkTimeRefinementIteration] = []
+        cuts: list[DddSupportConflictCut] = []
+        cut_ids: set[str] = set()
 
         for round_index in range(1, self.max_iterations + 1):
             network = builder.build(current)
-            flow = master.solve(network)
+            flow = master.solve(network, cuts=tuple(cuts))
             if flow.status is DddAnonymousFlowStatus.INFEASIBLE:
                 iterations.append(
                     _iteration(
@@ -139,6 +164,11 @@ class DddNetworkTimeRefinementSolver:
                         arc_count=len(network.arcs),
                         variable_count=flow.variable_count,
                         constraint_count=flow.constraint_count,
+                        prefix_variable_count=flow.prefix_variable_count,
+                        conflict_constraint_count=flow.conflict_constraint_count,
+                        tracked_prefix_cabin_count=(
+                            flow.tracked_prefix_cabin_count
+                        ),
                         path_count=0,
                         master_bound=None,
                         lower_bound=lower_bound,
@@ -150,6 +180,9 @@ class DddNetworkTimeRefinementSolver:
                         upper_bound=upper_bound,
                         cell_lift_statuses=(),
                         cell_lift_validation=_not_run_validation(),
+                        conflict_count=0,
+                        added_cut_ids=(),
+                        total_conflict_cut_count=len(cuts),
                         inconsistency=None,
                     )
                 )
@@ -165,6 +198,7 @@ class DddNetworkTimeRefinementSolver:
                     upper_bound=upper_bound,
                     iterations=iterations,
                     discretization=current.discretization,
+                    cuts=cuts,
                 )
             if flow.best_bound is None:
                 raise RuntimeError("optimal DDD network flow returned no best bound")
@@ -240,6 +274,28 @@ class DddNetworkTimeRefinementSolver:
                 ),
                 default=None,
             )
+            new_cuts = tuple(
+                cut
+                for cut in cell_lift_validation.cuts
+                if cut.id not in cut_ids
+            )[: self.max_new_cuts_per_iteration]
+            if (
+                cell_lift_validation.status
+                is DddNetworkValidationStatus.RESOURCE_CONFLICT
+                and not new_cuts
+            ):
+                return _result(
+                    status=DddNetworkTimeRefinementStatus.INVALID_INTERNAL,
+                    schedules=best_schedules,
+                    reference_solution=best_reference,
+                    lower_bound=lower_bound,
+                    upper_bound=upper_bound,
+                    iterations=iterations,
+                    discretization=current.discretization,
+                    cuts=cuts,
+                )
+            cuts.extend(new_cuts)
+            cut_ids.update(cut.id for cut in new_cuts)
             iterations.append(
                 _iteration(
                     round_index=round_index,
@@ -248,6 +304,11 @@ class DddNetworkTimeRefinementSolver:
                     arc_count=len(network.arcs),
                     variable_count=flow.variable_count,
                     constraint_count=flow.constraint_count,
+                    prefix_variable_count=flow.prefix_variable_count,
+                    conflict_constraint_count=flow.conflict_constraint_count,
+                    tracked_prefix_cabin_count=(
+                        flow.tracked_prefix_cabin_count
+                    ),
                     path_count=len(paths),
                     master_bound=flow.best_bound,
                     lower_bound=lower_bound,
@@ -257,6 +318,9 @@ class DddNetworkTimeRefinementSolver:
                     upper_bound=upper_bound,
                     cell_lift_statuses=tuple(cell_lift_statuses),
                     cell_lift_validation=cell_lift_validation,
+                    conflict_count=len(cell_lift_validation.conflicts),
+                    added_cut_ids=tuple(cut.id for cut in new_cuts),
+                    total_conflict_cut_count=len(cuts),
                     inconsistency=inconsistency,
                 )
             )
@@ -269,6 +333,7 @@ class DddNetworkTimeRefinementSolver:
                     upper_bound=upper_bound,
                     iterations=iterations,
                     discretization=current.discretization,
+                    cuts=cuts,
                 )
             if upper_bound - lower_bound <= self.bound_tolerance:
                 return _result(
@@ -279,8 +344,9 @@ class DddNetworkTimeRefinementSolver:
                     upper_bound=upper_bound,
                     iterations=iterations,
                     discretization=current.discretization,
+                    cuts=cuts,
                 )
-            if inconsistency is None:
+            if inconsistency is None and not new_cuts:
                 return _result(
                     status=(
                         DddNetworkTimeRefinementStatus.FEASIBLE_WITH_GAP
@@ -293,14 +359,16 @@ class DddNetworkTimeRefinementSolver:
                     upper_bound=upper_bound,
                     iterations=iterations,
                     discretization=current.discretization,
+                    cuts=cuts,
                 )
-            current = current.with_discretization(
-                current.discretization.split(
-                    state_id=inconsistency.state_id,
-                    boundary_seconds=inconsistency.split_boundary_seconds,
-                    tolerance_seconds=self.tolerance_seconds,
+            if inconsistency is not None:
+                current = current.with_discretization(
+                    current.discretization.split(
+                        state_id=inconsistency.state_id,
+                        boundary_seconds=inconsistency.split_boundary_seconds,
+                        tolerance_seconds=self.tolerance_seconds,
+                    )
                 )
-            )
 
         return _result(
             status=(
@@ -314,6 +382,7 @@ class DddNetworkTimeRefinementSolver:
             upper_bound=upper_bound,
             iterations=iterations,
             discretization=current.discretization,
+            cuts=cuts,
         )
 
 
@@ -363,29 +432,49 @@ def _validate_reference_solution(
             status=DddNetworkValidationStatus.INVALID,
             solution=None,
             detail=str(error),
+            conflicts=(),
+            cuts=(),
         )
     except DddReferenceHorizonCoverageError as error:
         return DddNetworkValidationResult(
             status=DddNetworkValidationStatus.HORIZON_INCOMPLETE,
             solution=None,
             detail=str(error),
+            conflicts=(),
+            cuts=(),
         )
     except DddReferenceResourceConflictError as error:
+        conflicts = find_ddd_reference_conflicts(
+            tuple(
+                occurrence
+                for trajectory in trajectories
+                for occurrence in trajectory.resource_occurrences
+            ),
+            problem.movement_problem,
+            tolerance_seconds=tolerance_seconds,
+        )
+        selection = DddSupportSelection(tuple(trajectories))
         return DddNetworkValidationResult(
             status=DddNetworkValidationStatus.RESOURCE_CONFLICT,
             solution=None,
             detail=str(error),
+            conflicts=conflicts,
+            cuts=build_ddd_prefix_conflict_cuts(selection, conflicts),
         )
     except ValueError as error:
         return DddNetworkValidationResult(
             status=DddNetworkValidationStatus.INVALID,
             solution=None,
             detail=str(error),
+            conflicts=(),
+            cuts=(),
         )
     return DddNetworkValidationResult(
         status=DddNetworkValidationStatus.FEASIBLE,
         solution=solution,
         detail=None,
+        conflicts=(),
+        cuts=(),
     )
 
 
@@ -394,6 +483,8 @@ def _not_run_validation() -> DddNetworkValidationResult:
         status=DddNetworkValidationStatus.NOT_RUN,
         solution=None,
         detail=None,
+        conflicts=(),
+        cuts=(),
     )
 
 
@@ -405,6 +496,9 @@ def _iteration(
     arc_count: int,
     variable_count: int,
     constraint_count: int,
+    prefix_variable_count: int,
+    conflict_constraint_count: int,
+    tracked_prefix_cabin_count: int,
     path_count: int,
     master_bound: float | None,
     lower_bound: float,
@@ -414,6 +508,9 @@ def _iteration(
     upper_bound: float,
     cell_lift_statuses: tuple[DddStrictTimeLiftStatus, ...],
     cell_lift_validation: DddNetworkValidationResult,
+    conflict_count: int,
+    added_cut_ids: tuple[str, ...],
+    total_conflict_cut_count: int,
     inconsistency: DddEventCellInconsistency | None,
 ) -> DddNetworkTimeRefinementIteration:
     return DddNetworkTimeRefinementIteration(
@@ -423,6 +520,9 @@ def _iteration(
         arc_count=arc_count,
         variable_count=variable_count,
         constraint_count=constraint_count,
+        prefix_variable_count=prefix_variable_count,
+        conflict_constraint_count=conflict_constraint_count,
+        tracked_prefix_cabin_count=tracked_prefix_cabin_count,
         decomposed_path_count=path_count,
         master_lower_bound=master_bound,
         global_lower_bound=_finite_or_none(lower_bound),
@@ -433,6 +533,9 @@ def _iteration(
         cell_lift_statuses=cell_lift_statuses,
         cell_lift_validation_status=cell_lift_validation.status,
         cell_lift_validation_detail=cell_lift_validation.detail,
+        conflict_count=conflict_count,
+        added_cut_ids=added_cut_ids,
+        total_conflict_cut_count=total_conflict_cut_count,
         split_state_id=(inconsistency.state_id if inconsistency else None),
         split_boundary_seconds=(
             inconsistency.split_boundary_seconds if inconsistency else None
@@ -449,6 +552,7 @@ def _result(
     upper_bound: float,
     iterations: list[DddNetworkTimeRefinementIteration],
     discretization: DddTimeDiscretization,
+    cuts: list[DddSupportConflictCut],
 ) -> DddNetworkTimeRefinementResult:
     finite_lower = _finite_or_none(lower_bound)
     finite_upper = _finite_or_none(upper_bound)
@@ -466,6 +570,7 @@ def _result(
         absolute_gap=gap,
         iterations=tuple(iterations),
         final_discretization=discretization,
+        conflict_cuts=tuple(cuts),
     )
 
 

@@ -275,9 +275,23 @@ trajectory, and derives a split at 44.0909 seconds at `R_entry_lr`. Round two
 has four nodes and six arcs and proves `LB = UB = 1`. The exact exhaustive
 oracle independently obtains Stop and Skip objectives one and two, and the
 final two-visit plan passes complete sparse EAN validation. This establishes
-the network-derived anonymous-flow gate. Multiple-cabin merge conflicts are
-still validated only after lifting; feeding their exact-prefix rows back into
-the anonymous master is the next integration step.
+the network-derived anonymous-flow gate. Multiple-cabin merge conflicts now
+feed exact-prefix rows back into the anonymous master through delayed
+partial disaggregation. For every cabin appearing beyond visit zero in an
+active cut, the master creates binary prefix flow only through the deepest
+referenced visit. These variables obey per-cabin prefix conservation, may
+terminate through a selected sink, and satisfy `sum_c prefix[c,a] <= flow[a]`.
+Thus route literals in a cut are exact without copying every internal arc for
+every cabin. The decomposer reserves and consumes the solved prefix arcs before
+assigning residual anonymous flow, so the exact lift checks the same
+decomposition that satisfied the active master rows.
+
+The physical `three_station_two_cabin_network_refinement_v0` gate combines both
+mechanisms. Two time splits are followed by two exact conflict rows, including
+one visit-one prefix. The final model has nine anonymous arcs and only six
+prefix variables, closes `LB = UB = 4` in four rounds, and passes complete EAN
+validation. This establishes integration correctness, not large-instance
+performance.
 
 OIP fleet capacity is analyzed by a separate certificate layer. A shared
 physical ring-topology builder identifies the service, enabled skip, and rope

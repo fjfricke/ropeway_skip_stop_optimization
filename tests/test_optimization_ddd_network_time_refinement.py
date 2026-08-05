@@ -5,6 +5,8 @@ from dataclasses import replace
 import pytest
 
 from ropeway_skip_stop_optimization.benchmarking.ddd_cases import (
+    build_three_station_network_combined_artifact,
+    build_three_station_network_combined_probe,
     build_three_station_network_time_refinement_probe,
     build_three_station_time_refinement_artifact,
 )
@@ -28,6 +30,8 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddRouteOption,
     DddRouteOptionCost,
     DddStrictTimeLiftStatus,
+    DddSupportLiteral,
+    DddSupportSelection,
     DddTimeDiscretization,
     DddTimePartition,
 )
@@ -238,7 +242,7 @@ def test_full_validation_classifies_resource_conflict() -> None:
         ),
     )
 
-    result = DddNetworkTimeRefinementSolver().solve(
+    result = DddNetworkTimeRefinementSolver(max_iterations=2).solve(
         replace(base, movement_problem=movement)
     )
 
@@ -250,6 +254,76 @@ def test_full_validation_classifies_resource_conflict() -> None:
     )
     assert "resource conflicts" in (
         result.iterations[-1].cell_lift_validation_detail or ""
+    )
+
+
+def test_physical_combined_refinement_closes_time_and_conflict_gap() -> None:
+    problem = build_three_station_network_combined_probe()
+
+    result = DddNetworkTimeRefinementSolver().solve(problem)
+
+    assert result.status is DddNetworkTimeRefinementStatus.OPTIMAL
+    assert result.global_lower_bound == pytest.approx(4.0)
+    assert result.global_upper_bound == pytest.approx(4.0)
+    assert len(result.iterations) == 4
+    first, second, third, fourth = result.iterations
+    assert first.split_state_id == "R_entry_lr"
+    assert first.split_boundary_seconds == pytest.approx(73.8818181818)
+    assert second.split_state_id == "R_entry_lr"
+    assert second.split_boundary_seconds == pytest.approx(53.9409090912)
+    assert (
+        third.cell_lift_validation_status
+        is DddNetworkValidationStatus.RESOURCE_CONFLICT
+    )
+    assert third.conflict_count == 2
+    assert len(third.added_cut_ids) == 2
+    assert fourth.conflict_constraint_count == 2
+    assert fourth.tracked_prefix_cabin_count == 2
+    assert fourth.prefix_variable_count == 6
+    assert (
+        fourth.cell_lift_validation_status
+        is DddNetworkValidationStatus.FEASIBLE
+    )
+    assert any(
+        literal.visit_index == 1
+        for cut in result.conflict_cuts
+        for literal in cut.literals
+    )
+    assert tuple(len(schedule.route_option_ids) for schedule in result.schedules) == (
+        2,
+        1,
+    )
+    assert result.reference_solution is not None
+    final_selection = DddSupportSelection(result.reference_solution.trajectories)
+    assert all(not cut.excludes(final_selection) for cut in result.conflict_cuts)
+
+    artifact = build_three_station_network_combined_artifact()
+    plan = DddReferenceToEanMovementPlanAdapter().build(
+        problem=problem.movement_problem,
+        solution=result.reference_solution,
+        artifact=artifact,
+    )
+    validate_ean_movement_plan_against_artifact(artifact, plan).raise_for_errors()
+
+
+def test_decomposition_consumes_the_prefix_flow_that_satisfies_cuts() -> None:
+    problem = build_three_station_network_combined_probe()
+    result = DddNetworkTimeRefinementSolver().solve(problem)
+    final_problem = problem.with_discretization(result.final_discretization)
+    network = DddLayeredTimeNetworkBuilder().build(final_problem)
+
+    flow = DddAnonymousFlowMaster().solve(network, cuts=result.conflict_cuts)
+    paths = DddAnonymousFlowDecomposer().decompose(network, flow)
+
+    assert flow.prefix_arc_values
+    selected_literals = {
+        DddSupportLiteral(path.cabin_id, visit_index, option_id)
+        for path in paths
+        for visit_index, option_id in enumerate(path.route_option_ids)
+    }
+    assert all(
+        not all(literal in selected_literals for literal in cut.literals)
+        for cut in result.conflict_cuts
     )
 
 

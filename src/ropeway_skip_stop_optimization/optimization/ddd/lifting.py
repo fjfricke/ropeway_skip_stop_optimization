@@ -83,14 +83,15 @@ class DddExactSupportLifter:
             tolerance_seconds=self.tolerance_seconds,
         )
         if conflicts:
-            cuts = tuple(
-                _prefix_conflict_cut(selection, conflict) for conflict in conflicts
+            cuts = build_ddd_prefix_conflict_cuts(
+                selection,
+                conflicts,
             )
             return DddExactLiftResult(
                 status=DddExactLiftStatus.CONFLICT,
                 solution=None,
                 conflicts=conflicts,
-                cuts=_deduplicate_cuts(cuts),
+                cuts=cuts,
                 refinement_reason=DddRefinementReason.RESOURCE_HEADWAY_CONFLICT,
             )
 
@@ -107,6 +108,18 @@ class DddExactSupportLifter:
             cuts=(),
             refinement_reason=None,
         )
+
+
+def build_ddd_prefix_conflict_cuts(
+    selection: DddSupportSelection,
+    conflicts: tuple[DddReferenceConflict, ...],
+) -> tuple[DddSupportConflictCut, ...]:
+    return _deduplicate_cuts(
+        tuple(
+            _prefix_conflict_cut(selection, conflict)
+            for conflict in conflicts
+        )
+    )
 
 
 def _prefix_conflict_cut(

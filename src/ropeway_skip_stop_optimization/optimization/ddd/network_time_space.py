@@ -10,6 +10,10 @@ from gurobipy import GRB
 from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddMovementProblem,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.support_master import (
+    DddSupportConflictCut,
+    DddSupportLiteral,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
     DddPartialTimedArc,
     DddPartialTimedPath,
@@ -409,13 +413,23 @@ class DddAnonymousFlowValue:
 
 
 @dataclass(frozen=True)
+class DddAnonymousPrefixFlowValue:
+    cabin_id: int
+    arc_id: str
+
+
+@dataclass(frozen=True)
 class DddAnonymousFlowResult:
     status: DddAnonymousFlowStatus
     objective_value: float | None
     best_bound: float | None
     arc_values: tuple[DddAnonymousFlowValue, ...]
+    prefix_arc_values: tuple[DddAnonymousPrefixFlowValue, ...]
     variable_count: int
     constraint_count: int
+    prefix_variable_count: int
+    conflict_constraint_count: int
+    tracked_prefix_cabin_count: int
 
 
 @dataclass(frozen=True)
@@ -423,7 +437,12 @@ class DddAnonymousFlowMaster:
     output_flag: bool = False
     integrality_tolerance: float = 1e-6
 
-    def solve(self, network: DddLayeredTimeNetwork) -> DddAnonymousFlowResult:
+    def solve(
+        self,
+        network: DddLayeredTimeNetwork,
+        *,
+        cuts: tuple[DddSupportConflictCut, ...] = (),
+    ) -> DddAnonymousFlowResult:
         network.validate()
         if self.integrality_tolerance <= 0:
             raise ValueError("DDD flow integrality tolerance must be positive")
@@ -471,6 +490,14 @@ class DddAnonymousFlowMaster:
                 ),
                 name=f"flow_conservation[{node_index}]",
             )
+        prefix_variables, tracked_prefix_cabin_count = (
+            _add_prefix_conflict_formulation(
+                model=model,
+                network=network,
+                flow_variables=variables,
+                cuts=cuts,
+            )
+        )
         model.ModelSense = GRB.MINIMIZE
         model.optimize()
         if model.Status == GRB.INFEASIBLE:
@@ -479,8 +506,12 @@ class DddAnonymousFlowMaster:
                 objective_value=None,
                 best_bound=None,
                 arc_values=(),
+                prefix_arc_values=(),
                 variable_count=model.NumVars,
                 constraint_count=model.NumConstrs,
+                prefix_variable_count=len(prefix_variables),
+                conflict_constraint_count=len(cuts),
+                tracked_prefix_cabin_count=tracked_prefix_cabin_count,
             )
         if model.Status != GRB.OPTIMAL:
             raise RuntimeError(f"unexpected DDD flow solver status: {model.Status}")
@@ -492,14 +523,233 @@ class DddAnonymousFlowMaster:
                 raise RuntimeError("DDD integer flow returned a fractional value")
             if integer_value:
                 values.append(DddAnonymousFlowValue(arc.id, integer_value))
+        prefix_values: list[DddAnonymousPrefixFlowValue] = []
+        for (cabin_id, arc_id), variable in sorted(prefix_variables.items()):
+            raw_value = variable.X
+            if abs(raw_value - round(raw_value)) > self.integrality_tolerance:
+                raise RuntimeError("DDD prefix flow returned a fractional value")
+            if round(raw_value):
+                prefix_values.append(
+                    DddAnonymousPrefixFlowValue(cabin_id, arc_id)
+                )
         return DddAnonymousFlowResult(
             status=DddAnonymousFlowStatus.OPTIMAL,
             objective_value=model.ObjVal,
             best_bound=model.ObjBound,
             arc_values=tuple(values),
+            prefix_arc_values=tuple(prefix_values),
             variable_count=model.NumVars,
             constraint_count=model.NumConstrs,
+            prefix_variable_count=len(prefix_variables),
+            conflict_constraint_count=len(cuts),
+            tracked_prefix_cabin_count=tracked_prefix_cabin_count,
         )
+
+
+def _add_prefix_conflict_formulation(
+    *,
+    model: gp.Model,
+    network: DddLayeredTimeNetwork,
+    flow_variables: dict[str, gp.Var],
+    cuts: tuple[DddSupportConflictCut, ...],
+) -> tuple[dict[tuple[int, str], gp.Var], int]:
+    if not cuts:
+        return {}, 0
+    cut_ids: set[str] = set()
+    known_route_option_ids = {
+        arc.partial_arc.route_option_id
+        for arc in network.arcs
+        if arc.partial_arc is not None
+    }
+    max_visit_by_cabin: dict[int, int] = {}
+    for cut in cuts:
+        cut.validate()
+        if cut.id in cut_ids:
+            raise ValueError(f"duplicate DDD flow conflict cut id: {cut.id}")
+        cut_ids.add(cut.id)
+        _validate_prefix_cut_literals(
+            cut,
+            cabin_ids=set(network.cabin_ids),
+            known_route_option_ids=known_route_option_ids,
+        )
+        for literal in cut.literals:
+            max_visit_by_cabin[literal.cabin_id] = max(
+                max_visit_by_cabin.get(literal.cabin_id, 0),
+                literal.visit_index,
+            )
+
+    source_arcs = tuple(
+        arc for arc in network.arcs if arc.kind is DddLayeredTimeArcKind.SOURCE
+    )
+    movement_arcs = tuple(
+        arc for arc in network.arcs if arc.kind is DddLayeredTimeArcKind.MOVEMENT
+    )
+    sink_arcs = tuple(
+        arc for arc in network.arcs if arc.kind is DddLayeredTimeArcKind.SINK
+    )
+    node_by_id = {node.id: node for node in network.nodes}
+    incoming_movement_by_node: dict[str, list[DddLayeredTimeArc]] = {
+        node.id: [] for node in network.nodes
+    }
+    outgoing_movement_by_node: dict[str, list[DddLayeredTimeArc]] = {
+        node.id: [] for node in network.nodes
+    }
+    sink_by_node: dict[str, list[DddLayeredTimeArc]] = {
+        node.id: [] for node in network.nodes
+    }
+    for arc in movement_arcs:
+        if arc.target_node_id is not None:
+            incoming_movement_by_node[arc.target_node_id].append(arc)
+        if arc.source_node_id is not None:
+            outgoing_movement_by_node[arc.source_node_id].append(arc)
+    for arc in sink_arcs:
+        if arc.source_node_id is not None:
+            sink_by_node[arc.source_node_id].append(arc)
+
+    prefix_variables: dict[tuple[int, str], gp.Var] = {}
+    prefix_variables_by_arc_id: dict[str, list[gp.Var]] = {}
+    for cabin_id, max_visit_index in sorted(max_visit_by_cabin.items()):
+        for arc in movement_arcs:
+            partial_arc = arc.partial_arc
+            if (
+                partial_arc is None
+                or partial_arc.visit_index > max_visit_index
+            ):
+                continue
+            variable = model.addVar(
+                vtype=GRB.BINARY,
+                name=f"prefix_flow[{cabin_id},{len(prefix_variables)}]",
+            )
+            prefix_variables[(cabin_id, arc.id)] = variable
+            prefix_variables_by_arc_id.setdefault(arc.id, []).append(variable)
+        for arc in sink_arcs:
+            if (
+                arc.source_node_id is None
+                or node_by_id[arc.source_node_id].layer_index > max_visit_index
+            ):
+                continue
+            variable = model.addVar(
+                vtype=GRB.BINARY,
+                name=f"prefix_sink[{cabin_id},{len(prefix_variables)}]",
+            )
+            prefix_variables[(cabin_id, arc.id)] = variable
+            prefix_variables_by_arc_id.setdefault(arc.id, []).append(variable)
+
+    for cabin_id, max_visit_index in sorted(max_visit_by_cabin.items()):
+        if max_visit_index == 0:
+            continue
+        for node_index, node in enumerate(network.nodes):
+            if node.layer_index > max_visit_index:
+                continue
+            if node.layer_index == 1:
+                incoming = gp.quicksum(
+                    flow_variables[arc.id]
+                    for arc in source_arcs
+                    if arc.cabin_id == cabin_id
+                    and arc.target_node_id == node.id
+                )
+            else:
+                incoming = gp.quicksum(
+                    prefix_variables[(cabin_id, arc.id)]
+                    for arc in incoming_movement_by_node[node.id]
+                    if (cabin_id, arc.id) in prefix_variables
+                )
+            outgoing = gp.quicksum(
+                prefix_variables[(cabin_id, arc.id)]
+                for arc in (
+                    *outgoing_movement_by_node[node.id],
+                    *sink_by_node[node.id],
+                )
+                if (cabin_id, arc.id) in prefix_variables
+            )
+            model.addConstr(
+                incoming == outgoing,
+                name=f"prefix_conservation[{cabin_id},{node_index}]",
+            )
+
+    for arc_index, arc in enumerate((*movement_arcs, *sink_arcs)):
+        tracked = prefix_variables_by_arc_id.get(arc.id, ())
+        if tracked:
+            model.addConstr(
+                gp.quicksum(tracked) <= flow_variables[arc.id],
+                name=f"prefix_link[{arc_index}]",
+            )
+
+    for cut_index, cut in enumerate(cuts):
+        model.addConstr(
+            gp.quicksum(
+                _prefix_literal_expression(
+                    literal=literal,
+                    source_arcs=source_arcs,
+                    movement_arcs=movement_arcs,
+                    flow_variables=flow_variables,
+                    prefix_variables=prefix_variables,
+                )
+                for literal in cut.literals
+            )
+            <= cut.right_hand_side,
+            name=f"prefix_conflict[{cut_index}]",
+        )
+    return (
+        prefix_variables,
+        sum(max_visit_index > 0 for max_visit_index in max_visit_by_cabin.values()),
+    )
+
+
+def _validate_prefix_cut_literals(
+    cut: DddSupportConflictCut,
+    *,
+    cabin_ids: set[int],
+    known_route_option_ids: set[str],
+) -> None:
+    by_cabin: dict[int, dict[int, DddSupportLiteral]] = {}
+    for literal in cut.literals:
+        if literal.cabin_id not in cabin_ids:
+            raise ValueError(
+                f"DDD flow conflict cut references unknown cabin {literal.cabin_id}"
+            )
+        if literal.route_option_id not in known_route_option_ids:
+            raise ValueError(
+                "DDD flow conflict cut references unknown route option "
+                f"{literal.route_option_id!r}"
+            )
+        visits = by_cabin.setdefault(literal.cabin_id, {})
+        if literal.visit_index in visits:
+            raise ValueError(
+                "DDD flow conflict cut has multiple literals for one cabin visit"
+            )
+        visits[literal.visit_index] = literal
+    for cabin_id, visits in by_cabin.items():
+        if set(visits) != set(range(max(visits) + 1)):
+            raise ValueError(
+                f"DDD flow conflict cut cabin {cabin_id} is not a complete prefix"
+            )
+
+
+def _prefix_literal_expression(
+    *,
+    literal: DddSupportLiteral,
+    source_arcs: tuple[DddLayeredTimeArc, ...],
+    movement_arcs: tuple[DddLayeredTimeArc, ...],
+    flow_variables: dict[str, gp.Var],
+    prefix_variables: dict[tuple[int, str], gp.Var],
+) -> gp.LinExpr:
+    if literal.visit_index == 0:
+        return gp.quicksum(
+            flow_variables[arc.id]
+            for arc in source_arcs
+            if arc.cabin_id == literal.cabin_id
+            and arc.partial_arc is not None
+            and arc.partial_arc.route_option_id == literal.route_option_id
+        )
+    return gp.quicksum(
+        prefix_variables[(literal.cabin_id, arc.id)]
+        for arc in movement_arcs
+        if arc.partial_arc is not None
+        and arc.partial_arc.visit_index == literal.visit_index
+        and arc.partial_arc.route_option_id == literal.route_option_id
+        and (literal.cabin_id, arc.id) in prefix_variables
+    )
 
 
 @dataclass(frozen=True)
@@ -522,15 +772,38 @@ class DddAnonymousFlowDecomposer:
             if arc.cabin_id is not None:
                 source_by_cabin.setdefault(arc.cabin_id, []).append(arc)
         for arcs in outgoing.values():
-            arcs.sort(key=lambda item: item.id)
+            arcs.sort(key=_decomposition_arc_key)
         for arcs in source_by_cabin.values():
             arcs.sort(key=lambda item: item.id)
 
+        prefix_arc_ids_by_cabin: dict[int, set[str]] = {}
+        for item in result.prefix_arc_values:
+            if item.arc_id not in arcs_by_id:
+                raise RuntimeError("DDD prefix flow references an unknown arc")
+            prefix_arc_ids_by_cabin.setdefault(item.cabin_id, set()).add(
+                item.arc_id
+            )
+        remaining_prefix_arcs = {
+            cabin_id: set(arc_ids)
+            for cabin_id, arc_ids in prefix_arc_ids_by_cabin.items()
+        }
+        decomposition_order = tuple(
+            sorted(
+                network.cabin_ids,
+                key=lambda cabin_id: (
+                    cabin_id not in prefix_arc_ids_by_cabin,
+                    cabin_id,
+                ),
+            )
+        )
         paths: list[DddPartialTimedPath] = []
-        for cabin_id in network.cabin_ids:
-            source_arc = _first_positive_arc(
+        for cabin_id in decomposition_order:
+            prefix_arc_ids = prefix_arc_ids_by_cabin.get(cabin_id, set())
+            source_arc = _first_source_for_prefix(
                 source_by_cabin.get(cabin_id, ()),
-                residual,
+                outgoing=outgoing,
+                prefix_arc_ids=prefix_arc_ids,
+                residual=residual,
             )
             if source_arc is None or source_arc.partial_arc is None:
                 raise RuntimeError(f"DDD flow has no source path for cabin {cabin_id}")
@@ -538,10 +811,20 @@ class DddAnonymousFlowDecomposer:
             partial_arcs = [source_arc.partial_arc]
             node_id = source_arc.target_node_id
             while node_id is not None:
-                next_arc = _first_positive_arc(outgoing.get(node_id, ()), residual)
+                next_arc = _first_positive_prefix_arc(
+                    outgoing.get(node_id, ()),
+                    residual=residual,
+                    prefix_arc_ids=prefix_arc_ids,
+                )
+                if next_arc is None:
+                    next_arc = _first_positive_arc(
+                        outgoing.get(node_id, ()),
+                        residual,
+                    )
                 if next_arc is None:
                     raise RuntimeError("DDD flow path ends before a sink")
                 _consume(next_arc.id, residual)
+                remaining_prefix_arcs.get(cabin_id, set()).discard(next_arc.id)
                 if next_arc.kind is DddLayeredTimeArcKind.SINK:
                     node_id = None
                     continue
@@ -550,11 +833,20 @@ class DddAnonymousFlowDecomposer:
                 partial_arcs.append(next_arc.partial_arc)
                 node_id = next_arc.target_node_id
             paths.append(DddPartialTimedPath(cabin_id, tuple(partial_arcs)))
+        unconsumed_prefix = {
+            cabin_id: tuple(sorted(arc_ids))
+            for cabin_id, arc_ids in remaining_prefix_arcs.items()
+            if arc_ids
+        }
+        if unconsumed_prefix:
+            raise RuntimeError(
+                f"DDD decomposition did not consume prefix flow: {unconsumed_prefix}"
+            )
         leftovers = {arc_id: value for arc_id, value in residual.items() if value}
         unknown = set(residual) - set(arcs_by_id)
         if leftovers or unknown:
             raise RuntimeError(f"DDD flow decomposition left residual flow: {leftovers}")
-        return tuple(paths)
+        return tuple(sorted(paths, key=lambda item: item.cabin_id))
 
 
 @dataclass(frozen=True)
@@ -618,6 +910,60 @@ def _first_positive_arc(
     residual: dict[str, int],
 ) -> DddLayeredTimeArc | None:
     return next((arc for arc in arcs if residual.get(arc.id, 0) > 0), None)
+
+
+def _first_positive_prefix_arc(
+    arcs: tuple[DddLayeredTimeArc, ...] | list[DddLayeredTimeArc],
+    *,
+    residual: dict[str, int],
+    prefix_arc_ids: set[str],
+) -> DddLayeredTimeArc | None:
+    return next(
+        (
+            arc
+            for arc in arcs
+            if arc.id in prefix_arc_ids and residual.get(arc.id, 0) > 0
+        ),
+        None,
+    )
+
+
+def _first_source_for_prefix(
+    arcs: tuple[DddLayeredTimeArc, ...] | list[DddLayeredTimeArc],
+    *,
+    outgoing: dict[str, list[DddLayeredTimeArc]],
+    prefix_arc_ids: set[str],
+    residual: dict[str, int],
+) -> DddLayeredTimeArc | None:
+    if prefix_arc_ids:
+        matching = next(
+            (
+                arc
+                for arc in arcs
+                if residual.get(arc.id, 0) > 0
+                and arc.target_node_id is not None
+                and any(
+                    outgoing_arc.id in prefix_arc_ids
+                    for outgoing_arc in outgoing.get(arc.target_node_id, ())
+                )
+            ),
+            None,
+        )
+        if matching is not None:
+            return matching
+    return _first_positive_arc(arcs, residual)
+
+
+def _decomposition_arc_key(arc: DddLayeredTimeArc) -> tuple[object, ...]:
+    if arc.partial_arc is None:
+        return (1, math.inf, math.inf, arc.id)
+    return (
+        0,
+        arc.partial_arc.target_cell.lower_seconds,
+        arc.partial_arc.target_cell.upper_seconds,
+        arc.partial_arc.route_option_id,
+        arc.id,
+    )
 
 
 def _consume(arc_id: str, residual: dict[str, int]) -> None:

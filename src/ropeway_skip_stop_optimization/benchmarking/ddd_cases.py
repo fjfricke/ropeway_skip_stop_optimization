@@ -52,6 +52,9 @@ THREE_STATION_TWO_CABIN_HORIZON_SECONDS = 30.0
 EVENT_CELL_BOUND_PROBE_CASE_ID = "event_cell_bound_probe_v0"
 THREE_STATION_TIME_REFINEMENT_CASE_ID = "three_station_time_refinement_v0"
 THREE_STATION_TIME_REFINEMENT_HORIZON_SECONDS = 70.0
+THREE_STATION_NETWORK_COMBINED_CASE_ID = (
+    "three_station_two_cabin_network_refinement_v0"
+)
 
 
 @dataclass(frozen=True)
@@ -155,6 +158,28 @@ def build_three_station_time_refinement_artifact() -> EanBuildArtifact:
     ).build(scenario, config)
 
 
+def build_three_station_network_combined_artifact() -> EanBuildArtifact:
+    scenario = replace(
+        build_three_station_scenario(),
+        id=THREE_STATION_NETWORK_COMBINED_CASE_ID,
+    )
+    base_config = build_three_station_ean_config(scenario)
+    config = replace(
+        base_config,
+        horizon_seconds=THREE_STATION_TIME_REFINEMENT_HORIZON_SECONDS,
+        tail_seconds=0.0,
+        station_configs=tuple(
+            replace(station, waiting_mode=StationWaitingMode.NO_WAITING)
+            for station in base_config.station_configs
+        ),
+    )
+    return network_ean_builder_for_pattern(
+        pattern_definition=build_three_station_ean_pattern_definition(),
+        start_builder=_TwoCabinMergeStartBuilder(),
+        headway_pair_builder=SparseHeadwayPairBuilder(),
+    ).build(scenario, config)
+
+
 def build_three_station_network_time_refinement_probe() -> DddNetworkTimeProblem:
     """Build a physical one-cabin witness for anonymous-flow time refinement."""
 
@@ -231,6 +256,99 @@ def build_three_station_network_time_refinement_probe() -> DddNetworkTimeProblem
                     threshold_seconds=terminal_threshold,
                     before_cost=0.0,
                     at_or_after_cost=1.0,
+                ),
+            ),
+        ),
+    )
+    result.validate()
+    return result
+
+
+def build_three_station_network_combined_probe() -> DddNetworkTimeProblem:
+    """Force one safe time split and one delayed physical merge-conflict cut."""
+
+    artifact = build_three_station_network_combined_artifact()
+    movement = EanArtifactToDddMovementProblemAdapter().build(artifact)
+    starts = {start.cabin_id: start for start in movement.starts}
+    first_options = movement.route_options_by_state_id[starts[0].state_id]
+    first_by_decision = {option.decision: option for option in first_options}
+    stop = first_by_decision[DddRouteDecision.STOP]
+    skip = first_by_decision[DddRouteDecision.SKIP]
+    continuation_options = movement.route_options_by_state_id[stop.to_state_id]
+    if len(continuation_options) != 1:
+        raise ValueError("combined DDD probe needs one continuation option")
+    continuation = continuation_options[0]
+
+    cabin_zero_skip_terminal = (
+        starts[0].time_seconds
+        + skip.duration_seconds
+        + continuation.duration_seconds
+    )
+    cabin_zero_stop_terminal = (
+        starts[0].time_seconds
+        + stop.duration_seconds
+        + continuation.duration_seconds
+    )
+    cabin_one_skip_terminal = (
+        starts[1].time_seconds
+        + skip.duration_seconds
+        + continuation.duration_seconds
+    )
+    terminal_threshold = (
+        cabin_one_skip_terminal + cabin_zero_stop_terminal
+    ) / 2.0
+    sentinel = (
+        movement.operational_end_seconds
+        + max(option.duration_seconds for option in movement.route_options)
+        + 10.0
+    )
+    partitions = tuple(
+        DddTimePartition(
+            state.id,
+            (
+                (
+                    0.0,
+                    starts[0].time_seconds + skip.duration_seconds,
+                    movement.operational_end_seconds,
+                    sentinel,
+                )
+                if state.id == stop.to_state_id
+                else (
+                    0.0,
+                    movement.operational_end_seconds,
+                    cabin_zero_skip_terminal,
+                    terminal_threshold,
+                    sentinel,
+                )
+                if state.id == continuation.to_state_id
+                else (0.0, movement.operational_end_seconds, sentinel)
+            ),
+        )
+        for state in movement.states
+    )
+    result = DddNetworkTimeProblem(
+        movement_problem=movement,
+        discretization=DddTimeDiscretization(partitions),
+        objective=DddNetworkTimeObjective(
+            route_option_costs=tuple(
+                DddRouteOptionCost(
+                    option.id,
+                    1.0 if option.id == skip.id else 0.0,
+                )
+                for option in movement.route_options
+            ),
+            terminal_costs=(
+                DddTerminalThresholdCost(
+                    state_id=stop.to_state_id,
+                    threshold_seconds=0.0,
+                    before_cost=4.0,
+                    at_or_after_cost=4.0,
+                ),
+                DddTerminalThresholdCost(
+                    state_id=continuation.to_state_id,
+                    threshold_seconds=terminal_threshold,
+                    before_cost=2.0,
+                    at_or_after_cost=0.0,
                 ),
             ),
         ),

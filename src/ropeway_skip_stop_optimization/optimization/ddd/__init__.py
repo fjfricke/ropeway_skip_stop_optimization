@@ -21,6 +21,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.network_refinement import (
 from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
     DddAnonymousFlowDecomposer,
     DddAnonymousFlowMaster,
+    DddAnonymousPrefixFlowValue,
     DddAnonymousFlowResult,
     DddAnonymousFlowStatus,
     DddAnonymousFlowValue,
@@ -47,6 +48,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.lifting import (
     DddExactLiftStatus,
     DddExactSupportLifter,
     DddRefinementReason,
+    build_ddd_prefix_conflict_cuts,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.reference import (
     DddReferenceConflict,
@@ -113,6 +115,7 @@ __all__ = [
     "DddCellFreeSupportRecovery",
     "DddAnonymousFlowDecomposer",
     "DddAnonymousFlowMaster",
+    "DddAnonymousPrefixFlowValue",
     "DddAnonymousFlowResult",
     "DddAnonymousFlowStatus",
     "DddAnonymousFlowValue",
@@ -193,6 +196,7 @@ __all__ = [
     "DddTimeSpaceObjective",
     "EanArtifactToDddMovementProblemAdapter",
     "build_ddd_reference_visit",
+    "build_ddd_prefix_conflict_cuts",
     "ddd_normalize_time_seconds",
     "ddd_partial_arc_is_compatible",
     "find_ddd_reference_conflicts",

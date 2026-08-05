@@ -206,6 +206,41 @@ class DddStrictTimeCellLifter:
                     tolerance_seconds=self.tolerance_seconds,
                 ):
                     raise ValueError("DDD strict lift source cell is inconsistent")
+                if source_event.time_seconds > (
+                    problem.movement_problem.operational_end_seconds
+                    + self.tolerance_seconds
+                ):
+                    split_boundary = ddd_normalize_time_seconds(
+                        source_event.time_seconds
+                    )
+                    if not (
+                        selected_source_cell.lower_seconds + self.tolerance_seconds
+                        < split_boundary
+                        < selected_source_cell.upper_seconds
+                        - self.tolerance_seconds
+                    ):
+                        raise ValueError(
+                            "DDD post-horizon inconsistency has no interior boundary"
+                        )
+                    return DddStrictTimeLiftResult(
+                        status=(
+                            DddStrictTimeLiftStatus.EVENT_CELL_INCONSISTENCY
+                        ),
+                        schedule=None,
+                        inconsistency=DddEventCellInconsistency(
+                            state_id=arc.from_state_id,
+                            selected_cell_id=selected_source_cell.id,
+                            exact_source_time_seconds=(
+                                source_event.time_seconds
+                            ),
+                            required_source_lower_seconds=(
+                                problem.movement_problem.operational_end_seconds
+                            ),
+                            required_source_upper_seconds=split_boundary,
+                            split_boundary_seconds=split_boundary,
+                            failed_target_cell_id=arc.target_cell.id,
+                        ),
+                    )
             if arc.target_cell.contains(
                 target_event.time_seconds,
                 tolerance_seconds=self.tolerance_seconds,

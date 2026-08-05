@@ -79,6 +79,20 @@ trajectory passes complete sparse EAN validation. This closes the
 physical anonymous-flow Phase-0 gate, but it does not yet combine multiple
 cabins with delayed merge-conflict rows.
 
+Run the combined physical multi-cabin refinement gate:
+
+```bash
+.venv/bin/python benchmarks/run_ddd_phase0_combined_refinement.py
+```
+
+The two-cabin Three-Station fixture first removes two optimistic time-cell
+artifacts, then separates two exact resource conflicts. One conflict reaches
+visit one, so the final master creates six binary prefix-flow variables for the
+two affected cabins while all remaining flow stays anonymous. The four-round
+trace closes `LB = UB = 4`, and the final plan passes complete sparse EAN
+validation. This proves the combined refinement plumbing; it is not yet a
+scaling benchmark.
+
 Run one EAN passenger benchmark:
 
 ```bash
