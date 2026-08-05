@@ -1,6 +1,6 @@
 # Exact Eager Headway Build-Performance Plan
 
-Status: **future work**
+Status: **in progress — Phase 4 sparse-matrix construction implemented**
 
 ## Goal
 
@@ -181,6 +181,27 @@ new dependency solely for assembly until the benchmark demonstrates a benefit.
 
 The batch size must be configurable for experiments but have one deterministic
 production default. Different batch sizes must generate equivalent models.
+
+### Phase 4 result (2026-07-22)
+
+The production headway pool now creates order binaries in blocks and inserts
+the normalized linear rows as SciPy CSR matrices through Gurobi `addMConstr`.
+The deterministic default is 100,000 pairs per block; the movement-model
+builder exposes the block size for experiments. Full variable and constraint
+names remain available, and delayed augmentation uses the same path.
+
+Build-only measurements on the five-station OIP skip+wait cases are:
+
+| Case | Pairs | Legacy headway build | Matrix headway build | Speedup |
+| --- | ---: | ---: | ---: | ---: |
+| OIP38 | 727,605 | 149.615 s | 23.682 s | 6.32x |
+| OIP76 | 2,915,094 | 1,073.434 s | 89.419 s | 12.00x |
+
+Model dimensions and nonzero counts were unchanged. Peak RSS remained roughly
+flat: about 2.6 GB for OIP38 and 6.0 GB for OIP76. The matrix path therefore
+meets the adoption criterion through a material wall-clock improvement, not a
+material memory reduction. The full regression suite passed (431 tests),
+including eager solving, delayed augmentation, naming, and extraction paths.
 
 ## Phase 5: Naming and Checkpoint Compatibility
 

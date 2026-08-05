@@ -23,8 +23,34 @@ Current plans:
 - `ean_eager_headway_build_performance.md`: exact pair pruning, compact
   conflict storage, batched Gurobi construction, and compact export for large
   eager OIP headway models.
+- `ean_oip_symmetry_and_exact_k.md`: exact OIP cabin-label canonicalization,
+  inactive-variable handling, and fixed-fleet-size passenger decomposition.
 - `ean_decomposition.md`: scaling diagnosis, passenger decomposition,
   progressive search, delayed constraints, and alternative solver paths.
+- `dynamic_discretization_cabin_passenger.md`: exact partial time-space cabin
+  and passenger planning through Dynamic Discretization Discovery, with an
+  optimistic lower-bound master, exact continuous-time lifting, refinement,
+  and certified upper bounds.
+- `demand_driven_network_operations.md`: recommended finite-horizon
+  passenger-guided planner using continuous-time resource reservations,
+  bounded conflict repair, exact fixed-movement passenger evaluation, and
+  optional rolling-horizon scaling.
+- `ean_merge_relaxation_and_backward_repair.md`: topology-derived relaxation
+  of stop/skip merge-conflict families, monotone latest-to-earliest timing
+  repair, endogenous OIP start-state reconstruction, and passenger recourse.
+- `ean_fixed_k_delayed_merge_headways.md`: exact fixed-fleet hybrid EAN with
+  an eager physical core, delayed merge-only headway disjunctions, complete
+  separation, and staged fixed-start-to-OIP evaluation.
+- `rotation_passenger_flow_hybrid.md`: passenger-guided anonymous cabin flow
+  over freely changing one-rotation templates, delayed occurrence conflicts,
+  minimal-waiting repair, and exact EAN R&C refinement.
+- `zero_wait_passenger_master_timing_cuts.md`: simplified zero-wait
+  passenger-service master, complete waiting-enabled timing subproblem,
+  logic-based infeasibility-core cuts, repaired passenger evaluation, and
+  independent bounds.
+- `ean_cp_sat_feasibility_gate.md`: optional complete CP-SAT movement-
+  feasibility gate for fixed \(K\), followed by a fixed-movement passenger
+  seed and exact Gurobi merge row-and-column optimization.
 - `ean_terminal_recovery_feasibility.md`: future sink-recovery continuation
   proof, one-ring feasibility model, and optional logic-based decomposition.
 - `ean_oip_capacity_bound.md`: exact scaling and later automatic use of the
