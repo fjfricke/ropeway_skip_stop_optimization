@@ -152,7 +152,7 @@ class DddReferenceTrajectoryGenerator:
                     raise ValueError(f"DDD state {state_id!r} has no route option")
                 for option in route_options:
                     branch_count += 1
-                    reference_visit = _build_visit(
+                    reference_visit = build_ddd_reference_visit(
                         start=start,
                         visit_index=len(visits),
                         switch_time_seconds=switch_time_seconds,
@@ -369,7 +369,7 @@ def validate_ddd_reference_solution(
             option = options_by_id[reference_visit.route_option_id]
             if option.from_state_id != reference_visit.state_id:
                 raise ValueError("DDD visit uses a route from another state")
-            rebuilt = _build_visit(
+            rebuilt = build_ddd_reference_visit(
                 start=start,
                 visit_index=visit_index,
                 switch_time_seconds=reference_visit.switch_time_seconds,
@@ -443,7 +443,7 @@ def find_ddd_reference_conflicts(
     )
 
 
-def _build_visit(
+def build_ddd_reference_visit(
     *,
     start: DddFixedStart,
     visit_index: int,

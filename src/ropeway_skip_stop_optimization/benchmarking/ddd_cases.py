@@ -14,6 +14,8 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddFixedStart,
     DddMovementProblem,
     DddMovementState,
+    DddNetworkTimeObjective,
+    DddNetworkTimeProblem,
     DddPartialTimeProblem,
     DddRouteDecision,
     DddRouteOption,
@@ -25,6 +27,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddTimeDiscretization,
     DddTimePartition,
     DddTimeSpaceObjective,
+    EanArtifactToDddMovementProblemAdapter,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
     EanBuildArtifact,
@@ -47,6 +50,8 @@ THREE_STATION_TWO_CABIN_MERGE_CASE_ID = (
 THREE_STATION_TWO_CABIN_SECOND_START_SECONDS = 19.7
 THREE_STATION_TWO_CABIN_HORIZON_SECONDS = 30.0
 EVENT_CELL_BOUND_PROBE_CASE_ID = "event_cell_bound_probe_v0"
+THREE_STATION_TIME_REFINEMENT_CASE_ID = "three_station_time_refinement_v0"
+THREE_STATION_TIME_REFINEMENT_HORIZON_SECONDS = 70.0
 
 
 @dataclass(frozen=True)
@@ -70,6 +75,25 @@ class _TwoCabinMergeStartBuilder(EanCabinStartBuilder):
                 first_switch_id=pattern.state_ids[0],
                 kind=EanCabinStartKind.FIXED,
                 time_seconds=THREE_STATION_TWO_CABIN_SECOND_START_SECONDS,
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class _OneCabinTimeRefinementStartBuilder(EanCabinStartBuilder):
+    def build(
+        self,
+        scenario: Scenario,
+        config: EanConfig,
+        network: EanMovementNetwork,
+        pattern: EanCirculationPattern,
+    ) -> tuple[EanCabinStart, ...]:
+        return (
+            EanCabinStart(
+                cabin_id=0,
+                first_switch_id=pattern.state_ids[0],
+                kind=EanCabinStartKind.FIXED,
+                time_seconds=0.0,
             ),
         )
 
@@ -107,6 +131,97 @@ def build_three_station_two_cabin_merge_artifact(
             headway_pair_builder or SparseHeadwayPairBuilder()
         ),
     ).build(scenario, config)
+
+
+def build_three_station_time_refinement_artifact() -> EanBuildArtifact:
+    scenario = replace(
+        build_three_station_scenario(),
+        id=THREE_STATION_TIME_REFINEMENT_CASE_ID,
+    )
+    base_config = build_three_station_ean_config(scenario)
+    config = replace(
+        base_config,
+        horizon_seconds=THREE_STATION_TIME_REFINEMENT_HORIZON_SECONDS,
+        tail_seconds=0.0,
+        station_configs=tuple(
+            replace(station, waiting_mode=StationWaitingMode.NO_WAITING)
+            for station in base_config.station_configs
+        ),
+    )
+    return network_ean_builder_for_pattern(
+        pattern_definition=build_three_station_ean_pattern_definition(),
+        start_builder=_OneCabinTimeRefinementStartBuilder(),
+        headway_pair_builder=SparseHeadwayPairBuilder(),
+    ).build(scenario, config)
+
+
+def build_three_station_network_time_refinement_probe() -> DddNetworkTimeProblem:
+    """Build a physical one-cabin witness for anonymous-flow time refinement."""
+
+    artifact = build_three_station_time_refinement_artifact()
+    movement = EanArtifactToDddMovementProblemAdapter().build(artifact)
+    start = movement.starts[0]
+    first_options = movement.route_options_by_state_id[start.state_id]
+    first_by_decision = {option.decision: option for option in first_options}
+    if set(first_by_decision) != {
+        DddRouteDecision.STOP,
+        DddRouteDecision.SKIP,
+    }:
+        raise ValueError("physical DDD time probe needs initial Stop and Skip")
+    stop = first_by_decision[DddRouteDecision.STOP]
+    skip = first_by_decision[DddRouteDecision.SKIP]
+    if stop.to_state_id != skip.to_state_id:
+        raise ValueError("physical DDD time probe requires Stop/Skip reconvergence")
+    continuation_options = movement.route_options_by_state_id[stop.to_state_id]
+    if len(continuation_options) != 1:
+        raise ValueError("physical DDD time probe needs one continuation option")
+    continuation = continuation_options[0]
+
+    skip_arrival = start.time_seconds + skip.duration_seconds
+    stop_arrival = start.time_seconds + stop.duration_seconds
+    skip_terminal = skip_arrival + continuation.duration_seconds
+    stop_terminal = stop_arrival + continuation.duration_seconds
+    terminal_threshold = (skip_terminal + stop_terminal) / 2.0
+    sentinel = stop_terminal + 10.0
+    if not (
+        stop_arrival < movement.operational_end_seconds < skip_terminal
+    ):
+        raise ValueError("physical DDD time probe horizon does not separate visits")
+
+    broad_upper = sentinel + 100.0
+    partitions = []
+    for state in movement.states:
+        if state.id == stop.to_state_id:
+            boundaries = (skip_arrival, stop_arrival + 5.0)
+        elif state.id == continuation.to_state_id:
+            boundaries = (skip_terminal, terminal_threshold, sentinel)
+        else:
+            boundaries = (0.0, broad_upper)
+        partitions.append(DddTimePartition(state.id, boundaries))
+
+    result = DddNetworkTimeProblem(
+        movement_problem=movement,
+        discretization=DddTimeDiscretization(partitions=tuple(partitions)),
+        objective=DddNetworkTimeObjective(
+            route_option_costs=tuple(
+                DddRouteOptionCost(
+                    option.id,
+                    2.0 if option.id == skip.id else 0.0,
+                )
+                for option in movement.route_options
+            ),
+            terminal_costs=(
+                DddTerminalThresholdCost(
+                    state_id=continuation.to_state_id,
+                    threshold_seconds=terminal_threshold,
+                    before_cost=0.0,
+                    at_or_after_cost=1.0,
+                ),
+            ),
+        ),
+    )
+    result.validate()
+    return result
 
 
 def build_three_station_two_cabin_merge_probe_objective(

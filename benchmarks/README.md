@@ -62,6 +62,22 @@ shared state cell at the derived boundary raises the master bound to one and
 closes `LB = UB = 1` in round two. This is a correctness and bound-contract
 fixture, not a runtime or scaling benchmark.
 
+Run the same two-round bound proof on the physical Three-Station movement
+network with an anonymous integer-flow master:
+
+```bash
+.venv/bin/python benchmarks/run_ddd_phase0_network_time_refinement.py
+```
+
+The builder derives reachable visit layers and partial timed arcs from the
+network-backed DDD movement problem. The first flow solve has three reachable
+nodes, six arcs, and lower bound zero. Strict lifting derives a split at the
+physical `R_entry_lr` state while cell-free recovery supplies objective one.
+After rebuilding, the second flow solve proves `LB = UB = 1`; the reconstructed
+two-visit trajectory passes complete sparse EAN validation. This closes the
+physical anonymous-flow Phase-0 gate, but it does not yet combine multiple
+cabins with delayed merge-conflict rows.
+
 Run one EAN passenger benchmark:
 
 ```bash

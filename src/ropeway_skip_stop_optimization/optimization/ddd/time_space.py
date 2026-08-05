@@ -422,7 +422,7 @@ class DddPartialTimeMaster:
                 for target_cell in problem.discretization.partition(
                     option.to_state_id
                 ).cells:
-                    if not _partial_arc_is_compatible(
+                    if not ddd_partial_arc_is_compatible(
                         source_cell=source_cell,
                         fixed_source_time=fixed_source_time,
                         target_cell=target_cell,
@@ -480,7 +480,7 @@ class DddPartialTimeMaster:
         )
 
 
-def _partial_arc_is_compatible(
+def ddd_partial_arc_is_compatible(
     *,
     source_cell: DddTimeCell | None,
     fixed_source_time: float | None,

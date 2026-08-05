@@ -10,6 +10,27 @@ from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddRouteDecision,
     DddRouteOption,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.network_refinement import (
+    DddNetworkTimeRefinementIteration,
+    DddNetworkTimeRefinementResult,
+    DddNetworkTimeRefinementSolver,
+    DddNetworkTimeRefinementStatus,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
+    DddAnonymousFlowDecomposer,
+    DddAnonymousFlowMaster,
+    DddAnonymousFlowResult,
+    DddAnonymousFlowStatus,
+    DddAnonymousFlowValue,
+    DddLayeredTimeArc,
+    DddLayeredTimeArcKind,
+    DddLayeredTimeNetwork,
+    DddLayeredTimeNetworkBuilder,
+    DddLayeredTimeNode,
+    DddNetworkTimeObjective,
+    DddNetworkPathProblemAdapter,
+    DddNetworkTimeProblem,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.ean_plan_adapter import (
     DddReferenceToEanMovementPlanAdapter,
 )
@@ -36,6 +57,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.reference import (
     DddReferenceTrajectory,
     DddReferenceTrajectoryGenerator,
     DddReferenceVisit,
+    build_ddd_reference_visit,
     find_ddd_reference_conflicts,
     validate_ddd_reference_solution,
 )
@@ -79,10 +101,16 @@ from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
     DddTimeDiscretization,
     DddTimePartition,
     DddTimeSpaceObjective,
+    ddd_partial_arc_is_compatible,
 )
 
 __all__ = [
     "DddCellFreeSupportRecovery",
+    "DddAnonymousFlowDecomposer",
+    "DddAnonymousFlowMaster",
+    "DddAnonymousFlowResult",
+    "DddAnonymousFlowStatus",
+    "DddAnonymousFlowValue",
     "DddDelayedConflictSolver",
     "DddEventCellInconsistency",
     "DddExactLiftResult",
@@ -95,6 +123,18 @@ __all__ = [
     "DddIterativeStatus",
     "DddMovementProblem",
     "DddMovementState",
+    "DddLayeredTimeArc",
+    "DddLayeredTimeArcKind",
+    "DddLayeredTimeNetwork",
+    "DddLayeredTimeNetworkBuilder",
+    "DddLayeredTimeNode",
+    "DddNetworkTimeObjective",
+    "DddNetworkPathProblemAdapter",
+    "DddNetworkTimeProblem",
+    "DddNetworkTimeRefinementIteration",
+    "DddNetworkTimeRefinementResult",
+    "DddNetworkTimeRefinementSolver",
+    "DddNetworkTimeRefinementStatus",
     "DddPartialTimedArc",
     "DddPartialTimedPath",
     "DddPartialTimeMaster",
@@ -143,6 +183,8 @@ __all__ = [
     "DddTimeRefinementStatus",
     "DddTimeSpaceObjective",
     "EanArtifactToDddMovementProblemAdapter",
+    "build_ddd_reference_visit",
+    "ddd_partial_arc_is_compatible",
     "find_ddd_reference_conflicts",
     "validate_ddd_recovered_schedule",
     "validate_ddd_reference_solution",
