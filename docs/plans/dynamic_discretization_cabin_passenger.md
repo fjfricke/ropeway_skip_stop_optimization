@@ -45,6 +45,12 @@ The first proof slice is deliberately movement-only and deterministic:
 - finite-horizon source/sink semantics;
 - complete resource and headway validation.
 
+With these conditions combined, event times are predetermined. This slice
+is therefore a complete correctness oracle for horizon, projection, path
+decomposition, and validation semantics, not a meaningful optimization or
+performance benchmark. The first nontrivial DDD optimization gate is fixed
+$K$, fixed starts, Stop/Skip alternatives, and no additional waiting.
+
 Stop/Skip alternatives are the next movement stage. Additional cabin waiting,
 platform occupancy, passenger feasibility, passenger journey time, optimized
 initial placement, and day-scale operation follow as separate gated stages.
@@ -773,6 +779,44 @@ Deliver:
 - a census tool estimating full-grid and partial-network sizes;
 - a reference complete expansion for tiny instances only.
 
+The reviewable proof draft lives as the standalone LaTeX note
+`idp_report/notes/ddd_phase0/main.tex`. The read-only census entry point is
+`benchmarks/run_ddd_phase0_census.py`; it builds sparse artifacts and reports
+the exact complete pair universe without materializing all pairs.
+
+Implemented Phase-0 reference infrastructure:
+
+- solver-independent domain types in `optimization/ddd/models.py`;
+- strict sparse-EAN adapter in `optimization/ddd/artifact_adapter.py`;
+- exhaustive trajectory generation, resource sweep, symmetry-reduced
+  combination, and complete reference validation in
+  `optimization/ddd/reference.py`;
+- conversion back to the existing `EanMovementPlan` and therefore reuse of
+  complete validation, replay, and export semantics;
+- benchmark entry point `benchmarks/run_ddd_phase0_reference.py`;
+- synthetic boundary/conflict tests and a tiny continuous-EAN cross-check.
+- a physical two-cabin Three-Station Stop/Skip fixture with four exact route
+  supports, three feasible supports, and one independently reproduced
+  exit-switch violation.
+- a closed solver-independent delayed-conflict loop whose optimistic support
+  master selects that invalid support, whose exact lift returns structured
+  `RESOURCE_HEADWAY_CONFLICT` evidence, and whose prefix cut excludes exactly
+  the proven conflict before a validated second-round solution is accepted.
+- a genuine time-partition fixture whose initial partial path splices two
+  incompatible witnesses in one coarse event cell, whose strict lift derives
+  the exact split boundary, and whose rebuilt master raises the certified
+  lower bound from zero to one;
+- a separate cell-free support recovery that validates an objective-one
+  incumbent in the first round, so primal discovery does not wait for bound
+  refinement; the second round closes `LB = UB = 1`, in agreement with the
+  exhaustive exact oracle.
+
+The next missing implementation mechanism is a network-derived layered
+partial graph with anonymous integer cabin flow. The current time master
+enumerates paths on one tiny acyclic instance and therefore proves semantics,
+not scalability. The next physical fixture must generate its partitions and
+partial arcs from `EanMovementNetwork` rather than handwritten states.
+
 Gate:
 
 - no production solver code until the movement-only lower-bound theorem and
@@ -786,6 +830,10 @@ Support one deterministic circulation pattern and fixed service semantics.
 Implement sparse partitions, anonymous cabin flow, exact decomposition,
 continuous timing lift, and complete validation.
 
+This stage deliberately contains no scheduling choice. Implement it only as
+the smallest executable reference kernel and exhaustive oracle. Do not use its
+runtime or zero objective as evidence that DDD improves optimization.
+
 Gate:
 
 - exact agreement with exhaustive small reference cases;
@@ -797,6 +845,9 @@ Gate:
 
 Add alternative route arcs and exact resource usages. Build mandatory-core
 packing rows and refine from exact merge/headway conflicts.
+
+This is the first nontrivial performance gate: route choices alter event times
+and merge order while the no-wait exact-time universe remains finite.
 
 Gate:
 
@@ -1035,15 +1086,22 @@ bound-driven discretization refinement.
 
 ## Immediate Next Work
 
-1. Freeze the full movement-only mathematical contract and horizon semantics.
-2. Write the projection, lifting, and refinement proofs for fixed starts,
-   deterministic circulation, and no additional waiting.
-3. Build a model-size census from the current canonical movement network.
-4. Implement only the partition, partial-network, and bound-certificate data
-   types.
-5. Add an exhaustive tiny reference expansion.
-6. Demonstrate one complete LB/lift/refine/UB loop before introducing Stop,
-   Skip, passengers, OIP, or a large benchmark.
+Completed Phase-0 foundations are the movement contract, proof note, model-size
+census, exhaustive oracle, delayed resource-conflict loop, safe time-cell
+split, strict lift, cell-free primal recovery, and the first complete
+`LB/lift/refine/UB` certificate.
+
+Next:
+
+1. derive visit-layer partitions and partial movement arcs from the canonical
+   physical `EanMovementNetwork`;
+2. replace enumerated one-cabin paths with anonymous integer flow and exact
+   deterministic path decomposition;
+3. preserve strict lift and cell-free recovery as separate consumers of the
+   decomposed physical route support;
+4. reproduce the bound trace on a physical fixed-start Three-Station case;
+5. only then combine time-cell refinement with delayed merge conflicts for
+   multiple cabins.
 
 This sequence is intentionally conservative. The main value of the approach
 is the certificate
