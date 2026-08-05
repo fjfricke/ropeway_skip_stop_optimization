@@ -504,6 +504,46 @@ def test_dynamic_headway_pool_adds_one_binary_and_two_constraints() -> None:
         movement_model.headway_constraint_pool.add_pairs((pair,))
 
 
+def test_dynamic_headway_pool_supports_multiple_matrix_batches() -> None:
+    gp = pytest.importorskip("gurobipy")
+    scenario = _single_station_ring()
+    config = _config()
+    fleet_config = EanFleetConfig(
+        mode=EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT,
+        available_fleet_count=2,
+        cardinality_mode=EanFleetCardinalityMode.EXACT,
+    )
+    base_builder = network_ean_builder_for_pattern(
+        pattern_definition=_single_state_pattern(), fleet_config=fleet_config
+    )
+    complete = base_builder.build(scenario, config)
+    sparse = replace(
+        base_builder, headway_pair_builder=SparseHeadwayPairBuilder()
+    ).build(scenario, config)
+    model = gp.Model("dynamic_headway_matrix_batches_test")
+    model.Params.OutputFlag = 0
+    movement_model = EanMovementModelBuilder(
+        headway_matrix_pair_batch_size=1
+    ).build(
+        model=model,
+        binary_vtype=gp.GRB.BINARY,
+        artifact=sparse,
+        optimization_config=EanOptimizationConfig().resolved_for_fleet_mode(
+            EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT
+        ),
+    )
+    before = (int(model.NumVars), int(model.NumConstrs))
+    pairs = complete.headway_pairs[:2]
+
+    movement_model.headway_constraint_pool.add_pairs(pairs)
+
+    assert int(model.NumVars) == before[0] + 2
+    assert int(model.NumConstrs) == before[1] + 4
+    assert set(movement_model.variables.headway_order) == {
+        pair.id for pair in pairs
+    }
+
+
 def test_capacity_optimizer_reuses_previous_feasible_probe() -> None:
     pytest.importorskip("gurobipy")
     result = EanInitialPlacementCapacityOptimizer().solve(

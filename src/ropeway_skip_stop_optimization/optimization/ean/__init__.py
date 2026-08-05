@@ -12,6 +12,13 @@ from ropeway_skip_stop_optimization.optimization.ean.headway_classification impo
     EanHeadwayCandidateTimeBounds,
     EanHeadwayPairClassification,
 )
+from ropeway_skip_stop_optimization.optimization.ean.headway_order_families import (
+    EanHeadwayOrderFamilyIndex,
+    EanHeadwayOrderReference,
+)
+from ropeway_skip_stop_optimization.optimization.ean.headway_merge_relaxation import (
+    EanDirectMergeHeadwayRelaxationIndex,
+)
 from ropeway_skip_stop_optimization.optimization.ean.fleet import (
     EanFleetPlan,
     EanInitialPlacementParameters,
@@ -122,6 +129,7 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers import (
     EanFixedMovementPassengerModel,
     EanFixedMovementPassengerModelBuilder,
     EanFixedMovementPassengerProblem,
+    EanFleetSymmetryBreaker,
     EanInitialPlacementCapacityCertificate,
     EanInitialPlacementCapacityOutputMode,
     EanInitialPlacementCapacityProbeResult,
@@ -232,9 +240,13 @@ __all__ = [
     "EanFleetMode",
     "EanHeadwayPairScope",
     "EanFleetPlan",
+    "EanFleetSymmetryBreaker",
     "EanFixedStartHeadwayClassifier",
     "EanHeadwayCandidateTimeBounds",
     "EanHeadwayPairClassification",
+    "EanHeadwayOrderFamilyIndex",
+    "EanHeadwayOrderReference",
+    "EanDirectMergeHeadwayRelaxationIndex",
     "EanInitialPlacementParameters",
     "EanInitialPlacementCapacityCertificate",
     "EanInitialPlacementCapacityOutputMode",

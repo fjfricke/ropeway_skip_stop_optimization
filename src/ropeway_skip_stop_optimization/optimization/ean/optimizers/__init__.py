@@ -10,6 +10,9 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.passenger_model 
     EanPassengerObjective,
     EanPassengerVariables,
 )
+from ropeway_skip_stop_optimization.optimization.ean.optimizers.fleet_symmetry import (
+    EanFleetSymmetryBreaker,
+)
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.initial_placement_capacity import (
     EanInitialPlacementCapacityCertificate,
     EanInitialPlacementCapacityOutputMode,
@@ -66,6 +69,7 @@ __all__ = [
     "EanFixedMovementPassengerModel",
     "EanFixedMovementPassengerModelBuilder",
     "EanFixedMovementPassengerProblem",
+    "EanFleetSymmetryBreaker",
     "EanInitialPlacementCapacityCertificate",
     "EanInitialPlacementCapacityOutputMode",
     "EanInitialPlacementCapacityProbeResult",

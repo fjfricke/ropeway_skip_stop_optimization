@@ -22,6 +22,13 @@ class EanOptimizationName(StrEnum):
     SLOT_TIME_RELAXATION_STRENGTHENING = "slot_time_relaxation_strengthening"
     TIGHT_BIG_M_BOUNDS = "tight_big_m_bounds"
     FIXED_START_HEADWAY_PRECEDENCE = "fixed_start_headway_precedence"
+    SHARED_MERGE_HEADWAY_ORDER = "shared_merge_headway_order"
+    DIAGNOSTIC_RELAX_MERGE_HEADWAYS = "diagnostic_relax_merge_headways"
+    OIP_FULL_INITIAL_STATE_SYMMETRY = "oip_full_initial_state_symmetry"
+    OIP_INITIAL_HEADWAY_PRECEDENCE = "oip_initial_headway_precedence"
+    OIP_INACTIVE_VARIABLE_CANONICALIZATION = (
+        "oip_inactive_variable_canonicalization"
+    )
 
 
 class EanOptimizationSelectionOrigin(StrEnum):
@@ -38,6 +45,9 @@ DEFAULT_EAN_OPTIMIZATION_NAMES: tuple[EanOptimizationName, ...] = (
     EanOptimizationName.CANDIDATE_HORIZON_PRUNING,
     EanOptimizationName.SINGLE_RING_DOMINATED_RIDE_PRUNING,
     EanOptimizationName.SLOT_TIME_RELAXATION_STRENGTHENING,
+    EanOptimizationName.OIP_FULL_INITIAL_STATE_SYMMETRY,
+    EanOptimizationName.OIP_INITIAL_HEADWAY_PRECEDENCE,
+    EanOptimizationName.OIP_INACTIVE_VARIABLE_CANONICALIZATION,
 )
 
 
@@ -55,6 +65,11 @@ class EanOptimizationConfig:
     enable_slot_time_relaxation_strengthening: bool = True
     enable_tight_big_m_bounds: bool = False
     enable_fixed_start_headway_precedence: bool = False
+    enable_shared_merge_headway_order: bool = False
+    enable_diagnostic_relax_merge_headways: bool = False
+    enable_oip_full_initial_state_symmetry: bool = True
+    enable_oip_initial_headway_precedence: bool = True
+    enable_oip_inactive_variable_canonicalization: bool = True
     formulation: EanFormulationConfig = EanFormulationConfig()
     selection_origin: EanOptimizationSelectionOrigin = field(
         default=EanOptimizationSelectionOrigin.AUTO,
@@ -77,6 +92,11 @@ class EanOptimizationConfig:
             enable_slot_time_relaxation_strengthening=False,
             enable_tight_big_m_bounds=False,
             enable_fixed_start_headway_precedence=False,
+            enable_shared_merge_headway_order=False,
+            enable_diagnostic_relax_merge_headways=False,
+            enable_oip_full_initial_state_symmetry=False,
+            enable_oip_initial_headway_precedence=False,
+            enable_oip_inactive_variable_canonicalization=False,
             formulation=EanFormulationConfig(),
             selection_origin=EanOptimizationSelectionOrigin.EXPLICIT,
         )
@@ -100,6 +120,22 @@ class EanOptimizationConfig:
             enable_tight_big_m_bounds=EanOptimizationName.TIGHT_BIG_M_BOUNDS in enabled,
             enable_fixed_start_headway_precedence=(
                 EanOptimizationName.FIXED_START_HEADWAY_PRECEDENCE in enabled
+            ),
+            enable_shared_merge_headway_order=(
+                EanOptimizationName.SHARED_MERGE_HEADWAY_ORDER in enabled
+            ),
+            enable_diagnostic_relax_merge_headways=(
+                EanOptimizationName.DIAGNOSTIC_RELAX_MERGE_HEADWAYS in enabled
+            ),
+            enable_oip_full_initial_state_symmetry=(
+                EanOptimizationName.OIP_FULL_INITIAL_STATE_SYMMETRY in enabled
+            ),
+            enable_oip_initial_headway_precedence=(
+                EanOptimizationName.OIP_INITIAL_HEADWAY_PRECEDENCE in enabled
+            ),
+            enable_oip_inactive_variable_canonicalization=(
+                EanOptimizationName.OIP_INACTIVE_VARIABLE_CANONICALIZATION
+                in enabled
             ),
             formulation=formulation or EanFormulationConfig(),
             selection_origin=EanOptimizationSelectionOrigin.EXPLICIT,
@@ -199,6 +235,20 @@ class EanOptimizationConfig:
             names.append(EanOptimizationName.TIGHT_BIG_M_BOUNDS)
         if self.enable_fixed_start_headway_precedence:
             names.append(EanOptimizationName.FIXED_START_HEADWAY_PRECEDENCE)
+        if self.enable_shared_merge_headway_order:
+            names.append(EanOptimizationName.SHARED_MERGE_HEADWAY_ORDER)
+        if self.enable_diagnostic_relax_merge_headways:
+            names.append(
+                EanOptimizationName.DIAGNOSTIC_RELAX_MERGE_HEADWAYS
+            )
+        if self.enable_oip_full_initial_state_symmetry:
+            names.append(EanOptimizationName.OIP_FULL_INITIAL_STATE_SYMMETRY)
+        if self.enable_oip_initial_headway_precedence:
+            names.append(EanOptimizationName.OIP_INITIAL_HEADWAY_PRECEDENCE)
+        if self.enable_oip_inactive_variable_canonicalization:
+            names.append(
+                EanOptimizationName.OIP_INACTIVE_VARIABLE_CANONICALIZATION
+            )
         return tuple(names)
 
     def selection_label(self) -> str:
@@ -234,10 +284,27 @@ class EanOptimizationConfig:
         self,
         fleet_mode: EanFleetMode,
     ) -> EanOptimizationConfig:
+        if (
+            self.enable_shared_merge_headway_order
+            and self.enable_diagnostic_relax_merge_headways
+        ):
+            raise ValueError(
+                "diagnostic_relax_merge_headways cannot be combined with "
+                "shared_merge_headway_order"
+            )
         if fleet_mode is EanFleetMode.FIXED_STARTS:
             return self
         if fleet_mode is not EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT:
             raise ValueError(f"unsupported EAN fleet mode: {fleet_mode}")
+
+        if (
+            self.enable_oip_initial_headway_precedence
+            and not self.enable_oip_full_initial_state_symmetry
+        ):
+            raise ValueError(
+                "oip_initial_headway_precedence requires "
+                "oip_full_initial_state_symmetry"
+            )
 
         unsupported = []
         if self.enable_candidate_horizon_pruning:
@@ -251,6 +318,14 @@ class EanOptimizationConfig:
         if self.enable_fixed_start_headway_precedence:
             unsupported.append(
                 EanOptimizationName.FIXED_START_HEADWAY_PRECEDENCE.value
+            )
+        if self.enable_shared_merge_headway_order:
+            unsupported.append(
+                EanOptimizationName.SHARED_MERGE_HEADWAY_ORDER.value
+            )
+        if self.enable_diagnostic_relax_merge_headways:
+            unsupported.append(
+                EanOptimizationName.DIAGNOSTIC_RELAX_MERGE_HEADWAYS.value
             )
         if (
             self.selection_origin is EanOptimizationSelectionOrigin.EXPLICIT
@@ -294,6 +369,8 @@ class EanOptimizationConfig:
             enable_single_ring_dominated_ride_pruning=False,
             enable_tight_big_m_bounds=False,
             enable_fixed_start_headway_precedence=False,
+            enable_shared_merge_headway_order=False,
+            enable_diagnostic_relax_merge_headways=False,
             formulation=replace(
                 self.formulation,
                 horizon=EanHorizonFormulation.EXACT_TIME_ACTIVATION,

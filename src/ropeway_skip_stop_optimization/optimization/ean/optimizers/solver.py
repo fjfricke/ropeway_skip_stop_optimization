@@ -25,6 +25,10 @@ from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     EanBoardTimeFormulation,
     EanHorizonFormulation,
 )
+from ropeway_skip_stop_optimization.optimization.ean.headway_separator import (
+    EanHeadwayViolation,
+    separate_all_headway_violations,
+)
 from ropeway_skip_stop_optimization.optimization.ean.fleet import EanFleetPlan
 from ropeway_skip_stop_optimization.optimization.ean.models import EanHeadwayPairScope
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.fixed_movement_passenger_model import (
@@ -196,6 +200,12 @@ class EanModelBuildMetrics:
     fixed_headway_pair_count: int = 0
     disjunctive_headway_pair_count: int = 0
     redundant_headway_pair_count: int = 0
+    headway_order_family_count: int = 0
+    shared_headway_pair_count: int = 0
+    headway_order_variable_savings: int = 0
+    singleton_headway_order_family_count: int = 0
+    diagnostically_omitted_headway_checkpoint_count: int = 0
+    diagnostically_omitted_headway_pair_count: int = 0
     peak_rss_bytes: int | None = None
 
 
@@ -248,6 +258,13 @@ class EanOptimizationMetadata:
     mip_start_unserved_passenger_count: int | None = None
     mip_start_passenger_objective_seconds: float | None = None
     mip_start_generation_seconds: float | None = None
+    diagnostic_headway_separation_complete: bool = False
+    diagnostic_headway_feasible: bool | None = None
+    diagnostic_headway_violation_count: int = 0
+    diagnostic_max_headway_violation_seconds: float | None = None
+    diagnostic_headway_separation_seconds: float = 0.0
+    diagnostically_omitted_headway_checkpoint_count: int = 0
+    diagnostically_omitted_headway_pair_count: int = 0
 
     def passenger_export_dict(self) -> dict[str, Any]:
         """Preserve the established passenger-result JSON metadata contract."""
@@ -284,6 +301,13 @@ class EanOptimizationMetadata:
             "mip_start_unserved_passenger_count",
             "mip_start_passenger_objective_seconds",
             "mip_start_generation_seconds",
+            "diagnostic_headway_separation_complete",
+            "diagnostic_headway_feasible",
+            "diagnostic_headway_violation_count",
+            "diagnostic_max_headway_violation_seconds",
+            "diagnostic_headway_separation_seconds",
+            "diagnostically_omitted_headway_checkpoint_count",
+            "diagnostically_omitted_headway_pair_count",
             "optimization_config",
             "progress_samples",
         }
@@ -576,6 +600,24 @@ class EanOptimizer:
             redundant_headway_pair_count=(
                 movement_model.build_metrics.redundant_headway_pair_count
             ),
+            headway_order_family_count=(
+                movement_model.build_metrics.headway_order_family_count
+            ),
+            shared_headway_pair_count=(
+                movement_model.build_metrics.shared_headway_pair_count
+            ),
+            headway_order_variable_savings=(
+                movement_model.build_metrics.headway_order_variable_savings
+            ),
+            singleton_headway_order_family_count=(
+                movement_model.build_metrics.singleton_headway_order_family_count
+            ),
+            diagnostically_omitted_headway_checkpoint_count=(
+                movement_model.build_metrics.diagnostically_omitted_headway_checkpoint_count
+            ),
+            diagnostically_omitted_headway_pair_count=(
+                movement_model.build_metrics.diagnostically_omitted_headway_pair_count
+            ),
             peak_rss_bytes=peak_rss_bytes(),
         )
         _log_model_summary(
@@ -652,11 +694,49 @@ class EanOptimizer:
             is EanHorizonFormulation.EXACT_TIME_ACTIVATION
             else 1e-6
         )
-        validate_ean_movement_plan_against_artifact(
-            problem.artifact,
-            movement_plan,
-            tolerance_seconds=tolerance,
-        ).raise_for_errors()
+        diagnostic_headway_violations: tuple[EanHeadwayViolation, ...] = ()
+        diagnostic_headway_separation_seconds = 0.0
+        if optimization_config.enable_diagnostic_relax_merge_headways:
+            retained_pair_ids = (
+                movement_model.headway_constraint_pool.materialized_pair_ids
+            )
+            retained_artifact = replace(
+                problem.artifact,
+                headway_pairs=tuple(
+                    pair
+                    for pair in problem.artifact.headway_pairs
+                    if pair.id in retained_pair_ids
+                ),
+            )
+            validate_ean_movement_plan_against_artifact(
+                retained_artifact,
+                movement_plan,
+                tolerance_seconds=tolerance,
+            ).raise_for_errors()
+            separation_started = perf_counter()
+            diagnostic_headway_violations = separate_all_headway_violations(
+                problem.artifact,
+                movement_plan,
+                tolerance_seconds=tolerance,
+            )
+            diagnostic_headway_separation_seconds = (
+                perf_counter() - separation_started
+            )
+            materialized_violations = {
+                violation.pair.id
+                for violation in diagnostic_headway_violations
+            } & retained_pair_ids
+            if materialized_violations:
+                raise RuntimeError(
+                    "diagnostic solution violates retained headway pairs: "
+                    f"{sorted(materialized_violations)[:10]!r}"
+                )
+        else:
+            validate_ean_movement_plan_against_artifact(
+                problem.artifact,
+                movement_plan,
+                tolerance_seconds=tolerance,
+            ).raise_for_errors()
         passenger_plan = (
             passenger_model.extract_passenger_plan()
             if passenger_model is not None
@@ -686,6 +766,12 @@ class EanOptimizer:
                 mip_start_unserved_passenger_count=mip_start_unserved_count,
                 mip_start_passenger_objective_seconds=(
                     mip_start_passenger_objective
+                ),
+                diagnostic_headway_violations=(
+                    diagnostic_headway_violations
+                ),
+                diagnostic_headway_separation_seconds=(
+                    diagnostic_headway_separation_seconds
                 ),
             ),
             fleet_plan=(
@@ -1051,6 +1137,8 @@ def _metadata(
     mip_start_active_cabin_count: int | None = None,
     mip_start_unserved_passenger_count: int | None = None,
     mip_start_passenger_objective_seconds: float | None = None,
+    diagnostic_headway_violations: tuple[EanHeadwayViolation, ...] = (),
+    diagnostic_headway_separation_seconds: float = 0.0,
 ) -> EanOptimizationMetadata:
     if passenger_model is None:
         objective_kind = None
@@ -1141,6 +1229,36 @@ def _metadata(
             build_metrics.mip_start_seconds
             if resolved_mip_start_strategy is not None
             else None
+        ),
+        diagnostic_headway_separation_complete=(
+            optimization_config.enable_diagnostic_relax_merge_headways
+            and movement_plan is not None
+        ),
+        diagnostic_headway_feasible=(
+            not diagnostic_headway_violations
+            if optimization_config.enable_diagnostic_relax_merge_headways
+            and movement_plan is not None
+            else None
+        ),
+        diagnostic_headway_violation_count=len(
+            diagnostic_headway_violations
+        ),
+        diagnostic_max_headway_violation_seconds=(
+            max(
+                violation.violation_seconds
+                for violation in diagnostic_headway_violations
+            )
+            if diagnostic_headway_violations
+            else None
+        ),
+        diagnostic_headway_separation_seconds=(
+            diagnostic_headway_separation_seconds
+        ),
+        diagnostically_omitted_headway_checkpoint_count=(
+            build_metrics.diagnostically_omitted_headway_checkpoint_count
+        ),
+        diagnostically_omitted_headway_pair_count=(
+            build_metrics.diagnostically_omitted_headway_pair_count
         ),
     )
 

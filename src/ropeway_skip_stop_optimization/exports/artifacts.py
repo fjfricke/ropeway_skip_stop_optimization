@@ -388,6 +388,24 @@ class EanModelBuildProfileArtifactBuilder(ArtifactBuilder):
                     "redundant_headway_pair_count": (
                         metadata.build_metrics.redundant_headway_pair_count
                     ),
+                    "headway_order_family_count": (
+                        metadata.build_metrics.headway_order_family_count
+                    ),
+                    "shared_headway_pair_count": (
+                        metadata.build_metrics.shared_headway_pair_count
+                    ),
+                    "headway_order_variable_savings": (
+                        metadata.build_metrics.headway_order_variable_savings
+                    ),
+                    "singleton_headway_order_family_count": (
+                        metadata.build_metrics.singleton_headway_order_family_count
+                    ),
+                    "diagnostically_omitted_headway_checkpoint_count": (
+                        metadata.build_metrics.diagnostically_omitted_headway_checkpoint_count
+                    ),
+                    "diagnostically_omitted_headway_pair_count": (
+                        metadata.build_metrics.diagnostically_omitted_headway_pair_count
+                    ),
                     "demand_group_count": metadata.demand_group_count,
                     "ride_candidate_count": metadata.ride_candidate_count,
                     "slot_variable_count": metadata.slot_variable_count,

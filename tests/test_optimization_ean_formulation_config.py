@@ -99,6 +99,77 @@ def test_ean_configuration_all_and_none_use_current_formulation_defaults() -> No
     assert not resolved_oip.enable_candidate_horizon_pruning
     assert not resolved_oip.enable_single_ring_dominated_ride_pruning
     assert resolved_oip.enable_slot_time_relaxation_strengthening
+    assert resolved_oip.enable_oip_full_initial_state_symmetry
+    assert resolved_oip.enable_oip_initial_headway_precedence
+    assert resolved_oip.enable_oip_inactive_variable_canonicalization
+    assert not EanOptimizationConfig.from_selection(
+        "none"
+    ).enable_oip_full_initial_state_symmetry
+
+
+def test_oip_symmetry_optimizations_are_independently_selectable() -> None:
+    config = EanOptimizationConfig.from_selection(
+        "oip_full_initial_state_symmetry,"
+        "oip_initial_headway_precedence,"
+        "oip_inactive_variable_canonicalization"
+    )
+
+    assert config.enable_oip_full_initial_state_symmetry
+    assert config.enable_oip_initial_headway_precedence
+    assert config.enable_oip_inactive_variable_canonicalization
+    assert config.selection_label() == (
+        "oip_full_initial_state_symmetry,"
+        "oip_initial_headway_precedence,"
+        "oip_inactive_variable_canonicalization"
+    )
+
+
+def test_oip_initial_headway_precedence_requires_full_state_symmetry() -> None:
+    config = EanOptimizationConfig.from_selection(
+        "oip_initial_headway_precedence"
+    )
+
+    with pytest.raises(ValueError, match="requires oip_full_initial_state_symmetry"):
+        config.resolved_for_fleet_mode(EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT)
+
+
+def test_shared_merge_headway_order_is_opt_in_and_fixed_start_only() -> None:
+    default = EanOptimizationConfig.from_selection("all")
+    config = EanOptimizationConfig.from_selection(
+        "shared_merge_headway_order"
+    )
+
+    assert not default.enable_shared_merge_headway_order
+    assert config.enable_shared_merge_headway_order
+    assert config.selection_label() == "shared_merge_headway_order"
+    with pytest.raises(
+        NotImplementedError,
+        match="shared_merge_headway_order",
+    ):
+        config.resolved_for_fleet_mode(
+            EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT
+        )
+
+
+def test_diagnostic_merge_relaxation_is_explicit_and_not_combined_with_shared() -> None:
+    config = EanOptimizationConfig.from_selection(
+        "diagnostic_relax_merge_headways"
+    )
+
+    assert config.enable_diagnostic_relax_merge_headways
+    assert config.selection_label() == "diagnostic_relax_merge_headways"
+    with pytest.raises(
+        NotImplementedError,
+        match="diagnostic_relax_merge_headways",
+    ):
+        config.resolved_for_fleet_mode(
+            EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT
+        )
+    with pytest.raises(ValueError, match="cannot be combined"):
+        EanOptimizationConfig.from_selection(
+            "shared_merge_headway_order,"
+            "diagnostic_relax_merge_headways"
+        ).resolved_for_fleet_mode(EanFleetMode.FIXED_STARTS)
 
 
 def test_ean_configuration_all_accepts_formulation_override() -> None:

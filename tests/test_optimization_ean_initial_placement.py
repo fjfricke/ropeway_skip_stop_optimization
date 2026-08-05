@@ -708,6 +708,106 @@ def test_initial_rope_order_uses_one_directed_cabin_id_headway() -> None:
     ].previous_event_time_seconds == pytest.approx(headway_seconds)
 
 
+def test_oip_full_initial_state_symmetry_builds_category_and_entry_order() -> None:
+    gp = pytest.importorskip("gurobipy")
+    example = ThreeStationOptimizedInitialPlacementExample()
+    artifact = _artifact(example, available_fleet_count=2)
+    movement, model = _movement_model(gp, artifact)
+
+    constraint_names = {constraint.ConstrName for constraint in model.getConstrs()}
+    assert "initial_state_category_symmetry_1" in constraint_names
+    assert any(
+        name.startswith("initial_station_order_")
+        and name.endswith("_0_1")
+        for name in constraint_names
+    )
+    assert any(
+        name.startswith("initial_platform_entry_order_")
+        and name.endswith("_0_1")
+        for name in constraint_names
+    )
+    assert movement.headway_constraint_pool.redundant_pair_count > 0
+
+
+def test_oip_category_order_reduces_initial_rope_headways_to_neighbors() -> None:
+    gp = pytest.importorskip("gurobipy")
+    example = ThreeStationOptimizedInitialPlacementExample()
+    artifact = _artifact(example, available_fleet_count=3)
+    _movement, model = _movement_model(gp, artifact)
+    previous_switch_id = artifact.circulation_state_ids[-1]
+    constraint_names = {constraint.ConstrName for constraint in model.getConstrs()}
+
+    assert f"initial_rope_headway_{previous_switch_id}_0_1" in constraint_names
+    assert f"initial_rope_headway_{previous_switch_id}_1_2" in constraint_names
+    assert f"initial_rope_headway_{previous_switch_id}_0_2" not in constraint_names
+
+
+def test_oip_symmetry_options_can_restore_legacy_phase_model() -> None:
+    gp = pytest.importorskip("gurobipy")
+    example = ThreeStationOptimizedInitialPlacementExample()
+    artifact = _artifact(example, available_fleet_count=3)
+    optimization_config = replace(
+        _initial_placement_optimization_config(),
+        enable_oip_full_initial_state_symmetry=False,
+        enable_oip_initial_headway_precedence=False,
+        enable_oip_inactive_variable_canonicalization=False,
+    )
+    movement, model = _movement_model(gp, artifact, optimization_config)
+
+    constraint_names = {constraint.ConstrName for constraint in model.getConstrs()}
+    assert "initial_phase_symmetry_1" in constraint_names
+    assert "initial_state_category_symmetry_1" not in constraint_names
+    assert not any(
+        name.startswith("initial_platform_entry_order_")
+        for name in constraint_names
+    )
+    assert not any(
+        name.startswith("initial_station_order_")
+        for name in constraint_names
+    )
+    previous_switch_id = artifact.circulation_state_ids[-1]
+    assert f"initial_rope_headway_{previous_switch_id}_0_2" in constraint_names
+    assert movement.headway_constraint_pool.redundant_pair_count == 0
+
+
+def test_oip_initial_headway_precedence_is_independently_measurable() -> None:
+    gp = pytest.importorskip("gurobipy")
+    example = ThreeStationOptimizedInitialPlacementExample()
+    artifact = _artifact(example, available_fleet_count=2)
+    optimization_config = replace(
+        _initial_placement_optimization_config(),
+        enable_oip_initial_headway_precedence=False,
+    )
+    movement, model = _movement_model(gp, artifact, optimization_config)
+
+    constraint_names = {constraint.ConstrName for constraint in model.getConstrs()}
+    assert "initial_state_category_symmetry_1" in constraint_names
+    assert any(
+        name.startswith("initial_platform_entry_order_")
+        for name in constraint_names
+    )
+    assert movement.headway_constraint_pool.redundant_pair_count == 0
+    assert len(movement.variables.headway_order) == len(artifact.headway_pairs)
+
+
+def test_oip_inactive_operational_variables_are_fixed_to_lower_bounds() -> None:
+    gp = pytest.importorskip("gurobipy")
+    example = ThreeStationOptimizedInitialPlacementExample()
+    artifact = _artifact(example, available_fleet_count=2)
+    movement, model = _movement_model(gp, artifact)
+    assert movement.fleet_model is not None
+    fleet = movement.fleet_model.variables
+    key = next(key for key in movement.variables.switch_time if key[0] == 0)
+    variable = movement.variables.switch_time[key]
+
+    model.addConstr(fleet.cabin_active[0] == 0)
+    model.setObjective(variable, gp.GRB.MAXIMIZE)
+    model.optimize()
+
+    assert model.SolCount >= 1
+    assert variable.X == pytest.approx(variable.LB)
+
+
 def test_initial_placement_tail_keeps_tail_routes_and_headways_valid() -> None:
     gp = pytest.importorskip("gurobipy")
     example = ThreeStationOptimizedInitialPlacementExample()
@@ -844,9 +944,11 @@ def test_fixed_starts_and_initial_placement_use_same_k_with_comparable_tail_mode
     assert len(fixed_movement.variables.headway_order) == len(
         fixed_artifact.headway_pairs
     )
-    assert len(initial_placement_movement.variables.headway_order) == len(
-        initial_placement_artifact.headway_pairs
+    assert len(initial_placement_movement.variables.headway_order) == (
+        len(initial_placement_artifact.headway_pairs)
+        - initial_placement_movement.headway_constraint_pool.redundant_pair_count
     )
+    assert initial_placement_movement.headway_constraint_pool.redundant_pair_count > 0
     assert fixed_movement.variable_count > 0
     assert initial_placement_movement.variable_count > 0
     assert fixed_movement.constraint_count > 0

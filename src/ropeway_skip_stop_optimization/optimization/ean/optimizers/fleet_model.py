@@ -18,6 +18,9 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
     SwitchVisitDefinition,
 )
 from ropeway_skip_stop_optimization.optimization.ean.plan import EanMovementPlan
+from ropeway_skip_stop_optimization.optimization.ean.optimizers.fleet_symmetry import (
+    EanFleetSymmetryBreaker,
+)
 
 
 VisitKey = tuple[int, int]
@@ -284,6 +287,8 @@ class EanFleetModelBuilder:
         visits_by_cabin_id: dict[int, tuple[SwitchVisitDefinition, ...]],
         timing_by_switch_id: dict[str, SkipStopTiming],
         big_m: float,
+        enable_full_initial_state_symmetry: bool,
+        enable_inactive_variable_canonicalization: bool,
     ) -> EanFleetModel:
         parameters = artifact.initial_placement_parameters
         if parameters is None:
@@ -418,42 +423,28 @@ class EanFleetModelBuilder:
             visits_by_cabin_id=visits_by_cabin_id,
             timing_by_switch_id=timing_by_switch_id,
             big_m=big_m,
+            adjacent_only=enable_full_initial_state_symmetry,
         )
 
-        # Cabins are interchangeable at the service boundary.  Sorting their
-        # selected ring phases removes label permutations without imposing an
-        # order after a later service/skip merge.
-        sorted_cabin_ids = sorted(cabin_active)
-        initial_phase_expression = {
-            cabin_id: sum(
-                visit.visit_index
-                * (
-                    station_selected[(cabin_id, visit.visit_index)]
-                    + rope_selected[(cabin_id, visit.visit_index)]
-                )
-                for visit in visits[: parameters.initial_phase_visit_count]
-            )
-            for cabin_id, visits in visits_by_cabin_id.items()
-        }
-        for previous_id, current_id in zip(sorted_cabin_ids, sorted_cabin_ids[1:]):
-            model.addConstr(
-                initial_phase_expression[previous_id]
-                <= (
-                    initial_phase_expression[current_id]
-                    # In the selectable mode inactive cabins have phase zero
-                    # and must not constrain the active prefix.
-                    + parameters.initial_phase_visit_count
-                    * (2 - cabin_active[previous_id] - cabin_active[current_id])
-                ),
-                name=f"initial_phase_symmetry_{current_id}",
-            )
-
-        if not exact_fleet:
-            for previous_id, current_id in zip(sorted_cabin_ids, sorted_cabin_ids[1:]):
-                model.addConstr(
-                    cabin_active[current_id] <= cabin_active[previous_id],
-                    name=f"cabin_activation_symmetry_{current_id}",
-                )
+        EanFleetSymmetryBreaker(
+            enable_full_initial_state_order=enable_full_initial_state_symmetry,
+            enable_inactive_variable_canonicalization=(
+                enable_inactive_variable_canonicalization
+            ),
+        ).add_constraints(
+            model=model,
+            artifact=artifact,
+            cabin_active=cabin_active,
+            station_selected=station_selected,
+            rope_selected=rope_selected,
+            switch_time=switch_time,
+            exit_switch_time=exit_switch_time,
+            wait_time=wait_time,
+            stop=stop,
+            visits_by_cabin_id=visits_by_cabin_id,
+            timing_by_switch_id=timing_by_switch_id,
+            big_m=big_m,
+        )
 
         return EanFleetModel(
             artifact=artifact,
@@ -483,6 +474,7 @@ def _add_initial_rope_headways(
     visits_by_cabin_id: dict[int, tuple[SwitchVisitDefinition, ...]],
     timing_by_switch_id: dict[str, SkipStopTiming],
     big_m: float,
+    adjacent_only: bool,
 ) -> None:
     parameters = artifact.initial_placement_parameters
     if parameters is None:
@@ -503,22 +495,30 @@ def _add_initial_rope_headways(
         ].rope_to_next_switch_seconds
         headway_seconds = exit_headway_by_switch_id[previous_switch_id]
 
-        for leader_position, leader_id in enumerate(cabin_ids):
+        rope_pairs = (
+            tuple(zip(cabin_ids, cabin_ids[1:]))
+            if adjacent_only
+            else tuple(
+                (leader_id, follower_id)
+                for leader_position, leader_id in enumerate(cabin_ids)
+                for follower_id in cabin_ids[leader_position + 1 :]
+            )
+        )
+        for leader_id, follower_id in rope_pairs:
             leader_key = (leader_id, phase_index)
             leader_exit = switch_time[leader_key] - rope_seconds
-            for follower_id in cabin_ids[leader_position + 1 :]:
-                follower_key = (follower_id, phase_index)
-                follower_exit = switch_time[follower_key] - rope_seconds
-                model.addConstr(
-                    leader_exit + headway_seconds
-                    <= follower_exit
-                    + big_m
-                    * (2 - rope_selected[leader_key] - rope_selected[follower_key]),
-                    name=(
-                        f"initial_rope_headway_{previous_switch_id}_"
-                        f"{leader_id}_{follower_id}"
-                    ),
-                )
+            follower_key = (follower_id, phase_index)
+            follower_exit = switch_time[follower_key] - rope_seconds
+            model.addConstr(
+                leader_exit + headway_seconds
+                <= follower_exit
+                + big_m
+                * (2 - rope_selected[leader_key] - rope_selected[follower_key]),
+                name=(
+                    f"initial_rope_headway_{previous_switch_id}_"
+                    f"{leader_id}_{follower_id}"
+                ),
+            )
 
         regular_visits = tuple(
             visit

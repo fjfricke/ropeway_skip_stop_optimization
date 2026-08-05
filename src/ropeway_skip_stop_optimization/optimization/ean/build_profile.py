@@ -41,6 +41,8 @@ class EanBuildProgressEvent:
     fixed_pair_count: int | None = None
     disjunctive_pair_count: int | None = None
     redundant_pair_count: int | None = None
+    order_variable_count: int | None = None
+    order_variable_savings: int | None = None
     variable_count: int | None = None
     constraint_count: int | None = None
     nonzero_count: int | None = None
@@ -89,6 +91,12 @@ class EanMovementBuildMetrics:
     fixed_headway_pair_count: int = 0
     disjunctive_headway_pair_count: int = 0
     redundant_headway_pair_count: int = 0
+    headway_order_family_count: int = 0
+    shared_headway_pair_count: int = 0
+    headway_order_variable_savings: int = 0
+    singleton_headway_order_family_count: int = 0
+    diagnostically_omitted_headway_checkpoint_count: int = 0
+    diagnostically_omitted_headway_pair_count: int = 0
 
     def validate(self) -> None:
         if min(
@@ -101,6 +109,12 @@ class EanMovementBuildMetrics:
             self.fixed_headway_pair_count,
             self.disjunctive_headway_pair_count,
             self.redundant_headway_pair_count,
+            self.headway_order_family_count,
+            self.shared_headway_pair_count,
+            self.headway_order_variable_savings,
+            self.singleton_headway_order_family_count,
+            self.diagnostically_omitted_headway_checkpoint_count,
+            self.diagnostically_omitted_headway_pair_count,
         ) < 0:
             raise ValueError("movement headway classification counts must be nonnegative")
 
@@ -119,6 +133,8 @@ def emit_build_progress(
     fixed_pair_count: int | None = None,
     disjunctive_pair_count: int | None = None,
     redundant_pair_count: int | None = None,
+    order_variable_count: int | None = None,
+    order_variable_savings: int | None = None,
     variable_count: int | None = None,
     constraint_count: int | None = None,
     nonzero_count: int | None = None,
@@ -138,6 +154,8 @@ def emit_build_progress(
             fixed_pair_count=fixed_pair_count,
             disjunctive_pair_count=disjunctive_pair_count,
             redundant_pair_count=redundant_pair_count,
+            order_variable_count=order_variable_count,
+            order_variable_savings=order_variable_savings,
             variable_count=variable_count,
             constraint_count=constraint_count,
             nonzero_count=nonzero_count,

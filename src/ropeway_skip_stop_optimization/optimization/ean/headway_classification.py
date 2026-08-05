@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import StrEnum
+from typing import Protocol
 
 from ropeway_skip_stop_optimization.optimization.ean.artifact import (
     EanBuildArtifact,
@@ -16,6 +17,7 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanFleetMode,
     EanTimeReference,
     HeadwayCandidate,
+    HeadwayCheckpointKind,
     HeadwayPair,
 )
 from ropeway_skip_stop_optimization.optimization.ean.time_bounds import (
@@ -28,6 +30,11 @@ class EanHeadwayPairClassification(StrEnum):
     FIXED_FORWARD = "fixed_forward"
     FIXED_REVERSE = "fixed_reverse"
     DISJUNCTIVE = "disjunctive"
+
+
+class EanHeadwayPairClassifier(Protocol):
+    def classify(self, pair: HeadwayPair) -> EanHeadwayPairClassification:
+        """Return an exact structural classification for one original pair."""
 
 
 @dataclass(frozen=True)
@@ -131,6 +138,52 @@ class EanFixedStartHeadwayClassifier:
             <= first.follower_enter_lower
         ):
             return EanHeadwayPairClassification.FIXED_REVERSE
+        return EanHeadwayPairClassification.DISJUNCTIVE
+
+
+@dataclass(frozen=True)
+class EanOipInitialHeadwayClassifier:
+    """Remove visit-zero entry pairs implied by OIP boundary ordering.
+
+    Visit zero is special: an active visit-zero route must have selected one
+    of the two phase-zero boundary states. The fleet symmetry layer orders all
+    serving phase-zero cabins at the shared platform-entry resource. For later
+    visits, a cabin may have started in an earlier phase and may already have
+    overtaken, so no cabin-ID direction is inferred.
+    """
+
+    candidate_by_id: dict[str, HeadwayCandidate]
+    platform_entry_checkpoint_ids: frozenset[str]
+
+    @classmethod
+    def build(
+        cls,
+        artifact: EanBuildArtifact,
+    ) -> EanOipInitialHeadwayClassifier | None:
+        if artifact.fleet_mode is not EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT:
+            return None
+        return cls(
+            candidate_by_id={
+                candidate.id: candidate for candidate in artifact.headway_candidates
+            },
+            platform_entry_checkpoint_ids=frozenset(
+                checkpoint.id
+                for checkpoint in artifact.headway_checkpoints
+                if checkpoint.kind is HeadwayCheckpointKind.PLATFORM_ENTRY
+            ),
+        )
+
+    def classify(self, pair: HeadwayPair) -> EanHeadwayPairClassification:
+        if pair.checkpoint_id not in self.platform_entry_checkpoint_ids:
+            return EanHeadwayPairClassification.DISJUNCTIVE
+        first = self.candidate_by_id[pair.first_candidate_id]
+        second = self.candidate_by_id[pair.second_candidate_id]
+        if (
+            first.visit_index == 0
+            and second.visit_index == 0
+            and first.cabin_id != second.cabin_id
+        ):
+            return EanHeadwayPairClassification.REDUNDANT
         return EanHeadwayPairClassification.DISJUNCTIVE
 
 

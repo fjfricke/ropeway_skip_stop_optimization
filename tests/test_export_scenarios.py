@@ -345,6 +345,13 @@ def test_unified_passenger_metadata_adapter_preserves_export_contract() -> None:
         "mip_start_unserved_passenger_count",
         "mip_start_passenger_objective_seconds",
         "mip_start_generation_seconds",
+        "diagnostic_headway_separation_complete",
+        "diagnostic_headway_feasible",
+        "diagnostic_headway_violation_count",
+        "diagnostic_max_headway_violation_seconds",
+        "diagnostic_headway_separation_seconds",
+        "diagnostically_omitted_headway_checkpoint_count",
+        "diagnostically_omitted_headway_pair_count",
         "optimization_config",
         "progress_samples",
     }

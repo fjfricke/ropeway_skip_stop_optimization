@@ -131,12 +131,18 @@ def test_ean_optimization_config_parses_cli_selection() -> None:
         enable_candidate_horizon_pruning=True,
         enable_single_ring_dominated_ride_pruning=False,
         enable_slot_time_relaxation_strengthening=True,
+        enable_oip_full_initial_state_symmetry=False,
+        enable_oip_initial_headway_precedence=False,
+        enable_oip_inactive_variable_canonicalization=False,
     )
     assert EanOptimizationConfig.from_selection("tight_big_m_bounds") == EanOptimizationConfig(
         enable_candidate_horizon_pruning=False,
         enable_single_ring_dominated_ride_pruning=False,
         enable_slot_time_relaxation_strengthening=False,
         enable_tight_big_m_bounds=True,
+        enable_oip_full_initial_state_symmetry=False,
+        enable_oip_initial_headway_precedence=False,
+        enable_oip_inactive_variable_canonicalization=False,
     )
 
 
