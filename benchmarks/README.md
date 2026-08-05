@@ -3,6 +3,65 @@
 This folder contains runnable benchmark entry points. Benchmark outputs are
 machine-specific and are written under `benchmarks/output/` by default.
 
+## DDD Phase-0 movement census
+
+Build a read-only structural census for all registered fixed-start examples:
+
+```bash
+uv run python benchmarks/run_ddd_phase0_census.py
+```
+
+The census builds sparse EAN artifacts, so it counts headway candidates and
+the exact complete pair universe without materializing the pair objects. It
+also estimates movement-only full-grid sizes for 0.5, 1, and 5 second quanta.
+These are structural estimates before reachability pruning, not measured MILP
+sizes or eager-EAN build times. JSON and Markdown outputs are written below
+`benchmarks/output/ddd_phase0_census/`.
+
+Run the solver-free exhaustive reference oracle on a fixed-start/no-wait
+proof fixture and retain all of its feasible supports:
+
+```bash
+uv run python benchmarks/run_ddd_phase0_reference.py \
+  --case three_station_two_cabin_stop_skip_merge_v0 \
+  --enumerate-all
+```
+
+The runner converts the sparse network artifact into the solver-independent
+DDD movement domain, enumerates exact trajectories, converts the first
+feasible result back to `EanMovementPlan`, and runs complete sparse headway
+validation. `--enumerate-all` is intended only for genuinely tiny cases.
+Waiting, OIP, and dynamic routing fail before enumeration.
+Registered fixed-start/no-wait examples remain selectable with `--example`.
+
+Run the first closed delayed-conflict loop on the physical two-cabin fixture:
+
+```bash
+uv run python benchmarks/run_ddd_phase0_conflict_loop.py
+```
+
+The optimistic support master deliberately selects the fixture's invalid
+Cabin-0-Stop/Cabin-1-Skip combination. Exact lifting detects the exit-switch
+headway violation, adds one valid no-good row over the two exact route
+prefixes, and re-solves to one of the three feasible supports. The final plan
+must pass the complete sparse EAN validator. This runner is an executable
+correctness proof for delayed resource rows; it is not a performance solver.
+
+Run the first genuine time-cell refinement and bound-contract proof:
+
+```bash
+uv run python benchmarks/run_ddd_phase0_time_refinement.py
+```
+
+The initial master combines an exact Stop arrival with an outgoing arc whose
+existential witness uses an earlier time in the same coarse cell. Its valid
+optimistic bound is zero. The strict lift returns
+`EVENT_CELL_INCONSISTENCY`, while cell-free support recovery immediately
+produces and validates a full schedule with objective one. Splitting the
+shared state cell at the derived boundary raises the master bound to one and
+closes `LB = UB = 1` in round two. This is a correctness and bound-contract
+fixture, not a runtime or scaling benchmark.
+
 Run one EAN passenger benchmark:
 
 ```bash
