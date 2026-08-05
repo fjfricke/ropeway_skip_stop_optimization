@@ -255,7 +255,26 @@ and raises the bound to one. The second round therefore closes
 `LB = UB = 1`; exhaustive exact enumeration independently confirms objectives
 one and two. Recovery never contributes to the lower bound, and failed
 recovery never implies infeasibility. This remains a tiny acyclic reference
-backend, not the production anonymous-flow MILP.
+backend; it remains available as an oracle for the network-derived flow path.
+
+`DddLayeredTimeNetworkBuilder` now derives the reachable visit-layer graph
+from a network-backed `DddMovementProblem` and state-dependent partitions.
+`DddAnonymousFlowMaster` places one integer flow unit per fixed start on source
+arcs, aggregates those units on shared internal movement and sink arcs, and
+uses ordinary flow conservation. `DddAnonymousFlowDecomposer` deterministically
+recovers one path per source cabin; the recovered paths feed the unchanged
+strict lift and cell-free recovery adapters.
+
+The physical `three_station_time_refinement_v0` fixture uses the actual
+Three-Station route durations and resources. Round one builds three reachable
+nodes and six arcs, returns lower bound zero, recovers an objective-one Stop
+trajectory, and derives a split at 44.0909 seconds at `R_entry_lr`. Round two
+has four nodes and six arcs and proves `LB = UB = 1`. The exact exhaustive
+oracle independently obtains Stop and Skip objectives one and two, and the
+final two-visit plan passes complete sparse EAN validation. This establishes
+the network-derived anonymous-flow gate. Multiple-cabin merge conflicts are
+still validated only after lifting; feeding their exact-prefix rows back into
+the anonymous master is the next integration step.
 
 OIP fleet capacity is analyzed by a separate certificate layer. A shared
 physical ring-topology builder identifies the service, enabled skip, and rope

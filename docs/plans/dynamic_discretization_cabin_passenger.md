@@ -811,11 +811,19 @@ Implemented Phase-0 reference infrastructure:
   refinement; the second round closes `LB = UB = 1`, in agreement with the
   exhaustive exact oracle.
 
-The next missing implementation mechanism is a network-derived layered
-partial graph with anonymous integer cabin flow. The current time master
-enumerates paths on one tiny acyclic instance and therefore proves semantics,
-not scalability. The next physical fixture must generate its partitions and
-partial arcs from `EanMovementNetwork` rather than handwritten states.
+The network-derived Phase-0 gate is now implemented. A layered partial graph
+is built from the network-backed DDD movement problem, and a Gurobi integer
+flow master chooses anonymous cabin flow without enumerating complete paths.
+Its integral solution is decomposed deterministically and passed to the same
+strict lift and cell-free recovery contracts. On the physical Three-Station
+fixture, the initial graph has three reachable nodes and six arcs; one split
+at `R_entry_lr` raises the certified lower bound from zero to one and closes
+`LB = UB = 1` in round two. The recovered trajectory passes complete sparse
+EAN validation.
+
+This result proves the physical network/flow plumbing, not multi-cabin scale.
+The next missing mechanism is the combined loop in which time-cell splits and
+delayed exact-prefix merge-conflict rows refine the same anonymous-flow master.
 
 Gate:
 
@@ -1091,17 +1099,20 @@ census, exhaustive oracle, delayed resource-conflict loop, safe time-cell
 split, strict lift, cell-free primal recovery, and the first complete
 `LB/lift/refine/UB` certificate.
 
+Completed additionally: visit-layer partial graph construction from the
+canonical network, anonymous integer flow, deterministic path decomposition,
+and the two-round physical Three-Station bound certificate.
+
 Next:
 
-1. derive visit-layer partitions and partial movement arcs from the canonical
-   physical `EanMovementNetwork`;
-2. replace enumerated one-cabin paths with anonymous integer flow and exact
-   deterministic path decomposition;
-3. preserve strict lift and cell-free recovery as separate consumers of the
-   decomposed physical route support;
-4. reproduce the bound trace on a physical fixed-start Three-Station case;
-5. only then combine time-cell refinement with delayed merge conflicts for
-   multiple cabins.
+1. express exact-prefix conflict rows over decomposed anonymous-flow paths;
+2. add those rows back to the flow master without introducing cabin copies on
+   every internal arc;
+3. run a two-cabin physical case that requires both a time split and a merge
+   cut;
+4. compare graph, row, and solve growth against enumerated support and eager
+   EAN references;
+5. only after that gate, introduce bounded station waiting.
 
 This sequence is intentionally conservative. The main value of the approach
 is the certificate
