@@ -433,6 +433,85 @@ class DddAnonymousFlowResult:
 
 
 @dataclass(frozen=True)
+class DddPrefixFormulationSize:
+    """Exact extra size of the delayed prefix formulation for one depth map."""
+
+    tracked_prefix_cabin_count: int
+    prefix_variable_count: int
+    movement_prefix_variable_count: int
+    sink_prefix_variable_count: int
+    prefix_conservation_row_count: int
+    prefix_link_row_count: int
+
+
+def estimate_ddd_prefix_formulation_size(
+    network: DddLayeredTimeNetwork,
+    *,
+    max_visit_index_by_cabin: dict[int, int],
+) -> DddPrefixFormulationSize:
+    """Count the variables and structural rows added by prefix disaggregation.
+
+    Visit zero is represented by the already labelled source arcs and therefore
+    needs no additional prefix variables.  Positive depths use precisely the
+    same arc filters as :func:`_add_prefix_conflict_formulation`.
+    """
+
+    network.validate()
+    known_cabin_ids = set(network.cabin_ids)
+    unknown = set(max_visit_index_by_cabin) - known_cabin_ids
+    if unknown:
+        raise ValueError(f"DDD prefix depth references unknown cabins: {unknown}")
+    if any(value < 0 for value in max_visit_index_by_cabin.values()):
+        raise ValueError("DDD prefix visit indices must be nonnegative")
+
+    active_depths = {
+        cabin_id: max_visit_index
+        for cabin_id, max_visit_index in max_visit_index_by_cabin.items()
+        if max_visit_index > 0
+    }
+    movement_arcs = tuple(
+        arc for arc in network.arcs if arc.kind is DddLayeredTimeArcKind.MOVEMENT
+    )
+    sink_arcs = tuple(
+        arc for arc in network.arcs if arc.kind is DddLayeredTimeArcKind.SINK
+    )
+    node_by_id = {node.id: node for node in network.nodes}
+    movement_count = 0
+    sink_count = 0
+    linked_arc_ids: set[str] = set()
+    conservation_count = 0
+    for max_visit_index in active_depths.values():
+        eligible_movement = tuple(
+            arc
+            for arc in movement_arcs
+            if arc.partial_arc is not None
+            and arc.partial_arc.visit_index <= max_visit_index
+        )
+        eligible_sink = tuple(
+            arc
+            for arc in sink_arcs
+            if arc.source_node_id is not None
+            and node_by_id[arc.source_node_id].layer_index <= max_visit_index
+        )
+        movement_count += len(eligible_movement)
+        sink_count += len(eligible_sink)
+        linked_arc_ids.update(arc.id for arc in eligible_movement)
+        linked_arc_ids.update(arc.id for arc in eligible_sink)
+        conservation_count += sum(
+            node.layer_index <= max_visit_index for node in network.nodes
+        )
+
+    return DddPrefixFormulationSize(
+        tracked_prefix_cabin_count=len(active_depths),
+        prefix_variable_count=movement_count + sink_count,
+        movement_prefix_variable_count=movement_count,
+        sink_prefix_variable_count=sink_count,
+        prefix_conservation_row_count=conservation_count,
+        prefix_link_row_count=len(linked_arc_ids),
+    )
+
+
+@dataclass(frozen=True)
 class DddAnonymousFlowMaster:
     output_flag: bool = False
     integrality_tolerance: float = 1e-6
@@ -608,7 +687,12 @@ def _add_prefix_conflict_formulation(
 
     prefix_variables: dict[tuple[int, str], gp.Var] = {}
     prefix_variables_by_arc_id: dict[str, list[gp.Var]] = {}
-    for cabin_id, max_visit_index in sorted(max_visit_by_cabin.items()):
+    active_depths = {
+        cabin_id: max_visit_index
+        for cabin_id, max_visit_index in max_visit_by_cabin.items()
+        if max_visit_index > 0
+    }
+    for cabin_id, max_visit_index in sorted(active_depths.items()):
         for arc in movement_arcs:
             partial_arc = arc.partial_arc
             if (
@@ -635,9 +719,7 @@ def _add_prefix_conflict_formulation(
             prefix_variables[(cabin_id, arc.id)] = variable
             prefix_variables_by_arc_id.setdefault(arc.id, []).append(variable)
 
-    for cabin_id, max_visit_index in sorted(max_visit_by_cabin.items()):
-        if max_visit_index == 0:
-            continue
+    for cabin_id, max_visit_index in sorted(active_depths.items()):
         for node_index, node in enumerate(network.nodes):
             if node.layer_index > max_visit_index:
                 continue
@@ -692,7 +774,7 @@ def _add_prefix_conflict_formulation(
         )
     return (
         prefix_variables,
-        sum(max_visit_index > 0 for max_visit_index in max_visit_by_cabin.values()),
+        len(active_depths),
     )
 
 

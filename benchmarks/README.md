@@ -93,6 +93,19 @@ trace closes `LB = UB = 4`, and the final plan passes complete sparse EAN
 validation. This proves the combined refinement plumbing; it is not yet a
 scaling benchmark.
 
+Measure Gate G9 on larger fixed-start/no-wait examples:
+
+```bash
+.venv/bin/python benchmarks/run_ddd_phase0_scaling.py
+```
+
+The runner builds the coarse anonymous DDD network, counts the exact additional
+prefix variables for a local two-cabin/depth-two activation and for the
+fully-labelled limit, counts the pre-resource trajectory universe without
+enumerating it, and actually builds the best configured eager EAN reference.
+The resulting Gate G9 statement concerns structural model size only. It does
+not claim faster solving or assume that every large case needs only local cuts.
+
 Run one EAN passenger benchmark:
 
 ```bash

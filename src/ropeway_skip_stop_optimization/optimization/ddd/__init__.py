@@ -24,6 +24,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
     DddAnonymousPrefixFlowValue,
     DddAnonymousFlowResult,
     DddAnonymousFlowStatus,
+    DddPrefixFormulationSize,
     DddAnonymousFlowValue,
     DddLayeredTimeArc,
     DddLayeredTimeArcKind,
@@ -33,6 +34,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
     DddNetworkTimeObjective,
     DddNetworkPathProblemAdapter,
     DddNetworkTimeProblem,
+    estimate_ddd_prefix_formulation_size,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.ean_plan_adapter import (
     DddReferenceToEanMovementPlanAdapter,
@@ -118,6 +120,7 @@ __all__ = [
     "DddAnonymousPrefixFlowValue",
     "DddAnonymousFlowResult",
     "DddAnonymousFlowStatus",
+    "DddPrefixFormulationSize",
     "DddAnonymousFlowValue",
     "DddDelayedConflictSolver",
     "DddEventCellInconsistency",
@@ -139,6 +142,7 @@ __all__ = [
     "DddNetworkTimeObjective",
     "DddNetworkPathProblemAdapter",
     "DddNetworkTimeProblem",
+    "estimate_ddd_prefix_formulation_size",
     "DddNetworkTimeRefinementIteration",
     "DddNetworkTimeRefinementResult",
     "DddNetworkTimeRefinementSolver",
