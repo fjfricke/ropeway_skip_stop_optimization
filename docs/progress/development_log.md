@@ -3,6 +3,58 @@
 This document records when relevant project work was completed and why the
 corresponding decisions were made.
 
+## 2026-08-06
+
+### Incremental DDD fragments and projected master starts
+
+The layered DDD builder now caches time cells and compatible transition
+targets across refinement rounds. A changed partition invalidates only cached
+transitions whose source or target is that physical state; unrelated
+state-to-state fragments remain reusable. The anonymous master also receives a
+projected partial MIP start: the preceding physical route sequence is replayed
+from each fixed start and mapped to the refined child cells. Starts are used
+during pure time refinement and deliberately disabled after prefix conflict
+rows become active, where labelled-model construction rather than primal
+discovery dominates. Both optimizations are independently switchable for
+controlled experiments.
+
+The anonymous-flow decomposer was corrected to reserve every labelled cabin
+prefix before extending any path through residual anonymous flow. This avoids
+an early cabin consuming an arc required by a later solved prefix and is
+covered by a dedicated merge-tail regression.
+
+On the 19-cabin Five-Station fixed-start Skip/no-wait probe, cached fragments
+reduced 100-round network-build time from 90.04 to 23.38 seconds. Projected
+starts changed the refinement trajectory: the first complete temporal lift
+was reached in round 52 and generated 71 exact resource-conflict cuts, whereas
+the preceding run still had no resource cut after round 100. The resulting
+delayed prefix formulation then became the new bottleneck, reaching 228,784
+prefix variables and 159.90 seconds of master time; total runtime was 189.19
+seconds and no validated incumbent was obtained. The experiment therefore
+confirms the intended initial refinement behavior while exposing prefix-cut
+scaling as the next optimization target.
+
+### Canonical integer time for DDD
+
+The Phase-0 DDD path now quantizes physical time once to integer microsecond
+ticks. Time partitions, half-open cell membership, shifted interval
+intersections, exact duration accumulation, resource occurrence times, split
+deduplication, deterministic IDs, and fingerprints use integer arithmetic;
+seconds remain the external plan and metric unit. This replaced the former
+12-significant-digit float normalization and removed refinement slivers that
+were accepted as partial arcs but too narrow for a tolerance-safe split.
+
+On the 19-cabin Five-Station fixed-start Skip/no-wait probe, the matched
+100-round run contained no stalled/invalid numerical lift rounds, compared
+with 66 previously. It processed 964 instead of 802 safe boundaries, reduced
+runtime from 325.72 to 102.00 seconds, and reduced final arcs from 13,489 to
+13,275. The final integer-storage implementation reproduced exactly the 964
+splits, 6,249 nodes, and 13,275 arcs of the preceding hybrid tick-arithmetic
+run, while reducing network-build time from 261.53 to 90.04 seconds. It still
+produced no validated incumbent or resource cut: genuine time-cell refinement
+remains the next bottleneck, so integer time is a correctness, stability, and
+substantial build-time improvement rather than the complete scaling solution.
+
 ## 2026-07-15
 
 ### EAN root-relaxation diagnostics

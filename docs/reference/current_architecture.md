@@ -268,6 +268,28 @@ that exact event times agree with the selected cells. Horizon coverage and all
 shared physical resources are subsequently validated on the combined paths;
 only that complete validation can certify an incumbent or upper bound.
 
+The layered builder is state-incremental across refinement rounds. It caches
+partition cells and compatible targets for each physical state transition. A
+split of state `S` invalidates only fragments entering or leaving `S`; all
+other compatibility classifications are reused. Before the next pure
+time-refinement master solve, `DddAnonymousFlowWarmStartProjector` replays the
+previous route options from the fixed integer-tick start, maps every exact
+arrival to its refined child cell, and supplies the resulting complete or
+partial anonymous flow as a MIP start. Prefix-cut rounds omit this start because
+constructing the delayed labelled formulation dominates there. The decomposer
+first reserves all solved cabin-specific prefixes and only then extends their
+anonymous tails, preventing one cabin from consuming another cabin's required
+prefix arc.
+
+All Phase-0 DDD time arithmetic now uses a canonical integer-microsecond
+domain. Movement durations, fixed starts, horizons, resource offsets, and
+partition boundaries are quantized once on construction. Cell membership,
+arc compatibility, shifted interval intersections, exact route propagation,
+split deduplication, IDs, and fingerprints operate on integer ticks. Public
+plans and metrics continue to expose seconds. This removes sub-tolerance
+floating-point sliver arcs without treating a relaxed master path as a
+feasible trajectory.
+
 The physical `three_station_time_refinement_v0` fixture uses the actual
 Three-Station route durations and resources. Round one builds three reachable
 nodes and six arcs, returns lower bound zero, recovers an objective-one Stop

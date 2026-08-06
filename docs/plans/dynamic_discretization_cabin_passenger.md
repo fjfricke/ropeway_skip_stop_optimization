@@ -632,9 +632,11 @@ DddOptimalityCertificate
 ```
 
 All IDs must be deterministic from physical provenance, time-boundary value,
-route option, and resource usage. Floating-point boundary values require one
-canonical normalization policy shared by IDs, equality, sorting, export, and
-solver tolerances.
+route option, and resource usage. Physical seconds are quantized once to
+integer microsecond ticks at the DDD boundary. IDs, equality, sorting,
+interval arithmetic, duration accumulation, and refinement use those ticks;
+seconds are reconstructed only for validation, metrics, and export. The
+maximum import error per time value is therefore half a microsecond.
 
 ### Components
 
@@ -675,7 +677,7 @@ total_time_limit_seconds
 master_time_fraction
 lift_time_fraction
 exact_gap_tolerance
-time_normalization_tolerance
+time_tick_seconds = 1e-6
 enable_stop_skip
 enable_cabin_waiting
 enable_passengers
@@ -831,6 +833,16 @@ arc multiplicities. Early termination is represented explicitly, so a cabin is
 not forced to reach the deepest visit of another support. Decomposition consumes
 the solved prefix arcs before assigning residual anonymous flow, preventing a
 different post-solve cabin matching from bypassing or falsely repeating a cut.
+The refinement implementation keeps the conservative first-inconsistency
+policy per cabin while making repeated rounds cheaper. Time cells and
+state-to-state compatibility fragments are cached; a split invalidates only
+fragments incident to the changed state. The previous physical route support
+is replayed on the refined integer-tick cells as a partial MIP start during
+pure time-refinement rounds. Once resource-prefix cuts are active, this start is
+disabled because labelled prefix-model construction is the measured dominant
+cost. Labelled prefixes for every tracked cabin are reserved before any
+anonymous tail is decomposed. Cache and warm-start behavior remain separate
+solver settings so their effects can be benchmarked independently.
 The physical
 two-cabin Three-Station fixture combines two time splits and two conflict rows,
 then closes `LB = UB = 4` with six prefix variables. This proves integration;
