@@ -4,6 +4,12 @@ from dataclasses import dataclass
 from enum import StrEnum
 import math
 
+from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
+    DddTimeTick,
+    ddd_quantize_time_seconds,
+    ddd_seconds_to_tick,
+)
+
 
 class DddRouteDecision(StrEnum):
     STOP = "stop"
@@ -25,6 +31,17 @@ class DddFixedStart:
     time_seconds: float
     max_visit_count: int
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "time_seconds",
+            ddd_quantize_time_seconds(self.time_seconds),
+        )
+
+    @property
+    def time_tick(self) -> DddTimeTick:
+        return ddd_seconds_to_tick(self.time_seconds)
+
     def validate(self) -> None:
         _require_nonnegative_int("DDD fixed start cabin_id", self.cabin_id)
         _require_id("DDD fixed start state_id", self.state_id)
@@ -38,9 +55,22 @@ class DddResource:
     id: str
     headway_seconds: float
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "headway_seconds",
+            ddd_quantize_time_seconds(self.headway_seconds),
+        )
+
+    @property
+    def headway_tick(self) -> DddTimeTick:
+        return ddd_seconds_to_tick(self.headway_seconds)
+
     def validate(self) -> None:
         _require_id("DDD resource id", self.id)
         _require_finite_positive("DDD resource headway_seconds", self.headway_seconds)
+        if self.headway_tick <= 0:
+            raise ValueError("DDD resource headway must occupy at least one time tick")
 
 
 @dataclass(frozen=True)
@@ -48,6 +78,26 @@ class DddResourceUsage:
     resource_id: str
     leader_clear_offset_seconds: float
     follower_enter_offset_seconds: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "leader_clear_offset_seconds",
+            ddd_quantize_time_seconds(self.leader_clear_offset_seconds),
+        )
+        object.__setattr__(
+            self,
+            "follower_enter_offset_seconds",
+            ddd_quantize_time_seconds(self.follower_enter_offset_seconds),
+        )
+
+    @property
+    def leader_clear_offset_tick(self) -> DddTimeTick:
+        return ddd_seconds_to_tick(self.leader_clear_offset_seconds)
+
+    @property
+    def follower_enter_offset_tick(self) -> DddTimeTick:
+        return ddd_seconds_to_tick(self.follower_enter_offset_seconds)
 
     def validate(self) -> None:
         _require_id("DDD resource usage resource_id", self.resource_id)
@@ -74,6 +124,29 @@ class DddRouteOption:
     exit_switch_offset_seconds: float
     resource_usages: tuple[DddResourceUsage, ...]
 
+    def __post_init__(self) -> None:
+        for name in (
+            "duration_seconds",
+            "platform_entry_offset_seconds",
+            "platform_exit_offset_seconds",
+            "exit_switch_offset_seconds",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                object.__setattr__(
+                    self,
+                    name,
+                    ddd_quantize_time_seconds(value),
+                )
+
+    @property
+    def duration_tick(self) -> DddTimeTick:
+        return ddd_seconds_to_tick(self.duration_seconds)
+
+    @property
+    def exit_switch_offset_tick(self) -> DddTimeTick:
+        return ddd_seconds_to_tick(self.exit_switch_offset_seconds)
+
     def validate(self) -> None:
         for label, value in (
             ("DDD route option id", self.id),
@@ -89,7 +162,9 @@ class DddRouteOption:
             "DDD route option exit_switch_offset_seconds",
             self.exit_switch_offset_seconds,
         )
-        if self.exit_switch_offset_seconds > self.duration_seconds:
+        if self.duration_tick <= 0:
+            raise ValueError("DDD route duration must occupy at least one time tick")
+        if self.exit_switch_offset_tick > self.duration_tick:
             raise ValueError("DDD route option exit switch must not follow its arrival")
         if self.decision is DddRouteDecision.STOP:
             if (
@@ -135,6 +210,26 @@ class DddMovementProblem:
     route_options: tuple[DddRouteOption, ...]
     resources: tuple[DddResource, ...]
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "passenger_service_end_seconds",
+            ddd_quantize_time_seconds(self.passenger_service_end_seconds),
+        )
+        object.__setattr__(
+            self,
+            "operational_end_seconds",
+            ddd_quantize_time_seconds(self.operational_end_seconds),
+        )
+
+    @property
+    def passenger_service_end_tick(self) -> DddTimeTick:
+        return ddd_seconds_to_tick(self.passenger_service_end_seconds)
+
+    @property
+    def operational_end_tick(self) -> DddTimeTick:
+        return ddd_seconds_to_tick(self.operational_end_seconds)
+
     def validate(self) -> None:
         _require_id("DDD movement problem scenario_id", self.scenario_id)
         _require_finite_positive(
@@ -145,7 +240,9 @@ class DddMovementProblem:
             "DDD operational_end_seconds",
             self.operational_end_seconds,
         )
-        if self.operational_end_seconds < self.passenger_service_end_seconds:
+        if self.passenger_service_end_tick <= 0 or self.operational_end_tick <= 0:
+            raise ValueError("DDD horizons must occupy at least one time tick")
+        if self.operational_end_tick < self.passenger_service_end_tick:
             raise ValueError("DDD operational horizon must include passenger service")
         if not self.states or not self.starts or not self.route_options:
             raise ValueError("DDD movement problem needs states, starts, and route options")
@@ -167,7 +264,7 @@ class DddMovementProblem:
             cabin_ids.add(start.cabin_id)
             if start.state_id not in state_ids:
                 raise ValueError("DDD fixed start references an unknown state")
-            if start.time_seconds > self.operational_end_seconds:
+            if start.time_tick > self.operational_end_tick:
                 raise ValueError("DDD fixed start lies after the operational horizon")
         outgoing_state_ids: set[str] = set()
         for option in self.route_options:

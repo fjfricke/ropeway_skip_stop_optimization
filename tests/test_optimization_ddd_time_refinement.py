@@ -17,8 +17,12 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddStrictTimeLiftStatus,
     DddTimeBoundaryError,
     DddTimeCell,
+    DddTimeDiscretization,
+    DddTimePartition,
     DddTimeRefinementSolver,
     DddTimeRefinementStatus,
+    ddd_seconds_to_tick,
+    ddd_tick_to_seconds,
     validate_ddd_recovered_schedule,
 )
 
@@ -29,6 +33,16 @@ def test_time_cells_are_half_open_at_refinement_boundary() -> None:
 
     assert not lower.contains(7.0, tolerance_seconds=1e-9)
     assert upper.contains(7.0, tolerance_seconds=1e-9)
+
+
+def test_time_ids_and_partitions_use_canonical_microsecond_ticks() -> None:
+    first = DddTimeCell("B", 47.2727272740, 50.0)
+    second = DddTimeCell("B", 47.2727272742, 50.0000000002)
+
+    assert first == second
+    assert first.id == "time_cell::B::47272727::50000000"
+    assert ddd_seconds_to_tick(47.2727272742) == 47_272_727
+    assert ddd_tick_to_seconds(47_272_727) == 47.272727
 
 
 def test_initial_partial_master_selects_optimistic_inconsistent_path() -> None:
@@ -68,6 +82,30 @@ def test_strict_lift_refines_while_cell_free_recovery_finds_upper_bound() -> Non
     assert recovery.schedule.terminal_time_seconds == pytest.approx(12.0)
     assert recovery.schedule.objective_value == pytest.approx(1.0)
     validate_ddd_recovered_schedule(problem, recovery.schedule)
+
+
+def test_microsecond_ticks_remove_sub_tick_refinement_sliver() -> None:
+    base = build_event_cell_bound_probe()
+    problem = replace(
+        base,
+        discretization=DddTimeDiscretization(
+            partitions=(
+                DddTimePartition("B", (5.0, 7.0000000002, 10.0)),
+                base.discretization.partition("C"),
+            )
+        ),
+    )
+    problem.validate()
+    master = DddPartialTimeMaster().solve(problem)
+    assert master.path is not None
+
+    partition = problem.discretization.partition("B")
+    assert partition.boundaries_seconds == (5.0, 7.0, 10.0)
+    assert partition.boundaries_ticks == (5_000_000, 7_000_000, 10_000_000)
+    assert ddd_seconds_to_tick(7.0000000002) == 7_000_000
+    lifted = DddStrictTimeCellLifter().lift(problem, master.path)
+    assert lifted.status is DddStrictTimeLiftStatus.FEASIBLE
+    assert lifted.schedule is not None
 
 
 def test_safe_split_rebuilds_partial_paths_and_raises_master_bound() -> None:

@@ -10,30 +10,50 @@ from ropeway_skip_stop_optimization.benchmarking.ddd_cases import (
     build_three_station_network_time_refinement_probe,
     build_three_station_time_refinement_artifact,
 )
+from ropeway_skip_stop_optimization.benchmarking.ddd_progress import (
+    format_ddd_iteration_progress,
+)
 from ropeway_skip_stop_optimization.optimization.ddd import (
     DddAnonymousFlowDecomposer,
     DddAnonymousFlowMaster,
+    DddAnonymousFlowResult,
     DddAnonymousFlowStatus,
+    DddAnonymousFlowValue,
+    DddAnonymousFlowWarmStartProjector,
+    DddAnonymousPrefixFlowValue,
     DddFixedStart,
     DddLayeredTimeArcKind,
+    DddLayeredTimeArc,
+    DddLayeredTimeNetwork,
     DddLayeredTimeNetworkBuilder,
+    DddLayeredTimeNode,
     DddMovementProblem,
     DddMovementState,
     DddNetworkTimeObjective,
     DddNetworkTimeProblem,
     DddNetworkTimeRefinementSolver,
+    DddNetworkTimeRefinementProgressStage,
     DddNetworkTimeRefinementStatus,
     DddNetworkValidationStatus,
+    DddPartialTimedArc,
     DddReferenceSolver,
     DddReferenceToEanMovementPlanAdapter,
     DddRouteDecision,
     DddRouteOption,
     DddRouteOptionCost,
     DddStrictTimeLiftStatus,
+    DddSupportConflictCut,
     DddSupportLiteral,
     DddSupportSelection,
     DddTimeDiscretization,
+    DddTimeCell,
     DddTimePartition,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.network_refinement import (
+    _build_time_split_batch,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.time_refinement import (
+    DddEventCellInconsistency,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
     validate_ean_movement_plan_against_artifact,
@@ -91,6 +111,231 @@ def test_anonymous_flow_aggregates_shared_cabin_movement_and_decomposes() -> Non
         if arc_by_id[item.arc_id].kind is not DddLayeredTimeArcKind.SOURCE
     )
     assert shared_values == (2, 2)
+
+
+def test_decomposition_reserves_all_labelled_prefixes_before_anonymous_tails() -> None:
+    cells = {
+        state_id: DddTimeCell(state_id, 0.0, 1.0)
+        for state_id in ("A", "B", "M", "P", "Q")
+    }
+    nodes = {
+        "A": DddLayeredTimeNode(1, "A", cells["A"]),
+        "B": DddLayeredTimeNode(1, "B", cells["B"]),
+        "M": DddLayeredTimeNode(2, "M", cells["M"]),
+        "P": DddLayeredTimeNode(3, "P", cells["P"]),
+        "Q": DddLayeredTimeNode(3, "Q", cells["Q"]),
+    }
+
+    def partial(
+        visit_index: int,
+        route_option_id: str,
+        source_state_id: str,
+        target_state_id: str,
+    ) -> DddPartialTimedArc:
+        return DddPartialTimedArc(
+            visit_index=visit_index,
+            route_option_id=route_option_id,
+            from_state_id=source_state_id,
+            to_state_id=target_state_id,
+            source_cell_id=(
+                None if visit_index == 0 else cells[source_state_id].id
+            ),
+            target_cell=cells[target_state_id],
+        )
+
+    arcs = (
+        DddLayeredTimeArc(
+            "source_0",
+            DddLayeredTimeArcKind.SOURCE,
+            None,
+            nodes["A"].id,
+            0,
+            partial(0, "source_0", "start_0", "A"),
+            0.0,
+        ),
+        DddLayeredTimeArc(
+            "source_1",
+            DddLayeredTimeArcKind.SOURCE,
+            None,
+            nodes["B"].id,
+            1,
+            partial(0, "source_1", "start_1", "B"),
+            0.0,
+        ),
+        DddLayeredTimeArc(
+            "prefix_0",
+            DddLayeredTimeArcKind.MOVEMENT,
+            nodes["A"].id,
+            nodes["M"].id,
+            None,
+            partial(1, "prefix_0", "A", "M"),
+            0.0,
+        ),
+        DddLayeredTimeArc(
+            "prefix_1",
+            DddLayeredTimeArcKind.MOVEMENT,
+            nodes["B"].id,
+            nodes["M"].id,
+            None,
+            partial(1, "prefix_1", "B", "M"),
+            0.0,
+        ),
+        DddLayeredTimeArc(
+            "required_by_1",
+            DddLayeredTimeArcKind.MOVEMENT,
+            nodes["M"].id,
+            nodes["P"].id,
+            None,
+            partial(2, "a_required_by_1", "M", "P"),
+            0.0,
+        ),
+        DddLayeredTimeArc(
+            "alternative_for_0",
+            DddLayeredTimeArcKind.MOVEMENT,
+            nodes["M"].id,
+            nodes["Q"].id,
+            None,
+            partial(2, "z_alternative_for_0", "M", "Q"),
+            0.0,
+        ),
+        DddLayeredTimeArc(
+            "sink_p",
+            DddLayeredTimeArcKind.SINK,
+            nodes["P"].id,
+            None,
+            None,
+            None,
+            0.0,
+        ),
+        DddLayeredTimeArc(
+            "sink_q",
+            DddLayeredTimeArcKind.SINK,
+            nodes["Q"].id,
+            None,
+            None,
+            None,
+            0.0,
+        ),
+    )
+    network = DddLayeredTimeNetwork(
+        nodes=tuple(nodes.values()),
+        arcs=arcs,
+        cabin_ids=(0, 1),
+    )
+    result = DddAnonymousFlowResult(
+        status=DddAnonymousFlowStatus.OPTIMAL,
+        objective_value=0.0,
+        best_bound=0.0,
+        arc_values=tuple(DddAnonymousFlowValue(arc.id, 1) for arc in arcs),
+        prefix_arc_values=(
+            DddAnonymousPrefixFlowValue(0, "prefix_0"),
+            DddAnonymousPrefixFlowValue(1, "prefix_1"),
+            DddAnonymousPrefixFlowValue(1, "required_by_1"),
+        ),
+        variable_count=len(arcs),
+        constraint_count=0,
+        prefix_variable_count=3,
+        conflict_constraint_count=1,
+        tracked_prefix_cabin_count=2,
+        warm_start_arc_variable_count=0,
+        warm_start_prefix_variable_count=0,
+        warm_start_projected_cabin_count=0,
+        warm_start_complete_cabin_count=0,
+    )
+
+    paths = DddAnonymousFlowDecomposer().decompose(network, result)
+
+    assert paths[0].route_option_ids[-1] == "z_alternative_for_0"
+    assert paths[1].route_option_ids[-1] == "a_required_by_1"
+
+
+def test_network_builder_reuses_unchanged_transition_fragments() -> None:
+    problem = build_three_station_network_time_refinement_probe()
+    builder = DddLayeredTimeNetworkBuilder()
+
+    first = builder.build(problem)
+    first_stats = builder.last_build_stats
+    repeated = builder.build(problem)
+    repeated_stats = builder.last_build_stats
+
+    assert repeated == first
+    assert first_stats.transition_cache_misses > 0
+    assert repeated_stats.invalidated_state_count == 0
+    assert repeated_stats.partition_cache_misses == 0
+    assert repeated_stats.transition_cache_misses == 0
+    assert repeated_stats.transition_cache_hits > 0
+
+    partition = problem.discretization.partitions[0]
+    first_cell = partition.cells[0]
+    split = (first_cell.lower_seconds + first_cell.upper_seconds) / 2.0
+    refined = problem.with_discretization(
+        problem.discretization.split(
+            state_id=partition.state_id,
+            boundary_seconds=split,
+            tolerance_seconds=0.0,
+        )
+    )
+    builder.build(refined)
+
+    assert builder.last_build_stats.invalidated_state_count == 1
+    assert builder.last_build_stats.transition_cache_hits > 0
+    assert builder.last_build_stats.transition_cache_misses > 0
+
+
+def test_anonymous_flow_warm_start_projects_routes_to_refined_cells() -> None:
+    problem = build_three_station_network_time_refinement_probe()
+    builder = DddLayeredTimeNetworkBuilder()
+    network = builder.build(problem)
+    initial = DddAnonymousFlowMaster().solve(network)
+    paths = DddAnonymousFlowDecomposer().decompose(network, initial)
+    partition = problem.discretization.partition(paths[0].arcs[0].to_state_id)
+    first_cell = partition.cells[0]
+    split = (first_cell.lower_seconds + first_cell.upper_seconds) / 2.0
+    refined = problem.with_discretization(
+        problem.discretization.split(
+            state_id=partition.state_id,
+            boundary_seconds=split,
+            tolerance_seconds=0.0,
+        )
+    )
+    refined_network = builder.build(refined)
+
+    warm_start = DddAnonymousFlowWarmStartProjector().project(
+        refined,
+        refined_network,
+        paths,
+    )
+    resolved = DddAnonymousFlowMaster().solve(
+        refined_network,
+        warm_start=warm_start,
+    )
+
+    assert warm_start.projected_cabin_count == len(paths)
+    assert warm_start.arc_values
+    assert resolved.status is DddAnonymousFlowStatus.OPTIMAL
+    assert resolved.warm_start_projected_cabin_count == len(paths)
+    assert resolved.warm_start_arc_variable_count == len(warm_start.arc_values)
+
+    excluded = DddSupportConflictCut(
+        id="exclude_projected_support",
+        literals=tuple(
+            DddSupportLiteral(paths[0].cabin_id, visit_index, option_id)
+            for visit_index, option_id in enumerate(
+                paths[0].route_option_ids[:2]
+            )
+        ),
+        resource_id="test_resource",
+        violation_seconds=1.0,
+    )
+    blocked = DddAnonymousFlowWarmStartProjector().project(
+        refined,
+        refined_network,
+        paths,
+        cuts=(excluded,),
+    )
+
+    assert blocked.projected_cabin_count == 0
+    assert not blocked.arc_values
 
 
 def test_network_problem_rejects_incomplete_partition_domain() -> None:
@@ -280,6 +525,14 @@ def test_physical_combined_refinement_closes_time_and_conflict_gap() -> None:
     assert fourth.conflict_constraint_count == 2
     assert fourth.tracked_prefix_cabin_count == 2
     assert fourth.prefix_variable_count == 6
+    assert fourth.maximum_prefix_visit_index == 1
+    assert fourth.average_prefix_visit_index == pytest.approx(1.0)
+    assert fourth.network_build_seconds >= 0.0
+    assert fourth.master_solve_seconds >= 0.0
+    assert fourth.decomposition_seconds >= 0.0
+    assert fourth.recovery_seconds >= 0.0
+    assert fourth.lifting_and_validation_seconds >= 0.0
+    assert fourth.round_seconds >= 0.0
     assert (
         fourth.cell_lift_validation_status
         is DddNetworkValidationStatus.FEASIBLE
@@ -304,6 +557,86 @@ def test_physical_combined_refinement_closes_time_and_conflict_gap() -> None:
         artifact=artifact,
     )
     validate_ean_movement_plan_against_artifact(artifact, plan).raise_for_errors()
+
+
+def test_network_refinement_optimizations_can_be_disabled() -> None:
+    result = DddNetworkTimeRefinementSolver(
+        reuse_network_fragments=False,
+        use_projected_warm_start=False,
+    ).solve(build_three_station_network_combined_probe())
+
+    assert result.status is DddNetworkTimeRefinementStatus.OPTIMAL
+    assert all(
+        iteration.warm_start_projected_cabin_count == 0
+        for iteration in result.iterations
+    )
+
+
+def test_network_refinement_emits_terminal_progress_data() -> None:
+    problem = build_three_station_network_combined_probe()
+    events = []
+
+    result = DddNetworkTimeRefinementSolver().solve(
+        problem,
+        progress_callback=events.append,
+    )
+
+    finished = [
+        event
+        for event in events
+        if event.stage is DddNetworkTimeRefinementProgressStage.ROUND_FINISHED
+    ]
+    assert len(finished) == len(result.iterations) == 4
+    assert finished[-1].iteration == result.iterations[-1]
+    assert {
+        DddNetworkTimeRefinementProgressStage.ROUND_STARTED,
+        DddNetworkTimeRefinementProgressStage.MASTER_STARTED,
+        DddNetworkTimeRefinementProgressStage.MASTER_FINISHED,
+        DddNetworkTimeRefinementProgressStage.ROUND_FINISHED,
+    } <= {event.stage for event in events}
+    rendered = format_ddd_iteration_progress(result.iterations[-1])
+    assert "LB/UB=4/4" in rendered
+    assert "prefix=2c/6v/d1" in rendered
+    assert "conflicts=0/+0/2" in rendered
+    assert "splits=0:none" in rendered
+
+
+def test_time_split_batch_is_deterministic_deduplicated_and_bounded() -> None:
+    discretization = DddTimeDiscretization(
+        (
+            DddTimePartition("A", (0.0, 10.0)),
+            DddTimePartition("B", (0.0, 10.0)),
+        )
+    )
+    inconsistencies = (
+        _inconsistency("B", 7.0, selected_cell_id="B-late"),
+        _inconsistency("A", 6.0, selected_cell_id="A-late"),
+        _inconsistency("A", 3.0, selected_cell_id="A-early"),
+        _inconsistency("A", 3.0 + 5e-10, selected_cell_id="A-duplicate"),
+    )
+
+    splits, refined = _build_time_split_batch(
+        discretization,
+        inconsistencies,
+        max_splits=2,
+        tolerance_seconds=1e-9,
+    )
+
+    assert tuple((split.state_id, split.boundary_seconds) for split in splits) == (
+        ("A", pytest.approx(3.0)),
+        ("A", pytest.approx(6.0)),
+    )
+    assert refined.partition("A").boundaries_seconds == pytest.approx(
+        (0.0, 3.0, 6.0, 10.0)
+    )
+    assert refined.partition("B") == discretization.partition("B")
+
+
+def test_network_refinement_rejects_nonpositive_time_split_batch() -> None:
+    with pytest.raises(ValueError, match="max_new_time_splits_per_iteration"):
+        DddNetworkTimeRefinementSolver(
+            max_new_time_splits_per_iteration=0
+        ).solve(build_three_station_network_time_refinement_probe())
 
 
 def test_decomposition_consumes_the_prefix_flow_that_satisfies_cuts() -> None:
@@ -396,4 +729,21 @@ def _skip_option(
         platform_exit_offset_seconds=None,
         exit_switch_offset_seconds=duration_seconds,
         resource_usages=(),
+    )
+
+
+def _inconsistency(
+    state_id: str,
+    boundary_seconds: float,
+    *,
+    selected_cell_id: str,
+) -> DddEventCellInconsistency:
+    return DddEventCellInconsistency(
+        state_id=state_id,
+        selected_cell_id=selected_cell_id,
+        exact_source_time_seconds=boundary_seconds,
+        required_source_lower_seconds=boundary_seconds,
+        required_source_upper_seconds=boundary_seconds,
+        split_boundary_seconds=boundary_seconds,
+        failed_target_cell_id="target",
     )

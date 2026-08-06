@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 import math
 
@@ -9,6 +9,7 @@ from gurobipy import GRB
 
 from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddMovementProblem,
+    DddRouteOption,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.support_master import (
     DddSupportConflictCut,
@@ -23,8 +24,10 @@ from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
     DddTimeCell,
     DddTimeDiscretization,
     DddTimeSpaceObjective,
-    ddd_normalize_time_seconds,
     ddd_partial_arc_is_compatible,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
+    ddd_seconds_to_tick,
 )
 
 
@@ -117,15 +120,10 @@ class DddNetworkTimeProblem:
     def validate(self) -> None:
         self.movement_problem.validate()
         self.discretization.validate()
-        operational_end = ddd_normalize_time_seconds(
-            self.movement_problem.operational_end_seconds
-        )
-        required_sentinel_lower_bound = ddd_normalize_time_seconds(
-            operational_end
-            + max(
-                option.duration_seconds
-                for option in self.movement_problem.route_options
-            )
+        operational_end = self.movement_problem.operational_end_tick
+        required_sentinel_lower_bound = operational_end + max(
+            option.duration_tick
+            for option in self.movement_problem.route_options
         )
         target_state_ids = {
             option.to_state_id for option in self.movement_problem.route_options
@@ -134,20 +132,17 @@ class DddNetworkTimeProblem:
         if missing:
             raise ValueError(f"DDD target states lack time partitions: {missing}")
         for partition in self.discretization.partitions:
-            normalized_boundaries = tuple(
-                ddd_normalize_time_seconds(value)
-                for value in partition.boundaries_seconds
-            )
-            if normalized_boundaries[0] != 0.0:
+            boundaries = partition.boundaries_ticks
+            if boundaries[0] != 0:
                 raise ValueError(
                     f"DDD partition {partition.state_id!r} must start at zero"
                 )
-            if operational_end not in normalized_boundaries:
+            if operational_end not in boundaries:
                 raise ValueError(
                     f"DDD partition {partition.state_id!r} must contain the "
                     "operational horizon boundary"
                 )
-            if normalized_boundaries[-1] <= required_sentinel_lower_bound:
+            if boundaries[-1] <= required_sentinel_lower_bound:
                 raise ValueError(
                     f"DDD partition {partition.state_id!r} sentinel must exceed "
                     "the latest attainable completion"
@@ -275,8 +270,32 @@ class DddLayeredTimeNetwork:
 
 
 @dataclass(frozen=True)
+class DddLayeredTimeNetworkBuildStats:
+    partition_cache_hits: int = 0
+    partition_cache_misses: int = 0
+    transition_cache_hits: int = 0
+    transition_cache_misses: int = 0
+    invalidated_state_count: int = 0
+
+
+@dataclass
 class DddLayeredTimeNetworkBuilder:
     tolerance_seconds: float = 1e-9
+    _partition_key_by_state_id: dict[str, tuple[int, ...]] = field(
+        default_factory=dict,
+        init=False,
+        repr=False,
+    )
+    _cells_by_partition_key: dict[
+        tuple[str, tuple[int, ...]], tuple[DddTimeCell, ...]
+    ] = field(default_factory=dict, init=False, repr=False)
+    _compatible_targets_by_key: dict[
+        tuple[object, ...], tuple[DddTimeCell, ...]
+    ] = field(default_factory=dict, init=False, repr=False)
+    last_build_stats: DddLayeredTimeNetworkBuildStats = field(
+        default_factory=DddLayeredTimeNetworkBuildStats,
+        init=False,
+    )
 
     def build(self, problem: DddNetworkTimeProblem) -> DddLayeredTimeNetwork:
         problem.validate()
@@ -286,6 +305,100 @@ class DddLayeredTimeNetworkBuilder:
         options_by_state = movement.route_options_by_state_id
         route_costs = problem.objective.route_cost_by_option_id
         max_layer = max(start.max_visit_count for start in movement.starts)
+        partitions_by_state = problem.discretization.by_state_id
+        partition_keys = {
+            state_id: partition.boundaries_ticks
+            for state_id, partition in partitions_by_state.items()
+        }
+        changed_state_ids = {
+            state_id
+            for state_id, key in partition_keys.items()
+            if self._partition_key_by_state_id.get(state_id) != key
+        }
+        removed_state_ids = set(self._partition_key_by_state_id) - set(partition_keys)
+        invalidated_state_ids = changed_state_ids | removed_state_ids
+        if invalidated_state_ids:
+            self._compatible_targets_by_key = {
+                key: value
+                for key, value in self._compatible_targets_by_key.items()
+                if key[0] not in invalidated_state_ids
+                and key[1] not in invalidated_state_ids
+            }
+            self._cells_by_partition_key = {
+                key: value
+                for key, value in self._cells_by_partition_key.items()
+                if key[0] not in invalidated_state_ids
+            }
+        self._partition_key_by_state_id = dict(partition_keys)
+
+        partition_cache_hits = 0
+        partition_cache_misses = 0
+        cells_by_state: dict[str, tuple[DddTimeCell, ...]] = {}
+        for state_id, partition in partitions_by_state.items():
+            cache_key = (state_id, partition.boundaries_ticks)
+            cells = self._cells_by_partition_key.get(cache_key)
+            if cells is None:
+                cells = partition.cells
+                self._cells_by_partition_key[cache_key] = cells
+                partition_cache_misses += 1
+            else:
+                partition_cache_hits += 1
+            cells_by_state[state_id] = cells
+
+        transition_cache_hits = 0
+        transition_cache_misses = 0
+
+        def compatible_targets(
+            *,
+            source_cell: DddTimeCell | None,
+            fixed_source_time: float | None,
+            option: DddRouteOption,
+        ) -> tuple[DddTimeCell, ...]:
+            nonlocal transition_cache_hits, transition_cache_misses
+            source_key: tuple[object, ...]
+            source_state_id: str
+            if source_cell is None:
+                if fixed_source_time is None:
+                    raise ValueError("DDD fixed source time is missing")
+                source_state_id = option.from_state_id
+                source_key = ("fixed", ddd_seconds_to_tick(fixed_source_time))
+            else:
+                source_state_id = source_cell.state_id
+                source_key = (
+                    "cell",
+                    source_cell.lower_tick,
+                    source_cell.upper_tick,
+                )
+            target_partition_key = partition_keys[option.to_state_id]
+            cache_key = (
+                source_state_id,
+                option.to_state_id,
+                source_key,
+                option.id,
+                option.duration_tick,
+                target_partition_key,
+                movement.operational_end_tick,
+            )
+            cached = self._compatible_targets_by_key.get(cache_key)
+            if cached is not None:
+                transition_cache_hits += 1
+                return cached
+            transition_cache_misses += 1
+            result = tuple(
+                target_cell
+                for target_cell in cells_by_state[option.to_state_id]
+                if ddd_partial_arc_is_compatible(
+                    source_cell=source_cell,
+                    fixed_source_time=fixed_source_time,
+                    target_cell=target_cell,
+                    option=option,
+                    operational_end_seconds=movement.operational_end_seconds,
+                    tolerance_seconds=self.tolerance_seconds,
+                )
+            )
+            self._compatible_targets_by_key[cache_key] = result
+            return result
+
         nodes_by_id: dict[str, DddLayeredTimeNode] = {}
         arcs_by_id: dict[str, DddLayeredTimeArc] = {}
         reachable_by_layer: dict[int, set[str]] = {}
@@ -296,18 +409,11 @@ class DddLayeredTimeNetworkBuilder:
 
         for start in sorted(movement.starts, key=lambda item: item.cabin_id):
             for option in options_by_state.get(start.state_id, ()):
-                for target_cell in problem.discretization.partition(
-                    option.to_state_id
-                ).cells:
-                    if not ddd_partial_arc_is_compatible(
-                        source_cell=None,
-                        fixed_source_time=start.time_seconds,
-                        target_cell=target_cell,
-                        option=option,
-                        operational_end_seconds=movement.operational_end_seconds,
-                        tolerance_seconds=self.tolerance_seconds,
-                    ):
-                        continue
+                for target_cell in compatible_targets(
+                    source_cell=None,
+                    fixed_source_time=start.time_seconds,
+                    option=option,
+                ):
                     node = DddLayeredTimeNode(1, option.to_state_id, target_cell)
                     add_node(node)
                     partial_arc = DddPartialTimedArc(
@@ -333,7 +439,7 @@ class DddLayeredTimeNetworkBuilder:
             layer_node_ids = tuple(sorted(reachable_by_layer.get(layer_index, ())))
             for node_id in layer_node_ids:
                 node = nodes_by_id[node_id]
-                if node.cell.upper_seconds > movement.operational_end_seconds:
+                if node.cell.upper_tick > movement.operational_end_tick:
                     sink_id = f"sink::{node.id}"
                     arcs_by_id[sink_id] = DddLayeredTimeArc(
                         id=sink_id,
@@ -350,18 +456,11 @@ class DddLayeredTimeNetworkBuilder:
                 if layer_index >= max_layer:
                     continue
                 for option in options_by_state.get(node.state_id, ()):
-                    for target_cell in problem.discretization.partition(
-                        option.to_state_id
-                    ).cells:
-                        if not ddd_partial_arc_is_compatible(
-                            source_cell=node.cell,
-                            fixed_source_time=None,
-                            target_cell=target_cell,
-                            option=option,
-                            operational_end_seconds=movement.operational_end_seconds,
-                            tolerance_seconds=self.tolerance_seconds,
-                        ):
-                            continue
+                    for target_cell in compatible_targets(
+                        source_cell=node.cell,
+                        fixed_source_time=None,
+                        option=option,
+                    ):
                         target = DddLayeredTimeNode(
                             layer_index + 1,
                             option.to_state_id,
@@ -398,6 +497,13 @@ class DddLayeredTimeNetworkBuilder:
             ),
         )
         result.validate()
+        self.last_build_stats = DddLayeredTimeNetworkBuildStats(
+            partition_cache_hits=partition_cache_hits,
+            partition_cache_misses=partition_cache_misses,
+            transition_cache_hits=transition_cache_hits,
+            transition_cache_misses=transition_cache_misses,
+            invalidated_state_count=len(invalidated_state_ids),
+        )
         return result
 
 
@@ -419,6 +525,14 @@ class DddAnonymousPrefixFlowValue:
 
 
 @dataclass(frozen=True)
+class DddAnonymousFlowWarmStart:
+    arc_values: tuple[DddAnonymousFlowValue, ...]
+    prefix_arc_values: tuple[DddAnonymousPrefixFlowValue, ...]
+    projected_cabin_count: int
+    complete_cabin_count: int
+
+
+@dataclass(frozen=True)
 class DddAnonymousFlowResult:
     status: DddAnonymousFlowStatus
     objective_value: float | None
@@ -430,6 +544,10 @@ class DddAnonymousFlowResult:
     prefix_variable_count: int
     conflict_constraint_count: int
     tracked_prefix_cabin_count: int
+    warm_start_arc_variable_count: int
+    warm_start_prefix_variable_count: int
+    warm_start_projected_cabin_count: int
+    warm_start_complete_cabin_count: int
 
 
 @dataclass(frozen=True)
@@ -521,6 +639,7 @@ class DddAnonymousFlowMaster:
         network: DddLayeredTimeNetwork,
         *,
         cuts: tuple[DddSupportConflictCut, ...] = (),
+        warm_start: DddAnonymousFlowWarmStart | None = None,
     ) -> DddAnonymousFlowResult:
         network.validate()
         if self.integrality_tolerance <= 0:
@@ -577,6 +696,21 @@ class DddAnonymousFlowMaster:
                 cuts=cuts,
             )
         )
+        warm_start_arc_variable_count = 0
+        warm_start_prefix_variable_count = 0
+        if warm_start is not None:
+            for item in warm_start.arc_values:
+                variable = variables.get(item.arc_id)
+                if variable is None:
+                    continue
+                variable.Start = float(item.value)
+                warm_start_arc_variable_count += 1
+            for item in warm_start.prefix_arc_values:
+                variable = prefix_variables.get((item.cabin_id, item.arc_id))
+                if variable is None:
+                    continue
+                variable.Start = 1.0
+                warm_start_prefix_variable_count += 1
         model.ModelSense = GRB.MINIMIZE
         model.optimize()
         if model.Status == GRB.INFEASIBLE:
@@ -591,6 +725,16 @@ class DddAnonymousFlowMaster:
                 prefix_variable_count=len(prefix_variables),
                 conflict_constraint_count=len(cuts),
                 tracked_prefix_cabin_count=tracked_prefix_cabin_count,
+                warm_start_arc_variable_count=warm_start_arc_variable_count,
+                warm_start_prefix_variable_count=(
+                    warm_start_prefix_variable_count
+                ),
+                warm_start_projected_cabin_count=(
+                    warm_start.projected_cabin_count if warm_start else 0
+                ),
+                warm_start_complete_cabin_count=(
+                    warm_start.complete_cabin_count if warm_start else 0
+                ),
             )
         if model.Status != GRB.OPTIMAL:
             raise RuntimeError(f"unexpected DDD flow solver status: {model.Status}")
@@ -622,6 +766,111 @@ class DddAnonymousFlowMaster:
             prefix_variable_count=len(prefix_variables),
             conflict_constraint_count=len(cuts),
             tracked_prefix_cabin_count=tracked_prefix_cabin_count,
+            warm_start_arc_variable_count=warm_start_arc_variable_count,
+            warm_start_prefix_variable_count=warm_start_prefix_variable_count,
+            warm_start_projected_cabin_count=(
+                warm_start.projected_cabin_count if warm_start else 0
+            ),
+            warm_start_complete_cabin_count=(
+                warm_start.complete_cabin_count if warm_start else 0
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class DddAnonymousFlowWarmStartProjector:
+    """Project a selected physical route support onto a refined time network."""
+
+    def project(
+        self,
+        problem: DddNetworkTimeProblem,
+        network: DddLayeredTimeNetwork,
+        paths: tuple[DddPartialTimedPath, ...],
+        *,
+        cuts: tuple[DddSupportConflictCut, ...] = (),
+    ) -> DddAnonymousFlowWarmStart:
+        problem.validate()
+        network.validate()
+        # Warm starts are most useful while only the time discretization
+        # changes. Once prefix cuts are active, constructing their labelled
+        # formulation dominates and a route projection cannot reduce that
+        # work; keeping it disabled also avoids biasing anonymous tails.
+        if not paths or cuts:
+            return DddAnonymousFlowWarmStart((), (), 0, 0)
+        starts_by_cabin = {
+            start.cabin_id: start for start in problem.movement_problem.starts
+        }
+        options_by_id = {
+            option.id: option
+            for option in problem.movement_problem.route_options
+        }
+        source_arcs_by_cabin: dict[int, list[DddLayeredTimeArc]] = {}
+        outgoing_by_node: dict[str, list[DddLayeredTimeArc]] = {}
+        for arc in network.arcs:
+            if arc.cabin_id is not None:
+                source_arcs_by_cabin.setdefault(arc.cabin_id, []).append(arc)
+            if arc.source_node_id is not None:
+                outgoing_by_node.setdefault(arc.source_node_id, []).append(arc)
+
+        aggregate: dict[str, int] = {}
+        prefix_values: list[DddAnonymousPrefixFlowValue] = []
+        projected_cabin_count = 0
+        complete_cabin_count = 0
+        for path in sorted(paths, key=lambda item: item.cabin_id):
+            start = starts_by_cabin.get(path.cabin_id)
+            if start is None:
+                continue
+            current_tick = start.time_tick
+            current_node_id: str | None = None
+            projected_arc_ids: list[str] = []
+            for visit_index, option_id in enumerate(path.route_option_ids):
+                option = options_by_id[option_id]
+                current_tick += option.duration_tick
+                candidates = (
+                    source_arcs_by_cabin.get(path.cabin_id, ())
+                    if visit_index == 0
+                    else outgoing_by_node.get(current_node_id or "", ())
+                )
+                matches = tuple(
+                    arc
+                    for arc in candidates
+                    if arc.partial_arc is not None
+                    and arc.partial_arc.visit_index == visit_index
+                    and arc.partial_arc.route_option_id == option_id
+                    and arc.partial_arc.target_cell.contains_tick(current_tick)
+                )
+                if len(matches) != 1:
+                    break
+                selected = matches[0]
+                projected_arc_ids.append(selected.id)
+                current_node_id = selected.target_node_id
+            if not projected_arc_ids:
+                continue
+            projected_cabin_count += 1
+            if len(projected_arc_ids) == len(path.route_option_ids):
+                sinks = tuple(
+                    arc
+                    for arc in outgoing_by_node.get(current_node_id or "", ())
+                    if arc.kind is DddLayeredTimeArcKind.SINK
+                )
+                if len(sinks) == 1:
+                    projected_arc_ids.append(sinks[0].id)
+                    complete_cabin_count += 1
+            for arc_id in projected_arc_ids:
+                aggregate[arc_id] = aggregate.get(arc_id, 0) + 1
+            prefix_values.extend(
+                DddAnonymousPrefixFlowValue(path.cabin_id, arc_id)
+                for arc_id in projected_arc_ids[1:]
+            )
+
+        return DddAnonymousFlowWarmStart(
+            arc_values=tuple(
+                DddAnonymousFlowValue(arc_id, value)
+                for arc_id, value in sorted(aggregate.items())
+            ),
+            prefix_arc_values=tuple(sorted(prefix_values, key=lambda item: (item.cabin_id, item.arc_id))),
+            projected_cabin_count=projected_cabin_count,
+            complete_cabin_count=complete_cabin_count,
         )
 
 
@@ -869,18 +1118,14 @@ class DddAnonymousFlowDecomposer:
             cabin_id: set(arc_ids)
             for cabin_id, arc_ids in prefix_arc_ids_by_cabin.items()
         }
-        decomposition_order = tuple(
-            sorted(
-                network.cabin_ids,
-                key=lambda cabin_id: (
-                    cabin_id not in prefix_arc_ids_by_cabin,
-                    cabin_id,
-                ),
-            )
-        )
-        paths: list[DddPartialTimedPath] = []
-        for cabin_id in decomposition_order:
-            prefix_arc_ids = prefix_arc_ids_by_cabin.get(cabin_id, set())
+        partial_arcs_by_cabin: dict[int, list[DddPartialTimedArc]] = {}
+        current_node_by_cabin: dict[int, str | None] = {}
+
+        # Reserve every labelled prefix before extending any cabin through the
+        # anonymous tail. Otherwise an early cabin can consume a shared arc
+        # that a later cabin's prefix variable explicitly requires.
+        for cabin_id in sorted(prefix_arc_ids_by_cabin):
+            prefix_arc_ids = prefix_arc_ids_by_cabin[cabin_id]
             source_arc = _first_source_for_prefix(
                 source_by_cabin.get(cabin_id, ()),
                 outgoing=outgoing,
@@ -899,12 +1144,7 @@ class DddAnonymousFlowDecomposer:
                     prefix_arc_ids=prefix_arc_ids,
                 )
                 if next_arc is None:
-                    next_arc = _first_positive_arc(
-                        outgoing.get(node_id, ()),
-                        residual,
-                    )
-                if next_arc is None:
-                    raise RuntimeError("DDD flow path ends before a sink")
+                    break
                 _consume(next_arc.id, residual)
                 remaining_prefix_arcs.get(cabin_id, set()).discard(next_arc.id)
                 if next_arc.kind is DddLayeredTimeArcKind.SINK:
@@ -914,7 +1154,8 @@ class DddAnonymousFlowDecomposer:
                     raise RuntimeError("DDD movement flow arc has no partial arc")
                 partial_arcs.append(next_arc.partial_arc)
                 node_id = next_arc.target_node_id
-            paths.append(DddPartialTimedPath(cabin_id, tuple(partial_arcs)))
+            partial_arcs_by_cabin[cabin_id] = partial_arcs
+            current_node_by_cabin[cabin_id] = node_id
         unconsumed_prefix = {
             cabin_id: tuple(sorted(arc_ids))
             for cabin_id, arc_ids in remaining_prefix_arcs.items()
@@ -924,6 +1165,39 @@ class DddAnonymousFlowDecomposer:
             raise RuntimeError(
                 f"DDD decomposition did not consume prefix flow: {unconsumed_prefix}"
             )
+
+        paths: list[DddPartialTimedPath] = []
+        for cabin_id in sorted(network.cabin_ids):
+            partial_arcs = partial_arcs_by_cabin.get(cabin_id)
+            node_id = current_node_by_cabin.get(cabin_id)
+            if partial_arcs is None:
+                source_arc = _first_positive_arc(
+                    source_by_cabin.get(cabin_id, ()),
+                    residual,
+                )
+                if source_arc is None or source_arc.partial_arc is None:
+                    raise RuntimeError(
+                        f"DDD flow has no source path for cabin {cabin_id}"
+                    )
+                _consume(source_arc.id, residual)
+                partial_arcs = [source_arc.partial_arc]
+                node_id = source_arc.target_node_id
+            while node_id is not None:
+                next_arc = _first_positive_arc(
+                    outgoing.get(node_id, ()),
+                    residual,
+                )
+                if next_arc is None:
+                    raise RuntimeError("DDD flow path ends before a sink")
+                _consume(next_arc.id, residual)
+                if next_arc.kind is DddLayeredTimeArcKind.SINK:
+                    node_id = None
+                    continue
+                if next_arc.partial_arc is None:
+                    raise RuntimeError("DDD movement flow arc has no partial arc")
+                partial_arcs.append(next_arc.partial_arc)
+                node_id = next_arc.target_node_id
+            paths.append(DddPartialTimedPath(cabin_id, tuple(partial_arcs)))
         leftovers = {arc_id: value for arc_id, value in residual.items() if value}
         unknown = set(residual) - set(arcs_by_id)
         if leftovers or unknown:

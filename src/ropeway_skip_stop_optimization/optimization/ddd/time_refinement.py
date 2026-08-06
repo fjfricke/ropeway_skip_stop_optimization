@@ -10,7 +10,12 @@ from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
     DddPartialTimeMasterStatus,
     DddPartialTimeProblem,
     DddTimeDiscretization,
-    ddd_normalize_time_seconds,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
+    DddTimeTick,
+    ddd_quantize_time_seconds,
+    ddd_seconds_to_tick,
+    ddd_tick_to_seconds,
 )
 
 
@@ -19,6 +24,17 @@ class DddExactTimedEvent:
     event_index: int
     state_id: str
     time_seconds: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "time_seconds",
+            ddd_quantize_time_seconds(self.time_seconds),
+        )
+
+    @property
+    def time_tick(self) -> DddTimeTick:
+        return ddd_seconds_to_tick(self.time_seconds)
 
 
 @dataclass(frozen=True)
@@ -54,11 +70,10 @@ def validate_ddd_recovered_schedule(
     if not schedule.events:
         raise ValueError("DDD recovered schedule must contain events")
     first = schedule.events[0]
-    if first.event_index != 0 or first.state_id != start.state_id or not math.isclose(
-        first.time_seconds,
-        start.time_seconds,
-        rel_tol=0.0,
-        abs_tol=tolerance_seconds,
+    if (
+        first.event_index != 0
+        or first.state_id != start.state_id
+        or first.time_tick != start.time_tick
     ):
         raise ValueError("DDD recovered schedule start is inconsistent")
     options_by_id = {
@@ -74,16 +89,9 @@ def validate_ddd_recovered_schedule(
             raise ValueError("DDD recovered event indices must be contiguous")
         if source.state_id != option.from_state_id or target.state_id != option.to_state_id:
             raise ValueError("DDD recovered route chain is inconsistent")
-        if source.time_seconds > (
-            problem.movement_problem.operational_end_seconds + tolerance_seconds
-        ):
+        if source.time_tick > problem.movement_problem.operational_end_tick:
             raise ValueError("DDD recovered route departs after operational horizon")
-        if not math.isclose(
-            target.time_seconds,
-            source.time_seconds + option.duration_seconds,
-            rel_tol=0.0,
-            abs_tol=tolerance_seconds,
-        ):
+        if target.time_tick != source.time_tick + option.duration_tick:
             raise ValueError("DDD recovered route duration is inconsistent")
     if schedule.events[-1].state_id != problem.terminal_state_id:
         raise ValueError("DDD recovered schedule does not reach terminal state")
@@ -149,6 +157,10 @@ class DddStrictTimeLiftStatus(StrEnum):
     EVENT_CELL_INCONSISTENCY = "event_cell_inconsistency"
 
 
+class DddTimeRefinementStalledError(ValueError):
+    """An inconsistency is proved but no tolerance-safe split is available."""
+
+
 @dataclass(frozen=True)
 class DddEventCellInconsistency:
     state_id: str
@@ -206,20 +218,18 @@ class DddStrictTimeCellLifter:
                     tolerance_seconds=self.tolerance_seconds,
                 ):
                     raise ValueError("DDD strict lift source cell is inconsistent")
-                if source_event.time_seconds > (
-                    problem.movement_problem.operational_end_seconds
-                    + self.tolerance_seconds
+                if (
+                    source_event.time_tick
+                    > problem.movement_problem.operational_end_tick
                 ):
-                    split_boundary = ddd_normalize_time_seconds(
-                        source_event.time_seconds
-                    )
+                    split_tick = source_event.time_tick
+                    split_boundary = ddd_tick_to_seconds(split_tick)
                     if not (
-                        selected_source_cell.lower_seconds + self.tolerance_seconds
-                        < split_boundary
-                        < selected_source_cell.upper_seconds
-                        - self.tolerance_seconds
+                        selected_source_cell.lower_tick
+                        < split_tick
+                        < selected_source_cell.upper_tick
                     ):
-                        raise ValueError(
+                        raise DddTimeRefinementStalledError(
                             "DDD post-horizon inconsistency has no interior boundary"
                         )
                     return DddStrictTimeLiftResult(
@@ -241,10 +251,7 @@ class DddStrictTimeCellLifter:
                             failed_target_cell_id=arc.target_cell.id,
                         ),
                     )
-            if arc.target_cell.contains(
-                target_event.time_seconds,
-                tolerance_seconds=self.tolerance_seconds,
-            ):
+            if arc.target_cell.contains_tick(target_event.time_tick):
                 continue
             if arc.source_cell_id is None:
                 raise ValueError("fixed-start partial arc was not exactly compatible")
@@ -254,24 +261,32 @@ class DddStrictTimeCellLifter:
                 if cell.id == arc.source_cell_id
             )
             option = options_by_id[arc.route_option_id]
-            required_lower = ddd_normalize_time_seconds(
-                arc.target_cell.lower_seconds - option.duration_seconds
+            required_lower_tick = (
+                arc.target_cell.lower_tick - option.duration_tick
             )
-            required_upper = ddd_normalize_time_seconds(
-                arc.target_cell.upper_seconds - option.duration_seconds
+            required_upper_tick = (
+                arc.target_cell.upper_tick - option.duration_tick
             )
-            split_boundary = ddd_normalize_time_seconds(
-                required_lower
-                if source_event.time_seconds < required_lower
-                else required_upper
+            split_tick = (
+                required_lower_tick
+                if source_event.time_tick < required_lower_tick
+                else required_upper_tick
             )
+            required_lower = ddd_tick_to_seconds(required_lower_tick)
+            required_upper = ddd_tick_to_seconds(required_upper_tick)
+            split_boundary = ddd_tick_to_seconds(split_tick)
             if not (
-                selected_source_cell.lower_seconds + self.tolerance_seconds
-                < split_boundary
-                < selected_source_cell.upper_seconds - self.tolerance_seconds
+                selected_source_cell.lower_tick
+                < split_tick
+                < selected_source_cell.upper_tick
             ):
-                raise ValueError(
-                    "DDD event-cell inconsistency has no interior source boundary"
+                raise DddTimeRefinementStalledError(
+                    "DDD event-cell inconsistency has no interior source boundary: "
+                    f"source={source_event.time_seconds}, "
+                    f"cell=[{selected_source_cell.lower_seconds},"
+                    f"{selected_source_cell.upper_seconds}), "
+                    f"required=[{required_lower},{required_upper}), "
+                    f"split={split_boundary}, target={arc.target_cell.id}"
                 )
             return DddStrictTimeLiftResult(
                 status=DddStrictTimeLiftStatus.EVENT_CELL_INCONSISTENCY,
@@ -313,17 +328,23 @@ def _propagate_route_support(
     }
     events = [DddExactTimedEvent(0, start.state_id, start.time_seconds)]
     state_id = start.state_id
-    time_seconds = start.time_seconds
+    time_tick = start.time_tick
     for index, option_id in enumerate(path.route_option_ids):
         option = options_by_id.get(option_id)
         if option is None or option.from_state_id != state_id:
             raise ValueError("DDD partial path route support is inconsistent")
-        time_seconds += option.duration_seconds
+        time_tick += option.duration_tick
         state_id = option.to_state_id
-        events.append(DddExactTimedEvent(index + 1, state_id, time_seconds))
+        events.append(
+            DddExactTimedEvent(
+                index + 1,
+                state_id,
+                ddd_tick_to_seconds(time_tick),
+            )
+        )
     objective_value = problem.objective.exact_value(
         path.route_option_ids,
-        time_seconds,
+        ddd_tick_to_seconds(time_tick),
         tolerance_seconds=tolerance_seconds,
     )
     return DddRecoveredSchedule(

@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-import math
 
 from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddMovementProblem,
@@ -10,6 +9,10 @@ from ropeway_skip_stop_optimization.optimization.ddd.models import (
 from ropeway_skip_stop_optimization.optimization.ddd.reference import (
     DddReferenceSolution,
     validate_ddd_reference_solution,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
+    ddd_seconds_to_tick,
+    ddd_tick_to_seconds,
 )
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
 from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
@@ -39,16 +42,11 @@ class DddReferenceToEanMovementPlanAdapter:
             raise ValueError("DDD problem and EAN artifact scenario ids differ")
         if artifact.fleet_mode is not EanFleetMode.FIXED_STARTS:
             raise ValueError("DDD reference plan conversion supports fixed starts only")
-        if not math.isclose(
-            artifact.config.passenger_service_end_seconds,
-            problem.passenger_service_end_seconds,
-            rel_tol=0.0,
-            abs_tol=self.tolerance_seconds,
-        ) or not math.isclose(
-            artifact.config.operational_end_seconds,
-            problem.operational_end_seconds,
-            rel_tol=0.0,
-            abs_tol=self.tolerance_seconds,
+        if (
+            ddd_seconds_to_tick(artifact.config.passenger_service_end_seconds)
+            != problem.passenger_service_end_tick
+            or ddd_seconds_to_tick(artifact.config.operational_end_seconds)
+            != problem.operational_end_tick
         ):
             raise ValueError("DDD problem and EAN artifact horizons differ")
         artifact_cabin_ids = {start.cabin_id for start in artifact.cabin_starts}
@@ -80,20 +78,34 @@ class DddReferenceToEanMovementPlanAdapter:
                         ),
                         switch_time_seconds=reference_visit.switch_time_seconds,
                         platform_entry_time_seconds=(
-                            reference_visit.switch_time_seconds
-                            + option.platform_entry_offset_seconds
+                            ddd_tick_to_seconds(
+                                ddd_seconds_to_tick(
+                                    reference_visit.switch_time_seconds
+                                )
+                                + ddd_seconds_to_tick(
+                                    option.platform_entry_offset_seconds
+                                )
+                            )
                             if option.platform_entry_offset_seconds is not None
                             else None
                         ),
                         platform_exit_time_seconds=(
-                            reference_visit.switch_time_seconds
-                            + option.platform_exit_offset_seconds
+                            ddd_tick_to_seconds(
+                                ddd_seconds_to_tick(
+                                    reference_visit.switch_time_seconds
+                                )
+                                + ddd_seconds_to_tick(
+                                    option.platform_exit_offset_seconds
+                                )
+                            )
                             if option.platform_exit_offset_seconds is not None
                             else None
                         ),
-                        exit_switch_time_seconds=(
-                            reference_visit.switch_time_seconds
-                            + option.exit_switch_offset_seconds
+                        exit_switch_time_seconds=ddd_tick_to_seconds(
+                            ddd_seconds_to_tick(
+                                reference_visit.switch_time_seconds
+                            )
+                            + option.exit_switch_offset_tick
                         ),
                         next_switch_time_seconds=(
                             reference_visit.next_switch_time_seconds

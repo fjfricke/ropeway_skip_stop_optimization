@@ -106,6 +106,32 @@ enumerating it, and actually builds the best configured eager EAN reference.
 The resulting Gate G9 statement concerns structural model size only. It does
 not claim faster solving or assume that every large case needs only local cuts.
 
+Run the first conflict-driven scaling experiment with a live terminal display:
+
+```bash
+.venv/bin/python benchmarks/run_ddd_fixed_start_refinement.py
+```
+
+The default is the 19-cabin Five-Station ring with Skip, fixed starts, and no
+Waiting. The single `tqdm` line reports the active stage and, after every round,
+bounds, network/model size, tracked cabins, prefix variables/depth, conflicts,
+projected warm-start coverage, transition-cache hits/misses, new/total cuts,
+the number and first member of the selected time-split batch, and round time.
+The benchmark admits up to 10,000 deterministic,
+tolerance-safe time splits per round; use `--max-new-time-splits 1` to replay
+the single-split reference strategy. Use `--no-reuse-network-fragments` and
+`--no-projected-warm-start` for controlled ablations. Gurobi logging is off in
+progress mode so both renderers do not corrupt each other; use the
+`--no-progress --gurobi-log` combination for the raw solver log. All
+completed-round metrics are written to JSON when the run finishes.
+
+DDD converts physical seconds once at its boundary to canonical integer
+microsecond ticks. Time-cell membership, shifted interval intersections,
+duration accumulation, split equality, IDs, and fingerprints then use exact
+integer arithmetic. Exported metrics and movement plans remain expressed in
+seconds. The maximum quantization error of one imported time value is half a
+microsecond.
+
 Run one EAN passenger benchmark:
 
 ```bash

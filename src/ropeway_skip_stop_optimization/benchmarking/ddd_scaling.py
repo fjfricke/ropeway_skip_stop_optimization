@@ -19,7 +19,8 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddTimeDiscretization,
     DddTimePartition,
     EanArtifactToDddMovementProblemAdapter,
-    ddd_normalize_time_seconds,
+    DDD_TIME_TICKS_PER_SECOND,
+    ddd_tick_to_seconds,
     estimate_ddd_prefix_formulation_size,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
@@ -77,25 +78,23 @@ def count_ddd_raw_trajectory_supports(
         @lru_cache(maxsize=None)
         def count_from(
             state_id: str,
-            time_seconds: float,
+            time_tick: int,
             visit_index: int,
         ) -> int:
             if visit_index >= start.max_visit_count:
                 raise ValueError(
                     "DDD raw-support count exhausted the visit bound for cabin "
-                    f"{start.cabin_id} at t={time_seconds}"
+                    f"{start.cabin_id} at tick={time_tick}"
                 )
             result = 0
             for option in options_by_state[state_id]:
-                next_time = ddd_normalize_time_seconds(
-                    time_seconds + option.duration_seconds
-                )
-                if next_time > problem.operational_end_seconds:
+                next_tick = time_tick + option.duration_tick
+                if next_tick > problem.operational_end_tick:
                     result += 1
                 else:
                     result += count_from(
                         option.to_state_id,
-                        next_time,
+                        next_tick,
                         visit_index + 1,
                     )
             return result
@@ -103,7 +102,7 @@ def count_ddd_raw_trajectory_supports(
         counts.append(
             count_from(
                 start.state_id,
-                ddd_normalize_time_seconds(start.time_seconds),
+                start.time_tick,
                 0,
             )
         )
@@ -122,10 +121,10 @@ def build_initial_ddd_network_problem(
     """Build the deliberately coarse, valid Phase-0 initial discretization."""
 
     movement.validate()
-    sentinel = ddd_normalize_time_seconds(
-        movement.operational_end_seconds
-        + max(option.duration_seconds for option in movement.route_options)
-        + 1.0
+    sentinel = ddd_tick_to_seconds(
+        movement.operational_end_tick
+        + max(option.duration_tick for option in movement.route_options)
+        + DDD_TIME_TICKS_PER_SECOND
     )
     result = DddNetworkTimeProblem(
         movement_problem=movement,

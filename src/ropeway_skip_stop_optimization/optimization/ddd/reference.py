@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import StrEnum
 from itertools import combinations
-import math
 
 from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddFixedStart,
@@ -12,6 +11,11 @@ from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddResourceUsage,
     DddRouteDecision,
     DddRouteOption,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
+    ddd_quantize_time_seconds,
+    ddd_seconds_to_tick,
+    ddd_tick_to_seconds,
 )
 
 
@@ -40,6 +44,18 @@ class DddReferenceResourceOccurrence:
     leader_clear_time_seconds: float
     follower_enter_time_seconds: float
 
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "leader_clear_time_seconds",
+            ddd_quantize_time_seconds(self.leader_clear_time_seconds),
+        )
+        object.__setattr__(
+            self,
+            "follower_enter_time_seconds",
+            ddd_quantize_time_seconds(self.follower_enter_time_seconds),
+        )
+
 
 @dataclass(frozen=True)
 class DddReferenceVisit:
@@ -51,6 +67,18 @@ class DddReferenceVisit:
     switch_time_seconds: float
     next_switch_time_seconds: float
     resource_occurrences: tuple[DddReferenceResourceOccurrence, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "switch_time_seconds",
+            ddd_quantize_time_seconds(self.switch_time_seconds),
+        )
+        object.__setattr__(
+            self,
+            "next_switch_time_seconds",
+            ddd_quantize_time_seconds(self.next_switch_time_seconds),
+        )
 
 
 @dataclass(frozen=True)
@@ -179,10 +207,9 @@ class DddReferenceTrajectoryGenerator:
                         continue
                     next_visits = (*visits, reference_visit)
                     next_occurrences = (*occurrences, *new_occurrences)
-                    if (
+                    if ddd_seconds_to_tick(
                         reference_visit.next_switch_time_seconds
-                        > problem.operational_end_seconds + self.tolerance_seconds
-                    ):
+                    ) > problem.operational_end_tick:
                         if len(trajectories) >= self.max_trajectories_per_start:
                             raise DddReferenceSearchLimitError(
                                 "DDD trajectory limit exceeded for cabin "
@@ -354,7 +381,7 @@ def validate_ddd_reference_solution(
         if not trajectory.visits:
             raise ValueError("DDD reference trajectory must contain an active visit")
         expected_state = start.state_id
-        expected_time = start.time_seconds
+        expected_time_tick = start.time_tick
         expected_occurrences: list[DddReferenceResourceOccurrence] = []
         for visit_index, reference_visit in enumerate(trajectory.visits):
             if reference_visit.cabin_id != trajectory.cabin_id:
@@ -363,15 +390,14 @@ def validate_ddd_reference_solution(
                 raise ValueError("DDD trajectory visit indices must be contiguous")
             if reference_visit.state_id != expected_state:
                 raise ValueError("DDD trajectory state chain is inconsistent")
-            if not math.isclose(
-                reference_visit.switch_time_seconds,
-                expected_time,
-                rel_tol=0.0,
-                abs_tol=tolerance_seconds,
+            if (
+                ddd_seconds_to_tick(reference_visit.switch_time_seconds)
+                != expected_time_tick
             ):
                 raise ValueError("DDD trajectory event-time chain is inconsistent")
-            if reference_visit.switch_time_seconds > (
-                problem.operational_end_seconds + tolerance_seconds
+            if (
+                ddd_seconds_to_tick(reference_visit.switch_time_seconds)
+                > problem.operational_end_tick
             ):
                 raise ValueError("DDD trajectory contains a post-horizon route entry")
             option = options_by_id[reference_visit.route_option_id]
@@ -389,8 +415,10 @@ def validate_ddd_reference_solution(
                 raise ValueError("DDD visit timing or resource occurrences are inconsistent")
             expected_occurrences.extend(rebuilt.resource_occurrences)
             expected_state = option.to_state_id
-            expected_time = rebuilt.next_switch_time_seconds
-        if expected_time <= problem.operational_end_seconds + tolerance_seconds:
+            expected_time_tick = ddd_seconds_to_tick(
+                rebuilt.next_switch_time_seconds
+            )
+        if expected_time_tick <= problem.operational_end_tick:
             raise DddReferenceHorizonCoverageError(
                 "DDD trajectory ends before covering the operational horizon"
             )
@@ -420,16 +448,14 @@ def find_ddd_reference_conflicts(
         if first.resource_id != second.resource_id:
             continue
         resource = resources_by_id[first.resource_id]
-        forward = (
+        forward = ddd_seconds_to_tick(
             second.follower_enter_time_seconds
-            - first.leader_clear_time_seconds
-        )
-        reverse = (
+        ) - ddd_seconds_to_tick(first.leader_clear_time_seconds)
+        reverse = ddd_seconds_to_tick(
             first.follower_enter_time_seconds
-            - second.leader_clear_time_seconds
-        )
-        violation = resource.headway_seconds - max(forward, reverse)
-        if violation > tolerance_seconds:
+        ) - ddd_seconds_to_tick(second.leader_clear_time_seconds)
+        violation_tick = resource.headway_tick - max(forward, reverse)
+        if violation_tick > ddd_seconds_to_tick(tolerance_seconds):
             result.append(
                 DddReferenceConflict(
                     resource_id=resource.id,
@@ -437,7 +463,7 @@ def find_ddd_reference_conflicts(
                     first_visit_index=first.visit_index,
                     second_cabin_id=second.cabin_id,
                     second_visit_index=second.visit_index,
-                    violation_seconds=violation,
+                    violation_seconds=ddd_tick_to_seconds(violation_tick),
                 )
             )
     return tuple(
@@ -464,19 +490,23 @@ def build_ddd_reference_visit(
     operational_end_seconds: float,
     tolerance_seconds: float,
 ) -> DddReferenceVisit:
-    next_switch_time_seconds = switch_time_seconds + option.duration_seconds
+    switch_tick = ddd_seconds_to_tick(switch_time_seconds)
+    next_switch_tick = switch_tick + option.duration_tick
+    next_switch_time_seconds = ddd_tick_to_seconds(next_switch_tick)
     occurrences = tuple(
         occurrence
         for usage in option.resource_usages
-        if (
-            occurrence := _resource_occurrence(
-                start=start,
-                visit_index=visit_index,
-                switch_time_seconds=switch_time_seconds,
-                usage=usage,
-            )
-        ).follower_enter_time_seconds
-        <= operational_end_seconds + tolerance_seconds
+        if ddd_seconds_to_tick(
+            (
+                occurrence := _resource_occurrence(
+                    start=start,
+                    visit_index=visit_index,
+                    switch_time_seconds=switch_time_seconds,
+                    usage=usage,
+                )
+            ).follower_enter_time_seconds
+        )
+        <= ddd_seconds_to_tick(operational_end_seconds)
     )
     return DddReferenceVisit(
         cabin_id=start.cabin_id,
@@ -484,7 +514,7 @@ def build_ddd_reference_visit(
         state_id=option.from_state_id,
         route_option_id=option.id,
         decision=option.decision,
-        switch_time_seconds=switch_time_seconds,
+        switch_time_seconds=ddd_tick_to_seconds(switch_tick),
         next_switch_time_seconds=next_switch_time_seconds,
         resource_occurrences=occurrences,
     )
@@ -497,15 +527,16 @@ def _resource_occurrence(
     switch_time_seconds: float,
     usage: DddResourceUsage,
 ) -> DddReferenceResourceOccurrence:
+    switch_tick = ddd_seconds_to_tick(switch_time_seconds)
     return DddReferenceResourceOccurrence(
         resource_id=usage.resource_id,
         cabin_id=start.cabin_id,
         visit_index=visit_index,
-        leader_clear_time_seconds=(
-            switch_time_seconds + usage.leader_clear_offset_seconds
+        leader_clear_time_seconds=ddd_tick_to_seconds(
+            switch_tick + usage.leader_clear_offset_tick
         ),
-        follower_enter_time_seconds=(
-            switch_time_seconds + usage.follower_enter_offset_seconds
+        follower_enter_time_seconds=ddd_tick_to_seconds(
+            switch_tick + usage.follower_enter_offset_tick
         ),
     )
 
@@ -521,14 +552,14 @@ def _occurrence_sets_conflict(
             if first.resource_id != second.resource_id:
                 continue
             resource = resources_by_id[first.resource_id]
-            forward = (
+            forward = ddd_seconds_to_tick(
                 second.follower_enter_time_seconds
-                - first.leader_clear_time_seconds
-            )
-            reverse = (
+            ) - ddd_seconds_to_tick(first.leader_clear_time_seconds)
+            reverse = ddd_seconds_to_tick(
                 first.follower_enter_time_seconds
-                - second.leader_clear_time_seconds
-            )
-            if resource.headway_seconds - max(forward, reverse) > tolerance_seconds:
+            ) - ddd_seconds_to_tick(second.leader_clear_time_seconds)
+            if resource.headway_tick - max(
+                forward, reverse
+            ) > ddd_seconds_to_tick(tolerance_seconds):
                 return True
     return False
