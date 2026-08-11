@@ -172,6 +172,8 @@ class DddNetworkTimeRefinementProgressEvent:
     candidate_elapsed_seconds: float | None = None
     primal_best_objective: float | None = None
     master_progress: DddAnonymousMasterProgress | None = None
+    global_lower_bound: float | None = None
+    global_upper_bound: float | None = None
 
 
 DddNetworkTimeRefinementProgressCallback = Callable[
@@ -557,6 +559,8 @@ class DddNetworkTimeRefinementSolver:
                     candidate_elapsed_seconds=candidate_elapsed_seconds,
                     primal_best_objective=primal_best_objective,
                     master_progress=master_progress,
+                    global_lower_bound=_finite_or_none(lower_bound),
+                    global_upper_bound=_finite_or_none(upper_bound),
                 )
             )
 

@@ -11,6 +11,7 @@ from ropeway_skip_stop_optimization.benchmarking.ddd_cases import (
     build_three_station_time_refinement_artifact,
 )
 from ropeway_skip_stop_optimization.benchmarking.ddd_progress import (
+    _format_fixed_live_progress,
     format_ddd_iteration_progress,
 )
 from ropeway_skip_stop_optimization.optimization.ddd import (
@@ -997,6 +998,8 @@ def test_network_refinement_emits_terminal_progress_data() -> None:
     ]
     assert len(finished) == len(result.iterations) == 3
     assert finished[-1].iteration == result.iterations[-1]
+    assert finished[-1].global_lower_bound == result.global_lower_bound
+    assert finished[-1].global_upper_bound == result.global_upper_bound
     assert {
         DddNetworkTimeRefinementProgressStage.ROUND_STARTED,
         DddNetworkTimeRefinementProgressStage.MASTER_STARTED,
@@ -1020,6 +1023,36 @@ def test_network_refinement_emits_terminal_progress_data() -> None:
     assert master_events
     assert all(event.master_progress is not None for event in master_events)
     assert result.iterations[-1].master_progress_snapshots
+
+    fixed_first = _format_fixed_live_progress(
+        event=master_events[0],
+        stage="master@1s",
+        master_incumbent=123.0,
+        master_best_bound=4.0,
+        master_relative_gap=0.5,
+        variable_count=12,
+        constraint_count=7,
+        cut_count=1,
+        prefix_variable_count=2,
+        master_node_count=3.0,
+    )
+    fixed_second = _format_fixed_live_progress(
+        event=master_events[0],
+        stage="primal_oracle_candidate_found",
+        master_incumbent=1234567.0,
+        master_best_bound=40.0,
+        master_relative_gap=0.05,
+        variable_count=123456,
+        constraint_count=70000,
+        cut_count=100,
+        prefix_variable_count=2000,
+        master_node_count=30000.0,
+    )
+    assert len(fixed_first) == len(fixed_second)
+    assert "LB=" in fixed_first
+    assert "UB=" in fixed_first
+    assert "INC=" in fixed_first
+    assert "GAP=" in fixed_first
 
 
 def test_time_split_batch_is_deterministic_deduplicated_and_bounded() -> None:

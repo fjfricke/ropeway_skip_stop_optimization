@@ -178,14 +178,28 @@ class DddTerminalProgress:
     max_iterations: int
     description: str = "DDD refinement"
     _bar: Any | None = field(init=False, default=None)
+    _master_incumbent: float | None = field(init=False, default=None)
+    _master_best_bound: float | None = field(init=False, default=None)
+    _master_relative_gap: float | None = field(init=False, default=None)
+    _variable_count: int = field(init=False, default=0)
+    _constraint_count: int = field(init=False, default=0)
+    _cut_count: int = field(init=False, default=0)
+    _prefix_variable_count: int = field(init=False, default=0)
+    _master_node_count: float = field(init=False, default=0.0)
 
     def __enter__(self) -> DddTerminalProgress:
         if self.enabled:
+            round_digits = len(str(self.max_iterations))
             self._bar = tqdm(
                 total=self.max_iterations,
                 desc=self.description,
                 unit="round",
-                dynamic_ncols=True,
+                dynamic_ncols=False,
+                bar_format=(
+                    "{desc}: {percentage:6.2f}%|{bar:20}| "
+                    f"{{n:>{round_digits}d}}/{{total:<{round_digits}d}} "
+                    "[{elapsed:>8}] {postfix}"
+                ),
             )
         return self
 
@@ -196,36 +210,31 @@ class DddTerminalProgress:
     def update(self, event: DddNetworkTimeRefinementProgressEvent) -> None:
         if self._bar is None:
             return
-        if event.stage is DddNetworkTimeRefinementProgressStage.ROUND_FINISHED:
+        if event.stage is DddNetworkTimeRefinementProgressStage.ROUND_STARTED:
+            self._master_incumbent = None
+            self._master_best_bound = None
+            self._master_relative_gap = None
+            self._master_node_count = 0.0
+        round_finished = (
+            event.stage is DddNetworkTimeRefinementProgressStage.ROUND_FINISHED
+        )
+        if round_finished:
             if event.iteration is None:
                 raise ValueError("finished DDD round lacks iteration metrics")
-            self._bar.update(max(0, event.round_index - self._bar.n))
-            self._bar.set_postfix_str(
-                format_ddd_iteration_progress(event.iteration),
-                refresh=True,
-            )
-            return
-        if event.stage in {
-            DddNetworkTimeRefinementProgressStage.PRIMAL_ORACLE_CANDIDATE_FOUND,
-            DddNetworkTimeRefinementProgressStage.PRIMAL_EVALUATION_FINISHED,
-        }:
-            self._bar.set_postfix_str(
-                " ".join(
-                    (
-                        f"round={event.round_index}",
-                        f"stage={event.stage.value}",
-                        (f"candidate={event.candidate_index}/{event.candidate_limit}"),
-                        (
-                            f"candidate_time={event.candidate_elapsed_seconds:.1f}s"
-                            if event.candidate_elapsed_seconds is not None
-                            else "candidate_time=-"
-                        ),
-                        (f"best={_format_bound(event.primal_best_objective)}"),
-                    )
-                ),
-                refresh=True,
-            )
-            return
+            self._variable_count = event.iteration.variable_count
+            self._constraint_count = event.iteration.constraint_count
+            self._cut_count = event.iteration.total_conflict_cut_count
+            self._prefix_variable_count = event.iteration.prefix_variable_count
+            self._master_node_count = event.iteration.master_explored_node_count
+        if event.stage is DddNetworkTimeRefinementProgressStage.MASTER_PROGRESS:
+            master = event.master_progress
+            if master is None:
+                raise ValueError("DDD master progress event lacks diagnostics")
+            self._master_incumbent = master.incumbent_objective
+            self._master_best_bound = master.best_bound
+            self._master_relative_gap = master.relative_gap
+            self._master_node_count = master.explored_node_count
+        stage = event.stage.value
         if event.stage is DddNetworkTimeRefinementProgressStage.MASTER_PROGRESS:
             master = event.master_progress
             if master is None:
@@ -235,35 +244,88 @@ class DddTerminalProgress:
                 if master.requested_elapsed_seconds is None
                 else f"{master.requested_elapsed_seconds:g}s"
             )
-            self._bar.set_postfix_str(
-                " ".join(
-                    (
-                        f"round={event.round_index}",
-                        f"stage=master@{marker}",
-                        f"inc={_format_bound(master.incumbent_objective)}",
-                        f"bound={_format_bound(master.best_bound)}",
-                        f"gap={_format_bound(master.relative_gap)}",
-                        f"nodes={master.explored_node_count:.0f}",
-                        f"open={master.open_node_count:.0f}",
-                        f"sol={master.solution_count}",
-                    )
-                ),
-                refresh=True,
-            )
-            return
+            stage = f"master@{marker}"
         self._bar.set_postfix_str(
-            " ".join(
-                (
-                    f"round={event.round_index}",
-                    f"stage={event.stage.value}",
-                    f"elapsed={event.total_elapsed_seconds:.1f}s",
-                )
+            _format_fixed_live_progress(
+                event=event,
+                stage=stage,
+                master_incumbent=self._master_incumbent,
+                master_best_bound=self._master_best_bound,
+                master_relative_gap=self._master_relative_gap,
+                variable_count=self._variable_count,
+                constraint_count=self._constraint_count,
+                cut_count=self._cut_count,
+                prefix_variable_count=self._prefix_variable_count,
+                master_node_count=self._master_node_count,
             ),
-            refresh=True,
+            refresh=False,
         )
+        if round_finished:
+            self._bar.update(max(0, event.round_index - self._bar.n))
+        else:
+            self._bar.refresh()
 
 
 def _format_bound(value: float | None) -> str:
     if value is None:
         return "-"
     return f"{value:.6g}"
+
+
+def _format_fixed_live_progress(
+    *,
+    event: DddNetworkTimeRefinementProgressEvent,
+    stage: str,
+    master_incumbent: float | None,
+    master_best_bound: float | None,
+    master_relative_gap: float | None,
+    variable_count: int,
+    constraint_count: int,
+    cut_count: int,
+    prefix_variable_count: int,
+    master_node_count: float,
+) -> str:
+    lower_bound = event.global_lower_bound
+    if master_best_bound is not None:
+        lower_bound = (
+            master_best_bound
+            if lower_bound is None
+            else max(lower_bound, master_best_bound)
+        )
+    gap = _relative_gap(lower_bound, event.global_upper_bound)
+    round_digits = len(str(event.max_iterations))
+    return " ".join(
+        (
+            f"r={event.round_index:0{round_digits}d}/{event.max_iterations}",
+            f"stage={stage[:28]:<28}",
+            f"LB={_format_fixed_number(lower_bound)}",
+            f"UB={_format_fixed_number(event.global_upper_bound)}",
+            f"INC={_format_fixed_number(master_incumbent)}",
+            f"GAP={_format_fixed_percent(gap)}",
+            f"MGAP={_format_fixed_percent(master_relative_gap)}",
+            f"V={variable_count:>8d}",
+            f"R={constraint_count:>8d}",
+            f"CUT={cut_count:>5d}",
+            f"PFX={prefix_variable_count:>7d}",
+            f"NODE={master_node_count:>8.0f}",
+            f"t={event.total_elapsed_seconds:>8.1f}s",
+        )
+    )
+
+
+def _format_fixed_number(value: float | None, *, width: int = 12) -> str:
+    if value is None:
+        return "-".rjust(width)
+    return f"{value:.6g}".rjust(width)
+
+
+def _format_fixed_percent(value: float | None, *, width: int = 9) -> str:
+    if value is None:
+        return "-".rjust(width)
+    return f"{100.0 * value:.2f}%".rjust(width)
+
+
+def _relative_gap(lower_bound: float | None, upper_bound: float | None) -> float | None:
+    if lower_bound is None or upper_bound is None:
+        return None
+    return max(0.0, upper_bound - lower_bound) / max(1.0, abs(upper_bound))
