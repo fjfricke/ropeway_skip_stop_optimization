@@ -11,6 +11,12 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddCellFreeSupportRecovery,
     DddPartialTimeMaster,
     DddPartialTimeMasterStatus,
+    DddPartialTimedArc,
+    DddPartialTimedPath,
+    DddPartialTimeProblem,
+    DddFixedStart,
+    DddMovementProblem,
+    DddMovementState,
     DddPrimalRecoveryStatus,
     DddReferenceSolver,
     DddStrictTimeCellLifter,
@@ -21,6 +27,11 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddTimePartition,
     DddTimeRefinementSolver,
     DddTimeRefinementStatus,
+    DddRouteDecision,
+    DddRouteOption,
+    DddRouteOptionCost,
+    DddTerminalThresholdCost,
+    DddTimeSpaceObjective,
     ddd_seconds_to_tick,
     ddd_tick_to_seconds,
     validate_ddd_recovered_schedule,
@@ -82,6 +93,93 @@ def test_strict_lift_refines_while_cell_free_recovery_finds_upper_bound() -> Non
     assert recovery.schedule.terminal_time_seconds == pytest.approx(12.0)
     assert recovery.schedule.objective_value == pytest.approx(1.0)
     validate_ddd_recovered_schedule(problem, recovery.schedule)
+
+
+def test_strict_lift_collects_all_back_propagated_path_inconsistencies() -> None:
+    options = (
+        DddRouteOption(
+            id="ab",
+            from_state_id="A",
+            to_state_id="B",
+            station_id="A",
+            decision=DddRouteDecision.SKIP,
+            duration_seconds=1.0,
+            platform_entry_offset_seconds=None,
+            platform_exit_offset_seconds=None,
+            exit_switch_offset_seconds=0.0,
+            resource_usages=(),
+        ),
+        DddRouteOption(
+            id="bc",
+            from_state_id="B",
+            to_state_id="C",
+            station_id="B",
+            decision=DddRouteDecision.SKIP,
+            duration_seconds=1.0,
+            platform_entry_offset_seconds=None,
+            platform_exit_offset_seconds=None,
+            exit_switch_offset_seconds=0.0,
+            resource_usages=(),
+        ),
+        DddRouteOption(
+            id="cd",
+            from_state_id="C",
+            to_state_id="D",
+            station_id="C",
+            decision=DddRouteDecision.SKIP,
+            duration_seconds=1.0,
+            platform_entry_offset_seconds=None,
+            platform_exit_offset_seconds=None,
+            exit_switch_offset_seconds=0.0,
+            resource_usages=(),
+        ),
+    )
+    movement = DddMovementProblem(
+        scenario_id="batch_lift_probe",
+        passenger_service_end_seconds=10.0,
+        operational_end_seconds=10.0,
+        states=tuple(DddMovementState(value) for value in "ABCD"),
+        starts=(DddFixedStart(0, "A", 0.0, 3),),
+        route_options=options,
+        resources=(),
+    )
+    discretization = DddTimeDiscretization(
+        (
+            DddTimePartition("B", (0.0, 10.0, 20.0)),
+            DddTimePartition("C", (0.0, 5.0, 10.0, 20.0)),
+            DddTimePartition("D", (0.0, 8.0, 12.0, 20.0)),
+        )
+    )
+    problem = DddPartialTimeProblem(
+        movement_problem=movement,
+        terminal_state_id="D",
+        discretization=discretization,
+        objective=DddTimeSpaceObjective(
+            route_option_costs=tuple(
+                DddRouteOptionCost(option.id, 0.0) for option in options
+            ),
+            terminal_cost=DddTerminalThresholdCost("D", 10.0, 0.0, 0.0),
+        ),
+    )
+    b_cell = discretization.partition("B").cells[0]
+    c_cell = discretization.partition("C").cells[1]
+    d_cell = discretization.partition("D").cells[1]
+    path = DddPartialTimedPath(
+        cabin_id=0,
+        arcs=(
+            DddPartialTimedArc(0, "ab", "A", "B", None, b_cell),
+            DddPartialTimedArc(1, "bc", "B", "C", b_cell.id, c_cell),
+            DddPartialTimedArc(2, "cd", "C", "D", c_cell.id, d_cell),
+        ),
+    )
+
+    result = DddStrictTimeCellLifter().lift(problem, path)
+
+    assert result.status is DddStrictTimeLiftStatus.EVENT_CELL_INCONSISTENCY
+    assert tuple(item.state_id for item in result.inconsistencies) == ("B", "B")
+    assert tuple(
+        item.split_boundary_seconds for item in result.inconsistencies
+    ) == pytest.approx((4.0, 6.0))
 
 
 def test_microsecond_ticks_remove_sub_tick_refinement_sliver() -> None:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from enum import StrEnum
 from typing import Any
 
 from ropeway_skip_stop_optimization.models import Scenario
@@ -22,7 +21,14 @@ from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     EanBoardTimeFormulation,
     EanSlotActivationFormulation,
 )
-from ropeway_skip_stop_optimization.optimization.ean.optimization_config import EanOptimizationConfig
+from ropeway_skip_stop_optimization.optimization.ean.optimization_config import (
+    EanOptimizationConfig,
+)
+from ropeway_skip_stop_optimization.optimization.ean.passenger_objective import (
+    EanPassengerObjective,
+    EanPassengerObjectiveEvent,
+    ean_passenger_objective_definition,
+)
 from ropeway_skip_stop_optimization.optimization.ean.passenger_plan import (
     EanPassengerServicePlan,
     EanServedRideGroup,
@@ -40,13 +46,6 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.movement_model i
     variable_value as _value,
     visits_by_cabin_id_for as _visits_by_cabin_id,
 )
-
-
-class EanPassengerObjective(StrEnum):
-    """Passenger objective for EAN service optimization."""
-
-    WAITING_TIME = "waiting_time"
-    JOURNEY_TIME = "journey_time"
 
 
 @dataclass(frozen=True)
@@ -161,18 +160,19 @@ class EanPassengerModelBuilder:
         model = movement_model.model
         time_upper_bound = movement_model.model_time_bounds.global_upper
 
+        objective_definition = ean_passenger_objective_definition(objective)
         slot: dict[tuple[str, int], Any] = {}
         slot_board_time: dict[tuple[str, int], Any] | None = (
             {}
             if (
-                objective is EanPassengerObjective.WAITING_TIME
+                objective_definition.requires_board_time
                 or optimization_config.formulation.board_time
                 is EanBoardTimeFormulation.EXPLICIT
             )
             else None
         )
         slot_alight_time: dict[tuple[str, int], Any] | None = (
-            {} if objective is EanPassengerObjective.JOURNEY_TIME else None
+            {} if objective_definition.requires_alight_time else None
         )
         for ride_candidate in passenger_build.ride_candidates:
             group = group_by_id[ride_candidate.demand_group_id]
@@ -331,7 +331,9 @@ def _add_passenger_constraints(
     board_time_nonnegative_by_key: dict[tuple[int, int], bool],
     alight_time_nonnegative_by_key: dict[tuple[int, int], bool],
 ) -> None:
-    ride_by_group_id: dict[str, list[EanRideCandidate]] = {group.id: [] for group in passenger_build.demand_groups}
+    ride_by_group_id: dict[str, list[EanRideCandidate]] = {
+        group.id: [] for group in passenger_build.demand_groups
+    }
     for ride_candidate in passenger_build.ride_candidates:
         ride_by_group_id[ride_candidate.demand_group_id].append(ride_candidate)
         _add_ride_slot_constraints(
@@ -366,12 +368,17 @@ def _add_passenger_constraints(
         for ride_candidate in ride_by_group_id[group.id]:
             for slot_index in range(min(group.count, cabin_capacity)):
                 terms.append(slot[ride_candidate.id, slot_index])
-        model.addConstr(sum(terms) + unserved[group.id] == group.count, name=f"demand_balance_{_var_id(group.id)}")
+        model.addConstr(
+            sum(terms) + unserved[group.id] == group.count,
+            name=f"demand_balance_{_var_id(group.id)}",
+        )
 
     visits_by_cabin_id = _visits_by_cabin_id(tuple(visits_by_key.values()))
     ride_candidates_by_cabin_id: dict[int, list[EanRideCandidate]] = {}
     for ride_candidate in passenger_build.ride_candidates:
-        ride_candidates_by_cabin_id.setdefault(ride_candidate.cabin_id, []).append(ride_candidate)
+        ride_candidates_by_cabin_id.setdefault(ride_candidate.cabin_id, []).append(
+            ride_candidate
+        )
 
     for cabin_id, visits in visits_by_cabin_id.items():
         cabin_ride_candidates = ride_candidates_by_cabin_id.get(cabin_id, [])
@@ -379,7 +386,11 @@ def _add_passenger_constraints(
             onboard_terms = []
             interval_index = visit.visit_index
             for ride_candidate in cabin_ride_candidates:
-                if ride_candidate.board_visit_index <= interval_index < ride_candidate.alight_visit_index:
+                if (
+                    ride_candidate.board_visit_index
+                    <= interval_index
+                    < ride_candidate.alight_visit_index
+                ):
                     group = group_by_id[ride_candidate.demand_group_id]
                     for slot_index in range(min(group.count, cabin_capacity)):
                         onboard_terms.append(slot[ride_candidate.id, slot_index])
@@ -414,8 +425,12 @@ def _add_ride_slot_constraints(
 ) -> None:
     board_key = (ride_candidate.cabin_id, ride_candidate.board_visit_index)
     alight_key = (ride_candidate.cabin_id, ride_candidate.alight_visit_index)
-    board_time = _platform_exit_time_expr(board_key, switch_time, wait_time, visits_by_key, timing_by_switch_id)
-    alight_time = _platform_entry_time_expr(alight_key, switch_time, visits_by_key, timing_by_switch_id)
+    board_time = _platform_exit_time_expr(
+        board_key, switch_time, wait_time, visits_by_key, timing_by_switch_id
+    )
+    alight_time = _platform_entry_time_expr(
+        alight_key, switch_time, visits_by_key, timing_by_switch_id
+    )
     slot_count = min(group.count, cabin_capacity)
     release_big_m = _slot_release_big_m(
         group=group,
@@ -424,7 +439,8 @@ def _add_ride_slot_constraints(
     )
 
     compact_activation = (
-        slot_activation_formulation is EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS
+        slot_activation_formulation
+        is EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS
     )
     previous_slot_var = None
     for slot_index in range(slot_count):
@@ -444,9 +460,7 @@ def _add_ride_slot_constraints(
                 horizon_seconds=horizon_seconds,
                 big_m=big_m,
                 release_big_m=release_big_m,
-                omit_zero_release=(
-                    compact_activation and board_time_nonnegative
-                ),
+                omit_zero_release=(compact_activation and board_time_nonnegative),
             )
         if slot_board_time is not None:
             slot_time = slot_board_time[key]
@@ -457,11 +471,7 @@ def _add_ride_slot_constraints(
             model.addConstr(
                 slot_time
                 <= board_time
-                + (
-                    0.0
-                    if board_time_nonnegative
-                    else big_m * (1 - slot_var)
-                ),
+                + (0.0 if board_time_nonnegative else big_m * (1 - slot_var)),
                 name=f"slot_time_board_ub_{_var_id(ride_candidate.id)}_{slot_index}",
             )
             model.addConstr(
@@ -477,11 +487,7 @@ def _add_ride_slot_constraints(
             model.addConstr(
                 alight_slot_time
                 <= alight_time
-                + (
-                    0.0
-                    if alight_time_nonnegative
-                    else big_m * (1 - slot_var)
-                ),
+                + (0.0 if alight_time_nonnegative else big_m * (1 - slot_var)),
                 name=f"slot_time_alight_ub_{_var_id(ride_candidate.id)}_{slot_index}",
             )
             model.addConstr(
@@ -497,14 +503,18 @@ def _add_ride_slot_constraints(
                     slot_index=slot_index,
                     slot_var=slot_var,
                     slot_board_time=slot_board_time[key],
-                    slot_alight_time=slot_alight_time[key] if slot_alight_time is not None else None,
+                    slot_alight_time=slot_alight_time[key]
+                    if slot_alight_time is not None
+                    else None,
                     visits_by_key=visits_by_key,
                     timing_by_switch_id=timing_by_switch_id,
                     omit_redundant_rows=compact_activation,
                 )
             else:
                 if slot_alight_time is None:
-                    raise ValueError("projected board times require journey-time selected alight variables")
+                    raise ValueError(
+                        "projected board times require journey-time selected alight variables"
+                    )
                 _add_projected_journey_slot_time_constraints(
                     model=model,
                     ride_candidate=ride_candidate,
@@ -519,7 +529,10 @@ def _add_ride_slot_constraints(
                     omit_release_row=compact_activation and slot_index > 0,
                 )
         if previous_slot_var is not None:
-            model.addConstr(slot_var <= previous_slot_var, name=f"slot_symmetry_{_var_id(ride_candidate.id)}_{slot_index}")
+            model.addConstr(
+                slot_var <= previous_slot_var,
+                name=f"slot_symmetry_{_var_id(ride_candidate.id)}_{slot_index}",
+            )
         previous_slot_var = slot_var
 
 
@@ -549,8 +562,12 @@ def _add_ride_slot_activation_constraints(
     """
 
     variable_id = _var_id(ride_candidate.id)
-    model.addConstr(slot_var <= board_stop, name=f"slot_board_stop_{variable_id}_{slot_index}")
-    model.addConstr(slot_var <= alight_stop, name=f"slot_alight_stop_{variable_id}_{slot_index}")
+    model.addConstr(
+        slot_var <= board_stop, name=f"slot_board_stop_{variable_id}_{slot_index}"
+    )
+    model.addConstr(
+        slot_var <= alight_stop, name=f"slot_alight_stop_{variable_id}_{slot_index}"
+    )
     if not (omit_zero_release and group.release_time_seconds == 0.0):
         model.addConstr(
             board_time >= group.release_time_seconds - release_big_m * (1 - slot_var),
@@ -692,33 +709,28 @@ def _passenger_service_objective(
     gp: Any,
     penalize_unserved: bool = True,
 ) -> Any:
-    if objective is EanPassengerObjective.WAITING_TIME:
+    definition = ean_passenger_objective_definition(objective)
+    if definition.event is EanPassengerObjectiveEvent.BOARDING:
         if slot_board_time is None:
             raise ValueError("slot_board_time is required for waiting-time objective")
-        return _served_time_minus_release_objective(
-            passenger_build=passenger_build,
-            group_by_id=group_by_id,
-            slot=slot,
-            slot_time=slot_board_time,
-            unserved=unserved,
-            horizon_seconds=horizon_seconds,
-            gp=gp,
-            penalize_unserved=penalize_unserved,
-        )
-    if objective is EanPassengerObjective.JOURNEY_TIME:
+        slot_time = slot_board_time
+    elif definition.event is EanPassengerObjectiveEvent.ALIGHTING:
         if slot_alight_time is None:
             raise ValueError("slot_alight_time is required for journey-time objective")
-        return _served_time_minus_release_objective(
-            passenger_build=passenger_build,
-            group_by_id=group_by_id,
-            slot=slot,
-            slot_time=slot_alight_time,
-            unserved=unserved,
-            horizon_seconds=horizon_seconds,
-            gp=gp,
-            penalize_unserved=penalize_unserved,
-        )
-    raise ValueError(f"unsupported EAN passenger service objective: {objective}")
+        slot_time = slot_alight_time
+    else:
+        raise ValueError(f"unsupported EAN passenger service objective: {objective}")
+    return _served_time_minus_release_objective(
+        objective=objective,
+        passenger_build=passenger_build,
+        group_by_id=group_by_id,
+        slot=slot,
+        slot_time=slot_time,
+        unserved=unserved,
+        horizon_seconds=horizon_seconds,
+        gp=gp,
+        penalize_unserved=penalize_unserved,
+    )
 
 
 def _set_all_stop_mip_start(
@@ -748,8 +760,7 @@ def _set_all_stop_mip_start(
         variable.Start = 0.0
 
     remaining_by_group_id = {
-        group.id: group.count
-        for group in passenger_build.demand_groups
+        group.id: group.count for group in passenger_build.demand_groups
     }
     load_by_interval: dict[tuple[int, int], int] = {}
     served_slot_keys: set[tuple[str, int]] = set()
@@ -768,7 +779,9 @@ def _set_all_stop_mip_start(
 
         interval_keys = tuple(
             (ride_candidate.cabin_id, interval_index)
-            for interval_index in range(ride_candidate.board_visit_index, ride_candidate.alight_visit_index)
+            for interval_index in range(
+                ride_candidate.board_visit_index, ride_candidate.alight_visit_index
+            )
         )
         free_capacity = min(
             artifact.config.cabin_capacity - load_by_interval.get(interval_key, 0)
@@ -798,16 +811,17 @@ def _set_all_stop_mip_start(
                 slot_alight_time[slot_key].Start = alight_time
             served_slot_keys.add(slot_key)
         passenger_time_objective += assign_count * (
-            (
-                board_time
-                if objective is EanPassengerObjective.WAITING_TIME
-                else alight_time
+            ean_passenger_objective_definition(objective).served_cost_seconds(
+                release_time_seconds=group.release_time_seconds,
+                boarding_time_seconds=board_time,
+                alighting_time_seconds=alight_time,
             )
-            - group.release_time_seconds
         )
 
         for interval_key in interval_keys:
-            load_by_interval[interval_key] = load_by_interval.get(interval_key, 0) + assign_count
+            load_by_interval[interval_key] = (
+                load_by_interval.get(interval_key, 0) + assign_count
+            )
         remaining_by_group_id[group.id] -= assign_count
 
     for group_id, remaining in remaining_by_group_id.items():
@@ -856,9 +870,7 @@ def _set_passenger_plan_mip_start(
         if slot_alight_time is not None:
             slot_alight_time[key].Start = 0.0
 
-    assigned_by_group_id = {
-        group.id: 0 for group in passenger_build.demand_groups
-    }
+    assigned_by_group_id = {group.id: 0 for group in passenger_build.demand_groups}
     for ride in passenger_plan.served_rides:
         signature = (
             ride.demand_group_id,
@@ -889,8 +901,8 @@ def _set_passenger_plan_mip_start(
 
     for group in passenger_build.demand_groups:
         expected_unserved = group.count - assigned_by_group_id[group.id]
-        reported_unserved = (
-            passenger_plan.unserved_counts_by_demand_group_id.get(group.id, 0)
+        reported_unserved = passenger_plan.unserved_counts_by_demand_group_id.get(
+            group.id, 0
         )
         if expected_unserved != reported_unserved:
             raise ValueError(
@@ -907,20 +919,38 @@ def _all_stop_mip_start_candidate_order(
     visit_start_by_key: dict[tuple[int, int], EanCabinVisit],
     horizon_seconds: float,
 ) -> tuple[EanRideCandidate, ...]:
-    candidates_with_times: list[tuple[float, float, int, int, str, EanRideCandidate]] = []
+    candidates_with_times: list[
+        tuple[float, float, int, int, str, EanRideCandidate]
+    ] = []
     for ride_candidate in ride_candidates:
         group = group_by_id[ride_candidate.demand_group_id]
         board_key = (ride_candidate.cabin_id, ride_candidate.board_visit_index)
         alight_key = (ride_candidate.cabin_id, ride_candidate.alight_visit_index)
         if board_key not in visit_start_by_key or alight_key not in visit_start_by_key:
             continue
-        if not _all_stop_visit_is_stop_at_station(board_key, group.origin_station_id, visit_start_by_key):
+        if not _all_stop_visit_is_stop_at_station(
+            board_key, group.origin_station_id, visit_start_by_key
+        ):
             continue
-        if not _all_stop_visit_is_stop_at_station(alight_key, group.destination_station_id, visit_start_by_key):
+        if not _all_stop_visit_is_stop_at_station(
+            alight_key, group.destination_station_id, visit_start_by_key
+        ):
             continue
-        board_time = _all_stop_platform_exit_time(ride_candidate.cabin_id, ride_candidate.board_visit_index, visit_start_by_key)
-        alight_time = _all_stop_platform_entry_time(ride_candidate.cabin_id, ride_candidate.alight_visit_index, visit_start_by_key)
-        if board_time < group.release_time_seconds or board_time > horizon_seconds or alight_time > horizon_seconds:
+        board_time = _all_stop_platform_exit_time(
+            ride_candidate.cabin_id,
+            ride_candidate.board_visit_index,
+            visit_start_by_key,
+        )
+        alight_time = _all_stop_platform_entry_time(
+            ride_candidate.cabin_id,
+            ride_candidate.alight_visit_index,
+            visit_start_by_key,
+        )
+        if (
+            board_time < group.release_time_seconds
+            or board_time > horizon_seconds
+            or alight_time > horizon_seconds
+        ):
             continue
         candidates_with_times.append(
             (
@@ -976,6 +1006,7 @@ def _waiting_time_objective(
     gp: Any,
 ) -> Any:
     return _served_time_minus_release_objective(
+        objective=EanPassengerObjective.WAITING_TIME,
         passenger_build=passenger_build,
         group_by_id=group_by_id,
         slot=slot,
@@ -987,6 +1018,7 @@ def _waiting_time_objective(
 
 
 def _served_time_minus_release_objective(
+    objective: EanPassengerObjective,
     passenger_build: EanPassengerCandidateBuildResult,
     group_by_id: dict[str, EanDemandGroup],
     slot: dict[tuple[str, int], Any],
@@ -996,7 +1028,9 @@ def _served_time_minus_release_objective(
     gp: Any,
     penalize_unserved: bool = True,
 ) -> Any:
-    candidate_by_id = {candidate.id: candidate for candidate in passenger_build.ride_candidates}
+    candidate_by_id = {
+        candidate.id: candidate for candidate in passenger_build.ride_candidates
+    }
     served_terms = []
     for key, slot_var in slot.items():
         ride_candidate = candidate_by_id[key[0]]
@@ -1005,7 +1039,10 @@ def _served_time_minus_release_objective(
 
     unserved_terms = (
         [
-            max(0.0, horizon_seconds - group.release_time_seconds)
+            ean_passenger_objective_definition(objective).unserved_cost_seconds(
+                release_time_seconds=group.release_time_seconds,
+                horizon_seconds=horizon_seconds,
+            )
             * unserved[group.id]
             for group in passenger_build.demand_groups
         ]
@@ -1030,7 +1067,9 @@ def _extract_passenger_plan(
     served_count_by_candidate_id: dict[str, int] = {}
     for key, variable in slot.items():
         if _value(variable) >= 0.5:
-            served_count_by_candidate_id[key[0]] = served_count_by_candidate_id.get(key[0], 0) + 1
+            served_count_by_candidate_id[key[0]] = (
+                served_count_by_candidate_id.get(key[0], 0) + 1
+            )
 
     for ride_candidate in passenger_build.ride_candidates:
         count = served_count_by_candidate_id.get(ride_candidate.id, 0)
@@ -1046,10 +1085,18 @@ def _extract_passenger_plan(
                 alight_visit_index=ride_candidate.alight_visit_index,
                 count=count,
                 boarding_time_seconds=_expr_value(
-                    _platform_exit_time_expr(board_key, switch_time, wait_time, visits_by_key, timing_by_switch_id)
+                    _platform_exit_time_expr(
+                        board_key,
+                        switch_time,
+                        wait_time,
+                        visits_by_key,
+                        timing_by_switch_id,
+                    )
                 ),
                 alighting_time_seconds=_expr_value(
-                    _platform_entry_time_expr(alight_key, switch_time, visits_by_key, timing_by_switch_id)
+                    _platform_entry_time_expr(
+                        alight_key, switch_time, visits_by_key, timing_by_switch_id
+                    )
                 ),
             )
         )
@@ -1075,10 +1122,18 @@ def _validate_passenger_accounting(
 ) -> None:
     served_by_group_id: dict[str, int] = {group_id: 0 for group_id in group_by_id}
     for ride in plan.served_rides:
-        served_by_group_id[ride.demand_group_id] = served_by_group_id.get(ride.demand_group_id, 0) + ride.count
+        served_by_group_id[ride.demand_group_id] = (
+            served_by_group_id.get(ride.demand_group_id, 0) + ride.count
+        )
     for group_id, group in group_by_id.items():
-        if served_by_group_id[group_id] + plan.unserved_counts_by_demand_group_id[group_id] != group.count:
-            raise ValueError(f"EAN passenger accounting mismatch for demand group {group_id!r}")
+        if (
+            served_by_group_id[group_id]
+            + plan.unserved_counts_by_demand_group_id[group_id]
+            != group.count
+        ):
+            raise ValueError(
+                f"EAN passenger accounting mismatch for demand group {group_id!r}"
+            )
 
 
 def _min_candidate_trip_time_seconds(
@@ -1092,18 +1147,29 @@ def _min_candidate_trip_time_seconds(
     board_key = (ride_candidate.cabin_id, ride_candidate.board_visit_index)
     alight_key = (ride_candidate.cabin_id, ride_candidate.alight_visit_index)
     if board_key not in visits_by_key:
-        raise ValueError(f"ride candidate board visit is not in EAN visits: {board_key!r}")
+        raise ValueError(
+            f"ride candidate board visit is not in EAN visits: {board_key!r}"
+        )
     if alight_key not in visits_by_key:
-        raise ValueError(f"ride candidate alight visit is not in EAN visits: {alight_key!r}")
+        raise ValueError(
+            f"ride candidate alight visit is not in EAN visits: {alight_key!r}"
+        )
 
     board_timing = timing_by_switch_id[visits_by_key[board_key].switch_id]
     alight_timing = timing_by_switch_id[visits_by_key[alight_key].switch_id]
-    elapsed = board_timing.platform_exit_to_exit_switch_seconds + board_timing.rope_to_next_switch_seconds
+    elapsed = (
+        board_timing.platform_exit_to_exit_switch_seconds
+        + board_timing.rope_to_next_switch_seconds
+    )
 
-    for visit_index in range(ride_candidate.board_visit_index + 1, ride_candidate.alight_visit_index):
+    for visit_index in range(
+        ride_candidate.board_visit_index + 1, ride_candidate.alight_visit_index
+    ):
         key = (ride_candidate.cabin_id, visit_index)
         if key not in visits_by_key:
-            raise ValueError(f"ride candidate intermediate visit is not in EAN visits: {key!r}")
+            raise ValueError(
+                f"ride candidate intermediate visit is not in EAN visits: {key!r}"
+            )
         timing = timing_by_switch_id[visits_by_key[key].switch_id]
         elapsed += _min_entry_to_next_switch_seconds(timing)
 
@@ -1114,7 +1180,10 @@ def _min_entry_to_next_switch_seconds(timing: SkipStopTiming) -> float:
     service_seconds = _service_entry_to_next_switch_seconds(timing)
     if not timing.skip_allowed:
         return service_seconds
-    return min(service_seconds, timing.skip_entry_to_exit_switch_seconds + timing.rope_to_next_switch_seconds)
+    return min(
+        service_seconds,
+        timing.skip_entry_to_exit_switch_seconds + timing.rope_to_next_switch_seconds,
+    )
 
 
 def _expr_value(expression: Any) -> float:

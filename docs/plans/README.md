@@ -31,6 +31,15 @@ Current plans:
   and passenger planning through Dynamic Discretization Discovery, with an
   optimistic lower-bound master, exact continuous-time lifting, refinement,
   and certified upper bounds.
+- `ddd_stronger_cp_support_cuts.md`: layer-state passenger lower bounds,
+  independent primal bootstrapping, nearest-feasible CP-SAT support search,
+  certified distance cuts, and proof-safe threshold/resource strengthening.
+- `ddd_adaptive_anytime_master.md`: adaptive inexact-master control, live
+  incumbent/bound measurements, interruption-safe checkpoints, exact finishing,
+  threshold strengthening, and the first directional-cut implementation tranche.
+- `ddd_fixed_k_certified_bounds.md`: general exact-cardinality Fixed-$K$ bound
+  engine combining anonymous passenger DDD, resource-window cuts, adaptive
+  cohort/prefix disaggregation, and independently validated primal schedules.
 - `demand_driven_network_operations.md`: recommended finite-horizon
   passenger-guided planner using continuous-time resource reservations,
   bounded conflict repair, exact fixed-movement passenger evaluation, and

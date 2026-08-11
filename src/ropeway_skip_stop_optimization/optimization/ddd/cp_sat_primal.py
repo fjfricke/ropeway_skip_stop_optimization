@@ -1,0 +1,683 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from enum import StrEnum
+from time import perf_counter
+from typing import Callable
+
+from ortools.sat.python import cp_model
+
+from ropeway_skip_stop_optimization.optimization.ddd.aggregate_support import (
+    DddAggregateRouteCountLiteral,
+    DddCpSatFixedSupport,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.models import (
+    DddMovementProblem,
+    DddRouteOption,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
+    DddNetworkTimeProblem,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.time_refinement import (
+    DddExactTimedEvent,
+    DddRecoveredSchedule,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.timed_flow_cover import (
+    DddCpSatTimedFlowSupport,
+    DddTimedFlowThresholdLiteral,
+    DddTimedFlowTimingScope,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
+    DddPartialTimedPath,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
+    ddd_tick_to_seconds,
+)
+
+
+class DddCpSatPrimalStatus(StrEnum):
+    NOT_RUN = "not_run"
+    FEASIBLE = "feasible"
+    INFEASIBLE = "infeasible"
+    UNKNOWN = "unknown"
+
+
+@dataclass(frozen=True)
+class DddCpSatPrimalResult:
+    status: DddCpSatPrimalStatus
+    schedules: tuple[DddRecoveredSchedule, ...]
+    wall_seconds: float
+    conflict_count: int
+    branch_count: int
+    candidate_schedules: tuple[tuple[DddRecoveredSchedule, ...], ...] = ()
+    search_complete: bool = False
+    fixed_support: DddCpSatFixedSupport | None = None
+    infeasible_core: tuple[DddAggregateRouteCountLiteral, ...] = ()
+    timed_flow_support: DddCpSatTimedFlowSupport | None = None
+    timed_flow_infeasible_core: tuple[DddTimedFlowThresholdLiteral, ...] = ()
+    distance_center: tuple[DddAggregateRouteCountLiteral, ...] = ()
+    support_distance_primal: int | None = None
+    support_distance_lower_bound: float | None = None
+
+
+DddCpSatCandidateCallback = Callable[[int, float], None]
+
+
+@dataclass(frozen=True)
+class DddCpSatPrimalOracle:
+    """Exact fixed-start movement scheduler over all deterministic route choices.
+
+    Version one uses zero waiting. The formulation already separates route
+    selection, integer event times, and optional resource intervals so bounded
+    waiting can later enter through the transition and occurrence expressions
+    without changing the master/oracle contract.
+    """
+
+    time_limit_seconds: float = 2.0
+    num_workers: int = 8
+    log_search_progress: bool = False
+    max_candidate_count: int = 1
+    minimum_hamming_distance: int = 1
+
+    def solve(
+        self,
+        problem: DddNetworkTimeProblem,
+        *,
+        hint_paths: tuple[DddPartialTimedPath, ...] = (),
+        hint_schedules: tuple[DddRecoveredSchedule, ...] = (),
+        fixed_support: DddCpSatFixedSupport | None = None,
+        timed_flow_support: DddCpSatTimedFlowSupport | None = None,
+        nearest_support: DddCpSatFixedSupport | None = None,
+        enabled_resource_ids: tuple[str, ...] | None = None,
+        candidate_callback: DddCpSatCandidateCallback | None = None,
+    ) -> DddCpSatPrimalResult:
+        problem.validate()
+        if fixed_support is not None:
+            fixed_support.validate()
+        if nearest_support is not None:
+            nearest_support.validate()
+        if timed_flow_support is not None:
+            timed_flow_support.validate()
+            if any(
+                item.region.timing_scope is not DddTimedFlowTimingScope.NO_WAIT
+                for item in timed_flow_support.arc_flows
+            ):
+                raise ValueError(
+                    "DDD CP-SAT v1 only supports no-wait timed-flow proofs"
+                )
+        selected_support_modes = sum(
+            item is not None
+            for item in (fixed_support, timed_flow_support, nearest_support)
+        )
+        if selected_support_modes > 1:
+            raise ValueError(
+                "fixed, timed-flow, and nearest CP-SAT support are mutually exclusive"
+            )
+        if self.time_limit_seconds <= 0:
+            raise ValueError("DDD CP-SAT time limit must be positive")
+        if self.num_workers <= 0:
+            raise ValueError("DDD CP-SAT worker count must be positive")
+        if self.max_candidate_count <= 0:
+            raise ValueError("DDD CP-SAT candidate count must be positive")
+        if self.minimum_hamming_distance <= 0:
+            raise ValueError("DDD CP-SAT Hamming distance must be positive")
+
+        movement = problem.movement_problem
+        if enabled_resource_ids is not None:
+            if not enabled_resource_ids:
+                raise ValueError("DDD CP-SAT enabled resource set must not be empty")
+            if tuple(sorted(set(enabled_resource_ids))) != enabled_resource_ids:
+                raise ValueError(
+                    "DDD CP-SAT enabled resource ids must be sorted and unique"
+                )
+            unknown_resource_ids = (
+                set(enabled_resource_ids) - movement.resources_by_id.keys()
+            )
+            if unknown_resource_ids:
+                raise ValueError(
+                    "DDD CP-SAT enabled resource ids are unknown: "
+                    f"{sorted(unknown_resource_ids)}"
+                )
+        enabled_resource_id_set = (
+            None if enabled_resource_ids is None else set(enabled_resource_ids)
+        )
+        model = cp_model.CpModel()
+        max_completion_tick = movement.operational_end_tick + max(
+            option.duration_tick for option in movement.route_options
+        )
+        hint_by_cabin = {path.cabin_id: path for path in hint_schedules}
+        hint_by_cabin.update({path.cabin_id: path for path in hint_paths})
+        time_by_cabin: dict[int, list[cp_model.IntVar]] = {}
+        active_by_cabin: dict[int, list[cp_model.IntVar]] = {}
+        selection_by_key: dict[tuple[int, int, str], cp_model.IntVar] = {}
+        states_by_cabin: dict[int, tuple[str, ...]] = {}
+        resource_intervals: dict[str, list[cp_model.IntervalVar]] = {
+            resource.id: []
+            for resource in movement.resources
+            if enabled_resource_id_set is None or resource.id in enabled_resource_id_set
+        }
+
+        for start in sorted(movement.starts, key=lambda item: item.cabin_id):
+            states, options_by_visit = _deterministic_visit_structure(
+                movement,
+                start.state_id,
+                start.max_visit_count,
+            )
+            states_by_cabin[start.cabin_id] = states
+            event_times = [
+                model.new_int_var(
+                    start.time_tick if visit_index == 0 else 0,
+                    start.time_tick if visit_index == 0 else max_completion_tick,
+                    f"time[{start.cabin_id},{visit_index}]",
+                )
+                for visit_index in range(start.max_visit_count + 1)
+            ]
+            active = [
+                model.new_bool_var(f"active[{start.cabin_id},{visit_index}]")
+                for visit_index in range(start.max_visit_count + 1)
+            ]
+            model.add(active[0] == 1)
+            model.add(active[-1] == 0)
+            for visit_index in range(start.max_visit_count + 1):
+                model.add(
+                    event_times[visit_index] <= movement.operational_end_tick
+                ).only_enforce_if(active[visit_index])
+                model.add(
+                    event_times[visit_index] >= movement.operational_end_tick + 1
+                ).only_enforce_if(active[visit_index].Not())
+
+            hinted_route_ids = (
+                hint_by_cabin[start.cabin_id].route_option_ids
+                if start.cabin_id in hint_by_cabin
+                else ()
+            )
+            for visit_index, options in enumerate(options_by_visit):
+                selections = []
+                for option in options:
+                    selected = model.new_bool_var(
+                        f"route[{start.cabin_id},{visit_index},{option.id}]"
+                    )
+                    selection_by_key[(start.cabin_id, visit_index, option.id)] = (
+                        selected
+                    )
+                    selections.append(selected)
+                    if visit_index < len(hinted_route_ids):
+                        model.add_hint(
+                            selected,
+                            int(hinted_route_ids[visit_index] == option.id),
+                        )
+                    _add_resource_intervals(
+                        model=model,
+                        movement=movement,
+                        cabin_id=start.cabin_id,
+                        visit_index=visit_index,
+                        event_time=event_times[visit_index],
+                        selected=selected,
+                        option=option,
+                        intervals_by_resource=resource_intervals,
+                    )
+                model.add(sum(selections) == active[visit_index])
+                model.add(
+                    event_times[visit_index + 1]
+                    == event_times[visit_index]
+                    + sum(
+                        option.duration_tick
+                        * selection_by_key[(start.cabin_id, visit_index, option.id)]
+                        for option in options
+                    )
+                )
+
+            time_by_cabin[start.cabin_id] = event_times
+            active_by_cabin[start.cabin_id] = active
+
+        for intervals in resource_intervals.values():
+            if intervals:
+                model.add_no_overlap(intervals)
+
+        assumption_literal_by_index: dict[int, DddAggregateRouteCountLiteral] = {}
+        if fixed_support is not None:
+            assumption_literal_by_index = _fix_aggregate_route_support(
+                model=model,
+                selection_by_key=selection_by_key,
+                fixed_support=fixed_support,
+            )
+        timed_flow_literal_by_index: dict[int, DddTimedFlowThresholdLiteral] = {}
+        if timed_flow_support is not None:
+            timed_flow_literal_by_index = _fix_timed_flow_support(
+                model=model,
+                selection_by_key=selection_by_key,
+                time_by_cabin=time_by_cabin,
+                timed_flow_support=timed_flow_support,
+            )
+
+        distance_center: tuple[DddAggregateRouteCountLiteral, ...] = ()
+        if nearest_support is not None:
+            distance_center, distance_expression = _add_nearest_support_objective(
+                model=model,
+                selection_by_key=selection_by_key,
+                nearest_support=nearest_support,
+            )
+            model.minimize(distance_expression)
+
+        started = perf_counter()
+        candidate_schedules: list[tuple[DddRecoveredSchedule, ...]] = []
+        conflict_count = 0
+        branch_count = 0
+        search_complete = False
+        terminal_status = cp_model.UNKNOWN
+        candidate_limit = 1 if nearest_support is not None else self.max_candidate_count
+        last_solver: cp_model.CpSolver | None = None
+        while len(candidate_schedules) < candidate_limit:
+            remaining_seconds = self.time_limit_seconds - (perf_counter() - started)
+            if remaining_seconds <= 0:
+                terminal_status = cp_model.UNKNOWN
+                break
+            solver = cp_model.CpSolver()
+            solver.parameters.max_time_in_seconds = remaining_seconds
+            solver.parameters.num_search_workers = self.num_workers
+            solver.parameters.log_search_progress = self.log_search_progress
+            solver.parameters.random_seed = 0
+            solver.parameters.stop_after_first_solution = nearest_support is None
+            terminal_status = solver.solve(model)
+            last_solver = solver
+            conflict_count += solver.num_conflicts
+            branch_count += solver.num_branches
+            if terminal_status not in (cp_model.FEASIBLE, cp_model.OPTIMAL):
+                search_complete = (
+                    terminal_status == cp_model.INFEASIBLE
+                    and self.minimum_hamming_distance == 1
+                )
+                break
+            schedules = _extract_schedules(
+                problem=problem,
+                solver=solver,
+                states_by_cabin=states_by_cabin,
+                time_by_cabin=time_by_cabin,
+                active_by_cabin=active_by_cabin,
+                selection_by_key=selection_by_key,
+            )
+            candidate_schedules.append(schedules)
+            if candidate_callback is not None:
+                candidate_callback(
+                    len(candidate_schedules),
+                    perf_counter() - started,
+                )
+            if nearest_support is not None:
+                search_complete = terminal_status == cp_model.OPTIMAL
+                break
+            _exclude_solution_and_replace_hint(
+                model=model,
+                solver=solver,
+                selection_by_key=selection_by_key,
+                time_by_cabin=time_by_cabin,
+                active_by_cabin=active_by_cabin,
+                minimum_hamming_distance=self.minimum_hamming_distance,
+            )
+        wall_seconds = perf_counter() - started
+        infeasible_core: tuple[DddAggregateRouteCountLiteral, ...] = ()
+        timed_flow_infeasible_core: tuple[DddTimedFlowThresholdLiteral, ...] = ()
+        support_distance_primal: int | None = None
+        support_distance_lower_bound: float | None = None
+        if candidate_schedules:
+            schedules = candidate_schedules[0]
+            result_status = DddCpSatPrimalStatus.FEASIBLE
+            if nearest_support is not None:
+                if last_solver is None:
+                    raise RuntimeError("nearest-support CP-SAT solve has no solver")
+                support_distance_primal = int(round(last_solver.objective_value))
+                support_distance_lower_bound = float(last_solver.best_objective_bound)
+        elif terminal_status == cp_model.INFEASIBLE:
+            schedules = ()
+            result_status = DddCpSatPrimalStatus.INFEASIBLE
+            if fixed_support is not None:
+                core_indices = solver.sufficient_assumptions_for_infeasibility()
+                infeasible_core = tuple(
+                    sorted(assumption_literal_by_index[index] for index in core_indices)
+                )
+            elif timed_flow_support is not None:
+                core_indices = solver.sufficient_assumptions_for_infeasibility()
+                timed_flow_infeasible_core = tuple(
+                    sorted(
+                        (timed_flow_literal_by_index[index] for index in core_indices),
+                        key=lambda item: item.sort_key,
+                    )
+                )
+        else:
+            schedules = ()
+            result_status = DddCpSatPrimalStatus.UNKNOWN
+        return DddCpSatPrimalResult(
+            status=result_status,
+            schedules=schedules,
+            wall_seconds=wall_seconds,
+            conflict_count=conflict_count,
+            branch_count=branch_count,
+            candidate_schedules=tuple(candidate_schedules),
+            search_complete=search_complete,
+            fixed_support=fixed_support,
+            infeasible_core=infeasible_core,
+            timed_flow_support=timed_flow_support,
+            timed_flow_infeasible_core=timed_flow_infeasible_core,
+            distance_center=distance_center,
+            support_distance_primal=support_distance_primal,
+            support_distance_lower_bound=support_distance_lower_bound,
+        )
+
+
+def _fix_timed_flow_support(
+    *,
+    model: cp_model.CpModel,
+    selection_by_key: dict[tuple[int, int, str], cp_model.IntVar],
+    time_by_cabin: dict[int, list[cp_model.IntVar]],
+    timed_flow_support: DddCpSatTimedFlowSupport,
+) -> dict[int, DddTimedFlowThresholdLiteral]:
+    """Condition lower bounds on exact CP traversals of stable timed regions."""
+
+    comparison_cache: dict[tuple[int, str, int], cp_model.IntVar] = {}
+
+    def comparison(
+        variable: cp_model.IntVar,
+        *,
+        sense: str,
+        bound: int,
+    ) -> cp_model.IntVar:
+        key = (variable.Index(), sense, bound)
+        known = comparison_cache.get(key)
+        if known is not None:
+            return known
+        result = model.new_bool_var(f"timed_flow_{sense}[{variable.Index()},{bound}]")
+        if sense == "ge":
+            model.add(variable >= bound).only_enforce_if(result)
+            model.add(variable <= bound - 1).only_enforce_if(result.Not())
+        elif sense == "lt":
+            model.add(variable <= bound - 1).only_enforce_if(result)
+            model.add(variable >= bound).only_enforce_if(result.Not())
+        else:
+            raise ValueError(f"unsupported DDD timed-flow comparison: {sense}")
+        comparison_cache[key] = result
+        return result
+
+    literal_by_index: dict[int, DddTimedFlowThresholdLiteral] = {}
+    for support_index, item in enumerate(timed_flow_support.arc_flows):
+        region = item.region
+        presences: list[cp_model.IntVar] = []
+        for cabin_id, event_times in sorted(time_by_cabin.items()):
+            if region.cabin_id is not None and region.cabin_id != cabin_id:
+                continue
+            if region.visit_index + 1 >= len(event_times):
+                continue
+            selected = selection_by_key.get(
+                (cabin_id, region.visit_index, region.route_option_id)
+            )
+            if selected is None:
+                continue
+            source_time = event_times[region.visit_index]
+            target_time = event_times[region.visit_index + 1]
+            factors = (
+                selected,
+                comparison(
+                    source_time,
+                    sense="ge",
+                    bound=region.source_lower_tick,
+                ),
+                comparison(
+                    source_time,
+                    sense="lt",
+                    bound=region.source_upper_tick,
+                ),
+                comparison(
+                    target_time,
+                    sense="ge",
+                    bound=region.target_lower_tick,
+                ),
+                comparison(
+                    target_time,
+                    sense="lt",
+                    bound=region.target_upper_tick,
+                ),
+            )
+            present = model.new_bool_var(
+                f"timed_flow_present[{support_index},{cabin_id}]"
+            )
+            model.add_bool_and(factors).only_enforce_if(present)
+            model.add_bool_or([*(factor.Not() for factor in factors), present])
+            presences.append(present)
+
+        assumption = model.new_bool_var(f"timed_flow_assumption[{support_index}]")
+        model.add(sum(presences) >= item.count).only_enforce_if(assumption)
+        model.add_assumption(assumption)
+        literal_by_index[assumption.Index()] = DddTimedFlowThresholdLiteral(
+            region=region,
+            minimum_flow=item.count,
+        )
+    return literal_by_index
+
+
+def _fix_aggregate_route_support(
+    *,
+    model: cp_model.CpModel,
+    selection_by_key: dict[tuple[int, int, str], cp_model.IntVar],
+    fixed_support: DddCpSatFixedSupport,
+) -> dict[int, DddAggregateRouteCountLiteral]:
+    selections_by_aggregate_key: dict[tuple[int, str], list[cp_model.IntVar]] = {}
+    for (_, visit_index, route_option_id), variable in selection_by_key.items():
+        selections_by_aggregate_key.setdefault(
+            (visit_index, route_option_id), []
+        ).append(variable)
+
+    required_by_key = fixed_support.count_by_key
+
+    literal_by_index: dict[int, DddAggregateRouteCountLiteral] = {}
+    # Include master keys that have no corresponding CP-SAT route variable.
+    # This can legitimately happen because the anonymous master relaxes cabin
+    # identities and terminal visit depths.  The conditional equality below
+    # then becomes ``0 == positive_count`` and lets CP-SAT return the offending
+    # aggregate literal in an infeasibility core instead of raising an adapter
+    # error before the solve.
+    aggregate_keys = set(selections_by_aggregate_key) | set(required_by_key)
+    for literal_index, key in enumerate(sorted(aggregate_keys)):
+        visit_index, route_option_id = key
+        count = required_by_key.get(key, 0)
+        variables = selections_by_aggregate_key.get(key, ())
+        assumption = model.new_bool_var(f"support_assumption[{literal_index}]")
+        model.add(sum(variables) == count).only_enforce_if(assumption)
+        model.add_assumption(assumption)
+        literal = DddAggregateRouteCountLiteral(
+            visit_index=visit_index,
+            route_option_id=route_option_id,
+            count=count,
+        )
+        literal_by_index[assumption.Index()] = literal
+    return literal_by_index
+
+
+def _add_nearest_support_objective(
+    *,
+    model: cp_model.CpModel,
+    selection_by_key: dict[tuple[int, int, str], cp_model.IntVar],
+    nearest_support: DddCpSatFixedSupport,
+) -> tuple[tuple[DddAggregateRouteCountLiteral, ...], cp_model.LinearExpr]:
+    selections_by_aggregate_key: dict[tuple[int, str], list[cp_model.IntVar]] = {}
+    for (_, visit_index, route_option_id), variable in selection_by_key.items():
+        selections_by_aggregate_key.setdefault(
+            (visit_index, route_option_id), []
+        ).append(variable)
+
+    center_by_key = nearest_support.count_by_key
+    aggregate_keys = tuple(
+        sorted(set(selections_by_aggregate_key) | set(center_by_key))
+    )
+    center = tuple(
+        DddAggregateRouteCountLiteral(
+            visit_index=visit_index,
+            route_option_id=route_option_id,
+            count=center_by_key.get((visit_index, route_option_id), 0),
+        )
+        for visit_index, route_option_id in aggregate_keys
+    )
+    distance_terms: list[cp_model.IntVar] = []
+    for coordinate_index, literal in enumerate(center):
+        variables = selections_by_aggregate_key.get(
+            (literal.visit_index, literal.route_option_id), ()
+        )
+        maximum = max(len(variables), literal.count)
+        distance = model.new_int_var(
+            0,
+            maximum,
+            f"support_distance[{coordinate_index}]",
+        )
+        model.add_abs_equality(distance, sum(variables) - literal.count)
+        distance_terms.append(distance)
+    return center, cp_model.LinearExpr.sum(distance_terms)
+
+
+def _exclude_solution_and_replace_hint(
+    *,
+    model: cp_model.CpModel,
+    solver: cp_model.CpSolver,
+    selection_by_key: dict[tuple[int, int, str], cp_model.IntVar],
+    time_by_cabin: dict[int, list[cp_model.IntVar]],
+    active_by_cabin: dict[int, list[cp_model.IntVar]],
+    minimum_hamming_distance: int,
+) -> None:
+    selections = tuple(variable for _, variable in sorted(selection_by_key.items()))
+    differing_literals = tuple(
+        (1 - variable) if solver.value(variable) else variable
+        for variable in selections
+    )
+    if minimum_hamming_distance > len(differing_literals):
+        raise ValueError("DDD CP-SAT Hamming distance exceeds the route-variable count")
+    model.add(sum(differing_literals) >= minimum_hamming_distance)
+    model.clear_hints()
+    for variable in selections:
+        model.add_hint(variable, solver.value(variable))
+    for cabin_id in sorted(time_by_cabin):
+        for variable in time_by_cabin[cabin_id]:
+            model.add_hint(variable, solver.value(variable))
+        for variable in active_by_cabin[cabin_id]:
+            model.add_hint(variable, solver.value(variable))
+
+
+def _deterministic_visit_structure(
+    movement: DddMovementProblem,
+    start_state_id: str,
+    max_visit_count: int,
+) -> tuple[tuple[str, ...], tuple[tuple[DddRouteOption, ...], ...]]:
+    state_id = start_state_id
+    states = [state_id]
+    options_by_visit: list[tuple[DddRouteOption, ...]] = []
+    for _ in range(max_visit_count):
+        options = movement.route_options_by_state_id.get(state_id, ())
+        if not options:
+            raise ValueError(f"DDD CP-SAT state {state_id!r} has no route option")
+        target_ids = {option.to_state_id for option in options}
+        if len(target_ids) != 1:
+            raise ValueError(
+                "DDD CP-SAT v1 requires route options to reconverge at every visit"
+            )
+        options_by_visit.append(options)
+        state_id = next(iter(target_ids))
+        states.append(state_id)
+    return tuple(states), tuple(options_by_visit)
+
+
+def _add_resource_intervals(
+    *,
+    model: cp_model.CpModel,
+    movement: DddMovementProblem,
+    cabin_id: int,
+    visit_index: int,
+    event_time: cp_model.IntVar,
+    selected: cp_model.IntVar,
+    option: DddRouteOption,
+    intervals_by_resource: dict[str, list[cp_model.IntervalVar]],
+) -> None:
+    for usage_index, usage in enumerate(option.resource_usages):
+        if usage.resource_id not in intervals_by_resource:
+            continue
+        resource = movement.resources_by_id[usage.resource_id]
+        size_tick = (
+            usage.leader_clear_offset_tick
+            - usage.follower_enter_offset_tick
+            + resource.headway_tick
+        )
+        if size_tick <= 0:
+            raise ValueError("DDD CP-SAT resource interval must have positive size")
+        entry = event_time + usage.follower_enter_offset_tick
+        if usage.follower_enter_offset_tick == 0:
+            present = selected
+        else:
+            present = model.new_bool_var(
+                f"resource_active[{cabin_id},{visit_index},{usage_index}]"
+            )
+            model.add_implication(present, selected)
+            model.add(entry <= movement.operational_end_tick).only_enforce_if(present)
+            model.add(entry >= movement.operational_end_tick + 1).only_enforce_if(
+                [selected, present.Not()]
+            )
+        interval = model.new_optional_fixed_size_interval_var(
+            entry,
+            size_tick,
+            present,
+            f"resource[{usage.resource_id},{cabin_id},{visit_index},{usage_index}]",
+        )
+        intervals_by_resource[usage.resource_id].append(interval)
+
+
+def _extract_schedules(
+    *,
+    problem: DddNetworkTimeProblem,
+    solver: cp_model.CpSolver,
+    states_by_cabin: dict[int, tuple[str, ...]],
+    time_by_cabin: dict[int, list[cp_model.IntVar]],
+    active_by_cabin: dict[int, list[cp_model.IntVar]],
+    selection_by_key: dict[tuple[int, int, str], cp_model.IntVar],
+) -> tuple[DddRecoveredSchedule, ...]:
+    options_by_state = problem.movement_problem.route_options_by_state_id
+    schedules: list[DddRecoveredSchedule] = []
+    for start in sorted(
+        problem.movement_problem.starts,
+        key=lambda item: item.cabin_id,
+    ):
+        route_option_ids: list[str] = []
+        event_count = 1
+        for visit_index, state_id in enumerate(states_by_cabin[start.cabin_id][:-1]):
+            if not solver.value(active_by_cabin[start.cabin_id][visit_index]):
+                break
+            options = options_by_state[state_id]
+            selected = tuple(
+                option.id
+                for option in options
+                if solver.value(
+                    selection_by_key[(start.cabin_id, visit_index, option.id)]
+                )
+            )
+            if len(selected) != 1:
+                raise RuntimeError("DDD CP-SAT solution has no unique selected route")
+            route_option_ids.append(selected[0])
+            event_count += 1
+        events = tuple(
+            DddExactTimedEvent(
+                event_index=index,
+                state_id=states_by_cabin[start.cabin_id][index],
+                time_seconds=ddd_tick_to_seconds(
+                    solver.value(time_by_cabin[start.cabin_id][index])
+                ),
+            )
+            for index in range(event_count)
+        )
+        route_ids = tuple(route_option_ids)
+        objective_value = problem.objective.exact_value(
+            route_ids,
+            events[-1].state_id,
+            events[-1].time_seconds,
+            tolerance_seconds=0.0,
+        )
+        schedules.append(
+            DddRecoveredSchedule(
+                cabin_id=start.cabin_id,
+                route_option_ids=route_ids,
+                events=events,
+                objective_value=objective_value,
+            )
+        )
+    return tuple(schedules)

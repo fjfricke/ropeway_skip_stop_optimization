@@ -185,6 +185,11 @@ from ropeway_skip_stop_optimization.optimization.ean.passenger_plan import (
     EanPassengerServicePlan,
     EanServedRideGroup,
 )
+from ropeway_skip_stop_optimization.optimization.ean.passenger_objective import (
+    EanPassengerObjectiveDefinition,
+    EanPassengerObjectiveEvent,
+    ean_passenger_objective_definition,
+)
 from ropeway_skip_stop_optimization.optimization.ean.plan import (
     EanCabinTrajectory,
     EanCabinVisit,
@@ -300,11 +305,14 @@ __all__ = [
     "EanOptimizationResult",
     "EanOptimizer",
     "EanPassengerObjective",
+    "EanPassengerObjectiveDefinition",
+    "EanPassengerObjectiveEvent",
     "EanPassengerBehavior",
     "EanPassengerAssignment",
     "EanPassengerAssignmentDomain",
     "EanPassengerServicePlan",
     "EanPassengerServiceProblem",
+    "ean_passenger_objective_definition",
     "EanPreparedRing",
     "EanPreparedRingBuilder",
     "EanPrimalSeed",

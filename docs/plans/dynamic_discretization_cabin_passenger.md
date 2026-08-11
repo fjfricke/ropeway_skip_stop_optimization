@@ -513,6 +513,18 @@ must not expose a lower-bound certificate.
 ## Passenger Feasibility
 
 Passengers are added first as a feasibility flow with zero journey-time cost.
+The current project semantics permit direct rides only: after boarding, a
+passenger remains assigned to one cabin trajectory until alighting. A partial
+model must therefore not expose a physical transfer merely because anonymous
+cabin flows meet in the same state-time cell.
+
+An anonymous passenger-flow relaxation that can re-pair incoming and outgoing
+cabin flow may still be mathematically optimistic, but it is not the primary
+Passenger model and must be labelled explicitly if it is ever used as a weak
+bound. The implemented primal path instead uses complete trajectory slots, so
+every Passenger ride belongs to one selected trajectory from boarding through
+alighting.
+
 The partial passenger network contains:
 
 - exact demand-release nodes;
@@ -767,6 +779,17 @@ generated rows, valid bounds, validated incumbent, solver configuration, and
 code/version provenance. Resume must reject incompatible physical or demand
 inputs.
 
+## Living mathematical contract
+
+Every new DDD relaxation, bound, cut, timing envelope, refinement rule, or
+certificate condition must be added to
+`idp_report/notes/ddd_mathematical_derivations/main.tex` together with its
+assumptions and validity argument before it contributes to a bound-producing
+master. Small counterexamples and boundary cases should use TikZ diagrams when
+the timing or graph relation is clearer visually. Executable exhaustive tests
+over small integer-tick domains mirror the corresponding lemmas wherever
+practical.
+
 ## Implementation Phases
 
 ### Phase 0: Mathematical specification and census
@@ -781,10 +804,10 @@ Deliver:
 - a census tool estimating full-grid and partial-network sizes;
 - a reference complete expansion for tiny instances only.
 
-The reviewable proof draft lives as the standalone LaTeX note
-`idp_report/notes/ddd_phase0/main.tex`. The read-only census entry point is
-`benchmarks/run_ddd_phase0_census.py`; it builds sparse artifacts and reports
-the exact complete pair universe without materializing all pairs.
+The living mathematical derivation lives as the standalone LaTeX note
+`idp_report/notes/ddd_mathematical_derivations/main.tex`. The read-only census
+entry point is `benchmarks/run_ddd_phase0_census.py`; it builds sparse artifacts
+and reports the exact complete pair universe without materializing all pairs.
 
 Implemented Phase-0 reference infrastructure:
 
@@ -797,6 +820,9 @@ Implemented Phase-0 reference infrastructure:
   complete validation, replay, and export semantics;
 - benchmark entry point `benchmarks/run_ddd_phase0_reference.py`;
 - synthetic boundary/conflict tests and a tiny continuous-EAN cross-check.
+- waiting-aware integer resource envelopes, maximal mandatory-core clique rows,
+  and delayed universal-conflict rows in the anonymous network-flow master;
+  non-universal conflicts continue to use exact prefix disaggregation;
 - a physical two-cabin Three-Station Stop/Skip fixture with four exact route
   supports, three feasible supports, and one independently reproduced
   exit-switch violation.
@@ -847,6 +873,43 @@ The physical
 two-cabin Three-Station fixture combines two time splits and two conflict rows,
 then closes `LB = UB = 4` with six prefix variables. This proves integration;
 multi-cabin scaling remains open.
+
+#### Five-station fixed-$K$ movement diagnostic
+
+Passenger assignment and the restricted trajectory-slot matheuristic are now
+excluded from movement-feasibility experiments by default. The trajectory
+pool remains an explicit passenger-objective option only; it cannot contribute
+to a movement-feasibility certificate or to the global lower bound.
+
+On `five_station_circle_cw_half_skip_no_wait_v0` with the 19 fixed starts, the
+complete no-wait CP-SAT oracle found a fully validated movement plan in 2.88
+seconds (3.27 seconds for the surrounding one-round coordinator), after 10
+conflicts and 15,142 branches. Hence physical feasibility is not the obstacle
+on this instance.
+
+The isolated DDD path without CP-SAT instead spent 35 rounds and 77.16 seconds
+before reaching its first resource-conflict refinement. Before that point it
+added 1,351 trajectory-consistency time splits, grew from 365 nodes and 1,288
+arcs to 10,217 nodes and 27,530 arcs, and recorded 322 per-path event-cell
+inconsistencies. No resource split, resource row, or prefix conflict cut was
+responsible for this growth. The dominant problem is therefore the weak
+time-cell path compatibility relaxation: with a zero objective, the anonymous
+master repeatedly selects a different flow decomposition whose locally
+compatible cell transitions do not form exact complete trajectories.
+
+This diagnostic also exposed a coordinator bug: a resource conflict with a
+safe time-split refinement was incorrectly classified as `INVALID_INTERNAL`
+when it had no simultaneous new row or prefix cut. A time split now counts as
+a valid next refinement and has a regression test. After this fix, round 36
+identified four resource conflicts and added two resource time splits. The
+following conflict required prefix disaggregation beyond the configured
+budget, so the run ended correctly as `REFINEMENT_BUDGET_EXHAUSTED` after
+80.37 seconds rather than as an internal error. This fixes the premature
+termination but not the two underlying scaling problems: excessive
+trajectory-consistency splitting followed by a potentially large labelled
+prefix formulation. The next Phase-2 work should strengthen trajectory
+consistency or propagate a conflict over a larger path segment; merely
+increasing the round or prefix limits would densify the partial network.
 
 Gate:
 
@@ -1128,13 +1191,160 @@ canonical network, anonymous integer flow, deterministic path decomposition,
 the two-round physical Three-Station bound certificate, and the four-round
 combined time/conflict certificate with delayed partial disaggregation.
 
+The first larger fixed-start experiment exposed two distinct failure modes:
+single-inconsistency refinement needed 58 rounds before complete lifting, and
+the first 63 resource conflicts subsequently expanded to 155,220 prefix
+variables. The implemented response is now:
+
+1. complete-path no-wait lifting batches every safely back-propagated event-cell
+   inconsistency;
+2. exact prefix disaggregation has explicit cabin, depth, and variable budgets
+   and terminates with `REFINEMENT_BUDGET_EXHAUSTED` instead of silently
+   rebuilding the full cabin-indexed model;
+3. non-universal exact conflicts first induce headway-preimage source-cell
+   splits;
+4. a delayed anonymous Hall separator adds resource-interval capacity rows;
+5. a full-route CP-SAT primal oracle chooses Stop/Skip and exact integer event
+   times under global `NoOverlap` resources;
+6. the nested fixed-start runner tests multiple cabin counts in one experiment;
+7. every independently validated timetable can now be passed to the existing
+   exact integer fixed-movement Passenger Assignment MILP. Its objective is
+   accepted only as a passenger upper bound; it never replaces the DDD lower
+   bound;
+8. an optional CP-SAT candidate pool repeatedly excludes the complete previous
+   route-selection vector, reuses it as a hint, and evaluates every new
+   physically validated timetable. The CP time limit is shared by the whole
+   pool rather than restarted per candidate.
+
+On `five_station_circle_cw_half_skip_no_wait_v0`, the CP-SAT oracle produces
+validated schedules for $K\in\{5,10,15,19\}$ in one DDD round each. The measured
+times are approximately 0.35, 0.96, 1.98, and 2.99 seconds. Since the current
+movement objective is zero, matching `LB=UB=0` certifies movement feasibility,
+not passenger optimality.
+
+The first passenger-recovery run for $K=19$ required approximately 3.11
+seconds end to end. CP-SAT supplied the timetable in approximately 2.88
+seconds and the cached-candidate Passenger Assignment required approximately
+0.09 seconds. For the journey-time objective it obtained 697,372.782648
+passenger-seconds, served 1,248 passengers, and left 32 unserved. The result is
+therefore `FEASIBLE_WITH_GAP` with passenger bounds
+$0 \le z^\star \le 697{,}372.782648$. The lower bound is intentionally weak:
+the current anonymous master still has a zero movement objective and does not
+yet price passenger consequences. The run is a genuine passenger incumbent,
+not a claim that CP-SAT optimized the timetable for passengers.
+
+The first aggregate passenger-master experiment on the same fixed-start
+$K=19$ Skip/no-wait case exposed the complementary failure. Fifty exact
+support rounds produced no physical incumbent. Master construction and
+optimization required only approximately 10 seconds in total, while CP-SAT
+used approximately 101 seconds to reject 50 supports. The optimistic master
+served all 1,280 passengers at a lower bound of only approximately 2,676
+passenger-seconds because late visit layers inherited source-cell lower bounds
+near zero. Equality-core cuts then excluded isolated count vectors without
+correcting this timing optimism.
+
+The layer-state earliest-reachability item below is now implemented. On the
+same 50-round case it raised the lower bound from approximately 2,676 to
+409,360 passenger-seconds while reducing the initial network from 365/1,288
+nodes/arcs to 348/1,232. All 50 selected aggregate supports nevertheless
+remained physically infeasible. The remaining passenger tranche is therefore:
+
+1. run the independent full-route CP oracle as an early upper-bound channel;
+2. replace repeated fixed-support checks, optionally, by a CP objective that
+   minimizes aggregate count distance to the master support;
+3. return both a nearby physical timetable and a certified distance-ball cut;
+4. retain equality cores, directional thresholds, and resource covers as
+   proof-safe fallback and strengthening layers;
+5. refine passenger event timing only after a physical support reveals a
+   remaining master-versus-recourse objective mismatch.
+
+The exact mathematics, fallback contract, and acceptance matrix are specified
+in
+[`ddd_stronger_cp_support_cuts.md`](ddd_stronger_cp_support_cuts.md). The raw
+diagnosis is recorded in
+[`../findings/ddd_five_station_passenger_support.md`](../findings/ddd_five_station_passenger_support.md).
+
+With a 30-second shared CP budget and a limit of ten candidates, the same
+$K=19$ case produced all ten candidates in approximately 24.45 seconds. Their
+Passenger Assignments required approximately 0.84 seconds in total. The best
+journey-time upper bound fell to 693,275.021968 passenger-seconds, an
+improvement of 4,097.760680 seconds or approximately 0.59 percent over the
+first feasible timetable. Several different route patterns had identical
+passenger objectives, showing that exact route-vector diversity is weaker than
+passenger-relevant diversity. The best candidate served 1,216 passengers and
+left 64 unserved under the existing non-lexicographic journey-time objective;
+served count is therefore reported separately and must not be confused with
+the optimized objective.
+
+Passenger costs now have one canonical objective contract shared by the EAN
+and DDD paths. For objective $o$, the contract defines the event whose time
+is priced, the exact served cost, the unserved cost, the unit, and an
+admissible optimistic served cost for a partial-time master. The two initial
+definitions are
+
+$$
+c^{\mathrm{wait}}_{gr}=b_r-\rho_g,
+\qquad
+c^{\mathrm{journey}}_{gr}=a_r-\rho_g,
+\qquad
+p_g=\max\{0,H-\rho_g\},
+$$
+
+where $\rho_g$ is release time and $b_r,a_r$ are boarding and alighting
+times. Partial cells replace the exact event time only by a proven lower bound
+and clamp the resulting cost at zero. Consequently, a reported pair
+$LB_o,UB_o$ is meaningful only when both values carry the same objective ID
+and unit (`passenger_seconds`). Bounds from different objectives must never be
+combined.
+
+This cost contract does not alter solver-level priority. The existing OIP
+formulation remains lexicographic (unserved demand, configured passenger cost,
+then fleet size), while the existing fixed-start formulation retains its
+scalar horizon-penalty objective. A future objective is added through a new
+definition plus exact recourse evaluation. Until an admissible partial-master
+cost has a proof and regression tests, that objective may produce validated
+primal upper bounds but no nontrivial DDD lower bound.
+
+The first direct-ride trajectory-slot proposal is now implemented. It pools
+complete, independently validated cabin trajectories from CP-SAT and exact DDD
+recoveries. For each fixed-start cabin it selects exactly one trajectory,
+assigns integer direct rides to that trajectory, enforces capacity on every
+onboard interval, and uses the canonical Waiting- or Journey-Time objective.
+New cross-cabin resource conflicts are separated as pairwise trajectory
+incompatibilities and the combined movement plan is validated again before its
+Passenger value is accepted.
+
+This restricted pool is deliberately primal-only. Missing trajectories
+restrict the solution space, hence its objective is an upper bound only after
+complete validation; `POOL_INFEASIBLE` says nothing about the full problem.
+Its value is never written into the DDD lower-bound field. A nontrivial global
+Passenger lower bound still requires either a proved full partial-network
+relaxation or complete reduced-cost pricing.
+
+On `five_station_circle_cw_half_skip_no_wait_v0` with $K=19$, ten CP-SAT
+candidate timetables produced 44 distinct cabin trajectory options and 3,324
+direct-ride variables. The pool required two separation rounds, added eight
+trajectory incompatibilities, and solved in approximately 1.09 seconds. The
+best validated Journey-Time upper bound improved from 693,275.021968 to
+689,333.892688 passenger-seconds, a further improvement of approximately
+0.57 percent over the best complete input timetable and 1.15 percent over the
+first timetable. The certificate remains
+$0\le z^\star\le689{,}333.892688$.
+
 Next:
 
-1. measure how prefix-variable growth behaves on larger fixed-start cases;
-2. add mandatory-core resource rows before delayed separation;
-3. compare graph, row, and solve growth against enumerated support and eager
-   EAN references;
-4. only after that gate, introduce bounded station waiting.
+1. design the direct-ride Passenger lower-bound relaxation and its pricing
+   gate; do not reuse the restricted trajectory-pool objective as a lower
+   bound;
+2. feed trajectory-pool selection and Passenger dual information back into
+   CP-SAT candidate generation, so new candidates are passenger-relevant
+   rather than merely route-vector-distinct;
+3. derive and implement bounded-wait route transitions and the resource wait
+   coefficients used by both CP-SAT and DDD envelopes;
+4. benchmark time to first feasible plan, first passenger incumbent, LB/UB
+   gap, anonymous Hall rows, and
+   exact infeasibility over low, medium, and near-capacity $K$;
+5. only then expand from fixed starts to optimized initial placement.
 
 This sequence is intentionally conservative. The main value of the approach
 is the certificate

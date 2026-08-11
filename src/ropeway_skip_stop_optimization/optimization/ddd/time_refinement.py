@@ -87,7 +87,10 @@ def validate_ddd_recovered_schedule(
         target = schedule.events[index + 1]
         if source.event_index != index or target.event_index != index + 1:
             raise ValueError("DDD recovered event indices must be contiguous")
-        if source.state_id != option.from_state_id or target.state_id != option.to_state_id:
+        if (
+            source.state_id != option.from_state_id
+            or target.state_id != option.to_state_id
+        ):
             raise ValueError("DDD recovered route chain is inconsistent")
         if source.time_tick > problem.movement_problem.operational_end_tick:
             raise ValueError("DDD recovered route departs after operational horizon")
@@ -176,7 +179,13 @@ class DddEventCellInconsistency:
 class DddStrictTimeLiftResult:
     status: DddStrictTimeLiftStatus
     schedule: DddRecoveredSchedule | None
-    inconsistency: DddEventCellInconsistency | None
+    inconsistencies: tuple[DddEventCellInconsistency, ...] = ()
+
+    @property
+    def inconsistency(self) -> DddEventCellInconsistency | None:
+        """Return the first inconsistency for legacy single-split callers."""
+
+        return self.inconsistencies[0] if self.inconsistencies else None
 
 
 @dataclass(frozen=True)
@@ -196,30 +205,29 @@ class DddStrictTimeCellLifter:
             path,
             tolerance_seconds=self.tolerance_seconds,
         )
-        options_by_id = {
-            option.id: option for option in problem.movement_problem.route_options
-        }
-        for arc, source_event, target_event in zip(
-            path.arcs,
-            schedule.events[:-1],
-            schedule.events[1:],
-            strict=True,
+        inconsistencies: list[DddEventCellInconsistency] = []
+        for arc_index, (arc, source_event, target_event) in enumerate(
+            zip(
+                path.arcs,
+                schedule.events[:-1],
+                schedule.events[1:],
+                strict=True,
+            )
         ):
             if arc.source_cell_id is not None:
-                source_cell = problem.discretization.partition(
-                    arc.from_state_id
-                ).cells
-                selected_source_cell = next(
-                    (cell for cell in source_cell if cell.id == arc.source_cell_id),
-                    None,
-                )
-                if selected_source_cell is None or not selected_source_cell.contains(
-                    source_event.time_seconds,
-                    tolerance_seconds=self.tolerance_seconds,
-                ):
-                    raise ValueError("DDD strict lift source cell is inconsistent")
-                if (
+                if arc_index == 0:
+                    raise ValueError(
+                        "DDD first strict-lift arc cannot reference a source cell"
+                    )
+                selected_source_cell = path.arcs[arc_index - 1].target_cell
+                if selected_source_cell.id != arc.source_cell_id:
+                    raise ValueError("DDD strict lift source-cell chain is broken")
+                source_cell_is_exact = selected_source_cell.contains_tick(
                     source_event.time_tick
+                )
+                if (
+                    source_cell_is_exact
+                    and source_event.time_tick
                     > problem.movement_problem.operational_end_tick
                 ):
                     split_tick = source_event.time_tick
@@ -229,77 +237,42 @@ class DddStrictTimeCellLifter:
                         < split_tick
                         < selected_source_cell.upper_tick
                     ):
-                        raise DddTimeRefinementStalledError(
-                            "DDD post-horizon inconsistency has no interior boundary"
-                        )
-                    return DddStrictTimeLiftResult(
-                        status=(
-                            DddStrictTimeLiftStatus.EVENT_CELL_INCONSISTENCY
-                        ),
-                        schedule=None,
-                        inconsistency=DddEventCellInconsistency(
+                        continue
+                    inconsistencies.append(
+                        DddEventCellInconsistency(
                             state_id=arc.from_state_id,
                             selected_cell_id=selected_source_cell.id,
-                            exact_source_time_seconds=(
-                                source_event.time_seconds
-                            ),
+                            exact_source_time_seconds=source_event.time_seconds,
                             required_source_lower_seconds=(
                                 problem.movement_problem.operational_end_seconds
                             ),
                             required_source_upper_seconds=split_boundary,
                             split_boundary_seconds=split_boundary,
                             failed_target_cell_id=arc.target_cell.id,
-                        ),
+                        )
                     )
             if arc.target_cell.contains_tick(target_event.time_tick):
                 continue
-            if arc.source_cell_id is None:
-                raise ValueError("fixed-start partial arc was not exactly compatible")
-            selected_source_cell = next(
-                cell
-                for cell in problem.discretization.partition(arc.from_state_id).cells
-                if cell.id == arc.source_cell_id
+            inconsistency = _build_back_propagated_inconsistency(
+                problem=problem,
+                path=path,
+                schedule=schedule,
+                failed_arc_index=arc_index,
             )
-            option = options_by_id[arc.route_option_id]
-            required_lower_tick = (
-                arc.target_cell.lower_tick - option.duration_tick
-            )
-            required_upper_tick = (
-                arc.target_cell.upper_tick - option.duration_tick
-            )
-            split_tick = (
-                required_lower_tick
-                if source_event.time_tick < required_lower_tick
-                else required_upper_tick
-            )
-            required_lower = ddd_tick_to_seconds(required_lower_tick)
-            required_upper = ddd_tick_to_seconds(required_upper_tick)
-            split_boundary = ddd_tick_to_seconds(split_tick)
-            if not (
-                selected_source_cell.lower_tick
-                < split_tick
-                < selected_source_cell.upper_tick
-            ):
+            if inconsistency is None:
                 raise DddTimeRefinementStalledError(
-                    "DDD event-cell inconsistency has no interior source boundary: "
-                    f"source={source_event.time_seconds}, "
-                    f"cell=[{selected_source_cell.lower_seconds},"
-                    f"{selected_source_cell.upper_seconds}), "
-                    f"required=[{required_lower},{required_upper}), "
-                    f"split={split_boundary}, target={arc.target_cell.id}"
+                    "DDD event-cell inconsistency has no earlier consistent "
+                    f"cell with an interior boundary: target={arc.target_cell.id}, "
+                    f"exact={target_event.time_seconds}"
                 )
+            inconsistencies.append(inconsistency)
+
+        if inconsistencies:
+            unique = tuple(dict.fromkeys(inconsistencies))
             return DddStrictTimeLiftResult(
                 status=DddStrictTimeLiftStatus.EVENT_CELL_INCONSISTENCY,
                 schedule=None,
-                inconsistency=DddEventCellInconsistency(
-                    state_id=arc.from_state_id,
-                    selected_cell_id=selected_source_cell.id,
-                    exact_source_time_seconds=source_event.time_seconds,
-                    required_source_lower_seconds=required_lower,
-                    required_source_upper_seconds=required_upper,
-                    split_boundary_seconds=split_boundary,
-                    failed_target_cell_id=arc.target_cell.id,
-                ),
+                inconsistencies=unique,
             )
 
         validate_ddd_recovered_schedule(
@@ -310,8 +283,45 @@ class DddStrictTimeCellLifter:
         return DddStrictTimeLiftResult(
             status=DddStrictTimeLiftStatus.FEASIBLE,
             schedule=schedule,
-            inconsistency=None,
         )
+
+
+def _build_back_propagated_inconsistency(
+    *,
+    problem: DddPartialTimeProblem,
+    path: DddPartialTimedPath,
+    schedule: DddRecoveredSchedule,
+    failed_arc_index: int,
+) -> DddEventCellInconsistency | None:
+    """Project a failed target cell to the latest exact-consistent earlier cell."""
+
+    failed_arc = path.arcs[failed_arc_index]
+    target_event = schedule.events[failed_arc_index + 1]
+    for anchor_event_index in range(failed_arc_index, 0, -1):
+        anchor_cell = path.arcs[anchor_event_index - 1].target_cell
+        anchor_event = schedule.events[anchor_event_index]
+        if not anchor_cell.contains_tick(anchor_event.time_tick):
+            continue
+        elapsed_tick = target_event.time_tick - anchor_event.time_tick
+        required_lower_tick = failed_arc.target_cell.lower_tick - elapsed_tick
+        required_upper_tick = failed_arc.target_cell.upper_tick - elapsed_tick
+        split_tick = (
+            required_lower_tick
+            if anchor_event.time_tick < required_lower_tick
+            else required_upper_tick
+        )
+        if not anchor_cell.lower_tick < split_tick < anchor_cell.upper_tick:
+            continue
+        return DddEventCellInconsistency(
+            state_id=anchor_event.state_id,
+            selected_cell_id=anchor_cell.id,
+            exact_source_time_seconds=anchor_event.time_seconds,
+            required_source_lower_seconds=ddd_tick_to_seconds(required_lower_tick),
+            required_source_upper_seconds=ddd_tick_to_seconds(required_upper_tick),
+            split_boundary_seconds=ddd_tick_to_seconds(split_tick),
+            failed_target_cell_id=failed_arc.target_cell.id,
+        )
+    return None
 
 
 def _propagate_route_support(
@@ -402,9 +412,7 @@ class DddTimeRefinementSolver:
             raise ValueError("DDD time refinement max_iterations must be positive")
         master = DddPartialTimeMaster(tolerance_seconds=self.tolerance_seconds)
         lifter = DddStrictTimeCellLifter(tolerance_seconds=self.tolerance_seconds)
-        recovery = DddCellFreeSupportRecovery(
-            tolerance_seconds=self.tolerance_seconds
-        )
+        recovery = DddCellFreeSupportRecovery(tolerance_seconds=self.tolerance_seconds)
         current = problem
         lower_bound = -math.inf
         upper_bound = math.inf
@@ -445,7 +453,9 @@ class DddTimeRefinementSolver:
             path = master_result.path
             master_bound = master_result.objective_lower_bound
             if path is None or master_bound is None:
-                raise RuntimeError("optimal DDD partial master returned no path or bound")
+                raise RuntimeError(
+                    "optimal DDD partial master returned no path or bound"
+                )
             lower_bound = max(lower_bound, master_bound)
 
             recovered = recovery.recover(current, path)

@@ -17,8 +17,9 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanDemandGroup,
     EanRideCandidate,
 )
-from ropeway_skip_stop_optimization.optimization.ean.optimizers.passenger_model import (
+from ropeway_skip_stop_optimization.optimization.ean.passenger_objective import (
     EanPassengerObjective,
+    ean_passenger_objective_definition,
 )
 from ropeway_skip_stop_optimization.optimization.ean.passenger_plan import (
     EanPassengerServicePlan,
@@ -194,23 +195,11 @@ class EanFixedMovementPassengerModelBuilder:
             ),
         )
         validation.raise_for_errors()
-        group_by_id = {
-            group.id: group
-            for group in passenger_build.demand_groups
-        }
-        visits_by_key = _plan_visits_by_key(movement_plan)
-        rides = tuple(
-            ride
-            for candidate in passenger_build.ride_candidates
-            if (
-                ride := _fixed_movement_ride(
-                    candidate,
-                    group_by_id[candidate.demand_group_id],
-                    visits_by_key,
-                    artifact.config.horizon_seconds,
-                )
-            )
-            is not None
+        group_by_id = {group.id: group for group in passenger_build.demand_groups}
+        rides = build_ean_fixed_movement_rides(
+            passenger_build=passenger_build,
+            movement_plan=movement_plan,
+            horizon_seconds=artifact.config.horizon_seconds,
         )
         filtered_build = EanPassengerCandidateBuildResult(
             demand_groups=passenger_build.demand_groups,
@@ -238,8 +227,7 @@ class EanFixedMovementPassengerModelBuilder:
         model.update()
 
         rides_by_group_id: dict[str, list[EanFixedMovementRide]] = {
-            group.id: []
-            for group in filtered_build.demand_groups
+            group.id: [] for group in filtered_build.demand_groups
         }
         rides_by_cabin_id: dict[int, list[EanFixedMovementRide]] = {}
         for ride in rides:
@@ -278,19 +266,19 @@ class EanFixedMovementPassengerModelBuilder:
                     name=f"fixed_capacity_cabin_{key[0]}_interval_{key[1]}",
                 )
 
+        objective_definition = ean_passenger_objective_definition(objective)
         objective_constant = 0.0
         objective_terms = []
         for group in filtered_build.demand_groups:
-            unserved_cost = max(
-                0.0,
-                artifact.config.horizon_seconds - group.release_time_seconds,
+            unserved_cost = objective_definition.unserved_cost_seconds(
+                release_time_seconds=group.release_time_seconds,
+                horizon_seconds=artifact.config.horizon_seconds,
             )
             objective_constant += unserved_cost * group.count
             for ride in rides_by_group_id[group.id]:
                 served_cost = _served_cost(ride, group, objective)
                 objective_terms.append(
-                    (served_cost - unserved_cost)
-                    * ride_count[ride.candidate.id]
+                    (served_cost - unserved_cost) * ride_count[ride.candidate.id]
                 )
         model.setObjective(
             objective_constant + gp.quicksum(objective_terms),
@@ -316,18 +304,49 @@ class EanFixedMovementPassengerModelBuilder:
         )
 
 
+def build_ean_fixed_movement_rides(
+    *,
+    passenger_build: EanPassengerCandidateBuildResult,
+    movement_plan: EanMovementPlan,
+    horizon_seconds: float,
+) -> tuple[EanFixedMovementRide, ...]:
+    """Return every direct ride enabled by one exact movement plan.
+
+    This is shared by the fixed-plan Passenger Assignment and the restricted
+    DDD trajectory-slot proposal master. It deliberately performs no movement
+    validation; callers that combine trajectories must validate the resulting
+    complete plan independently.
+    """
+
+    if horizon_seconds <= 0:
+        raise ValueError("fixed-movement passenger horizon must be positive")
+    passenger_build.validate()
+    movement_plan.validate()
+    group_by_id = {group.id: group for group in passenger_build.demand_groups}
+    visits_by_key = _plan_visits_by_key(movement_plan)
+    return tuple(
+        ride
+        for candidate in passenger_build.ride_candidates
+        if (
+            ride := _fixed_movement_ride(
+                candidate,
+                group_by_id[candidate.demand_group_id],
+                visits_by_key,
+                horizon_seconds,
+            )
+        )
+        is not None
+    )
+
+
 def _fixed_movement_ride(
     candidate: EanRideCandidate,
     group: EanDemandGroup,
     visits_by_key: dict[tuple[int, int], EanCabinVisit],
     horizon_seconds: float,
 ) -> EanFixedMovementRide | None:
-    board_visit = visits_by_key.get(
-        (candidate.cabin_id, candidate.board_visit_index)
-    )
-    alight_visit = visits_by_key.get(
-        (candidate.cabin_id, candidate.alight_visit_index)
-    )
+    board_visit = visits_by_key.get((candidate.cabin_id, candidate.board_visit_index))
+    alight_visit = visits_by_key.get((candidate.cabin_id, candidate.alight_visit_index))
     if (
         board_visit is None
         or alight_visit is None
@@ -358,13 +377,11 @@ def _served_cost(
     group: EanDemandGroup,
     objective: EanPassengerObjective,
 ) -> float:
-    if objective is EanPassengerObjective.WAITING_TIME:
-        event_time = ride.boarding_time_seconds
-    elif objective is EanPassengerObjective.JOURNEY_TIME:
-        event_time = ride.alighting_time_seconds
-    else:
-        raise ValueError(f"unsupported EAN passenger objective: {objective}")
-    return event_time - group.release_time_seconds
+    return ean_passenger_objective_definition(objective).served_cost_seconds(
+        release_time_seconds=group.release_time_seconds,
+        boarding_time_seconds=ride.boarding_time_seconds,
+        alighting_time_seconds=ride.alighting_time_seconds,
+    )
 
 
 def _plan_visits_by_key(
@@ -402,8 +419,5 @@ def _variable_value(variable: Any) -> float:
 
 def _var_id(value: str) -> str:
     return (
-        value.replace("::", "__")
-        .replace(":", "_")
-        .replace("-", "_")
-        .replace(" ", "_")
+        value.replace("::", "__").replace(":", "_").replace("-", "_").replace(" ", "_")
     )

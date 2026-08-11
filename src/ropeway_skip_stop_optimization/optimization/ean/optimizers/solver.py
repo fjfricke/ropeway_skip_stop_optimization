@@ -53,6 +53,9 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.passenger_model 
     EanPassengerModelBuilder,
     EanPassengerObjective,
 )
+from ropeway_skip_stop_optimization.optimization.ean.passenger_objective import (
+    ean_passenger_objective_definition,
+)
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.solver_policy import (
     GurobiSolverPolicy,
     apply_gurobi_solver_policy,
@@ -152,9 +155,7 @@ class EanPassengerServiceProblem:
     artifact: EanBuildArtifact
     objective: EanPassengerObjective = EanPassengerObjective.WAITING_TIME
     passenger_builder: EanPassengerCandidateBuilder | None = None
-    mip_start_strategy: EanMipStartStrategy = (
-        EanMipStartStrategy.AUTO
-    )
+    mip_start_strategy: EanMipStartStrategy = EanMipStartStrategy.AUTO
 
     @property
     def kind(self) -> EanOptimizationProblemKind:
@@ -312,9 +313,7 @@ class EanOptimizationMetadata:
             "progress_samples",
         }
         return {
-            key: value
-            for key, value in asdict(self).items()
-            if key in export_fields
+            key: value for key, value in asdict(self).items() if key in export_fields
         }
 
 
@@ -348,10 +347,8 @@ class EanOptimizer:
                 gp=gp,
                 grb=GRB,
             )
-        optimization_config = (
-            self.config.optimization_config.resolved_for_fleet_mode(
-                problem.artifact.fleet_mode
-            )
+        optimization_config = self.config.optimization_config.resolved_for_fleet_mode(
+            problem.artifact.fleet_mode
         )
         passenger_build = None
         passenger_candidate_runtime = 0.0
@@ -362,13 +359,13 @@ class EanOptimizer:
                     f"artifact: {problem.scenario.id!r} != "
                     f"{problem.artifact.scenario_id!r}"
                 )
-            optimization_config = (
-                optimization_config.resolved_for_passenger_objective(
-                    problem.objective
-                )
+            optimization_config = optimization_config.resolved_for_passenger_objective(
+                problem.objective
             )
             if (
-                problem.objective is EanPassengerObjective.WAITING_TIME
+                ean_passenger_objective_definition(
+                    problem.objective
+                ).requires_board_time
                 and optimization_config.formulation.board_time
                 is EanBoardTimeFormulation.PROJECTED_JOURNEY_TIME
             ):
@@ -384,9 +381,7 @@ class EanOptimizer:
             )
             passenger_build = (
                 problem.passenger_builder
-                or EanPassengerCandidateBuilder(
-                    optimization_config=optimization_config
-                )
+                or EanPassengerCandidateBuilder(optimization_config=optimization_config)
             ).build(problem.scenario, problem.artifact)
             passenger_candidate_runtime = perf_counter() - candidate_started
             emit_build_progress(
@@ -475,10 +470,7 @@ class EanOptimizer:
                     optimization_config.formulation.horizon,
                 )
                 mip_start_active_cabin_count = _seed_active_cabin_count(seed)
-                if (
-                    mip_start_strategy
-                    is EanMipStartStrategy.GREEDY_ALL_STOP
-                ):
+                if mip_start_strategy is EanMipStartStrategy.GREEDY_ALL_STOP:
                     (
                         mip_start_unserved_count,
                         mip_start_passenger_objective,
@@ -487,10 +479,7 @@ class EanOptimizer:
                         seed.fleet_plan,
                     )
                     mip_start_objective_value = mip_start_passenger_objective
-                elif (
-                    mip_start_strategy
-                    is EanMipStartStrategy.OPTIMIZED_ALL_STOP
-                ):
+                elif mip_start_strategy is EanMipStartStrategy.OPTIMIZED_ALL_STOP:
                     optimized_start = _solve_optimized_all_stop_start(
                         optimizer=self,
                         problem=problem,
@@ -529,9 +518,7 @@ class EanOptimizer:
                             seed.movement_plan,
                             seed.fleet_plan,
                         )
-                        mip_start_objective_value = (
-                            mip_start_passenger_objective
-                        )
+                        mip_start_objective_value = mip_start_passenger_objective
                 mip_start_runtime = perf_counter() - mip_start_started
                 emit_build_progress(
                     self.config.build_progress_callback,
@@ -574,9 +561,7 @@ class EanOptimizer:
         model_nonzero_count = int(model.NumNZs)
         setup_runtime = perf_counter() - setup_started
         build_metrics = EanModelBuildMetrics(
-            passenger_candidate_generation_seconds=(
-                passenger_candidate_runtime
-            ),
+            passenger_candidate_generation_seconds=(passenger_candidate_runtime),
             movement_model_seconds=movement_runtime,
             movement_fixing_seconds=movement_fixing_runtime,
             passenger_model_seconds=passenger_runtime,
@@ -651,9 +636,7 @@ class EanOptimizer:
                 self.config.progress_recorder,
                 progress_start,
             )
-            solve_phase_metrics = _progress_phase_metrics(
-                self.config.progress_recorder
-            )
+            solve_phase_metrics = _progress_phase_metrics(self.config.progress_recorder)
             diagnostics = _solver_diagnostics(
                 model,
                 GRB,
@@ -719,12 +702,9 @@ class EanOptimizer:
                 movement_plan,
                 tolerance_seconds=tolerance,
             )
-            diagnostic_headway_separation_seconds = (
-                perf_counter() - separation_started
-            )
+            diagnostic_headway_separation_seconds = perf_counter() - separation_started
             materialized_violations = {
-                violation.pair.id
-                for violation in diagnostic_headway_violations
+                violation.pair.id for violation in diagnostic_headway_violations
             } & retained_pair_ids
             if materialized_violations:
                 raise RuntimeError(
@@ -764,12 +744,8 @@ class EanOptimizer:
                 resolved_mip_start_strategy=resolved_mip_start_strategy,
                 mip_start_active_cabin_count=mip_start_active_cabin_count,
                 mip_start_unserved_passenger_count=mip_start_unserved_count,
-                mip_start_passenger_objective_seconds=(
-                    mip_start_passenger_objective
-                ),
-                diagnostic_headway_violations=(
-                    diagnostic_headway_violations
-                ),
+                mip_start_passenger_objective_seconds=(mip_start_passenger_objective),
+                diagnostic_headway_violations=(diagnostic_headway_violations),
                 diagnostic_headway_separation_seconds=(
                     diagnostic_headway_separation_seconds
                 ),
@@ -791,8 +767,7 @@ def _solve_fixed_movement_passenger(
 ) -> EanOptimizationResult:
     config = optimizer.config
     if (
-        problem.assignment_domain
-        is EanPassengerAssignmentDomain.LP_RELAXATION
+        problem.assignment_domain is EanPassengerAssignmentDomain.LP_RELAXATION
         and config.checkpoint is not None
     ):
         raise ValueError(
@@ -809,17 +784,13 @@ def _solve_fixed_movement_passenger(
             f"{problem.scenario.id!r} != {problem.artifact.scenario_id!r}"
         )
 
-    optimization_config = (
-        config.optimization_config.resolved_for_fleet_mode(
-            problem.artifact.fleet_mode
-        ).resolved_for_passenger_objective(problem.objective)
-    )
+    optimization_config = config.optimization_config.resolved_for_fleet_mode(
+        problem.artifact.fleet_mode
+    ).resolved_for_passenger_objective(problem.objective)
     candidate_started = perf_counter()
     passenger_build = (
         problem.passenger_builder
-        or EanPassengerCandidateBuilder(
-            optimization_config=optimization_config
-        )
+        or EanPassengerCandidateBuilder(optimization_config=optimization_config)
     ).build(problem.scenario, problem.artifact)
     passenger_candidate_runtime = perf_counter() - candidate_started
 
@@ -891,17 +862,12 @@ def _solve_fixed_movement_passenger(
         diagnostics["mip_gap_target"] = None
         diagnostics["node_count"] = None
     checkpoint_diagnostics = _checkpoint_diagnostics(config.checkpoint)
-    assignment = (
-        fixed_model.extract_assignment()
-        if int(model.SolCount) > 0
-        else None
-    )
+    assignment = fixed_model.extract_assignment() if int(model.SolCount) > 0 else None
     passenger_plan = (
         fixed_model.extract_passenger_plan(assignment)
         if (
             assignment is not None
-            and problem.assignment_domain
-            is EanPassengerAssignmentDomain.INTEGER
+            and problem.assignment_domain is EanPassengerAssignmentDomain.INTEGER
         )
         else None
     )
@@ -945,11 +911,7 @@ def _fixed_movement_metadata(
     assignment: EanPassengerAssignment | None,
     passenger_plan: EanPassengerServicePlan | None,
 ) -> EanOptimizationMetadata:
-    objective_value = (
-        float(model.ObjVal)
-        if int(model.SolCount) > 0
-        else None
-    )
+    objective_value = float(model.ObjVal) if int(model.SolCount) > 0 else None
     skipped_count = sum(
         visit.decision is EanRouteDecision.SKIP
         for trajectory in problem.movement_plan.trajectories
@@ -957,8 +919,7 @@ def _fixed_movement_metadata(
     )
     visible_skipped_count = sum(
         visit.decision is EanRouteDecision.SKIP
-        and visit.switch_time_seconds
-        <= problem.artifact.config.horizon_seconds
+        and visit.switch_time_seconds <= problem.artifact.config.horizon_seconds
         for trajectory in problem.movement_plan.trajectories
         for visit in trajectory.visits
     )
@@ -968,9 +929,7 @@ def _fixed_movement_metadata(
         objective_kind=problem.objective,
         objective_value_seconds=objective_value,
         objective_passenger_hours=(
-            objective_value / 3600.0
-            if objective_value is not None
-            else None
+            objective_value / 3600.0 if objective_value is not None else None
         ),
         demand_group_count=len(fixed_model.passenger_build.demand_groups),
         ride_candidate_count=len(fixed_model.passenger_build.ride_candidates),
@@ -1005,19 +964,13 @@ def _fixed_movement_metadata(
         assignment_domain=problem.assignment_domain,
         passenger_assignment_variable_count=fixed_model.variable_count,
         fractional_ride_count=(
-            assignment.fractional_ride_count
-            if assignment is not None
-            else None
+            assignment.fractional_ride_count if assignment is not None else None
         ),
         fractional_distance_sum=(
-            assignment.fractional_distance_sum
-            if assignment is not None
-            else None
+            assignment.fractional_distance_sum if assignment is not None else None
         ),
         maximum_fractional_distance=(
-            assignment.maximum_fractional_distance
-            if assignment is not None
-            else None
+            assignment.maximum_fractional_distance if assignment is not None else None
         ),
     )
 
@@ -1026,12 +979,8 @@ def _should_apply_mip_start(
     strategy: EanMipStartStrategy,
     checkpoint: GurobiCheckpointConfig | None,
 ) -> bool:
-    return (
-        strategy is not EanMipStartStrategy.NONE
-        and (
-            checkpoint is None
-            or checkpoint.read_solution_path is None
-        )
+    return strategy is not EanMipStartStrategy.NONE and (
+        checkpoint is None or checkpoint.read_solution_path is None
     )
 
 
@@ -1096,23 +1045,23 @@ def _solve_optimized_all_stop_start(
 def _seed_active_cabin_count(seed: EanAllStopMipStartSeed) -> int:
     if seed.fleet_plan is not None:
         return len(seed.fleet_plan.active_cabin_ids)
-    return sum(bool(trajectory.visits) for trajectory in seed.movement_plan.trajectories)
+    return sum(
+        bool(trajectory.visits) for trajectory in seed.movement_plan.trajectories
+    )
 
 
 def _seed_passenger_objective_seconds(
     passenger_model: EanPassengerModel,
     passenger_plan: EanPassengerServicePlan,
 ) -> float:
+    definition = ean_passenger_objective_definition(passenger_model.objective)
     total = 0.0
     for ride in passenger_plan.served_rides:
         group = passenger_model.group_by_id[ride.demand_group_id]
-        service_time = (
-            ride.boarding_time_seconds
-            if passenger_model.objective is EanPassengerObjective.WAITING_TIME
-            else ride.alighting_time_seconds
-        )
-        total += ride.count * (
-            service_time - group.release_time_seconds
+        total += ride.count * definition.served_cost_seconds(
+            release_time_seconds=group.release_time_seconds,
+            boarding_time_seconds=ride.boarding_time_seconds,
+            alighting_time_seconds=ride.alighting_time_seconds,
         )
     return total
 
@@ -1208,9 +1157,7 @@ def _metadata(
         movement_constraint_count=movement_model.constraint_count,
         movement_nonzero_count=movement_model.nonzero_count,
         headway_pair_count=len(problem.artifact.headway_pairs),
-        headway_order_variable_count=len(
-            movement_model.variables.headway_order
-        ),
+        headway_order_variable_count=len(movement_model.variables.headway_order),
         fixed_movement=False,
         build_metrics=build_metrics,
         solve_phase_metrics=solve_phase_metrics,
@@ -1222,9 +1169,7 @@ def _metadata(
         resolved_mip_start_strategy=resolved_mip_start_strategy,
         mip_start_active_cabin_count=mip_start_active_cabin_count,
         mip_start_unserved_passenger_count=mip_start_unserved_passenger_count,
-        mip_start_passenger_objective_seconds=(
-            mip_start_passenger_objective_seconds
-        ),
+        mip_start_passenger_objective_seconds=(mip_start_passenger_objective_seconds),
         mip_start_generation_seconds=(
             build_metrics.mip_start_seconds
             if resolved_mip_start_strategy is not None
@@ -1240,9 +1185,7 @@ def _metadata(
             and movement_plan is not None
             else None
         ),
-        diagnostic_headway_violation_count=len(
-            diagnostic_headway_violations
-        ),
+        diagnostic_headway_violation_count=len(diagnostic_headway_violations),
         diagnostic_max_headway_violation_seconds=(
             max(
                 violation.violation_seconds
@@ -1251,9 +1194,7 @@ def _metadata(
             if diagnostic_headway_violations
             else None
         ),
-        diagnostic_headway_separation_seconds=(
-            diagnostic_headway_separation_seconds
-        ),
+        diagnostic_headway_separation_seconds=(diagnostic_headway_separation_seconds),
         diagnostically_omitted_headway_checkpoint_count=(
             build_metrics.diagnostically_omitted_headway_checkpoint_count
         ),
@@ -1284,11 +1225,7 @@ def _optimize(
         begin_run = getattr(callback_recorder, "begin_run", None)
         result = begin_run() if callable(begin_run) else None
         if callback_recorder is recorder:
-            start = (
-                int(result)
-                if result is not None
-                else len(recorder.samples)
-            )
+            start = int(result) if result is not None else len(recorder.samples)
     model.optimize(
         lambda callback_model, where: _record_callbacks(
             callback_recorders,
@@ -1372,7 +1309,9 @@ def _configure_checkpoints(
         model.Params.SolFiles = str(checkpoint.solution_file_prefix)
     if checkpoint.read_solution_path is not None:
         model.update()
-        LOGGER.info("Loading EAN checkpoint MIP start from %s", checkpoint.read_solution_path)
+        LOGGER.info(
+            "Loading EAN checkpoint MIP start from %s", checkpoint.read_solution_path
+        )
         model.read(str(checkpoint.read_solution_path))
 
 
@@ -1430,9 +1369,7 @@ def _solver_diagnostics(
         "solver_status": solver_status,
         "best_bound": _safe_finite_float_attr(model, "ObjBound"),
         "mip_gap": (
-            _safe_finite_float_attr(model, "MIPGap")
-            if solution_count > 0
-            else None
+            _safe_finite_float_attr(model, "MIPGap") if solution_count > 0 else None
         ),
         "runtime_seconds": _safe_finite_float_attr(model, "Runtime"),
         "node_count": _safe_finite_float_attr(model, "NodeCount"),
