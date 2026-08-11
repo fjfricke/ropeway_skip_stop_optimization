@@ -1029,24 +1029,12 @@ def test_network_refinement_emits_terminal_progress_data() -> None:
         stage="master@1s",
         master_incumbent=123.0,
         master_best_bound=4.0,
-        master_relative_gap=0.5,
-        variable_count=12,
-        constraint_count=7,
-        cut_count=1,
-        prefix_variable_count=2,
-        master_node_count=3.0,
     )
     fixed_second = _format_fixed_live_progress(
         event=master_events[0],
         stage="primal_oracle_candidate_found",
         master_incumbent=1234567.0,
         master_best_bound=40.0,
-        master_relative_gap=0.05,
-        variable_count=123456,
-        constraint_count=70000,
-        cut_count=100,
-        prefix_variable_count=2000,
-        master_node_count=30000.0,
     )
     assert len(fixed_first) == len(fixed_second)
     assert "LB=" in fixed_first

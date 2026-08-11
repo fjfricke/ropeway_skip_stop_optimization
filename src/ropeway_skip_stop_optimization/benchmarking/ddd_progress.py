@@ -180,12 +180,6 @@ class DddTerminalProgress:
     _bar: Any | None = field(init=False, default=None)
     _master_incumbent: float | None = field(init=False, default=None)
     _master_best_bound: float | None = field(init=False, default=None)
-    _master_relative_gap: float | None = field(init=False, default=None)
-    _variable_count: int = field(init=False, default=0)
-    _constraint_count: int = field(init=False, default=0)
-    _cut_count: int = field(init=False, default=0)
-    _prefix_variable_count: int = field(init=False, default=0)
-    _master_node_count: float = field(init=False, default=0.0)
 
     def __enter__(self) -> DddTerminalProgress:
         if self.enabled:
@@ -196,9 +190,9 @@ class DddTerminalProgress:
                 unit="round",
                 dynamic_ncols=False,
                 bar_format=(
-                    "{desc}: {percentage:6.2f}%|{bar:20}| "
+                    "{desc} {percentage:5.1f}% "
                     f"{{n:>{round_digits}d}}/{{total:<{round_digits}d}} "
-                    "[{elapsed:>8}] {postfix}"
+                    "{postfix}"
                 ),
             )
         return self
@@ -213,27 +207,18 @@ class DddTerminalProgress:
         if event.stage is DddNetworkTimeRefinementProgressStage.ROUND_STARTED:
             self._master_incumbent = None
             self._master_best_bound = None
-            self._master_relative_gap = None
-            self._master_node_count = 0.0
         round_finished = (
             event.stage is DddNetworkTimeRefinementProgressStage.ROUND_FINISHED
         )
         if round_finished:
             if event.iteration is None:
                 raise ValueError("finished DDD round lacks iteration metrics")
-            self._variable_count = event.iteration.variable_count
-            self._constraint_count = event.iteration.constraint_count
-            self._cut_count = event.iteration.total_conflict_cut_count
-            self._prefix_variable_count = event.iteration.prefix_variable_count
-            self._master_node_count = event.iteration.master_explored_node_count
         if event.stage is DddNetworkTimeRefinementProgressStage.MASTER_PROGRESS:
             master = event.master_progress
             if master is None:
                 raise ValueError("DDD master progress event lacks diagnostics")
             self._master_incumbent = master.incumbent_objective
             self._master_best_bound = master.best_bound
-            self._master_relative_gap = master.relative_gap
-            self._master_node_count = master.explored_node_count
         stage = event.stage.value
         if event.stage is DddNetworkTimeRefinementProgressStage.MASTER_PROGRESS:
             master = event.master_progress
@@ -251,12 +236,6 @@ class DddTerminalProgress:
                 stage=stage,
                 master_incumbent=self._master_incumbent,
                 master_best_bound=self._master_best_bound,
-                master_relative_gap=self._master_relative_gap,
-                variable_count=self._variable_count,
-                constraint_count=self._constraint_count,
-                cut_count=self._cut_count,
-                prefix_variable_count=self._prefix_variable_count,
-                master_node_count=self._master_node_count,
             ),
             refresh=False,
         )
@@ -278,12 +257,6 @@ def _format_fixed_live_progress(
     stage: str,
     master_incumbent: float | None,
     master_best_bound: float | None,
-    master_relative_gap: float | None,
-    variable_count: int,
-    constraint_count: int,
-    cut_count: int,
-    prefix_variable_count: int,
-    master_node_count: float,
 ) -> str:
     lower_bound = event.global_lower_bound
     if master_best_bound is not None:
@@ -293,36 +266,51 @@ def _format_fixed_live_progress(
             else max(lower_bound, master_best_bound)
         )
     gap = _relative_gap(lower_bound, event.global_upper_bound)
-    round_digits = len(str(event.max_iterations))
     return " ".join(
         (
-            f"r={event.round_index:0{round_digits}d}/{event.max_iterations}",
-            f"stage={stage[:28]:<28}",
+            f"S={_short_stage(stage):<4}",
             f"LB={_format_fixed_number(lower_bound)}",
             f"UB={_format_fixed_number(event.global_upper_bound)}",
             f"INC={_format_fixed_number(master_incumbent)}",
             f"GAP={_format_fixed_percent(gap)}",
-            f"MGAP={_format_fixed_percent(master_relative_gap)}",
-            f"V={variable_count:>8d}",
-            f"R={constraint_count:>8d}",
-            f"CUT={cut_count:>5d}",
-            f"PFX={prefix_variable_count:>7d}",
-            f"NODE={master_node_count:>8.0f}",
-            f"t={event.total_elapsed_seconds:>8.1f}s",
         )
     )
 
 
-def _format_fixed_number(value: float | None, *, width: int = 12) -> str:
+def _format_fixed_number(value: float | None, *, width: int = 9) -> str:
     if value is None:
         return "-".rjust(width)
-    return f"{value:.6g}".rjust(width)
+    return f"{value:.4g}".rjust(width)
 
 
-def _format_fixed_percent(value: float | None, *, width: int = 9) -> str:
+def _format_fixed_percent(value: float | None, *, width: int = 7) -> str:
     if value is None:
         return "-".rjust(width)
     return f"{100.0 * value:.2f}%".rjust(width)
+
+
+def _short_stage(stage: str) -> str:
+    if stage.startswith("master"):
+        return "MIP"
+    if "primal_oracle" in stage or "bootstrap" in stage:
+        return "CP"
+    if "evaluation" in stage:
+        return "OBJ"
+    if "network" in stage:
+        return "NET"
+    if "decomposition" in stage:
+        return "DEC"
+    if "recovery" in stage:
+        return "REC"
+    if "lifting" in stage:
+        return "LFT"
+    if "resource_window" in stage:
+        return "ROW"
+    if "trajectory_pool" in stage:
+        return "POOL"
+    if stage == "round_finished":
+        return "DONE"
+    return "RND"
 
 
 def _relative_gap(lower_bound: float | None, upper_bound: float | None) -> float | None:
