@@ -309,3 +309,49 @@ the bound per unit time, the lower-bound bottleneck is trajectory consistency
 rather than missing local capacity rows, and work should move to
 sequence-/trajectory-linking cuts while nearest-support search remains the
 primal timetable channel.
+
+## Anonymous resource-window A/B result
+
+The entry-count and protected-interval energy separators were integrated as
+an inner master loop before decomposition and CP-SAT. The controlled 20-round
+experiment again used fixed-start $K=19$, structural earliest times, the
+Journey-Time passenger master, free primal bootstrap, timed-flow covers, and
+no nearest-support search.
+
+| Metric | Off | Entry count | Entry + energy |
+|---|---:|---:|---:|
+| Lower bound | 409,360.38 | 409,360.38 | 409,360.38 |
+| Upper bound | 1,422,004.21 | 1,422,004.21 | 1,422,004.21 |
+| Total time | 81.94 s | 81.86 s | 79.97 s |
+| Master time | 13.19 s | 13.00 s | 12.34 s |
+| CP-SAT time | 60.79 s | 60.69 s | 59.28 s |
+| Window candidates checked | 0 | 8,590 | 17,180 |
+| Violated / added rows | 0 / 0 | 0 / 0 | 0 / 0 |
+| CP-infeasible supports | 20 | 20 | 20 |
+| Separator time | 0 s | 0.11 s | 0.25 s |
+
+The arithmetic separator is cheap and remains useful as a proof-safe optional
+presolve, but it does not satisfy the lower-bound adoption gate on this case.
+The reason is visible in the initial layered network: its 556 unconditional
+resource windows have a median entry-window width of about 496.97 seconds and
+a maximum of about 1,132 seconds. Only 57 usages have a fixed entry tick, and
+those are already represented by mandatory-core rows. Independent marginal
+envelopes of later anonymous arcs are therefore far too wide to prove the CP
+contradictions by full-containment Hall or energy arithmetic.
+
+This sharpens the local-CP interpretation. A support may become infeasible
+when only one resource remains constrained while the proof still depends on
+route continuity and accumulated timing along the cabins reaching that
+resource. Removing other no-overlap resources does not turn that
+trajectory-conditioned contradiction into an anonymous interval overload.
+Narrower rows require a valid representation of the conditioning prefix,
+cohort, or sequence; deriving tighter marginal windows from one rejected
+point without representing that condition would be invalid.
+
+The next lower-bound step should consequently be selective trajectory
+linking. Retain the cheap resource-window mode as an opt-in diagnostic, but do
+not invest in persistent child-arc materialization or make it the default.
+Use mixed/resource-touching CP evidence to introduce a small cabin cohort or
+route-prefix flow through the relevant visit band, then re-run resource-window
+separation on those conditionally narrower flows. This attacks the measured
+loss of cross-visit identity without rebuilding the full cabins-by-arcs EAN.

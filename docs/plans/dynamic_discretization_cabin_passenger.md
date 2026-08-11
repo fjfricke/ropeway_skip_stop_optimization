@@ -1128,6 +1128,60 @@ Do not compare only final wall-clock time. The purpose is to determine whether
 DDD improves model construction, primal discovery, dual progress, or all
 three.
 
+## Anonymous Resource-Window Separation
+
+The partial master now supports an opt-in inner row-generation loop before
+trajectory decomposition and CP-SAT.  Let $x_a$ be the anonymous integer flow
+on timed arc $a$.  For every unconditionally active usage $u$ of resource $r$,
+let $E_u^-$ and $E_u^+$ be the earliest and latest follower-entry tick allowed
+by the complete source/target-cell envelope.  If the whole entry window lies
+in the closed integer interval $[A,B]$, headway $h_r$ gives
+
+$$
+\sum_a m_{a,r,[A,B]}x_a
+\le
+1+\left\lfloor\frac{B-A}{h_r}\right\rfloor.
+$$
+
+Here $m_{a,r,[A,B]}$ counts all qualifying occurrences on one selected arc;
+it therefore preserves both anonymous flow and repeated resource use.  The
+row is independent of a CP core and remains valid under cabin relabelling.
+
+For an occupancy usage, define the conservative protected-work lower bound
+
+$$
+p_u=\max\{0,
+o_u^{\mathrm{clear}}+d_u^{\mathrm{clear},-}
+-o_u^{\mathrm{enter}}-d_u^{\mathrm{enter},+}+h_r\},
+$$
+
+where $o$ are offsets from the shared route event and $d$ are bounded waiting
+delays. The common event time cancels and therefore the bound does not weaken
+merely because its DDD cell is wide. If every possible entry is at or after
+$A$ and every possible protected completion is at or before $B$, pairwise
+`NoOverlap` implies the energetic inequality
+
+$$
+\sum_a\left(\sum_{u\in a\cap U_{r,[A,B)}}p_u\right)x_a\le B-A.
+$$
+
+No-wait route options give the exact CP-SAT interval size.  Bounded-wait
+envelopes may reduce $p_u$ and thus weaken the row, but cannot invalidate it.
+Horizon-optional usages are omitted until refinement makes their activation
+unconditional.  Integer coefficients are divided by their greatest common
+divisor and the right-hand side is rounded down, which is equivalent for
+integer flow and improves numerical scaling.
+
+After every integral master solution, candidate windows are formed only from
+canonical envelope endpoints of positive-flow arcs.  Violated rows are
+deduplicated by normalized left-hand side, ranked deterministically, added in
+a bounded batch, and the unchanged partial master is immediately warm-started
+and re-solved.  CP-SAT sees only a resource-window-separated incumbent unless
+the configured inner resolve budget is exhausted.  Rows in the first tranche
+are tied to one discretization fingerprint and are safely regenerated after a
+cell split; persistent child-arc materialization is deferred until the cut
+family demonstrates lower-bound value.
+
 ## Acceptance and Stop Criteria
 
 Continue beyond movement-only only if:

@@ -135,6 +135,8 @@ from ropeway_skip_stop_optimization.optimization.ddd.resource_time import (
     DddAnonymousResourceRowTerm,
     DddBoundedTickDelay,
     DddResourceTimingAssumption,
+    DddResourceWindowCutMode,
+    DddResourceWindowSeparationResult,
     DddTickInterval,
     DddTimedResourceUsageWindow,
     DddUniversalResourceConflict,
@@ -143,6 +145,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.resource_time import (
     ddd_feasible_source_interval,
     find_ddd_violated_interval_capacity_rows,
     find_ddd_universal_resource_conflict,
+    separate_ddd_resource_window_rows,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.support_master import (
     DddSupportConflictCut,
@@ -348,6 +351,8 @@ __all__ = [
     "DddTimedFlowRegion",
     "DddTimedFlowThresholdLiteral",
     "DddTimedFlowTimingScope",
+    "DddResourceWindowCutMode",
+    "DddResourceWindowSeparationResult",
     "DddTickInterval",
     "DddTimedResourceUsageWindow",
     "DddUniversalResourceConflict",
@@ -370,6 +375,7 @@ __all__ = [
     "find_ddd_reference_conflicts",
     "find_ddd_violated_interval_capacity_rows",
     "find_ddd_universal_resource_conflict",
+    "separate_ddd_resource_window_rows",
     "validate_ddd_recovered_schedule",
     "validate_ddd_reference_solution",
 ]

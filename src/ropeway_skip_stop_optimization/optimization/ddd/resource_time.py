@@ -3,7 +3,9 @@ from __future__ import annotations
 from collections import Counter
 from dataclasses import dataclass
 from enum import StrEnum
+from functools import reduce
 from hashlib import sha1
+from math import gcd
 
 from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddResource,
@@ -57,6 +59,12 @@ class DddBoundedTickDelay:
 class DddResourceTimingAssumption(StrEnum):
     NO_WAIT = "no_wait"
     BOUNDED_WAIT_ENVELOPE = "bounded_wait_envelope"
+
+
+class DddResourceWindowCutMode(StrEnum):
+    OFF = "off"
+    ENTRY_COUNT = "entry_count"
+    ENTRY_AND_ENERGY = "entry_and_energy"
 
 
 @dataclass(frozen=True)
@@ -161,6 +169,21 @@ class DddTimedResourceUsageWindow:
         )
 
     @property
+    def minimum_clear_after_enter_tick(self) -> DddTimeTick:
+        """Universal lower bound on clear minus entry for one realization."""
+
+        return (
+            self.leader_clear_offset_tick
+            + self.leader_clear_delay.minimum_tick
+            - self.follower_enter_offset_tick
+            - self.follower_enter_delay.maximum_tick
+        )
+
+    @property
+    def minimum_protected_occupancy_tick(self) -> DddTimeTick:
+        return self.minimum_clear_after_enter_tick + self.headway_tick
+
+    @property
     def latest_leader_clear_tick(self) -> DddTimeTick:
         return (
             self.source_interval.last_tick
@@ -188,6 +211,7 @@ class DddAnonymousResourceRowKind(StrEnum):
     MANDATORY_CORE = "mandatory_core"
     UNIVERSAL_CONFLICT = "universal_conflict"
     INTERVAL_CAPACITY = "interval_capacity"
+    INTERVAL_ENERGY = "interval_energy"
 
 
 @dataclass(frozen=True, order=True)
@@ -255,6 +279,28 @@ class DddAnonymousResourceRow:
             or self.interval_lower_tick > self.interval_upper_tick
         ):
             raise ValueError("DDD interval-capacity row witness is inconsistent")
+
+
+@dataclass(frozen=True)
+class DddResourceWindowSeparationResult:
+    rows: tuple[DddAnonymousResourceRow, ...]
+    candidate_window_count: int
+    violated_candidate_count: int
+    duplicate_candidate_count: int
+
+    @property
+    def entry_row_count(self) -> int:
+        return sum(
+            row.kind is DddAnonymousResourceRowKind.INTERVAL_CAPACITY
+            for row in self.rows
+        )
+
+    @property
+    def energy_row_count(self) -> int:
+        return sum(
+            row.kind is DddAnonymousResourceRowKind.INTERVAL_ENERGY
+            for row in self.rows
+        )
 
 
 @dataclass(frozen=True)
@@ -441,15 +487,37 @@ def find_ddd_violated_interval_capacity_rows(
     arc_flow_by_id: dict[str, int],
     max_rows: int = 10_000,
 ) -> tuple[DddAnonymousResourceRow, ...]:
-    """Separate anonymous Hall inequalities from one selected integer flow.
+    """Separate entry-count Hall inequalities from one selected integer flow.
 
     Every counted occurrence has its complete follower-entry window contained
     in the closed interval ``[A, B]``. At headway ``h``, no exact schedule can
     place more than ``1 + floor((B-A)/h)`` such entries in that interval.
     """
 
+    return separate_ddd_resource_window_rows(
+        windows,
+        arc_flow_by_id=arc_flow_by_id,
+        mode=DddResourceWindowCutMode.ENTRY_COUNT,
+        max_rows=max_rows,
+    ).rows
+
+
+def separate_ddd_resource_window_rows(
+    windows: tuple[DddTimedResourceUsageWindow, ...],
+    *,
+    arc_flow_by_id: dict[str, int],
+    mode: DddResourceWindowCutMode,
+    max_rows: int = 100,
+) -> DddResourceWindowSeparationResult:
+    """Separate proof-safe entry-count and protected-interval energy rows."""
+
+    if not isinstance(mode, DddResourceWindowCutMode):
+        raise ValueError("DDD resource-window cut mode is invalid")
     if max_rows <= 0:
-        raise ValueError("DDD interval-capacity row limit must be positive")
+        raise ValueError("DDD resource-window row limit must be positive")
+    if mode is DddResourceWindowCutMode.OFF:
+        return DddResourceWindowSeparationResult((), 0, 0, 0)
+
     selected_by_resource: dict[str, list[DddTimedResourceUsageWindow]] = {}
     headway_by_resource: dict[str, int] = {}
     for window in windows:
@@ -467,7 +535,9 @@ def find_ddd_violated_interval_capacity_rows(
             raise ValueError("DDD shared resource windows have different headways")
         selected_by_resource.setdefault(window.resource_id, []).append(window)
 
-    violated: list[tuple[int, int, int, DddAnonymousResourceRow]] = []
+    candidates: list[tuple[int, int, int, DddAnonymousResourceRow]] = []
+    candidate_window_count = 0
+    violated_candidate_count = 0
     for resource_id, resource_windows in sorted(selected_by_resource.items()):
         headway_tick = headway_by_resource[resource_id]
         lower_candidates = sorted(
@@ -485,10 +555,12 @@ def find_ddd_violated_interval_capacity_rows(
             for upper_tick in upper_candidates:
                 if upper_tick < lower_tick:
                     continue
+                candidate_window_count += 1
                 contained = tuple(
                     window
                     for window in eligible
                     if window.latest_follower_enter_tick <= upper_tick
+                    and window.minimum_clear_after_enter_tick >= 0
                 )
                 if not contained:
                     continue
@@ -501,6 +573,7 @@ def find_ddd_violated_interval_capacity_rows(
                 violation = selected_count - capacity
                 if violation <= 0:
                     continue
+                violated_candidate_count += 1
                 terms = tuple(
                     DddAnonymousResourceRowTerm(arc_id, coefficient)
                     for arc_id, coefficient in sorted(multiplicity.items())
@@ -522,12 +595,115 @@ def find_ddd_violated_interval_capacity_rows(
                     interval_upper_tick=upper_tick,
                 )
                 row.validate()
-                violated.append((violation, upper_tick - lower_tick, lower_tick, row))
+                candidates.append(
+                    (violation, upper_tick - lower_tick, lower_tick, row)
+                )
 
-    return tuple(
+        if mode is not DddResourceWindowCutMode.ENTRY_AND_ENERGY:
+            continue
+        energy_lower_candidates = sorted(
+            {window.earliest_follower_enter_tick for window in resource_windows}
+        )
+        energy_upper_candidates = sorted(
+            {
+                window.latest_leader_clear_tick + window.headway_tick
+                for window in resource_windows
+            }
+        )
+        for lower_tick in energy_lower_candidates:
+            eligible = tuple(
+                window
+                for window in resource_windows
+                if window.earliest_follower_enter_tick >= lower_tick
+            )
+            for upper_tick in energy_upper_candidates:
+                if upper_tick <= lower_tick:
+                    continue
+                candidate_window_count += 1
+                contained = tuple(
+                    window
+                    for window in eligible
+                    if window.latest_leader_clear_tick + window.headway_tick
+                    <= upper_tick
+                )
+                coefficient_by_arc: Counter[str] = Counter()
+                for window in contained:
+                    minimum_work = window.minimum_protected_occupancy_tick
+                    if minimum_work > 0:
+                        coefficient_by_arc[window.timed_arc_id] += minimum_work
+                if not coefficient_by_arc:
+                    continue
+                capacity = upper_tick - lower_tick
+                divisor = reduce(gcd, coefficient_by_arc.values())
+                normalized_coefficients = {
+                    arc_id: coefficient // divisor
+                    for arc_id, coefficient in coefficient_by_arc.items()
+                }
+                normalized_capacity = capacity // divisor
+                selected_work = sum(
+                    coefficient * arc_flow_by_id[arc_id]
+                    for arc_id, coefficient in normalized_coefficients.items()
+                )
+                violation = selected_work - normalized_capacity
+                if violation <= 0:
+                    continue
+                violated_candidate_count += 1
+                terms = tuple(
+                    DddAnonymousResourceRowTerm(arc_id, coefficient)
+                    for arc_id, coefficient in sorted(normalized_coefficients.items())
+                )
+                signature = "||".join(
+                    f"{term.timed_arc_id}:{term.coefficient}" for term in terms
+                )
+                digest = sha1(signature.encode("utf-8")).hexdigest()[:16]
+                row = DddAnonymousResourceRow(
+                    id=(
+                        f"resource_energy::{resource_id}::{lower_tick}::"
+                        f"{upper_tick}::{digest}"
+                    ),
+                    resource_id=resource_id,
+                    kind=DddAnonymousResourceRowKind.INTERVAL_ENERGY,
+                    terms=terms,
+                    right_hand_side=normalized_capacity,
+                    interval_lower_tick=lower_tick,
+                    interval_upper_tick=upper_tick,
+                )
+                row.validate()
+                candidates.append(
+                    (violation, upper_tick - lower_tick, lower_tick, row)
+                )
+
+    strongest_by_lhs: dict[
+        tuple[str, DddAnonymousResourceRowKind, tuple[DddAnonymousResourceRowTerm, ...]],
+        tuple[int, int, int, DddAnonymousResourceRow],
+    ] = {}
+    for candidate in candidates:
+        row = candidate[3]
+        key = (row.resource_id, row.kind, row.terms)
+        incumbent = strongest_by_lhs.get(key)
+        if incumbent is None or row.right_hand_side < incumbent[3].right_hand_side:
+            strongest_by_lhs[key] = candidate
+        elif (
+            row.right_hand_side == incumbent[3].right_hand_side
+            and row.id < incumbent[3].id
+        ):
+            strongest_by_lhs[key] = candidate
+    selected = tuple(
         item[3]
         for item in sorted(
-            violated,
-            key=lambda item: (-item[0], item[1], item[2], item[3].id),
+            strongest_by_lhs.values(),
+            key=lambda item: (
+                -(item[0] / max(1, item[3].right_hand_side)),
+                -item[0],
+                item[1],
+                item[2],
+                item[3].id,
+            ),
         )[:max_rows]
+    )
+    return DddResourceWindowSeparationResult(
+        rows=selected,
+        candidate_window_count=candidate_window_count,
+        violated_candidate_count=violated_candidate_count,
+        duplicate_candidate_count=len(candidates) - len(strongest_by_lhs),
     )

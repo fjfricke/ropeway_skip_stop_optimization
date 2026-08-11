@@ -415,6 +415,14 @@ second against timed covers alone.
 Stop this line of work if the new rows neither lift the bound nor reduce CP
 support rejections under matched total budgets.
 
+The first fixed-start $K=19$ A/B experiment reached exactly this stop
+condition: entry-count and protected-interval energy separation checked 8,590
+and 17,180 candidate windows respectively, found no violated row, left all 20
+CP support rejections unchanged, and produced the same lower bound. The
+implementation remains an opt-in proof-safe presolve; persistent row
+materialization is deferred. Phase 2 is therefore the next lower-bound
+experiment rather than further unconditional marginal-window engineering.
+
 ### Phase 2: adaptive cohort/prefix master
 
 - Define a persistent cabin-cohort partition and refinement operations.

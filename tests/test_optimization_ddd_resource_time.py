@@ -12,6 +12,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.resource_time import (
     DddAnonymousResourceRowKind,
     DddBoundedTickDelay,
     DddResourceTimingAssumption,
+    DddResourceWindowCutMode,
     DddTickInterval,
     DddTimedResourceUsageWindow,
     build_ddd_mandatory_resource_rows,
@@ -19,6 +20,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.resource_time import (
     ddd_feasible_source_interval,
     find_ddd_universal_resource_conflict,
     find_ddd_violated_interval_capacity_rows,
+    separate_ddd_resource_window_rows,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_space import DddTimeCell
 from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
@@ -417,6 +419,154 @@ def test_interval_capacity_separator_uses_complete_waiting_window() -> None:
         tuple(term.timed_arc_id for term in row.terms) != ("fixed", "flexible")
         for row in rows
     )
+
+
+def test_resource_window_mode_off_returns_no_rows() -> None:
+    result = separate_ddd_resource_window_rows(
+        (_window("fixed", source=(0, 1), headway=3),),
+        arc_flow_by_id={"fixed": 3},
+        mode=DddResourceWindowCutMode.OFF,
+    )
+
+    assert result.rows == ()
+    assert result.candidate_window_count == 0
+
+
+def test_energy_separator_detects_occupancy_overload_missed_by_entry_count() -> None:
+    windows = (
+        _window("a", source=(0, 1), clear_offset=2, headway=2),
+        _window("b", source=(3, 4), clear_offset=2, headway=2),
+        _window("c", source=(6, 7), clear_offset=2, headway=2),
+    )
+    flow = {"a": 1, "b": 1, "c": 1}
+
+    entry = separate_ddd_resource_window_rows(
+        windows,
+        arc_flow_by_id=flow,
+        mode=DddResourceWindowCutMode.ENTRY_COUNT,
+    )
+    energy = separate_ddd_resource_window_rows(
+        windows,
+        arc_flow_by_id=flow,
+        mode=DddResourceWindowCutMode.ENTRY_AND_ENERGY,
+    )
+
+    assert entry.rows == ()
+    row = next(
+        item
+        for item in energy.rows
+        if item.kind is DddAnonymousResourceRowKind.INTERVAL_ENERGY
+        and len(item.terms) == 3
+    )
+    assert tuple((term.timed_arc_id, term.coefficient) for term in row.terms) == (
+        ("a", 1),
+        ("b", 1),
+        ("c", 1),
+    )
+    assert row.right_hand_side == 2
+
+
+def test_energy_minimum_work_cancels_shared_source_cell_time() -> None:
+    window = _window(
+        "wide",
+        source=(0, 100),
+        enter_offset=1,
+        clear_offset=4,
+        headway=2,
+    )
+
+    assert window.minimum_clear_after_enter_tick == 3
+    assert window.minimum_protected_occupancy_tick == 5
+
+
+def test_energy_separator_uses_conservative_waiting_minimum_work() -> None:
+    flexible = _window(
+        "flexible",
+        source=(0, 1),
+        clear_offset=2,
+        headway=2,
+        enter_delay=(0, 5),
+        clear_delay=(0, 5),
+    )
+    fixed = _window("fixed", source=(0, 1), clear_offset=2, headway=2)
+
+    result = separate_ddd_resource_window_rows(
+        (flexible, fixed),
+        arc_flow_by_id={"flexible": 1, "fixed": 1},
+        mode=DddResourceWindowCutMode.ENTRY_AND_ENERGY,
+    )
+
+    assert all(
+        tuple(term.timed_arc_id for term in row.terms) != ("fixed", "flexible")
+        for row in result.rows
+        if row.kind is DddAnonymousResourceRowKind.INTERVAL_ENERGY
+    )
+
+
+def test_resource_window_separator_deduplicates_equal_left_hand_sides() -> None:
+    result = separate_ddd_resource_window_rows(
+        (
+            _window("wide", source=(0, 101), headway=10),
+            _window("b", source=(10, 11), headway=10),
+            _window("c", source=(11, 12), headway=10),
+            _window("d", source=(12, 13), headway=10),
+        ),
+        arc_flow_by_id={"wide": 1, "b": 1, "c": 1, "d": 1},
+        mode=DddResourceWindowCutMode.ENTRY_AND_ENERGY,
+    )
+
+    signatures = tuple((row.resource_id, row.kind, row.terms) for row in result.rows)
+    assert len(signatures) == len(set(signatures))
+    assert result.duplicate_candidate_count > 0
+
+
+def test_resource_window_rows_preserve_every_exhaustively_feasible_subset() -> None:
+    windows = tuple(
+        _window(
+            chr(ord("a") + index),
+            source=(index, index + 3),
+            clear_offset=1,
+            headway=2,
+        )
+        for index in range(4)
+    )
+    result = separate_ddd_resource_window_rows(
+        windows,
+        arc_flow_by_id={window.timed_arc_id: 1 for window in windows},
+        mode=DddResourceWindowCutMode.ENTRY_AND_ENERGY,
+    )
+    assert result.rows
+
+    for selected_count in range(len(windows) + 1):
+        for selected in combinations(windows, selected_count):
+            has_feasible_realization = any(
+                all(
+                    first_source + 3 <= second_source
+                    or second_source + 3 <= first_source
+                    for (first_source, second_source) in combinations(
+                        source_ticks, 2
+                    )
+                )
+                for source_ticks in product(
+                    *(
+                        range(
+                            window.source_interval.lower_tick,
+                            window.source_interval.upper_tick,
+                        )
+                        for window in selected
+                    )
+                )
+            )
+            if not has_feasible_realization:
+                continue
+            selected_ids = {window.timed_arc_id for window in selected}
+            for row in result.rows:
+                left_hand_side = sum(
+                    term.coefficient
+                    for term in row.terms
+                    if term.timed_arc_id in selected_ids
+                )
+                assert left_hand_side <= row.right_hand_side
 
 
 def test_from_usage_preserves_canonical_tick_offsets() -> None:

@@ -45,6 +45,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddRouteDecision,
     DddRouteOption,
     DddRouteOptionCost,
+    DddResourceWindowCutMode,
     DddStrictTimeLiftStatus,
     DddSupportConflictCut,
     DddSupportLiteral,
@@ -312,6 +313,56 @@ def test_mandatory_resource_rows_reject_identical_fixed_start_occupancy() -> Non
     assert result.resource_constraint_count == (
         result.mandatory_resource_constraint_count
     )
+
+
+def test_resource_window_inner_loop_resolves_before_physical_lifting() -> None:
+    base = build_three_station_network_time_refinement_probe()
+    start = base.movement_problem.starts[0]
+    initial_option = base.movement_problem.route_options_by_state_id[start.state_id][0]
+    movement = replace(
+        base.movement_problem,
+        starts=(
+            start,
+            DddFixedStart(
+                cabin_id=1,
+                state_id=start.state_id,
+                time_seconds=start.time_seconds,
+                max_visit_count=start.max_visit_count,
+            ),
+        ),
+        route_options=tuple(
+            option
+            for option in base.movement_problem.route_options
+            if option.from_state_id != start.state_id or option.id == initial_option.id
+        ),
+    )
+    problem = replace(
+        base,
+        movement_problem=movement,
+        objective=replace(
+            base.objective,
+            route_option_costs=tuple(
+                cost
+                for cost in base.objective.route_option_costs
+                if cost.route_option_id
+                in {option.id for option in movement.route_options}
+            ),
+        ),
+    )
+
+    result = DddNetworkTimeRefinementSolver(
+        use_mandatory_resource_rows=False,
+        use_cp_sat_primal_oracle=False,
+        resource_window_cut_mode=DddResourceWindowCutMode.ENTRY_COUNT,
+    ).solve(problem)
+
+    assert result.status is DddNetworkTimeRefinementStatus.RELAXATION_INFEASIBLE
+    assert len(result.iterations) == 1
+    iteration = result.iterations[0]
+    assert iteration.resource_window_resolve_count == 1
+    assert iteration.resource_window_added_count > 0
+    assert iteration.resource_window_entry_row_count > 0
+    assert iteration.cp_sat_status.value == "not_run"
 
 
 def test_flow_master_accepts_proved_additional_universal_resource_row() -> None:

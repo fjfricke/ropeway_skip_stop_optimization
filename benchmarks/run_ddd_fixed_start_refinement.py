@@ -29,6 +29,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddNetworkTimeRefinementSolver,
     DddRecoveredScheduleFlowProjector,
     DddPassengerMasterProblem,
+    DddResourceWindowCutMode,
     EanArtifactToDddMovementProblemAdapter,
     build_ddd_cp_sat_local_explainability_report,
     build_ddd_passenger_master_problem,
@@ -55,6 +56,13 @@ def main() -> None:
     parser.add_argument("--max-iterations", type=int, default=100)
     parser.add_argument("--max-new-cuts", type=int, default=10_000)
     parser.add_argument("--max-new-time-splits", type=int, default=10_000)
+    parser.add_argument(
+        "--resource-window-cuts",
+        choices=tuple(item.value for item in DddResourceWindowCutMode),
+        default=DddResourceWindowCutMode.OFF.value,
+    )
+    parser.add_argument("--resource-window-max-rows", type=int, default=100)
+    parser.add_argument("--resource-window-max-resolves", type=int, default=10)
     parser.add_argument("--max-prefix-variables", type=int, default=20_000)
     parser.add_argument("--max-prefix-cabins", type=int, default=8)
     parser.add_argument("--max-prefix-visit-index", type=int, default=3)
@@ -201,6 +209,13 @@ def main() -> None:
         output_flag=args.gurobi_log,
         max_new_cuts_per_iteration=args.max_new_cuts,
         max_new_time_splits_per_iteration=args.max_new_time_splits,
+        resource_window_cut_mode=DddResourceWindowCutMode(
+            args.resource_window_cuts
+        ),
+        max_resource_window_rows_per_resolve=args.resource_window_max_rows,
+        max_resource_window_resolves_per_iteration=(
+            args.resource_window_max_resolves
+        ),
         max_prefix_variable_count=args.max_prefix_variables,
         max_tracked_prefix_cabin_count=args.max_prefix_cabins,
         max_prefix_visit_index=args.max_prefix_visit_index,
@@ -321,6 +336,11 @@ def main() -> None:
         "max_iterations": args.max_iterations,
         "max_new_cuts_per_iteration": args.max_new_cuts,
         "max_new_time_splits_per_iteration": args.max_new_time_splits,
+        "resource_window_cut_mode": args.resource_window_cuts,
+        "resource_window_max_rows_per_resolve": args.resource_window_max_rows,
+        "resource_window_max_resolves_per_iteration": (
+            args.resource_window_max_resolves
+        ),
         "max_prefix_variable_count": args.max_prefix_variables,
         "max_tracked_prefix_cabin_count": args.max_prefix_cabins,
         "max_prefix_visit_index": args.max_prefix_visit_index,

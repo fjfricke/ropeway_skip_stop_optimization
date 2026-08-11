@@ -69,6 +69,19 @@ def format_ddd_iteration_progress(
                 f"{iteration.total_interval_resource_row_count}i"
             ),
             (
+                "resource_window="
+                f"{iteration.resource_window_resolve_count}r/"
+                f"+{iteration.resource_window_added_count}/"
+                f"{iteration.resource_window_entry_row_count}e/"
+                f"{iteration.resource_window_energy_row_count}g/"
+                f"cand={iteration.resource_window_candidate_count}/"
+                f"viol={iteration.resource_window_violated_count}/"
+                f"dup={iteration.resource_window_duplicate_count}/"
+                f"LB={_format_bound(iteration.resource_window_lower_bound_before)}"
+                f"->{_format_bound(iteration.resource_window_lower_bound_after)}/"
+                f"{iteration.resource_window_separation_seconds + iteration.resource_window_master_seconds:.2f}s"
+            ),
+            (
                 "cp="
                 f"{iteration.cp_sat_status.value}/"
                 f"{iteration.cp_sat_candidate_count}n/"
