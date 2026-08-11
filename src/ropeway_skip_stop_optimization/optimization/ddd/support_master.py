@@ -80,8 +80,13 @@ class DddSupportConflictCut:
             raise ValueError("DDD support conflict cut resource_id must be nonempty")
         if not math.isfinite(self.violation_seconds) or self.violation_seconds <= 0:
             raise ValueError("DDD support conflict violation must be finite and positive")
-        if len(self.literals) < 2:
-            raise ValueError("DDD support conflict cut needs at least two literals")
+        if not self.literals:
+            raise ValueError("DDD support conflict cut needs at least one literal")
+        if (
+            len(self.literals) < 2
+            and self.provenance != "exact_cp_sat_no_wait_cabin_path_core"
+        ):
+            raise ValueError("DDD resource-prefix conflict cut needs two literals")
         if len(set(self.literals)) != len(self.literals):
             raise ValueError("DDD support conflict cut literals must be unique")
         for literal in self.literals:

@@ -2110,7 +2110,10 @@ def _validate_prefix_cut_literals(
             )
         visits[literal.visit_index] = literal
     for cabin_id, visits in by_cabin.items():
-        if set(visits) != set(range(max(visits) + 1)):
+        if (
+            cut.provenance != "exact_cp_sat_no_wait_cabin_path_core"
+            and set(visits) != set(range(max(visits) + 1))
+        ):
             raise ValueError(
                 f"DDD flow conflict cut cabin {cabin_id} is not a complete prefix"
             )

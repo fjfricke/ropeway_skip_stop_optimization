@@ -61,6 +61,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.resource_time import (
     separate_ddd_resource_window_rows,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.lifting import (
+    build_ddd_cabin_path_core_cut,
     build_ddd_prefix_conflict_cuts,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.reference import (
@@ -247,6 +248,12 @@ class DddNetworkTimeRefinementIteration:
     cp_sat_branch_count: int = 0
     cp_sat_candidate_count: int = 0
     cp_sat_search_complete: bool = False
+    cp_sat_cabin_path_status: DddCpSatPrimalStatus = DddCpSatPrimalStatus.NOT_RUN
+    cp_sat_cabin_path_seconds: float = 0.0
+    cp_sat_cabin_path_core_cabin_ids: tuple[int, ...] = ()
+    cp_sat_cabin_path_core_literal_count: int = 0
+    cp_sat_cabin_path_cut_literal_count: int = 0
+    added_cabin_path_core_cut_ids: tuple[str, ...] = ()
     primal_evaluation_status: DddPrimalEvaluationStatus = (
         DddPrimalEvaluationStatus.NOT_RUN
     )
@@ -362,6 +369,7 @@ class DddNetworkTimeRefinementSolver:
     use_cp_sat_primal_bootstrap: bool = True
     use_cp_sat_nearest_support: bool = True
     use_cp_sat_timed_flow_covers: bool = False
+    use_cp_sat_cabin_path_cuts: bool = False
     collect_cp_sat_local_explainability: bool = False
     cp_sat_local_explainability_time_limit_seconds: float = 0.5
     cp_sat_nearest_support_time_limit_seconds: float = 5.0
@@ -385,6 +393,8 @@ class DddNetworkTimeRefinementSolver:
             raise ValueError(
                 "DDD timed-flow covers require fixed aggregate master coupling"
             )
+        if self.use_cp_sat_cabin_path_cuts and not self.use_cp_sat_primal_oracle:
+            raise ValueError("DDD cabin-path cuts require the CP-SAT primal oracle")
         if (
             self.collect_cp_sat_local_explainability
             and not self.use_cp_sat_timed_flow_covers
@@ -1069,6 +1079,12 @@ class DddNetworkTimeRefinementSolver:
             cp_sat_candidate_count = 0
             cp_sat_search_complete = False
             cp_sat_exact_infeasible = False
+            cp_sat_cabin_path_status = DddCpSatPrimalStatus.NOT_RUN
+            cp_sat_cabin_path_seconds = 0.0
+            cp_sat_cabin_path_core_cabin_ids: tuple[int, ...] = ()
+            cp_sat_cabin_path_core_literal_count = 0
+            cp_sat_cabin_path_cut_literal_count = 0
+            cp_sat_cabin_path_candidate_cuts: tuple[DddSupportConflictCut, ...] = ()
             fixed_cp_support = (
                 DddCpSatFixedSupport.from_paths(paths)
                 if self.cp_sat_master_coupling
@@ -1106,23 +1122,70 @@ class DddNetworkTimeRefinementSolver:
                     and (round_index - 1) % self.cp_sat_retry_interval == 0
                 )
             ):
-                cp_result = cp_sat_oracle.solve(
-                    current,
-                    hint_paths=paths,
-                    fixed_support=(
-                        fixed_cp_support if timed_flow_cp_support is None else None
-                    ),
-                    timed_flow_support=timed_flow_cp_support,
-                    candidate_callback=(
-                        lambda candidate_index, elapsed_seconds: emit(
-                            DddNetworkTimeRefinementProgressStage.PRIMAL_ORACLE_CANDIDATE_FOUND,
-                            round_index,
-                            candidate_index=candidate_index,
-                            candidate_limit=self.cp_sat_max_candidate_count,
-                            candidate_elapsed_seconds=elapsed_seconds,
+                cp_result: DddCpSatPrimalResult | None = None
+                if self.use_cp_sat_cabin_path_cuts:
+                    cabin_path_result = cp_sat_oracle.solve(
+                        current,
+                        hint_paths=paths,
+                        fixed_cabin_paths=paths,
+                    )
+                    cp_sat_cabin_path_status = cabin_path_result.status
+                    cp_sat_cabin_path_seconds = cabin_path_result.wall_seconds
+                    cp_sat_cabin_path_core_cabin_ids = tuple(
+                        sorted(
+                            {
+                                literal.cabin_id
+                                for literal in (
+                                    cabin_path_result.cabin_path_infeasible_core
+                                )
+                            }
                         )
-                    ),
-                )
+                    )
+                    if cabin_path_result.cabin_path_infeasible_core:
+                        cp_sat_cabin_path_core_literal_count = len(
+                            cabin_path_result.cabin_path_infeasible_core
+                        )
+                        cabin_path_cut = build_ddd_cabin_path_core_cut(
+                            paths,
+                            cabin_path_result.cabin_path_infeasible_core,
+                        )
+                        cp_sat_cabin_path_cut_literal_count = len(
+                            cabin_path_cut.literals
+                        )
+                        admissible_cuts, _ = _select_prefix_cuts_within_budget(
+                            network,
+                            tuple(cuts),
+                            (cabin_path_cut,),
+                            max_new_cuts=1,
+                            max_variable_count=self.max_prefix_variable_count,
+                            max_cabin_count=self.max_tracked_prefix_cabin_count,
+                            max_visit_index=self.max_prefix_visit_index,
+                        )
+                        if admissible_cuts:
+                            cp_sat_cabin_path_candidate_cuts = admissible_cuts
+                            cp_result = cabin_path_result
+                    elif cabin_path_result.status is not DddCpSatPrimalStatus.UNKNOWN:
+                        cp_result = cabin_path_result
+                if cp_result is None:
+                    cp_result = cp_sat_oracle.solve(
+                        current,
+                        hint_paths=paths,
+                        fixed_support=(
+                            fixed_cp_support
+                            if timed_flow_cp_support is None
+                            else None
+                        ),
+                        timed_flow_support=timed_flow_cp_support,
+                        candidate_callback=(
+                            lambda candidate_index, elapsed_seconds: emit(
+                                DddNetworkTimeRefinementProgressStage.PRIMAL_ORACLE_CANDIDATE_FOUND,
+                                round_index,
+                                candidate_index=candidate_index,
+                                candidate_limit=self.cp_sat_max_candidate_count,
+                                candidate_elapsed_seconds=elapsed_seconds,
+                            )
+                        ),
+                    )
                 cp_sat_status = cp_result.status
                 cp_sat_seconds = cp_result.wall_seconds
                 cp_sat_conflict_count = cp_result.conflict_count
@@ -1170,7 +1233,11 @@ class DddNetworkTimeRefinementSolver:
                         cp_result.timed_flow_infeasible_core
                     )
                     support_rejected = False
-                    if timed_flow_cp_support is not None:
+                    if cp_result.cabin_path_infeasible_core:
+                        support_rejected = True
+                    elif cp_result.fixed_cabin_paths:
+                        cp_sat_exact_infeasible = True
+                    elif timed_flow_cp_support is not None:
                         if not cp_result.timed_flow_infeasible_core:
                             # No timed-flow assumption is needed for the proof:
                             # the unrestricted physical model itself is infeasible.
@@ -1206,7 +1273,11 @@ class DddNetworkTimeRefinementSolver:
                             aggregate_support_cut_ids.add(aggregate_cut.id)
                             new_aggregate_support_cuts = (aggregate_cut,)
                         support_rejected = True
-                    if support_rejected and self.use_cp_sat_nearest_support:
+                    if (
+                        support_rejected
+                        and not cp_result.fixed_cabin_paths
+                        and self.use_cp_sat_nearest_support
+                    ):
                         if fixed_cp_support is None:
                             raise RuntimeError(
                                 "DDD rejected support has no aggregate nearest center"
@@ -1280,6 +1351,14 @@ class DddNetworkTimeRefinementSolver:
                     round_index,
                 )
 
+            new_cabin_path_core_cuts = tuple(
+                cut
+                for cut in cp_sat_cabin_path_candidate_cuts
+                if cut.id not in cut_ids
+            )
+            cuts.extend(new_cabin_path_core_cuts)
+            cut_ids.update(cut.id for cut in new_cabin_path_core_cuts)
+
             if cp_sat_exact_infeasible and cp_sat_nearest_status is (
                 DddCpSatPrimalStatus.INFEASIBLE
             ):
@@ -1314,6 +1393,7 @@ class DddNetworkTimeRefinementSolver:
                 new_aggregate_support_cuts
                 or new_aggregate_distance_cuts
                 or new_timed_flow_cover_cuts
+                or new_cabin_path_core_cuts
             ):
                 record_iteration(
                     _iteration(
@@ -1364,7 +1444,9 @@ class DddNetworkTimeRefinementSolver:
                         cell_lift_statuses=(),
                         cell_lift_validation=_not_run_validation(),
                         conflict_count=0,
-                        added_cut_ids=(),
+                        added_cut_ids=tuple(
+                            cut.id for cut in new_cabin_path_core_cuts
+                        ),
                         total_conflict_cut_count=len(cuts),
                         time_splits=(),
                         trajectory_time_split_count=0,
@@ -1397,6 +1479,20 @@ class DddNetworkTimeRefinementSolver:
                         cp_sat_branch_count=cp_sat_branch_count,
                         cp_sat_candidate_count=cp_sat_candidate_count,
                         cp_sat_search_complete=cp_sat_search_complete,
+                        cp_sat_cabin_path_status=cp_sat_cabin_path_status,
+                        cp_sat_cabin_path_seconds=cp_sat_cabin_path_seconds,
+                        cp_sat_cabin_path_core_cabin_ids=(
+                            cp_sat_cabin_path_core_cabin_ids
+                        ),
+                        cp_sat_cabin_path_core_literal_count=(
+                            cp_sat_cabin_path_core_literal_count
+                        ),
+                        cp_sat_cabin_path_cut_literal_count=(
+                            cp_sat_cabin_path_cut_literal_count
+                        ),
+                        added_cabin_path_core_cut_ids=tuple(
+                            cut.id for cut in new_cabin_path_core_cuts
+                        ),
                         primal_evaluation_status=primal_evaluation_status,
                         primal_evaluation_count=primal_evaluation_count,
                         primal_evaluation_seconds=primal_evaluation_seconds,
@@ -1846,6 +1942,23 @@ class DddNetworkTimeRefinementSolver:
                     cp_sat_branch_count=cp_sat_branch_count,
                     cp_sat_candidate_count=cp_sat_candidate_count,
                     cp_sat_search_complete=cp_sat_search_complete,
+                    cp_sat_cabin_path_status=cp_sat_cabin_path_status,
+                    cp_sat_cabin_path_seconds=cp_sat_cabin_path_seconds,
+                    cp_sat_cabin_path_core_cabin_ids=(
+                        cp_sat_cabin_path_core_cabin_ids
+                    ),
+                    cp_sat_cabin_path_core_literal_count=(
+                        cp_sat_cabin_path_core_literal_count
+                    ),
+                    cp_sat_cabin_path_cut_literal_count=(
+                        cp_sat_cabin_path_cut_literal_count
+                    ),
+                    added_cabin_path_core_cut_ids=tuple(
+                        cut.id
+                        for cut in new_cuts
+                        if cut.provenance
+                        == "exact_cp_sat_no_wait_cabin_path_core"
+                    ),
                     primal_evaluation_status=primal_evaluation_status,
                     primal_evaluation_count=primal_evaluation_count,
                     primal_evaluation_seconds=primal_evaluation_seconds,
@@ -2537,6 +2650,14 @@ def _iteration(
     unserved_passenger_count: int | None,
     primal_candidate_summaries: tuple[DddPrimalEvaluationSummary, ...],
     trajectory_pool_result: DddTrajectorySlotPoolResult | None = None,
+    cp_sat_cabin_path_status: DddCpSatPrimalStatus = (
+        DddCpSatPrimalStatus.NOT_RUN
+    ),
+    cp_sat_cabin_path_seconds: float = 0.0,
+    cp_sat_cabin_path_core_cabin_ids: tuple[int, ...] = (),
+    cp_sat_cabin_path_core_literal_count: int = 0,
+    cp_sat_cabin_path_cut_literal_count: int = 0,
+    added_cabin_path_core_cut_ids: tuple[str, ...] = (),
     aggregate_support_constraint_count: int = 0,
     aggregate_threshold_variable_count: int = 0,
     timed_flow_cover_constraint_count: int = 0,
@@ -2652,6 +2773,16 @@ def _iteration(
         cp_sat_branch_count=cp_sat_branch_count,
         cp_sat_candidate_count=cp_sat_candidate_count,
         cp_sat_search_complete=cp_sat_search_complete,
+        cp_sat_cabin_path_status=cp_sat_cabin_path_status,
+        cp_sat_cabin_path_seconds=cp_sat_cabin_path_seconds,
+        cp_sat_cabin_path_core_cabin_ids=cp_sat_cabin_path_core_cabin_ids,
+        cp_sat_cabin_path_core_literal_count=(
+            cp_sat_cabin_path_core_literal_count
+        ),
+        cp_sat_cabin_path_cut_literal_count=(
+            cp_sat_cabin_path_cut_literal_count
+        ),
+        added_cabin_path_core_cut_ids=added_cabin_path_core_cut_ids,
         primal_evaluation_status=primal_evaluation_status,
         primal_evaluation_count=primal_evaluation_count,
         primal_evaluation_seconds=primal_evaluation_seconds,

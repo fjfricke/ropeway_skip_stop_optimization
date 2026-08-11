@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, replace
 from enum import StrEnum
+from hashlib import sha256
 
 from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddMovementProblem,
@@ -16,6 +17,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.support_master import (
     DddSupportConflictCut,
     DddSupportLiteral,
     DddSupportSelection,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
+    DddPartialTimedPath,
 )
 
 
@@ -120,6 +124,45 @@ def build_ddd_prefix_conflict_cuts(
             for conflict in conflicts
         )
     )
+
+
+def build_ddd_cabin_path_core_cut(
+    paths: tuple[DddPartialTimedPath, ...],
+    core: tuple[DddSupportLiteral, ...],
+) -> DddSupportConflictCut:
+    """Lift an exact CP-SAT cabin-path core into a delayed prefix no-good."""
+
+    if not core or tuple(sorted(set(core))) != core:
+        raise ValueError("DDD cabin-path core must be sorted and unique")
+    paths_by_cabin_id = {path.cabin_id: path for path in paths}
+    if len(paths_by_cabin_id) != len(paths):
+        raise ValueError("DDD cabin paths must have unique cabin ids")
+    unknown = {literal.cabin_id for literal in core} - paths_by_cabin_id.keys()
+    if unknown:
+        raise ValueError(f"DDD cabin-path core references unknown cabins: {sorted(unknown)}")
+    for literal in core:
+        path = paths_by_cabin_id[literal.cabin_id]
+        if literal.visit_index >= len(path.arcs):
+            raise ValueError("DDD cabin-path core visit exceeds the selected path")
+        if path.route_option_ids[literal.visit_index] != literal.route_option_id:
+            raise ValueError("DDD cabin-path core literal differs from selected path")
+    digest = sha256(
+        "||".join(
+            f"{item.cabin_id}:{item.visit_index}:{item.route_option_id}"
+            for item in core
+        ).encode("utf-8")
+    ).hexdigest()[:20]
+    cut = DddSupportConflictCut(
+        id=f"cp_sat_cabin_path_core::{digest}",
+        literals=core,
+        resource_id="cp_sat_joint_cabin_paths",
+        # This cut is a logical no-good, not a measured pairwise headway
+        # violation.  The legacy field remains positive for schema compatibility.
+        violation_seconds=1.0,
+        provenance="exact_cp_sat_no_wait_cabin_path_core",
+    )
+    cut.validate()
+    return cut
 
 
 def _prefix_conflict_cut(

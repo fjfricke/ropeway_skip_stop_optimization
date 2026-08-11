@@ -1093,6 +1093,41 @@ def test_decomposition_consumes_the_prefix_flow_that_satisfies_cuts() -> None:
     )
 
 
+def test_cp_sat_core_cut_can_reference_sparse_deep_route_literal() -> None:
+    problem = build_three_station_network_combined_probe()
+    network = DddLayeredTimeNetworkBuilder().build(problem)
+    initial = DddAnonymousFlowMaster(include_mandatory_resource_rows=False).solve(
+        network
+    )
+    path = DddAnonymousFlowDecomposer().decompose(network, initial)[0]
+    assert len(path.route_option_ids) >= 2
+    cut = DddSupportConflictCut(
+        id="cp_sparse_deep_literal",
+        literals=(
+            DddSupportLiteral(
+                path.cabin_id,
+                1,
+                path.route_option_ids[1],
+            ),
+        ),
+        resource_id="cp_sat_joint_cabin_paths",
+        violation_seconds=1.0,
+        provenance="exact_cp_sat_no_wait_cabin_path_core",
+    )
+
+    resolved = DddAnonymousFlowMaster(include_mandatory_resource_rows=False).solve(
+        network,
+        cuts=(cut,),
+    )
+
+    assert resolved.status in {
+        DddAnonymousFlowStatus.OPTIMAL,
+        DddAnonymousFlowStatus.INFEASIBLE,
+    }
+    assert resolved.conflict_constraint_count == 1
+    assert resolved.prefix_variable_count > 0
+
+
 def test_physical_network_result_passes_complete_ean_validation() -> None:
     problem = build_three_station_network_time_refinement_probe()
     artifact = build_three_station_time_refinement_artifact()

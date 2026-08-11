@@ -110,6 +110,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.lifting import (
     DddExactLiftStatus,
     DddExactSupportLifter,
     DddRefinementReason,
+    build_ddd_cabin_path_core_cut,
     build_ddd_prefix_conflict_cuts,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.reference import (
@@ -358,6 +359,7 @@ __all__ = [
     "DddUniversalResourceConflict",
     "EanArtifactToDddMovementProblemAdapter",
     "build_ddd_reference_visit",
+    "build_ddd_cabin_path_core_cut",
     "build_ddd_cp_sat_timed_flow_support",
     "build_ddd_cp_sat_local_explainability_report",
     "build_ddd_passenger_master_problem",

@@ -355,3 +355,59 @@ Use mixed/resource-touching CP evidence to introduce a small cabin cohort or
 route-prefix flow through the relevant visit band, then re-run resource-window
 separation on those conditionally narrower flows. This attacks the measured
 loss of cross-visit identity without rebuilding the full cabins-by-arcs EAN.
+
+## Selective cabin-path core experiment contract
+
+The first selective trajectory-linking family is now implemented as an
+opt-in no-wait experiment. Every route visit of every decomposed cabin path
+receives its own CP-SAT assumption. The raw infeasibility core becomes one
+no-good in the DDD master. Prefix-flow conservation carries identity from the
+fixed start only through the deepest core visit, without adding earlier route
+literals to the no-good. Every unimplicated cabin and every later tail remains
+anonymous.
+
+This family targets exactly the failure left unresolved by anonymous resource
+windows: the contradiction may depend on accumulated route history before a
+local resource. It does not claim that the CP core is minimal or that one cut
+generalizes to every support with the same marginal resource counts. The
+adoption experiment must report core cabins, core literals, added prefix
+variables, master build/solve time, and lower-bound movement. A cut is emitted
+only after proved CP infeasibility; `UNKNOWN` is inert. The no-wait provenance
+is explicit because bounded waiting can make the same route prefix feasible.
+
+### Controlled ten-round result
+
+The corrected raw-core formulation was compared against aggregate equality
+cores with the same free bootstrap, five-second CP budget, disabled nearest
+search, Journey-Time passenger master, and ten rounds.
+
+| Metric | Aggregate equality | Selective raw path core |
+|---|---:|---:|
+| Lower bound | 409,360.38 | 409,360.38 |
+| Upper bound | 1,422,004.21 | 1,422,004.21 |
+| Solve time | 34.65 s | 36.13 s |
+| Final variables / rows | 11,446 / 8,628 | 19,044 / 11,838 |
+| Prefix variables / cabins | 0 / 0 | 7,685 / 9 |
+| Master build time | 1.64 s | 1.88 s |
+| Master optimize time | 1.44 s | 1.76 s |
+| CP time | 26.43 s | 27.51 s |
+| Added aggregate / path cuts | 10 / 0 | 0 / 10 |
+
+The selective formulation is technically scalable over this short window:
+runtime increased by only 4.3 percent despite 7,685 labelled prefix variables,
+and no trajectory time splits were needed. It did not yet improve the lower
+bound. Nine tracked cabins after ten rounds and repeatedly deep core visits
+show that the first contradictions are dominated by matching anonymous tails
+to fixed starts and their finite visit bounds, rather than by a small reusable
+merge-resource cohort. One round produced a unary late-visit core; preserving
+that raw fixing is substantially stronger than forbidding the entire observed
+path, but identity is still needed through the late visit to express it.
+
+The feature should therefore remain opt-in. The next experiment should first
+construct an identity-consistent decomposition without resource no-overlaps
+(equivalently, rematch anonymous flow to fixed starts under route and horizon
+constraints), then ask the full CP oracle for resource-conflict cores on that
+rematched support. If the cheap rematching problem is infeasible, the existing
+aggregate core is the appropriate stronger response. If it is feasible, the
+subsequent selective core is more likely to describe the merge conflicts that
+the formulation was intended to target.

@@ -7,6 +7,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddAggregateRouteCount,
     DddAggregateRouteCountLiteral,
     DddAggregateSupportCut,
+    DddAnonymousFlowDecomposer,
     DddAnonymousFlowMaster,
     DddAnonymousFlowStatus,
     DddCpSatPrimalOracle,
@@ -31,6 +32,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddTimeDiscretization,
     DddTimePartition,
     DddTimedFlowCoverCut,
+    build_ddd_cabin_path_core_cut,
     build_ddd_cp_sat_local_explainability_report,
     build_ddd_cp_sat_timed_flow_support,
 )
@@ -306,6 +308,56 @@ def test_cp_sat_fixed_support_returns_valid_aggregate_infeasibility_core() -> No
         fixed_start_movement_problem=movement,
     )
     assert flow.status is DddAnonymousFlowStatus.OPTIMAL
+    paths = DddAnonymousFlowDecomposer().decompose(network, flow)
+    cabin_fixed = DddCpSatPrimalOracle(
+        time_limit_seconds=2.0,
+        num_workers=1,
+    ).solve(timed_problem, fixed_cabin_paths=paths)
+
+    assert cabin_fixed.status is DddCpSatPrimalStatus.INFEASIBLE
+    assert {
+        literal.cabin_id for literal in cabin_fixed.cabin_path_infeasible_core
+    } == {0, 1}
+    assert all(
+        literal.route_option_id == "bad_skip"
+        for literal in cabin_fixed.cabin_path_infeasible_core
+    )
+    cabin_path_cut = build_ddd_cabin_path_core_cut(
+        paths,
+        cabin_fixed.cabin_path_infeasible_core,
+    )
+    assert cabin_path_cut.provenance == "exact_cp_sat_no_wait_cabin_path_core"
+    assert cabin_path_cut.right_hand_side == len(cabin_path_cut.literals) - 1
+    assert {literal.cabin_id for literal in cabin_path_cut.literals} == {0, 1}
+    assert all(literal.visit_index == 0 for literal in cabin_path_cut.literals)
+
+    integrated_prefix = DddNetworkTimeRefinementSolver(
+        max_iterations=2,
+        max_prefix_variable_count=100,
+        max_tracked_prefix_cabin_count=2,
+        max_prefix_visit_index=1,
+        use_mandatory_resource_rows=False,
+        use_universal_resource_rows=False,
+        use_cp_sat_primal_bootstrap=False,
+        use_cp_sat_cabin_path_cuts=True,
+        use_cp_sat_nearest_support=False,
+        cp_sat_time_limit_seconds=2.0,
+        cp_sat_num_workers=1,
+        cp_sat_retry_interval=1,
+    ).solve(timed_problem)
+
+    assert integrated_prefix.iterations[0].cp_sat_cabin_path_status is (
+        DddCpSatPrimalStatus.INFEASIBLE
+    )
+    assert integrated_prefix.iterations[0].cp_sat_cabin_path_core_cabin_ids == (0, 1)
+    assert integrated_prefix.iterations[0].cp_sat_cabin_path_core_literal_count == 2
+    assert integrated_prefix.iterations[0].cp_sat_cabin_path_cut_literal_count == 2
+    assert integrated_prefix.iterations[0].added_cabin_path_core_cut_ids
+    assert any(
+        cut.provenance == "exact_cp_sat_no_wait_cabin_path_core"
+        for cut in integrated_prefix.conflict_cuts
+    )
+
     timed_support = build_ddd_cp_sat_timed_flow_support(network, flow, movement)
 
     timed = DddCpSatPrimalOracle(

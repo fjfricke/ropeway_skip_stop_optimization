@@ -91,6 +91,15 @@ def format_ddd_iteration_progress(
                 f"complete={int(iteration.cp_sat_search_complete)}"
             ),
             (
+                "cabin_path="
+                f"{iteration.cp_sat_cabin_path_status.value}/"
+                f"{iteration.cp_sat_cabin_path_seconds:.2f}s/"
+                f"core={len(iteration.cp_sat_cabin_path_core_cabin_ids)}c/"
+                f"{iteration.cp_sat_cabin_path_core_literal_count}l"
+                f"->{iteration.cp_sat_cabin_path_cut_literal_count}p/"
+                f"+{len(iteration.added_cabin_path_core_cut_ids)}"
+            ),
+            (
                 "aggregate="
                 f"{iteration.aggregate_support_constraint_count}c/"
                 f"{iteration.aggregate_threshold_variable_count}v/"

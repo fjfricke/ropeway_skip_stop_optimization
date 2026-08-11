@@ -874,6 +874,18 @@ two-cabin Three-Station fixture combines two time splits and two conflict rows,
 then closes `LB = UB = 4` with six prefix variables. This proves integration;
 multi-cabin scaling remains open.
 
+Selective cabin-path CP cores are now available as an opt-in no-wait
+strengthening. After anonymous-flow decomposition, the exact CP-SAT movement
+oracle fixes every observed cabin route visit behind its own assumption. The
+raw sufficient infeasibility core becomes the no-good; labelled flow is built
+only for its cabins and only through their deepest referenced visits. Earlier
+identity flow follows from conservation but need not appear in the cut itself.
+If the core exceeds the configured prefix budget, the coordinator falls back
+to the existing CP coupling instead of treating the support or the full
+problem as infeasible. `UNKNOWN` creates no cut. The first implementation is
+deliberately unavailable as a waiting proof until the CP oracle represents
+the same bounded-wait domain.
+
 #### Five-station fixed-$K$ movement diagnostic
 
 Passenger assignment and the restricted trajectory-slot matheuristic are now

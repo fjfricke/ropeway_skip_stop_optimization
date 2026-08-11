@@ -18,6 +18,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.models import (
 from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
     DddNetworkTimeProblem,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.support_master import (
+    DddSupportLiteral,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.time_refinement import (
     DddExactTimedEvent,
     DddRecoveredSchedule,
@@ -55,6 +58,8 @@ class DddCpSatPrimalResult:
     infeasible_core: tuple[DddAggregateRouteCountLiteral, ...] = ()
     timed_flow_support: DddCpSatTimedFlowSupport | None = None
     timed_flow_infeasible_core: tuple[DddTimedFlowThresholdLiteral, ...] = ()
+    fixed_cabin_paths: tuple[DddPartialTimedPath, ...] = ()
+    cabin_path_infeasible_core: tuple[DddSupportLiteral, ...] = ()
     distance_center: tuple[DddAggregateRouteCountLiteral, ...] = ()
     support_distance_primal: int | None = None
     support_distance_lower_bound: float | None = None
@@ -88,6 +93,7 @@ class DddCpSatPrimalOracle:
         fixed_support: DddCpSatFixedSupport | None = None,
         timed_flow_support: DddCpSatTimedFlowSupport | None = None,
         nearest_support: DddCpSatFixedSupport | None = None,
+        fixed_cabin_paths: tuple[DddPartialTimedPath, ...] = (),
         enabled_resource_ids: tuple[str, ...] | None = None,
         candidate_callback: DddCpSatCandidateCallback | None = None,
     ) -> DddCpSatPrimalResult:
@@ -105,13 +111,20 @@ class DddCpSatPrimalOracle:
                 raise ValueError(
                     "DDD CP-SAT v1 only supports no-wait timed-flow proofs"
                 )
+        _validate_fixed_cabin_paths(problem, fixed_cabin_paths)
         selected_support_modes = sum(
-            item is not None
-            for item in (fixed_support, timed_flow_support, nearest_support)
+            item
+            for item in (
+                fixed_support is not None,
+                timed_flow_support is not None,
+                nearest_support is not None,
+                bool(fixed_cabin_paths),
+            )
         )
         if selected_support_modes > 1:
             raise ValueError(
-                "fixed, timed-flow, and nearest CP-SAT support are mutually exclusive"
+                "fixed aggregate, timed-flow, nearest, and fixed cabin-path "
+                "CP-SAT support are mutually exclusive"
             )
         if self.time_limit_seconds <= 0:
             raise ValueError("DDD CP-SAT time limit must be positive")
@@ -249,6 +262,13 @@ class DddCpSatPrimalOracle:
                 time_by_cabin=time_by_cabin,
                 timed_flow_support=timed_flow_support,
             )
+        cabin_path_literal_by_assumption_index: dict[int, DddSupportLiteral] = {}
+        if fixed_cabin_paths:
+            cabin_path_literal_by_assumption_index = _fix_cabin_route_prefixes(
+                model=model,
+                selection_by_key=selection_by_key,
+                fixed_cabin_paths=fixed_cabin_paths,
+            )
 
         distance_center: tuple[DddAggregateRouteCountLiteral, ...] = ()
         if nearest_support is not None:
@@ -316,6 +336,7 @@ class DddCpSatPrimalOracle:
         wall_seconds = perf_counter() - started
         infeasible_core: tuple[DddAggregateRouteCountLiteral, ...] = ()
         timed_flow_infeasible_core: tuple[DddTimedFlowThresholdLiteral, ...] = ()
+        cabin_path_infeasible_core: tuple[DddSupportLiteral, ...] = ()
         support_distance_primal: int | None = None
         support_distance_lower_bound: float | None = None
         if candidate_schedules:
@@ -342,6 +363,14 @@ class DddCpSatPrimalOracle:
                         key=lambda item: item.sort_key,
                     )
                 )
+            elif fixed_cabin_paths:
+                core_indices = solver.sufficient_assumptions_for_infeasibility()
+                cabin_path_infeasible_core = tuple(
+                    sorted(
+                        cabin_path_literal_by_assumption_index[index]
+                        for index in core_indices
+                    )
+                )
         else:
             schedules = ()
             result_status = DddCpSatPrimalStatus.UNKNOWN
@@ -357,10 +386,77 @@ class DddCpSatPrimalOracle:
             infeasible_core=infeasible_core,
             timed_flow_support=timed_flow_support,
             timed_flow_infeasible_core=timed_flow_infeasible_core,
+            fixed_cabin_paths=fixed_cabin_paths,
+            cabin_path_infeasible_core=cabin_path_infeasible_core,
             distance_center=distance_center,
             support_distance_primal=support_distance_primal,
             support_distance_lower_bound=support_distance_lower_bound,
         )
+
+
+def _validate_fixed_cabin_paths(
+    problem: DddNetworkTimeProblem,
+    fixed_cabin_paths: tuple[DddPartialTimedPath, ...],
+) -> None:
+    if not fixed_cabin_paths:
+        return
+    known_cabin_ids = {
+        start.cabin_id for start in problem.movement_problem.starts
+    }
+    cabin_ids = tuple(path.cabin_id for path in fixed_cabin_paths)
+    if len(set(cabin_ids)) != len(cabin_ids):
+        raise ValueError("DDD fixed cabin paths must have unique cabin ids")
+    unknown_cabin_ids = set(cabin_ids) - known_cabin_ids
+    if unknown_cabin_ids:
+        raise ValueError(
+            "DDD fixed cabin paths reference unknown cabins: "
+            f"{sorted(unknown_cabin_ids)}"
+        )
+    for path in fixed_cabin_paths:
+        if not path.arcs:
+            raise ValueError("DDD fixed cabin path must contain at least one route")
+        if any(
+            arc.visit_index != visit_index
+            for visit_index, arc in enumerate(path.arcs)
+        ):
+            raise ValueError(
+                f"DDD fixed cabin path {path.cabin_id} is not a complete prefix"
+            )
+
+
+def _fix_cabin_route_prefixes(
+    *,
+    model: cp_model.CpModel,
+    selection_by_key: dict[tuple[int, int, str], cp_model.IntVar],
+    fixed_cabin_paths: tuple[DddPartialTimedPath, ...],
+) -> dict[int, DddSupportLiteral]:
+    """Add one assumption for every route literal in the cabin paths.
+
+    A literal-level infeasibility core identifies the deepest relevant visit
+    per cabin.  The master retains the raw no-good while labelled-flow
+    conservation supplies identity from the fixed start through that depth.
+    """
+
+    literal_by_index: dict[int, DddSupportLiteral] = {}
+    for path in sorted(fixed_cabin_paths, key=lambda item: item.cabin_id):
+        for visit_index, route_option_id in enumerate(path.route_option_ids):
+            assumption = model.new_bool_var(
+                f"cabin_path_assumption[{path.cabin_id},{visit_index}]"
+            )
+            selected = selection_by_key.get(
+                (path.cabin_id, visit_index, route_option_id)
+            )
+            if selected is None:
+                model.add(0 == 1).only_enforce_if(assumption)
+            else:
+                model.add(selected == 1).only_enforce_if(assumption)
+            model.add_assumption(assumption)
+            literal_by_index[assumption.Index()] = DddSupportLiteral(
+                cabin_id=path.cabin_id,
+                visit_index=visit_index,
+                route_option_id=route_option_id,
+            )
+    return literal_by_index
 
 
 def _fix_timed_flow_support(

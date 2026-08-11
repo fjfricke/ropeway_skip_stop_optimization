@@ -97,6 +97,11 @@ def main() -> None:
         default=False,
     )
     parser.add_argument(
+        "--cp-sat-cabin-path-cuts",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+    )
+    parser.add_argument(
         "--cp-sat-local-explainability",
         action=argparse.BooleanOptionalAction,
         default=False,
@@ -178,6 +183,8 @@ def main() -> None:
         parser.error("--passenger-master requires a passenger objective")
     if args.passenger_master and not args.cp_sat:
         parser.error("--passenger-master requires CP-SAT support lifting")
+    if args.cp_sat_cabin_path_cuts and not args.cp_sat:
+        parser.error("--cp-sat-cabin-path-cuts requires --cp-sat")
     if args.cp_sat_local_explainability and not args.cp_sat_timed_flow_covers:
         parser.error(
             "--cp-sat-local-explainability requires --cp-sat-timed-flow-covers"
@@ -228,6 +235,7 @@ def main() -> None:
         use_cp_sat_primal_bootstrap=args.cp_sat_primal_bootstrap,
         use_cp_sat_nearest_support=args.cp_sat_nearest_support,
         use_cp_sat_timed_flow_covers=args.cp_sat_timed_flow_covers,
+        use_cp_sat_cabin_path_cuts=args.cp_sat_cabin_path_cuts,
         collect_cp_sat_local_explainability=args.cp_sat_local_explainability,
         cp_sat_local_explainability_time_limit_seconds=(
             args.cp_sat_local_explainability_time_limit
@@ -353,6 +361,7 @@ def main() -> None:
         "cp_sat_primal_bootstrap": args.cp_sat_primal_bootstrap,
         "cp_sat_nearest_support": args.cp_sat_nearest_support,
         "cp_sat_timed_flow_covers": args.cp_sat_timed_flow_covers,
+        "cp_sat_cabin_path_cuts": args.cp_sat_cabin_path_cuts,
         "cp_sat_local_explainability": args.cp_sat_local_explainability,
         "cp_sat_local_explainability_time_limit_seconds": (
             args.cp_sat_local_explainability_time_limit
@@ -605,6 +614,7 @@ def _build_partial_payload(
         "cp_sat_primal_bootstrap": args.cp_sat_primal_bootstrap,
         "cp_sat_nearest_support": args.cp_sat_nearest_support,
         "cp_sat_timed_flow_covers": args.cp_sat_timed_flow_covers,
+        "cp_sat_cabin_path_cuts": args.cp_sat_cabin_path_cuts,
         "cp_sat_local_explainability": args.cp_sat_local_explainability,
         "cp_sat_local_explainability_time_limit_seconds": (
             args.cp_sat_local_explainability_time_limit
