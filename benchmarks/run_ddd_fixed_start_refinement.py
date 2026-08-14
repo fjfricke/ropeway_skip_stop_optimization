@@ -30,6 +30,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddRecoveredScheduleFlowProjector,
     DddPassengerMasterProblem,
     DddResourceWindowCutMode,
+    DddTrajectoryOptimizerMode,
     EanArtifactToDddMovementProblemAdapter,
     build_ddd_cp_sat_local_explainability_report,
     build_ddd_passenger_master_problem,
@@ -139,6 +140,15 @@ def main() -> None:
         action=argparse.BooleanOptionalAction,
         default=False,
     )
+    parser.add_argument(
+        "--trajectory-method",
+        choices=tuple(item.value for item in DddTrajectoryOptimizerMode),
+        default=DddTrajectoryOptimizerMode.OFF.value,
+        help=(
+            "Trajectory backend; --trajectory-slot-pool remains a compatibility "
+            "alias for restricted_primal"
+        ),
+    )
     parser.add_argument("--trajectory-slot-time-limit", type=float, default=30.0)
     parser.add_argument(
         "--trajectory-slot-max-conflict-rounds",
@@ -174,9 +184,14 @@ def main() -> None:
     args = parser.parse_args()
     if args.progress and args.gurobi_log:
         parser.error("--progress and --gurobi-log cannot be combined")
-    if args.trajectory_slot_pool and args.passenger_objective == "none":
+    trajectory_mode = DddTrajectoryOptimizerMode(args.trajectory_method)
+    trajectory_enabled = (
+        args.trajectory_slot_pool
+        or trajectory_mode is not DddTrajectoryOptimizerMode.OFF
+    )
+    if trajectory_enabled and args.passenger_objective == "none":
         parser.error(
-            "--trajectory-slot-pool requires a passenger objective; "
+            "the trajectory optimizer requires a passenger objective; "
             "movement-feasibility runs intentionally exclude passenger heuristics"
         )
     if args.passenger_master and args.passenger_objective == "none":
@@ -216,13 +231,9 @@ def main() -> None:
         output_flag=args.gurobi_log,
         max_new_cuts_per_iteration=args.max_new_cuts,
         max_new_time_splits_per_iteration=args.max_new_time_splits,
-        resource_window_cut_mode=DddResourceWindowCutMode(
-            args.resource_window_cuts
-        ),
+        resource_window_cut_mode=DddResourceWindowCutMode(args.resource_window_cuts),
         max_resource_window_rows_per_resolve=args.resource_window_max_rows,
-        max_resource_window_resolves_per_iteration=(
-            args.resource_window_max_resolves
-        ),
+        max_resource_window_resolves_per_iteration=(args.resource_window_max_resolves),
         max_prefix_variable_count=args.max_prefix_variables,
         max_tracked_prefix_cabin_count=args.max_prefix_cabins,
         max_prefix_visit_index=args.max_prefix_visit_index,
@@ -249,6 +260,7 @@ def main() -> None:
             else DddCpSatMasterCoupling.FREE_ROUTE_CHOICES
         ),
         use_trajectory_slot_pool=args.trajectory_slot_pool,
+        trajectory_optimizer_mode=trajectory_mode,
         reuse_network_fragments=args.reuse_network_fragments,
         use_projected_warm_start=args.projected_warm_start,
         use_structural_earliest_times=args.structural_earliest_times,
@@ -389,7 +401,12 @@ def main() -> None:
         "passenger_time_limit_seconds": args.passenger_time_limit,
         "passenger_mip_gap": args.passenger_mip_gap,
         "passenger_threads": args.passenger_threads,
-        "trajectory_slot_pool_enabled": args.trajectory_slot_pool,
+        "trajectory_slot_pool_enabled": trajectory_enabled,
+        "trajectory_optimizer_mode": (
+            DddTrajectoryOptimizerMode.RESTRICTED_PRIMAL.value
+            if args.trajectory_slot_pool
+            else trajectory_mode.value
+        ),
         "trajectory_slot_time_limit_seconds": args.trajectory_slot_time_limit,
         "trajectory_slot_max_conflict_rounds": (
             args.trajectory_slot_max_conflict_rounds

@@ -2,6 +2,17 @@
 
 Status: **proposed implementation and research plan**
 
+Implementation checkpoint (2026-08-14): the Phase-1 in-memory kernel is now
+available as `restricted_primal`. It provides deterministic whole-horizon
+column IDs, an append-only pool across DDD rounds, an incrementally extended
+Gurobi restricted master, cached validation and Passenger-service
+coefficients, retained incompatibility rows, a separately named restricted
+master, explicit bound-status fields, and provenance-bound reduced-cost
+certificate arithmetic. It intentionally remains `PRIMAL_POOL_ONLY`: exact
+route-load pricing, persistent checkpoint files, resource/clique indices, and
+root row-and-column convergence are later phases and are not claimed by this
+checkpoint.
+
 ## Decision Summary
 
 Add a separate fixed-$K$ optimizer that selects complete, cabin-specific,

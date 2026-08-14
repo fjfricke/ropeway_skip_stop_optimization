@@ -49,9 +49,14 @@ from ropeway_skip_stop_optimization.optimization.ddd.passenger_master import (
     DddPassengerMasterProblem,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_slot import (
+    DddTrajectoryColumnPool,
     DddTrajectorySlotCandidate,
     DddTrajectorySlotPoolResult,
     DddTrajectorySlotPoolStatus,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generation import (
+    DddTrajectoryBoundStatus,
+    DddTrajectoryOptimizerMode,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.resource_time import (
     DddAnonymousResourceRow,
@@ -265,7 +270,14 @@ class DddNetworkTimeRefinementIteration:
     served_passenger_count: int | None = None
     unserved_passenger_count: int | None = None
     primal_candidate_summaries: tuple[DddPrimalEvaluationSummary, ...] = ()
+    trajectory_optimizer_mode: DddTrajectoryOptimizerMode = (
+        DddTrajectoryOptimizerMode.OFF
+    )
     trajectory_pool_status: DddTrajectorySlotPoolStatus | None = None
+    trajectory_bound_status: DddTrajectoryBoundStatus | None = None
+    trajectory_certified_lower_bound: float | None = None
+    trajectory_pool_candidate_count: int = 0
+    trajectory_pool_added_option_count: int = 0
     trajectory_pool_option_count: int = 0
     trajectory_pool_ride_variable_count: int = 0
     trajectory_pool_conflict_round_count: int = 0
@@ -351,9 +363,7 @@ class DddNetworkTimeRefinementSolver:
     use_structural_earliest_times: bool = True
     use_mandatory_resource_rows: bool = True
     use_universal_resource_rows: bool = True
-    resource_window_cut_mode: DddResourceWindowCutMode = (
-        DddResourceWindowCutMode.OFF
-    )
+    resource_window_cut_mode: DddResourceWindowCutMode = DddResourceWindowCutMode.OFF
     max_resource_window_rows_per_resolve: int = 100
     max_resource_window_resolves_per_iteration: int = 10
     max_prefix_variable_count: int = 20_000
@@ -379,6 +389,9 @@ class DddNetworkTimeRefinementSolver:
     # heuristic.  It must be enabled explicitly and is deliberately absent
     # from movement-only feasibility experiments.
     use_trajectory_slot_pool: bool = False
+    trajectory_optimizer_mode: DddTrajectoryOptimizerMode = (
+        DddTrajectoryOptimizerMode.OFF
+    )
 
     def solve(
         self,
@@ -389,6 +402,18 @@ class DddNetworkTimeRefinementSolver:
         passenger_master_problem: DddPassengerMasterProblem | None = None,
     ) -> DddNetworkTimeRefinementResult:
         problem.validate()
+        if not isinstance(self.trajectory_optimizer_mode, DddTrajectoryOptimizerMode):
+            raise ValueError("DDD trajectory optimizer mode is invalid")
+        trajectory_pool_enabled = (
+            self.use_trajectory_slot_pool
+            or self.trajectory_optimizer_mode
+            is DddTrajectoryOptimizerMode.RESTRICTED_PRIMAL
+        )
+        resolved_trajectory_optimizer_mode = (
+            DddTrajectoryOptimizerMode.RESTRICTED_PRIMAL
+            if trajectory_pool_enabled
+            else DddTrajectoryOptimizerMode.OFF
+        )
         if self.use_cp_sat_timed_flow_covers and self.cp_sat_master_coupling is not (
             DddCpSatMasterCoupling.FIXED_AGGREGATE_SUPPORT
         ):
@@ -533,6 +558,9 @@ class DddNetworkTimeRefinementSolver:
         solve_started = perf_counter()
         bootstrap_result = None
         bootstrap_objective: float | None = None
+        trajectory_column_pool = DddTrajectoryColumnPool()
+        last_trajectory_pool_fingerprint: str | None = None
+        latest_trajectory_pool_result: DddTrajectorySlotPoolResult | None = None
 
         def emit(
             stage: DddNetworkTimeRefinementProgressStage,
@@ -654,6 +682,18 @@ class DddNetworkTimeRefinementSolver:
                         best_schedules = candidate_schedules
                         best_reference = validation.solution
                         best_primal_evaluation = evaluation
+                    if (
+                        trajectory_pool_enabled
+                        and evaluation is not None
+                        and evaluation.movement_plan is not None
+                    ):
+                        trajectory_column_pool.add_candidate(
+                            DddTrajectorySlotCandidate(
+                                schedules=candidate_schedules,
+                                reference_solution=validation.solution,
+                                movement_plan=evaluation.movement_plan,
+                            )
+                        )
             emit(DddNetworkTimeRefinementProgressStage.PRIMAL_BOOTSTRAP_FINISHED, 0)
 
         for round_index in range(1, self.max_iterations + 1):
@@ -664,8 +704,8 @@ class DddNetworkTimeRefinementSolver:
             round_primal_objective: float | None = None
             round_primal_evaluation: DddPrimalEvaluationResult | None = None
             primal_candidate_summaries: list[DddPrimalEvaluationSummary] = []
-            trajectory_pool_candidates: list[DddTrajectorySlotCandidate] = []
-            trajectory_pool_result: DddTrajectorySlotPoolResult | None = None
+            trajectory_pool_result = latest_trajectory_pool_result
+            trajectory_pool_added_option_count = 0
 
             def consider_primal_candidate(
                 schedules: tuple[DddRecoveredSchedule, ...],
@@ -679,6 +719,7 @@ class DddNetworkTimeRefinementSolver:
                 nonlocal primal_evaluation_status
                 nonlocal round_primal_evaluation
                 nonlocal round_primal_objective
+                nonlocal trajectory_pool_added_option_count
                 nonlocal upper_bound
 
                 evaluation: DddPrimalEvaluationResult | None = None
@@ -708,6 +749,16 @@ class DddNetworkTimeRefinementSolver:
                             else _finite_or_none(upper_bound)
                         ),
                     )
+                    if trajectory_pool_enabled and evaluation.movement_plan is not None:
+                        trajectory_pool_added_option_count += (
+                            trajectory_column_pool.add_candidate(
+                                DddTrajectorySlotCandidate(
+                                    schedules=schedules,
+                                    reference_solution=solution,
+                                    movement_plan=evaluation.movement_plan,
+                                )
+                            )
+                        )
                     if (
                         evaluation.status is not DddPrimalEvaluationStatus.FEASIBLE
                         or objective_value is None
@@ -717,13 +768,6 @@ class DddNetworkTimeRefinementSolver:
                         raise RuntimeError(
                             "feasible DDD primal evaluation has no movement plan"
                         )
-                    trajectory_pool_candidates.append(
-                        DddTrajectorySlotCandidate(
-                            schedules=schedules,
-                            reference_solution=solution,
-                            movement_plan=evaluation.movement_plan,
-                        )
-                    )
                     if (
                         round_primal_objective is None
                         or objective_value < round_primal_objective
@@ -845,7 +889,9 @@ class DddNetworkTimeRefinementSolver:
                 if flow.status is DddAnonymousFlowStatus.INFEASIBLE:
                     break
                 if flow.best_bound is None:
-                    raise RuntimeError("optimal DDD network flow returned no best bound")
+                    raise RuntimeError(
+                        "optimal DDD network flow returned no best bound"
+                    )
                 if resource_window_lower_bound_before is None:
                     resource_window_lower_bound_before = flow.best_bound
                 resource_window_lower_bound_after = flow.best_bound
@@ -1011,15 +1057,11 @@ class DddNetworkTimeRefinementSolver:
                         ),
                         master_passenger_variable_count=0,
                         master_passenger_constraint_count=0,
-                        resource_window_resolve_count=(
-                            resource_window_resolve_count
-                        ),
+                        resource_window_resolve_count=(resource_window_resolve_count),
                         resource_window_candidate_count=(
                             resource_window_candidate_count
                         ),
-                        resource_window_violated_count=(
-                            resource_window_violated_count
-                        ),
+                        resource_window_violated_count=(resource_window_violated_count),
                         resource_window_duplicate_count=(
                             resource_window_duplicate_count
                         ),
@@ -1033,9 +1075,7 @@ class DddNetworkTimeRefinementSolver:
                         resource_window_separation_seconds=(
                             resource_window_separation_seconds
                         ),
-                        resource_window_master_seconds=(
-                            resource_window_master_seconds
-                        ),
+                        resource_window_master_seconds=(resource_window_master_seconds),
                         resource_window_lower_bound_before=(
                             resource_window_lower_bound_before
                         ),
@@ -1175,9 +1215,7 @@ class DddNetworkTimeRefinementSolver:
                         current,
                         hint_paths=paths,
                         fixed_support=(
-                            fixed_cp_support
-                            if timed_flow_cp_support is None
-                            else None
+                            fixed_cp_support if timed_flow_cp_support is None else None
                         ),
                         timed_flow_support=timed_flow_cp_support,
                         candidate_callback=(
@@ -1356,9 +1394,7 @@ class DddNetworkTimeRefinementSolver:
                 )
 
             new_cabin_path_core_cuts = tuple(
-                cut
-                for cut in cp_sat_cabin_path_candidate_cuts
-                if cut.id not in cut_ids
+                cut for cut in cp_sat_cabin_path_candidate_cuts if cut.id not in cut_ids
             )
             cuts.extend(new_cabin_path_core_cuts)
             cut_ids.update(cut.id for cut in new_cabin_path_core_cuts)
@@ -1448,9 +1484,7 @@ class DddNetworkTimeRefinementSolver:
                         cell_lift_statuses=(),
                         cell_lift_validation=_not_run_validation(),
                         conflict_count=0,
-                        added_cut_ids=tuple(
-                            cut.id for cut in new_cabin_path_core_cuts
-                        ),
+                        added_cut_ids=tuple(cut.id for cut in new_cabin_path_core_cuts),
                         total_conflict_cut_count=len(cuts),
                         time_splits=(),
                         trajectory_time_split_count=0,
@@ -1562,15 +1596,11 @@ class DddNetworkTimeRefinementSolver:
                             if flow.passenger_solution is not None
                             else None
                         ),
-                        resource_window_resolve_count=(
-                            resource_window_resolve_count
-                        ),
+                        resource_window_resolve_count=(resource_window_resolve_count),
                         resource_window_candidate_count=(
                             resource_window_candidate_count
                         ),
-                        resource_window_violated_count=(
-                            resource_window_violated_count
-                        ),
+                        resource_window_violated_count=(resource_window_violated_count),
                         resource_window_duplicate_count=(
                             resource_window_duplicate_count
                         ),
@@ -1584,9 +1614,7 @@ class DddNetworkTimeRefinementSolver:
                         resource_window_separation_seconds=(
                             resource_window_separation_seconds
                         ),
-                        resource_window_master_seconds=(
-                            resource_window_master_seconds
-                        ),
+                        resource_window_master_seconds=(resource_window_master_seconds),
                         resource_window_lower_bound_before=(
                             resource_window_lower_bound_before
                         ),
@@ -1828,9 +1856,11 @@ class DddNetworkTimeRefinementSolver:
                 round_index,
             )
             if (
-                self.use_trajectory_slot_pool
+                trajectory_pool_enabled
                 and primal_evaluator is not None
-                and len(trajectory_pool_candidates) >= 2
+                and trajectory_column_pool.has_recombination_choice
+                and trajectory_column_pool.fingerprint
+                != last_trajectory_pool_fingerprint
             ):
                 emit(
                     DddNetworkTimeRefinementProgressStage.TRAJECTORY_POOL_STARTED,
@@ -1839,10 +1869,12 @@ class DddNetworkTimeRefinementSolver:
                 pool_evaluation: DddPrimalPoolEvaluationResult = (
                     primal_evaluator.evaluate_trajectory_pool(
                         current,
-                        tuple(trajectory_pool_candidates),
+                        trajectory_column_pool,
                     )
                 )
                 trajectory_pool_result = pool_evaluation.pool_result
+                latest_trajectory_pool_result = trajectory_pool_result
+                last_trajectory_pool_fingerprint = trajectory_column_pool.fingerprint
                 evaluation = pool_evaluation.evaluation
                 if evaluation is not None:
                     primal_candidate_summaries.append(evaluation.summary)
@@ -1948,9 +1980,7 @@ class DddNetworkTimeRefinementSolver:
                     cp_sat_search_complete=cp_sat_search_complete,
                     cp_sat_cabin_path_status=cp_sat_cabin_path_status,
                     cp_sat_cabin_path_seconds=cp_sat_cabin_path_seconds,
-                    cp_sat_cabin_path_core_cabin_ids=(
-                        cp_sat_cabin_path_core_cabin_ids
-                    ),
+                    cp_sat_cabin_path_core_cabin_ids=(cp_sat_cabin_path_core_cabin_ids),
                     cp_sat_cabin_path_core_literal_count=(
                         cp_sat_cabin_path_core_literal_count
                     ),
@@ -1960,8 +1990,7 @@ class DddNetworkTimeRefinementSolver:
                     added_cabin_path_core_cut_ids=tuple(
                         cut.id
                         for cut in new_cuts
-                        if cut.provenance
-                        == "exact_cp_sat_no_wait_cabin_path_core"
+                        if cut.provenance == "exact_cp_sat_no_wait_cabin_path_core"
                     ),
                     primal_evaluation_status=primal_evaluation_status,
                     primal_evaluation_count=primal_evaluation_count,
@@ -1979,6 +2008,14 @@ class DddNetworkTimeRefinementSolver:
                     ),
                     primal_candidate_summaries=tuple(primal_candidate_summaries),
                     trajectory_pool_result=trajectory_pool_result,
+                    trajectory_optimizer_mode=resolved_trajectory_optimizer_mode,
+                    trajectory_pool_candidate_count=(
+                        trajectory_column_pool.candidate_count
+                    ),
+                    trajectory_pool_added_option_count=(
+                        trajectory_pool_added_option_count
+                    ),
+                    trajectory_pool_option_count=(trajectory_column_pool.column_count),
                     aggregate_support_constraint_count=(
                         flow.aggregate_support_constraint_count
                     ),
@@ -2029,22 +2066,12 @@ class DddNetworkTimeRefinementSolver:
                         else None
                     ),
                     resource_window_resolve_count=resource_window_resolve_count,
-                    resource_window_candidate_count=(
-                        resource_window_candidate_count
-                    ),
-                    resource_window_violated_count=(
-                        resource_window_violated_count
-                    ),
-                    resource_window_duplicate_count=(
-                        resource_window_duplicate_count
-                    ),
+                    resource_window_candidate_count=(resource_window_candidate_count),
+                    resource_window_violated_count=(resource_window_violated_count),
+                    resource_window_duplicate_count=(resource_window_duplicate_count),
                     resource_window_added_count=len(round_resource_window_rows),
-                    resource_window_entry_row_count=(
-                        resource_window_entry_row_count
-                    ),
-                    resource_window_energy_row_count=(
-                        resource_window_energy_row_count
-                    ),
+                    resource_window_entry_row_count=(resource_window_entry_row_count),
+                    resource_window_energy_row_count=(resource_window_energy_row_count),
                     resource_window_separation_seconds=(
                         resource_window_separation_seconds
                     ),
@@ -2654,9 +2681,13 @@ def _iteration(
     unserved_passenger_count: int | None,
     primal_candidate_summaries: tuple[DddPrimalEvaluationSummary, ...],
     trajectory_pool_result: DddTrajectorySlotPoolResult | None = None,
-    cp_sat_cabin_path_status: DddCpSatPrimalStatus = (
-        DddCpSatPrimalStatus.NOT_RUN
+    trajectory_optimizer_mode: DddTrajectoryOptimizerMode = (
+        DddTrajectoryOptimizerMode.OFF
     ),
+    trajectory_pool_candidate_count: int = 0,
+    trajectory_pool_added_option_count: int = 0,
+    trajectory_pool_option_count: int = 0,
+    cp_sat_cabin_path_status: DddCpSatPrimalStatus = (DddCpSatPrimalStatus.NOT_RUN),
     cp_sat_cabin_path_seconds: float = 0.0,
     cp_sat_cabin_path_core_cabin_ids: tuple[int, ...] = (),
     cp_sat_cabin_path_core_literal_count: int = 0,
@@ -2780,12 +2811,8 @@ def _iteration(
         cp_sat_cabin_path_status=cp_sat_cabin_path_status,
         cp_sat_cabin_path_seconds=cp_sat_cabin_path_seconds,
         cp_sat_cabin_path_core_cabin_ids=cp_sat_cabin_path_core_cabin_ids,
-        cp_sat_cabin_path_core_literal_count=(
-            cp_sat_cabin_path_core_literal_count
-        ),
-        cp_sat_cabin_path_cut_literal_count=(
-            cp_sat_cabin_path_cut_literal_count
-        ),
+        cp_sat_cabin_path_core_literal_count=(cp_sat_cabin_path_core_literal_count),
+        cp_sat_cabin_path_cut_literal_count=(cp_sat_cabin_path_cut_literal_count),
         added_cabin_path_core_cut_ids=added_cabin_path_core_cut_ids,
         primal_evaluation_status=primal_evaluation_status,
         primal_evaluation_count=primal_evaluation_count,
@@ -2794,16 +2821,30 @@ def _iteration(
         served_passenger_count=served_passenger_count,
         unserved_passenger_count=unserved_passenger_count,
         primal_candidate_summaries=primal_candidate_summaries,
+        trajectory_optimizer_mode=trajectory_optimizer_mode,
         trajectory_pool_status=(
             trajectory_pool_result.status
             if trajectory_pool_result is not None
             else None
         ),
-        trajectory_pool_option_count=(
-            trajectory_pool_result.trajectory_option_count
+        trajectory_bound_status=(
+            trajectory_pool_result.bound_status
             if trajectory_pool_result is not None
-            else 0
+            else (
+                DddTrajectoryBoundStatus.PRIMAL_POOL_ONLY
+                if trajectory_optimizer_mode
+                is DddTrajectoryOptimizerMode.RESTRICTED_PRIMAL
+                else None
+            )
         ),
+        trajectory_certified_lower_bound=(
+            trajectory_pool_result.certified_lower_bound
+            if trajectory_pool_result is not None
+            else None
+        ),
+        trajectory_pool_candidate_count=trajectory_pool_candidate_count,
+        trajectory_pool_added_option_count=trajectory_pool_added_option_count,
+        trajectory_pool_option_count=trajectory_pool_option_count,
         trajectory_pool_ride_variable_count=(
             trajectory_pool_result.ride_variable_count
             if trajectory_pool_result is not None

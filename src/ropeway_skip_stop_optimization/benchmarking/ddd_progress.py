@@ -122,10 +122,7 @@ def format_ddd_iteration_progress(
                 f"core={iteration.cp_sat_timed_flow_core_literal_count}/"
                 f"+{len(iteration.added_timed_flow_cover_cut_ids)}/"
                 "resources="
-                + (
-                    ",".join(iteration.cp_sat_timed_flow_core_resource_ids)
-                    or "-"
-                )
+                + (",".join(iteration.cp_sat_timed_flow_core_resource_ids) or "-")
             ),
             (
                 "master_passenger="
@@ -155,7 +152,10 @@ def format_ddd_iteration_progress(
             ),
             (
                 "trajectory_pool="
-                f"{iteration.trajectory_pool_status.value if iteration.trajectory_pool_status is not None else 'off'}/"
+                f"{iteration.trajectory_pool_status.value if iteration.trajectory_pool_status is not None else ('pending' if iteration.trajectory_optimizer_mode.value != 'off' else 'off')}/"
+                f"{iteration.trajectory_bound_status.value if iteration.trajectory_bound_status is not None else 'none'}/"
+                f"{iteration.trajectory_pool_candidate_count}p/"
+                f"+{iteration.trajectory_pool_added_option_count}o/"
                 f"{iteration.trajectory_pool_option_count}o/"
                 f"{iteration.trajectory_pool_ride_variable_count}r/"
                 f"{iteration.trajectory_pool_conflict_round_count}c/"

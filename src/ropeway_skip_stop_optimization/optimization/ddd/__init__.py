@@ -91,10 +91,22 @@ from ropeway_skip_stop_optimization.optimization.ddd.passenger_master import (
     build_ddd_passenger_master_problem,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_slot import (
+    DddTrajectoryColumn,
+    DddTrajectoryColumnPool,
+    DddTrajectoryRestrictedMaster,
     DddTrajectorySlotCandidate,
     DddTrajectorySlotPoolOptimizer,
     DddTrajectorySlotPoolResult,
     DddTrajectorySlotPoolStatus,
+    ddd_trajectory_column,
+    ddd_trajectory_column_signature,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generation import (
+    DddTrajectoryBoundStatus,
+    DddTrajectoryOptimizerMode,
+    DddTrajectoryPricingCertificate,
+    DddTrajectoryReducedCost,
+    DddTrajectoryWaitingDomain,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.ean_plan_adapter import (
     DddReferenceToEanMovementPlanAdapter,
@@ -299,10 +311,18 @@ __all__ = [
     "DddPrimalEvaluationStatus",
     "DddPrimalEvaluationSummary",
     "DddPrimalEvaluator",
+    "DddTrajectoryBoundStatus",
+    "DddTrajectoryColumn",
+    "DddTrajectoryColumnPool",
+    "DddTrajectoryOptimizerMode",
+    "DddTrajectoryPricingCertificate",
+    "DddTrajectoryReducedCost",
+    "DddTrajectoryRestrictedMaster",
     "DddTrajectorySlotCandidate",
     "DddTrajectorySlotPoolOptimizer",
     "DddTrajectorySlotPoolResult",
     "DddTrajectorySlotPoolStatus",
+    "DddTrajectoryWaitingDomain",
     "DddRecoveredSchedule",
     "DddReferenceConflict",
     "DddReferenceHorizonCoverageError",
@@ -380,4 +400,6 @@ __all__ = [
     "separate_ddd_resource_window_rows",
     "validate_ddd_recovered_schedule",
     "validate_ddd_reference_solution",
+    "ddd_trajectory_column",
+    "ddd_trajectory_column_signature",
 ]

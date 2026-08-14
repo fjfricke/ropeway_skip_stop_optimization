@@ -17,8 +17,8 @@ from ropeway_skip_stop_optimization.optimization.ddd.reference import (
     DddReferenceSolution,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_slot import (
-    DddTrajectorySlotCandidate,
-    DddTrajectorySlotPoolOptimizer,
+    DddTrajectoryColumnPool,
+    DddTrajectoryRestrictedMaster,
     DddTrajectorySlotPoolResult,
     DddTrajectorySlotPoolStatus,
 )
@@ -110,7 +110,7 @@ class DddPrimalEvaluator(Protocol):
     def evaluate_trajectory_pool(
         self,
         problem: DddNetworkTimeProblem,
-        candidates: tuple[DddTrajectorySlotCandidate, ...],
+        column_pool: DddTrajectoryColumnPool,
     ) -> DddPrimalPoolEvaluationResult: ...
 
 
@@ -150,6 +150,11 @@ class DddEanPassengerPrimalEvaluator:
         default_factory=EanOptimizationConfig
     )
     _passenger_build: EanPassengerCandidateBuildResult | None = field(
+        init=False,
+        default=None,
+        repr=False,
+    )
+    _trajectory_master: DddTrajectoryRestrictedMaster | None = field(
         init=False,
         default=None,
         repr=False,
@@ -283,19 +288,21 @@ class DddEanPassengerPrimalEvaluator:
     def evaluate_trajectory_pool(
         self,
         problem: DddNetworkTimeProblem,
-        candidates: tuple[DddTrajectorySlotCandidate, ...],
+        column_pool: DddTrajectoryColumnPool,
     ) -> DddPrimalPoolEvaluationResult:
         self.validate_problem(problem)
-        pool_result = DddTrajectorySlotPoolOptimizer(
-            time_limit_seconds=self.trajectory_pool_time_limit_seconds,
-            max_conflict_rounds=self.trajectory_pool_max_conflict_rounds,
-            output_flag=self.log_to_console,
-        ).solve(
+        if self._trajectory_master is None:
+            self._trajectory_master = DddTrajectoryRestrictedMaster(
+                time_limit_seconds=self.trajectory_pool_time_limit_seconds,
+                max_conflict_rounds=self.trajectory_pool_max_conflict_rounds,
+                output_flag=self.log_to_console,
+            )
+        pool_result = self._trajectory_master.solve(
             problem=problem,
             artifact=self.artifact,
             passenger_build=self._passenger_candidates(),
             objective=self.objective,
-            candidates=candidates,
+            column_pool=column_pool,
         )
         if (
             pool_result.status is not DddTrajectorySlotPoolStatus.FEASIBLE
