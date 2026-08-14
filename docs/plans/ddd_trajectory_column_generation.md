@@ -723,6 +723,37 @@ objective; every complete integer solution maps into the bound reference; the
 full generated reference agrees with direct enumeration; duals pass sign and
 finite-difference checks.
 
+#### Phase 2 implementation status (2026-08-14)
+
+The solver-independent factorized Passenger LP, size-limited integrated
+load-pattern reference, and stable dual export are implemented.  Exhaustive
+active-set enumeration generates every extreme point of each tiny
+single-trajectory continuous load polytope.  Randomized tiny regressions show
+that the factorized perspective LP and the integrated reference have the same
+objective, including active cross-cabin incompatibility rows.  Demand duals
+use the documented solver-native sign and pass a finite-difference check.
+
+The production restricted-master evaluation now solves and records the
+factorized LP after complete pair separation over the current column pool,
+including its objective, solve time, and dual fingerprint.  This remains
+`PRIMAL_POOL_ONLY`: the integrated reference enumeration is intentionally
+capped and no omitted movement trajectory has yet been priced.  The next gate
+is to consume these duals in heuristic no-wait pricing and demonstrate
+Passenger-relevant new movement columns.
+
+Two five-round Five-Station $K=19$ smoke runs ended with 57 movement options
+and 3,176--3,190 direct-ride variables.  Depending on the nondeterministic
+eight-worker CP-SAT archive, integer incumbent separation had discovered
+10--87 incompatibilities, whereas complete LP pool separation found 117--257.
+The row-clean factorized LP lay between $673{,}682.01$ and $685{,}459.16$;
+the validated integer pool plan was $685{,}629.36$.  Thus the observed local
+restricted-pool LP gap ranged from about $0.025\%$ to $1.74\%$; it is not the
+global optimization gap.  In the fully timed final run, complete pair
+separation and LP construction took $0.53$ seconds and Gurobi optimization
+took $0.12$ seconds.  Dual extraction is therefore not the current runtime
+bottleneck.  Formal matched comparisons must replay a frozen candidate archive
+or use deterministic single-worker CP-SAT.
+
 ### Phase 3: Heuristic dual-guided pricing
 
 - build the layered no-wait movement-pricing graph;

@@ -24,6 +24,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddTrajectorySlotPoolStatus,
     DddTrajectoryBoundStatus,
     DddTrajectoryOptimizerMode,
+    DddTrajectoryPassengerLpStatus,
     DddTrajectoryColumnPool,
     DddTrajectorySlotCandidate,
     EanArtifactToDddMovementProblemAdapter,
@@ -102,6 +103,18 @@ def test_cp_sat_timetable_receives_exact_fixed_movement_passenger_assignment(
         for iteration in result.iterations
     )
     assert result.iterations[0].trajectory_pool_ride_variable_count > 0
+    assert (
+        result.iterations[0].trajectory_pool_lp_status
+        is DddTrajectoryPassengerLpStatus.OPTIMAL
+    )
+    assert result.iterations[0].trajectory_pool_lp_objective_value is not None
+    assert result.iterations[0].trajectory_pool_lp_dual_fingerprint
+    assert result.iterations[0].trajectory_pool_lp_row_separation_complete
+    assert (
+        result.iterations[0].trajectory_pool_lp_incompatibility_count
+        >= result.iterations[0].trajectory_pool_incompatibility_count
+    )
+    assert result.iterations[0].trajectory_pool_lp_total_seconds > 0.0
     solved_pool_rounds = tuple(
         iteration
         for iteration in result.iterations

@@ -1387,6 +1387,85 @@ Its value is never written into the DDD lower-bound field. A nontrivial global
 Passenger lower bound still requires either a proved full partial-network
 relaxation or complete reduced-cost pricing.
 
+### Whole-horizon Passenger LP and load-pattern reference
+
+The Phase-2 Passenger LP now has a solver-independent representation.  For a
+generated trajectory option $p$, let $R_p$ denote its direct rides and let
+$E_p$ denote its onboard segments.  Its continuous single-cabin load
+polytope is
+
+$$
+P_p=\left\{y\geq0:
+y_r\leq U_r\;\forall r\in R_p,\quad
+\sum_{r:\,e\in r}y_r\leq Q\;\forall e\in E_p
+\right\}.
+$$
+
+The factorized restricted LP uses a trajectory share
+$0\leq\lambda_p\leq1$ and scaled Passenger variables $f_{pr}$:
+
+$$
+0\leq f_{pr}\leq U_r\lambda_p,
+\qquad
+\sum_{r:\,e\in r}f_{pr}\leq Q\lambda_p.
+$$
+
+This is exactly the perspective of $P_p$.  If $\lambda_p>0$, then
+$y=f_p/\lambda_p\in P_p$; if $\lambda_p=0$, the scaled upper bounds imply
+$f_p=0$.  Conversely, every $y\in P_p$ gives the feasible point
+$(\lambda_p,\lambda_p y)$.  Since every point of the bounded polytope $P_p$
+is a convex combination of its extreme points $y^{p\ell}$, the factorized LP
+is equivalent to the integrated load-pattern formulation
+
+$$
+\sum_{p\in P_c,\ell}\theta_{p\ell}=1
+\quad\forall c,
+\qquad
+\lambda_p=\sum_\ell\theta_{p\ell},
+\qquad
+f_p=\sum_\ell y^{p\ell}\theta_{p\ell}.
+$$
+
+Demand and trajectory-conflict rows are linear in these projections, so the
+equivalence remains valid after coupling cabins.  The extreme points may be
+fractional; no total-unimodularity claim is made.  The integrated enumerator
+is therefore a deliberately size-limited mathematical reference for tiny
+instances, not the production pricing algorithm.
+
+For the integrated LP, let $\alpha_c$ be the raw dual of the cabin-choice
+equality, $\pi_g\leq0$ the raw dual of demand row
+$\sum_q b_{qg}\theta_q\leq d_g$, and $\mu_j\leq0$ the raw dual of an active
+trajectory-conflict row.  The reduced cost of a load-pattern column $q$ is
+
+$$
+\bar c_q=c_q-\alpha_c-\sum_g\pi_g b_{qg}-\sum_j\mu_j a_{qj}.
+$$
+
+The implementation exports both the solver-native value $\pi_g$ and the
+nonnegative scarcity signal $\sigma_g=-\pi_g$.  Thus increasing a fixed
+demand-row right-hand side by $\varepsilon$ changes the LP value locally by
+$\pi_g\varepsilon$.  Finite-difference tests verify this sign convention.
+Cabin, demand, conflict, activation, and capacity dual maps receive stable
+keys and a content fingerprint.
+
+Neither LP is a global lower bound while its trajectory pool is restricted.
+Both report `PRIMAL_POOL_ONLY` and `certified_lower_bound=None`.  Only complete
+exact pricing over the declared trajectory and Waiting domain may promote the
+LP value through the existing pricing-certificate interface.
+
+Two five-round Five-Station $K=19$ smoke runs ended with 57 trajectory options
+and 3,176--3,190 direct-ride variables.  Depending on the nondeterministic
+eight-worker CP-SAT archive, integer incumbent separation found 10--87
+trajectory incompatibilities while complete LP pool separation found
+117--257.  The integer objective was $685{,}629.36$ and the row-clean
+factorized restricted LP ranged from $673{,}682.01$ to $685{,}459.16$.  The
+corresponding $0.025\%$--$1.74\%$ is a local pool integrality gap, not a
+certified global gap.  Complete pair separation plus LP construction took
+$0.53$ seconds and Gurobi optimization $0.12$ seconds in the fully timed final
+round, which is small compared with CP-SAT candidate generation and exact
+Passenger recourse.  Formal comparisons must replay a frozen candidate pool
+or use deterministic single-worker CP-SAT.
+
 On `five_station_circle_cw_half_skip_no_wait_v0` with $K=19$, ten CP-SAT
 candidate timetables produced 44 distinct cabin trajectory options and 3,324
 direct-ride variables. The pool required two separation rounds, added eight

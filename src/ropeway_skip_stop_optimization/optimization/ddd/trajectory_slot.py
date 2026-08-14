@@ -29,6 +29,11 @@ from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generation import (
     DddTrajectoryBoundStatus,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_passenger_lp import (
+    DddTrajectoryPassengerMasterProblem,
+    DddTrajectoryPassengerOption,
+    DddTrajectoryPassengerRide,
+)
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
 from ropeway_skip_stop_optimization.optimization.ean.builders.passenger_builder import (
     EanPassengerCandidateBuildResult,
@@ -967,6 +972,138 @@ def _build_trajectory_options(
         )
     column_pool.record_option_cache_access(hits=hit_count, misses=miss_count)
     return tuple(cache[key] for key in sorted(cache))
+
+
+def build_ddd_trajectory_passenger_master_problem(
+    *,
+    problem: DddNetworkTimeProblem,
+    artifact: EanBuildArtifact,
+    passenger_build: EanPassengerCandidateBuildResult,
+    objective: EanPassengerObjective,
+    column_pool: DddTrajectoryColumnPool,
+    incompatibility_pairs: tuple[tuple[str, str], ...] = (),
+    complete_incompatibility_separation: bool = False,
+    tolerance_seconds: float = 1e-6,
+) -> DddTrajectoryPassengerMasterProblem:
+    """Build the solver-independent Phase-2 Passenger master representation."""
+
+    if tolerance_seconds < 0:
+        raise ValueError("trajectory Passenger master tolerance must be nonnegative")
+    column_pool.validate_passenger_build(passenger_build)
+    column_pool.validate_against(
+        problem=problem,
+        artifact=artifact,
+        tolerance_seconds=tolerance_seconds,
+    )
+    options = _build_trajectory_options(
+        column_pool=column_pool,
+        passenger_build=passenger_build,
+        horizon_seconds=artifact.config.horizon_seconds,
+    )
+    resolved_incompatibility_pairs = set(
+        tuple(sorted(pair)) for pair in incompatibility_pairs
+    )
+    if complete_incompatibility_separation:
+        resolved_incompatibility_pairs.update(
+            _complete_trajectory_incompatibility_pairs(
+                options,
+                problem=problem,
+                tolerance_seconds=tolerance_seconds,
+            )
+        )
+    definition = ean_passenger_objective_definition(objective)
+    group_by_id = {group.id: group for group in passenger_build.demand_groups}
+    unserved_cost_by_group_id = {
+        group.id: definition.unserved_cost_seconds(
+            release_time_seconds=group.release_time_seconds,
+            horizon_seconds=artifact.config.horizon_seconds,
+        )
+        for group in passenger_build.demand_groups
+    }
+    master_options = []
+    for option in options:
+        rides = []
+        for ride in option.rides:
+            group = group_by_id[ride.candidate.demand_group_id]
+            served_cost = definition.served_cost_seconds(
+                release_time_seconds=group.release_time_seconds,
+                boarding_time_seconds=ride.boarding_time_seconds,
+                alighting_time_seconds=ride.alighting_time_seconds,
+            )
+            rides.append(
+                DddTrajectoryPassengerRide(
+                    id=f"{option.id}::{ride.candidate.id}",
+                    demand_group_id=group.id,
+                    upper_bound=float(min(group.count, artifact.config.cabin_capacity)),
+                    objective_delta=(served_cost - unserved_cost_by_group_id[group.id]),
+                    onboard_segment_ids=tuple(
+                        f"visit:{visit.visit_index:08d}"
+                        for visit in option.ean_trajectory.visits
+                        if (
+                            ride.candidate.board_visit_index
+                            <= visit.visit_index
+                            < ride.candidate.alight_visit_index
+                        )
+                    ),
+                )
+            )
+        master_options.append(
+            DddTrajectoryPassengerOption(
+                id=option.id,
+                cabin_id=option.cabin_id,
+                rides=tuple(sorted(rides, key=lambda item: item.id)),
+            )
+        )
+    master_problem = DddTrajectoryPassengerMasterProblem(
+        cabin_ids=tuple(
+            sorted(start.cabin_id for start in problem.movement_problem.starts)
+        ),
+        demand_by_group_id={
+            group.id: float(group.count)
+            for group in sorted(
+                passenger_build.demand_groups,
+                key=lambda item: item.id,
+            )
+        },
+        options=tuple(sorted(master_options, key=lambda item: item.id)),
+        cabin_capacity=float(artifact.config.cabin_capacity),
+        objective_constant=sum(
+            unserved_cost_by_group_id[group.id] * group.count
+            for group in passenger_build.demand_groups
+        ),
+        incompatibility_pairs=tuple(sorted(resolved_incompatibility_pairs)),
+        incompatibility_rows_complete=complete_incompatibility_separation,
+    )
+    master_problem.validate()
+    return master_problem
+
+
+def _complete_trajectory_incompatibility_pairs(
+    options: tuple[_TrajectoryOption, ...],
+    *,
+    problem: DddNetworkTimeProblem,
+    tolerance_seconds: float,
+) -> tuple[tuple[str, str], ...]:
+    pairs = []
+    for first_index, first in enumerate(options):
+        for second in options[first_index + 1 :]:
+            if first.cabin_id == second.cabin_id:
+                continue
+            occurrences = tuple(
+                occurrence
+                for trajectory in (
+                    first.reference_trajectory,
+                    second.reference_trajectory,
+                )
+                for occurrence in trajectory.resource_occurrences
+            )
+            if find_ddd_reference_conflicts(
+                occurrences,
+                problem.movement_problem,
+                tolerance_seconds=tolerance_seconds,
+            ):
+                pairs.append((first.id, second.id))
+    return tuple(sorted(pairs))
 
 
 def ddd_trajectory_column_signature(

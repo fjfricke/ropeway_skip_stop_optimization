@@ -21,6 +21,12 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_slot import (
     DddTrajectoryRestrictedMaster,
     DddTrajectorySlotPoolResult,
     DddTrajectorySlotPoolStatus,
+    build_ddd_trajectory_passenger_master_problem,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_passenger_lp import (
+    DddTrajectoryFactorizedLpOptimizer,
+    DddTrajectoryPassengerLpResult,
+    DddTrajectoryPassengerLpStatus,
 )
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
 from ropeway_skip_stop_optimization.optimization.ean.builders.passenger_builder import (
@@ -118,6 +124,7 @@ class DddPrimalEvaluator(Protocol):
 class DddPrimalPoolEvaluationResult:
     pool_result: DddTrajectorySlotPoolResult
     evaluation: DddPrimalEvaluationResult | None
+    lp_result: DddTrajectoryPassengerLpResult | None = None
 
 
 @dataclass(frozen=True)
@@ -159,6 +166,12 @@ class DddEanPassengerPrimalEvaluator:
         default=None,
         repr=False,
     )
+
+    @property
+    def passenger_build(self) -> EanPassengerCandidateBuildResult:
+        """Return the canonical cached Passenger candidate universe."""
+
+        return self._passenger_candidates()
 
     def validate_problem(self, problem: DddNetworkTimeProblem) -> None:
         problem.validate()
@@ -304,11 +317,38 @@ class DddEanPassengerPrimalEvaluator:
             objective=self.objective,
             column_pool=column_pool,
         )
+        lp_setup_started = perf_counter()
+        lp_problem = build_ddd_trajectory_passenger_master_problem(
+            problem=problem,
+            artifact=self.artifact,
+            passenger_build=self._passenger_candidates(),
+            objective=self.objective,
+            column_pool=column_pool,
+            incompatibility_pairs=pool_result.incompatibility_pairs,
+            complete_incompatibility_separation=True,
+        )
+        lp_setup_seconds = perf_counter() - lp_setup_started
+        lp_result = DddTrajectoryFactorizedLpOptimizer(
+            output_flag=self.log_to_console
+        ).solve(lp_problem)
+        lp_result = replace(
+            lp_result,
+            build_seconds=lp_result.build_seconds + lp_setup_seconds,
+            total_seconds=lp_result.total_seconds + lp_setup_seconds,
+        )
+        if (
+            lp_result.status is DddTrajectoryPassengerLpStatus.OPTIMAL
+            and lp_result.objective_value is not None
+            and pool_result.restricted_objective_value is not None
+            and lp_result.objective_value
+            > pool_result.restricted_objective_value + 1e-5
+        ):
+            raise RuntimeError("trajectory LP exceeds its restricted integer master")
         if (
             pool_result.status is not DddTrajectorySlotPoolStatus.FEASIBLE
             or pool_result.movement_plan is None
         ):
-            return DddPrimalPoolEvaluationResult(pool_result, None)
+            return DddPrimalPoolEvaluationResult(pool_result, None, lp_result)
         evaluation = self.evaluate_movement_plan(
             problem,
             pool_result.movement_plan,
@@ -335,9 +375,13 @@ class DddEanPassengerPrimalEvaluator:
             trajectory_pool_incompatibility_count=(
                 pool_result.incompatibility_constraint_count
             ),
-            total_seconds=evaluation.total_seconds + pool_result.total_seconds,
+            total_seconds=(
+                evaluation.total_seconds
+                + pool_result.total_seconds
+                + lp_result.total_seconds
+            ),
         )
-        return DddPrimalPoolEvaluationResult(pool_result, evaluation)
+        return DddPrimalPoolEvaluationResult(pool_result, evaluation, lp_result)
 
     def _passenger_candidates(self) -> EanPassengerCandidateBuildResult:
         if self._passenger_build is None:

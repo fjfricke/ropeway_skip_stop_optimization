@@ -58,6 +58,10 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generatio
     DddTrajectoryBoundStatus,
     DddTrajectoryOptimizerMode,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_passenger_lp import (
+    DddTrajectoryPassengerLpResult,
+    DddTrajectoryPassengerLpStatus,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.resource_time import (
     DddAnonymousResourceRow,
     DddAnonymousResourceRowKind,
@@ -292,6 +296,14 @@ class DddNetworkTimeRefinementIteration:
     trajectory_pool_conflict_round_count: int = 0
     trajectory_pool_incompatibility_count: int = 0
     trajectory_pool_seconds: float = 0.0
+    trajectory_pool_lp_status: DddTrajectoryPassengerLpStatus | None = None
+    trajectory_pool_lp_objective_value: float | None = None
+    trajectory_pool_lp_dual_fingerprint: str | None = None
+    trajectory_pool_lp_incompatibility_count: int = 0
+    trajectory_pool_lp_row_separation_complete: bool = False
+    trajectory_pool_lp_build_seconds: float = 0.0
+    trajectory_pool_lp_optimize_seconds: float = 0.0
+    trajectory_pool_lp_total_seconds: float = 0.0
     aggregate_support_constraint_count: int = 0
     aggregate_threshold_variable_count: int = 0
     timed_flow_cover_constraint_count: int = 0
@@ -577,6 +589,7 @@ class DddNetworkTimeRefinementSolver:
         trajectory_column_pool = DddTrajectoryColumnPool()
         last_trajectory_pool_fingerprint: str | None = None
         latest_trajectory_pool_result: DddTrajectorySlotPoolResult | None = None
+        latest_trajectory_pool_lp_result: DddTrajectoryPassengerLpResult | None = None
         primal_candidate_schedules: dict[
             tuple[tuple[int, tuple[str, ...]], ...],
             tuple[DddRecoveredSchedule, ...],
@@ -739,6 +752,7 @@ class DddNetworkTimeRefinementSolver:
             round_primal_evaluation: DddPrimalEvaluationResult | None = None
             primal_candidate_summaries: list[DddPrimalEvaluationSummary] = []
             trajectory_pool_result = latest_trajectory_pool_result
+            trajectory_pool_lp_result = latest_trajectory_pool_lp_result
             trajectory_pool_added_option_count = 0
             trajectory_pool_solved_this_round = False
 
@@ -1924,6 +1938,8 @@ class DddNetworkTimeRefinementSolver:
                 )
                 trajectory_pool_result = pool_evaluation.pool_result
                 latest_trajectory_pool_result = trajectory_pool_result
+                trajectory_pool_lp_result = pool_evaluation.lp_result
+                latest_trajectory_pool_lp_result = trajectory_pool_lp_result
                 trajectory_pool_solved_this_round = True
                 last_trajectory_pool_fingerprint = trajectory_column_pool.fingerprint
                 evaluation = pool_evaluation.evaluation
@@ -2059,6 +2075,7 @@ class DddNetworkTimeRefinementSolver:
                     ),
                     primal_candidate_summaries=tuple(primal_candidate_summaries),
                     trajectory_pool_result=trajectory_pool_result,
+                    trajectory_pool_lp_result=trajectory_pool_lp_result,
                     trajectory_optimizer_mode=resolved_trajectory_optimizer_mode,
                     trajectory_pool_candidate_count=(
                         trajectory_column_pool.candidate_count
@@ -2735,6 +2752,7 @@ def _iteration(
     unserved_passenger_count: int | None,
     primal_candidate_summaries: tuple[DddPrimalEvaluationSummary, ...],
     trajectory_pool_result: DddTrajectorySlotPoolResult | None = None,
+    trajectory_pool_lp_result: DddTrajectoryPassengerLpResult | None = None,
     trajectory_optimizer_mode: DddTrajectoryOptimizerMode = (
         DddTrajectoryOptimizerMode.OFF
     ),
@@ -2959,6 +2977,50 @@ def _iteration(
         trajectory_pool_seconds=(
             trajectory_pool_result.total_seconds
             if trajectory_pool_result is not None and trajectory_pool_solved_this_round
+            else 0.0
+        ),
+        trajectory_pool_lp_status=(
+            trajectory_pool_lp_result.status
+            if trajectory_pool_lp_result is not None
+            else None
+        ),
+        trajectory_pool_lp_objective_value=(
+            trajectory_pool_lp_result.objective_value
+            if trajectory_pool_lp_result is not None
+            else None
+        ),
+        trajectory_pool_lp_dual_fingerprint=(
+            trajectory_pool_lp_result.duals.fingerprint
+            if trajectory_pool_lp_result is not None
+            and trajectory_pool_lp_result.duals is not None
+            else None
+        ),
+        trajectory_pool_lp_incompatibility_count=(
+            trajectory_pool_lp_result.incompatibility_constraint_count
+            if trajectory_pool_lp_result is not None
+            else 0
+        ),
+        trajectory_pool_lp_row_separation_complete=(
+            trajectory_pool_lp_result.row_separation_complete
+            if trajectory_pool_lp_result is not None
+            else False
+        ),
+        trajectory_pool_lp_build_seconds=(
+            trajectory_pool_lp_result.build_seconds
+            if trajectory_pool_lp_result is not None
+            and trajectory_pool_solved_this_round
+            else 0.0
+        ),
+        trajectory_pool_lp_optimize_seconds=(
+            trajectory_pool_lp_result.optimize_seconds
+            if trajectory_pool_lp_result is not None
+            and trajectory_pool_solved_this_round
+            else 0.0
+        ),
+        trajectory_pool_lp_total_seconds=(
+            trajectory_pool_lp_result.total_seconds
+            if trajectory_pool_lp_result is not None
+            and trajectory_pool_solved_this_round
             else 0.0
         ),
         aggregate_support_constraint_count=aggregate_support_constraint_count,

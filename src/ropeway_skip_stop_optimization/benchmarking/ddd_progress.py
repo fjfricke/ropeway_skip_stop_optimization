@@ -168,7 +168,15 @@ def format_ddd_iteration_progress(
                 f"update={iteration.trajectory_pool_master_update_seconds:.2f}s/"
                 f"first={_format_bound(iteration.trajectory_pool_time_to_first_incumbent_seconds)}s/"
                 f"imp={iteration.trajectory_pool_incumbent_improvement_count}/"
-                f"{iteration.trajectory_pool_seconds:.2f}s"
+                f"{iteration.trajectory_pool_seconds:.2f}s/"
+                "lp="
+                f"{iteration.trajectory_pool_lp_status.value if iteration.trajectory_pool_lp_status is not None else '-'}/"
+                f"{_format_bound(iteration.trajectory_pool_lp_objective_value)}/"
+                f"{iteration.trajectory_pool_lp_incompatibility_count}i:"
+                f"clean={int(iteration.trajectory_pool_lp_row_separation_complete)}/"
+                f"b={iteration.trajectory_pool_lp_build_seconds:.2f}s:"
+                f"s={iteration.trajectory_pool_lp_optimize_seconds:.2f}s/"
+                f"dual={iteration.trajectory_pool_lp_dual_fingerprint[:8] if iteration.trajectory_pool_lp_dual_fingerprint else '-'}"
             ),
             (
                 f"splits={iteration.time_split_count}:"
