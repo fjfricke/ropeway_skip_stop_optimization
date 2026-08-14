@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import pytest
+
 from ropeway_skip_stop_optimization.benchmarking.ddd_cases import (
     build_three_station_network_combined_probe,
 )
@@ -91,6 +93,84 @@ def test_cp_sat_primal_pool_excludes_previous_route_patterns() -> None:
             tolerance_seconds=1e-9,
         )
         assert validation.status is DddNetworkValidationStatus.FEASIBLE
+
+
+def test_cp_sat_primal_oracle_excludes_archived_route_patterns() -> None:
+    problem = build_three_station_network_combined_probe()
+    oracle = DddCpSatPrimalOracle(
+        time_limit_seconds=2.0,
+        num_workers=1,
+        max_candidate_count=1,
+    )
+
+    first = oracle.solve(problem)
+    second = oracle.solve(
+        problem,
+        excluded_schedules=(first.schedules,),
+    )
+
+    assert first.status is DddCpSatPrimalStatus.FEASIBLE
+    assert second.status is DddCpSatPrimalStatus.FEASIBLE
+    first_routes = tuple(
+        (schedule.cabin_id, schedule.route_option_ids) for schedule in first.schedules
+    )
+    second_routes = tuple(
+        (schedule.cabin_id, schedule.route_option_ids) for schedule in second.schedules
+    )
+    assert second_routes != first_routes
+
+
+def test_cp_sat_primal_oracle_rejects_duplicate_route_exclusions() -> None:
+    problem = build_three_station_network_combined_probe()
+    oracle = DddCpSatPrimalOracle(time_limit_seconds=2.0, num_workers=1)
+    first = oracle.solve(problem)
+
+    with pytest.raises(ValueError, match="excluded schedules must be unique"):
+        oracle.solve(
+            problem,
+            excluded_schedules=(first.schedules, first.schedules),
+        )
+
+
+def test_cp_sat_primal_oracle_reports_exhausted_route_archive() -> None:
+    movement = DddMovementProblem(
+        scenario_id="cp_sat_exhausted_probe",
+        passenger_service_end_seconds=1.0,
+        operational_end_seconds=1.0,
+        states=(DddMovementState("A"), DddMovementState("B")),
+        starts=(DddFixedStart(0, "A", 0.0, 1),),
+        route_options=(
+            DddRouteOption(
+                id="only_route",
+                from_state_id="A",
+                to_state_id="B",
+                station_id="A",
+                decision=DddRouteDecision.SKIP,
+                duration_seconds=2.0,
+                platform_entry_offset_seconds=None,
+                platform_exit_offset_seconds=None,
+                exit_switch_offset_seconds=0.0,
+                resource_usages=(),
+            ),
+        ),
+        resources=(),
+    )
+    problem = DddNetworkTimeProblem(
+        movement_problem=movement,
+        discretization=DddTimeDiscretization((DddTimePartition("B", (0.0, 1.0, 4.0)),)),
+        objective=DddNetworkTimeObjective(
+            route_option_costs=(DddRouteOptionCost("only_route", 0.0),)
+        ),
+    )
+    oracle = DddCpSatPrimalOracle(time_limit_seconds=2.0, num_workers=1)
+
+    first = oracle.solve(problem)
+    exhausted = oracle.solve(problem, excluded_schedules=(first.schedules,))
+
+    assert first.status is DddCpSatPrimalStatus.FEASIBLE
+    assert exhausted.status is DddCpSatPrimalStatus.EXHAUSTED
+    assert exhausted.search_complete
+    assert exhausted.schedules == ()
 
 
 def test_cp_sat_primal_oracle_proves_full_route_choice_model_infeasible() -> None:
@@ -315,9 +395,10 @@ def test_cp_sat_fixed_support_returns_valid_aggregate_infeasibility_core() -> No
     ).solve(timed_problem, fixed_cabin_paths=paths)
 
     assert cabin_fixed.status is DddCpSatPrimalStatus.INFEASIBLE
-    assert {
-        literal.cabin_id for literal in cabin_fixed.cabin_path_infeasible_core
-    } == {0, 1}
+    assert {literal.cabin_id for literal in cabin_fixed.cabin_path_infeasible_core} == {
+        0,
+        1,
+    }
     assert all(
         literal.route_option_id == "bad_skip"
         for literal in cabin_fixed.cabin_path_infeasible_core

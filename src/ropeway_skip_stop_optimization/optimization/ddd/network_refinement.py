@@ -384,6 +384,7 @@ class DddNetworkTimeRefinementSolver:
     cp_sat_retry_interval: int = 10
     cp_sat_max_candidate_count: int = 1
     cp_sat_minimum_hamming_distance: int = 1
+    cp_sat_diversification_interval: int = 0
     cp_sat_master_coupling: DddCpSatMasterCoupling = (
         DddCpSatMasterCoupling.FREE_ROUTE_CHOICES
     )
@@ -511,6 +512,12 @@ class DddNetworkTimeRefinementSolver:
             raise ValueError("DDD CP-SAT candidate count must be positive")
         if self.cp_sat_minimum_hamming_distance <= 0:
             raise ValueError("DDD CP-SAT Hamming distance must be positive")
+        if self.cp_sat_diversification_interval < 0:
+            raise ValueError("DDD CP-SAT diversification interval must be nonnegative")
+        if self.cp_sat_diversification_interval > 0 and not (
+            self.use_cp_sat_primal_oracle
+        ):
+            raise ValueError("DDD CP-SAT diversification requires the CP-SAT oracle")
         if self.tolerance_seconds < 0 or self.bound_tolerance < 0:
             raise ValueError("DDD network refinement tolerances must be nonnegative")
         shared_builder = DddLayeredTimeNetworkBuilder(
@@ -570,6 +577,23 @@ class DddNetworkTimeRefinementSolver:
         trajectory_column_pool = DddTrajectoryColumnPool()
         last_trajectory_pool_fingerprint: str | None = None
         latest_trajectory_pool_result: DddTrajectorySlotPoolResult | None = None
+        primal_candidate_schedules: dict[
+            tuple[tuple[int, tuple[str, ...]], ...],
+            tuple[DddRecoveredSchedule, ...],
+        ] = {}
+
+        def remember_primal_candidate(
+            schedules: tuple[DddRecoveredSchedule, ...],
+        ) -> None:
+            if self.cp_sat_diversification_interval <= 0:
+                return
+            fingerprint = tuple(
+                sorted(
+                    (schedule.cabin_id, schedule.route_option_ids)
+                    for schedule in schedules
+                )
+            )
+            primal_candidate_schedules.setdefault(fingerprint, schedules)
 
         def emit(
             stage: DddNetworkTimeRefinementProgressStage,
@@ -670,6 +694,7 @@ class DddNetworkTimeRefinementSolver:
                             timed_flow_cover_cuts=timed_flow_cover_cuts,
                             bootstrap_result=bootstrap_result,
                         )
+                    remember_primal_candidate(candidate_schedules)
                     evaluation = (
                         primal_evaluator.evaluate(current, validation.solution)
                         if primal_evaluator is not None
@@ -731,6 +756,8 @@ class DddNetworkTimeRefinementSolver:
                 nonlocal round_primal_objective
                 nonlocal trajectory_pool_added_option_count
                 nonlocal upper_bound
+
+                remember_primal_candidate(schedules)
 
                 evaluation: DddPrimalEvaluationResult | None = None
                 if primal_evaluator is None:
@@ -1167,17 +1194,25 @@ class DddNetworkTimeRefinementSolver:
             cp_sat_nearest_seconds = 0.0
             cp_sat_nearest_distance_primal: int | None = None
             cp_sat_nearest_distance_lower_bound: float | None = None
+            cp_sat_diversification_round = (
+                self.cp_sat_diversification_interval > 0
+                and round_index > 1
+                and (round_index - 1) % self.cp_sat_diversification_interval == 0
+            )
             if self.use_cp_sat_primal_oracle and (
                 self.cp_sat_master_coupling
                 is DddCpSatMasterCoupling.FIXED_AGGREGATE_SUPPORT
                 or round_index == 1
+                or cp_sat_diversification_round
                 or (
                     best_reference is None
                     and (round_index - 1) % self.cp_sat_retry_interval == 0
                 )
             ):
                 cp_result: DddCpSatPrimalResult | None = None
-                if self.use_cp_sat_cabin_path_cuts:
+                if self.use_cp_sat_cabin_path_cuts and not (
+                    cp_sat_diversification_round
+                ):
                     cabin_path_result = cp_sat_oracle.solve(
                         current,
                         hint_paths=paths,
@@ -1228,6 +1263,11 @@ class DddNetworkTimeRefinementSolver:
                             fixed_cp_support if timed_flow_cp_support is None else None
                         ),
                         timed_flow_support=timed_flow_cp_support,
+                        excluded_schedules=(
+                            tuple(primal_candidate_schedules.values())
+                            if cp_sat_diversification_round
+                            else ()
+                        ),
                         candidate_callback=(
                             lambda candidate_index, elapsed_seconds: emit(
                                 DddNetworkTimeRefinementProgressStage.PRIMAL_ORACLE_CANDIDATE_FOUND,

@@ -679,6 +679,32 @@ Exit criterion: the refactored restricted master reproduces the current
 trajectory-slot result and objective, and every selected solution passes the
 existing movement and Passenger validators.
 
+#### Phase 1 evidence (2026-08-14)
+
+Phase 1 is implemented.  The restricted master and its option/ride caches are
+persistent across DDD rounds.  A separate CP-SAT primal-diversification
+interval can request further complete schedules after the first incumbent.
+Every archived route pattern is excluded only inside that heuristic CP-SAT
+call.  Consequently, an exhausted diversification search proves only that no
+new route pattern remains outside the archive; it neither cuts the DDD master
+nor proves the physical problem infeasible.
+
+On `five_station_circle_cw_half_skip_no_wait_v0`, fixed starts, $K=19$ and
+Journey Time, ten archived route patterns produced 62 unique
+cabin columns.  Against the same sequence of individually evaluated CP-SAT
+candidates, the best individual objective was $688{,}161.64$ passenger-seconds.
+The restricted master recombined columns to a fully validated objective of
+$685{,}629.36$, an improvement of $2{,}532.29$ passenger-seconds (about
+$0.37\%$).  Incremental restricted-master resolves after initial construction
+took roughly $0.22$--$0.37$ seconds in this smoke run.  This is a positive
+primal signal, not a lower-bound result; the certified DDD lower bound remained
+$0$ in the short experiment.
+
+The observation that most later complete schedules added only one new cabin
+column also motivates Phase 2: dual and load information must show whether the
+pool contains economically useful diversity rather than merely more route
+fingerprints.
+
 ### Phase 2: Primal Passenger master and route-load bound reference
 
 - retain the current trajectory-keyed direct-ride variables and onboard

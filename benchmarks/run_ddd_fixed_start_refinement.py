@@ -151,6 +151,15 @@ def main() -> None:
     )
     parser.add_argument("--trajectory-slot-time-limit", type=float, default=30.0)
     parser.add_argument(
+        "--cp-sat-diversification-interval",
+        type=int,
+        default=0,
+        help=(
+            "Re-run unrestricted CP-SAT every N DDD rounds after an incumbent "
+            "exists, excluding archived route patterns; 0 disables it"
+        ),
+    )
+    parser.add_argument(
         "--trajectory-slot-max-conflict-rounds",
         type=int,
         default=100,
@@ -261,6 +270,7 @@ def main() -> None:
         ),
         use_trajectory_slot_pool=args.trajectory_slot_pool,
         trajectory_optimizer_mode=trajectory_mode,
+        cp_sat_diversification_interval=args.cp_sat_diversification_interval,
         reuse_network_fragments=args.reuse_network_fragments,
         use_projected_warm_start=args.projected_warm_start,
         use_structural_earliest_times=args.structural_earliest_times,
@@ -408,6 +418,7 @@ def main() -> None:
             else trajectory_mode.value
         ),
         "trajectory_slot_time_limit_seconds": args.trajectory_slot_time_limit,
+        "cp_sat_diversification_interval": args.cp_sat_diversification_interval,
         "trajectory_slot_max_conflict_rounds": (
             args.trajectory_slot_max_conflict_rounds
         ),
@@ -642,6 +653,7 @@ def _build_partial_payload(
         "cp_sat_nearest_support_time_limit_seconds": (
             args.cp_sat_nearest_support_time_limit
         ),
+        "cp_sat_diversification_interval": args.cp_sat_diversification_interval,
         "structural_earliest_times": args.structural_earliest_times,
         "setup_seconds": setup_seconds,
         "solve_seconds": solve_seconds,

@@ -42,6 +42,7 @@ class DddCpSatPrimalStatus(StrEnum):
     NOT_RUN = "not_run"
     FEASIBLE = "feasible"
     INFEASIBLE = "infeasible"
+    EXHAUSTED = "exhausted"
     UNKNOWN = "unknown"
 
 
@@ -95,6 +96,7 @@ class DddCpSatPrimalOracle:
         nearest_support: DddCpSatFixedSupport | None = None,
         fixed_cabin_paths: tuple[DddPartialTimedPath, ...] = (),
         enabled_resource_ids: tuple[str, ...] | None = None,
+        excluded_schedules: tuple[tuple[DddRecoveredSchedule, ...], ...] = (),
         candidate_callback: DddCpSatCandidateCallback | None = None,
     ) -> DddCpSatPrimalResult:
         problem.validate()
@@ -112,6 +114,7 @@ class DddCpSatPrimalOracle:
                     "DDD CP-SAT v1 only supports no-wait timed-flow proofs"
                 )
         _validate_fixed_cabin_paths(problem, fixed_cabin_paths)
+        _validate_excluded_schedules(problem, excluded_schedules)
         selected_support_modes = sum(
             item
             for item in (
@@ -269,6 +272,12 @@ class DddCpSatPrimalOracle:
                 selection_by_key=selection_by_key,
                 fixed_cabin_paths=fixed_cabin_paths,
             )
+        _exclude_route_patterns(
+            model=model,
+            selection_by_key=selection_by_key,
+            excluded_schedules=excluded_schedules,
+            minimum_hamming_distance=self.minimum_hamming_distance,
+        )
 
         distance_center: tuple[DddAggregateRouteCountLiteral, ...] = ()
         if nearest_support is not None:
@@ -347,6 +356,9 @@ class DddCpSatPrimalOracle:
                     raise RuntimeError("nearest-support CP-SAT solve has no solver")
                 support_distance_primal = int(round(last_solver.objective_value))
                 support_distance_lower_bound = float(last_solver.best_objective_bound)
+        elif terminal_status == cp_model.INFEASIBLE and excluded_schedules:
+            schedules = ()
+            result_status = DddCpSatPrimalStatus.EXHAUSTED
         elif terminal_status == cp_model.INFEASIBLE:
             schedules = ()
             result_status = DddCpSatPrimalStatus.INFEASIBLE
@@ -400,9 +412,7 @@ def _validate_fixed_cabin_paths(
 ) -> None:
     if not fixed_cabin_paths:
         return
-    known_cabin_ids = {
-        start.cabin_id for start in problem.movement_problem.starts
-    }
+    known_cabin_ids = {start.cabin_id for start in problem.movement_problem.starts}
     cabin_ids = tuple(path.cabin_id for path in fixed_cabin_paths)
     if len(set(cabin_ids)) != len(cabin_ids):
         raise ValueError("DDD fixed cabin paths must have unique cabin ids")
@@ -416,8 +426,7 @@ def _validate_fixed_cabin_paths(
         if not path.arcs:
             raise ValueError("DDD fixed cabin path must contain at least one route")
         if any(
-            arc.visit_index != visit_index
-            for visit_index, arc in enumerate(path.arcs)
+            arc.visit_index != visit_index for visit_index, arc in enumerate(path.arcs)
         ):
             raise ValueError(
                 f"DDD fixed cabin path {path.cabin_id} is not a complete prefix"
@@ -651,6 +660,61 @@ def _exclude_solution_and_replace_hint(
             model.add_hint(variable, solver.value(variable))
         for variable in active_by_cabin[cabin_id]:
             model.add_hint(variable, solver.value(variable))
+
+
+def _validate_excluded_schedules(
+    problem: DddNetworkTimeProblem,
+    excluded_schedules: tuple[tuple[DddRecoveredSchedule, ...], ...],
+) -> None:
+    expected_cabin_ids = tuple(
+        sorted(start.cabin_id for start in problem.movement_problem.starts)
+    )
+    fingerprints: set[tuple[tuple[int, tuple[str, ...]], ...]] = set()
+    for schedules in excluded_schedules:
+        fingerprint = tuple(
+            sorted(
+                (schedule.cabin_id, schedule.route_option_ids) for schedule in schedules
+            )
+        )
+        if tuple(cabin_id for cabin_id, _ in fingerprint) != expected_cabin_ids:
+            raise ValueError(
+                "DDD CP-SAT excluded schedule cabin IDs differ from the problem"
+            )
+        if fingerprint in fingerprints:
+            raise ValueError("DDD CP-SAT excluded schedules must be unique")
+        fingerprints.add(fingerprint)
+
+
+def _exclude_route_patterns(
+    *,
+    model: cp_model.CpModel,
+    selection_by_key: dict[tuple[int, int, str], cp_model.IntVar],
+    excluded_schedules: tuple[tuple[DddRecoveredSchedule, ...], ...],
+    minimum_hamming_distance: int,
+) -> None:
+    all_keys = tuple(sorted(selection_by_key))
+    for schedules in excluded_schedules:
+        selected_keys = {
+            (schedule.cabin_id, visit_index, route_option_id)
+            for schedule in schedules
+            for visit_index, route_option_id in enumerate(schedule.route_option_ids)
+        }
+        unknown_keys = selected_keys - selection_by_key.keys()
+        if unknown_keys:
+            raise ValueError(
+                "DDD CP-SAT excluded schedule references unknown route selections"
+            )
+        differing_literals = tuple(
+            (1 - selection_by_key[key])
+            if key in selected_keys
+            else selection_by_key[key]
+            for key in all_keys
+        )
+        if minimum_hamming_distance > len(differing_literals):
+            raise ValueError(
+                "DDD CP-SAT Hamming distance exceeds the route-variable count"
+            )
+        model.add(sum(differing_literals) >= minimum_hamming_distance)
 
 
 def _deterministic_visit_structure(
