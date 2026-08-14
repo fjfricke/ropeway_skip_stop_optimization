@@ -26,6 +26,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddTrajectorySlotCandidate,
     EanArtifactToDddMovementProblemAdapter,
     build_ddd_trajectory_passenger_master_problem,
+    build_ddd_trajectory_heuristic_pricing_signal,
     enumerate_ddd_trajectory_load_patterns,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.network_refinement import (
@@ -306,4 +307,20 @@ def test_real_column_pool_builds_factorized_lp_below_integer_pool_value() -> Non
     assert (
         pool_evaluation.lp_result.incompatibility_constraint_count
         >= integer_result.incompatibility_constraint_count
+    )
+    pricing_signal = build_ddd_trajectory_heuristic_pricing_signal(
+        movement_problem=movement,
+        artifact=artifact,
+        passenger_build=evaluator.passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+        lp_result=pool_evaluation.lp_result,
+    )
+    repeated_signal = evaluator.build_trajectory_pricing_signal(
+        problem,
+        pool_evaluation.lp_result,
+    )
+    assert pricing_signal.preferences
+    assert pricing_signal.fingerprint == repeated_signal.fingerprint
+    assert pricing_signal.dual_fingerprint == (
+        pool_evaluation.lp_result.duals.fingerprint
     )

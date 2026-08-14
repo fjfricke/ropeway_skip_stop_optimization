@@ -9,6 +9,8 @@ from ropeway_skip_stop_optimization.optimization.ddd.aggregate_support import (
     DddCpSatFixedSupport,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_primal import (
+    DddCpSatPassengerObjectiveEvent,
+    DddCpSatPassengerRidePreference,
     DddCpSatPrimalOracle,
     DddCpSatPrimalResult,
     DddCpSatPrimalStatus,
@@ -114,6 +116,10 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_passenger_lp imp
     DddTrajectoryPassengerOption,
     DddTrajectoryPassengerRide,
     enumerate_ddd_trajectory_load_patterns,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_pricing import (
+    DddTrajectoryHeuristicPricingSignal,
+    build_ddd_trajectory_heuristic_pricing_signal,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generation import (
     DddTrajectoryBoundStatus,
@@ -258,6 +264,8 @@ __all__ = [
     "DddCpSatFixedSupport",
     "DddCpSatTimedFlowSupport",
     "DddCpSatMasterCoupling",
+    "DddCpSatPassengerObjectiveEvent",
+    "DddCpSatPassengerRidePreference",
     "DddBoundedTickDelay",
     "DddAnonymousFlowDecomposer",
     "DddAnonymousFlowMaster",
@@ -330,6 +338,7 @@ __all__ = [
     "DddTrajectoryColumnPool",
     "DddTrajectoryFactorizedLpOptimizer",
     "DddTrajectoryIntegratedLpReferenceOptimizer",
+    "DddTrajectoryHeuristicPricingSignal",
     "DddTrajectoryLoadPattern",
     "DddTrajectoryOptimizerMode",
     "DddTrajectoryPassengerDuals",
@@ -408,6 +417,7 @@ __all__ = [
     "build_ddd_cp_sat_local_explainability_report",
     "build_ddd_passenger_master_problem",
     "build_ddd_trajectory_passenger_master_problem",
+    "build_ddd_trajectory_heuristic_pricing_signal",
     "build_ddd_mandatory_resource_rows",
     "build_ddd_universal_resource_row",
     "build_ddd_prefix_conflict_cuts",

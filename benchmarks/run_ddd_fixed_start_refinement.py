@@ -150,6 +150,9 @@ def main() -> None:
         ),
     )
     parser.add_argument("--trajectory-slot-time-limit", type=float, default=30.0)
+    parser.add_argument("--trajectory-pricing-interval", type=int, default=1)
+    parser.add_argument("--trajectory-pricing-time-limit", type=float, default=5.0)
+    parser.add_argument("--trajectory-pricing-candidates", type=int, default=1)
     parser.add_argument(
         "--cp-sat-diversification-interval",
         type=int,
@@ -270,6 +273,9 @@ def main() -> None:
         ),
         use_trajectory_slot_pool=args.trajectory_slot_pool,
         trajectory_optimizer_mode=trajectory_mode,
+        trajectory_pricing_interval=args.trajectory_pricing_interval,
+        trajectory_pricing_time_limit_seconds=args.trajectory_pricing_time_limit,
+        trajectory_pricing_max_candidate_count=args.trajectory_pricing_candidates,
         cp_sat_diversification_interval=args.cp_sat_diversification_interval,
         reuse_network_fragments=args.reuse_network_fragments,
         use_projected_warm_start=args.projected_warm_start,
@@ -418,6 +424,9 @@ def main() -> None:
             else trajectory_mode.value
         ),
         "trajectory_slot_time_limit_seconds": args.trajectory_slot_time_limit,
+        "trajectory_pricing_interval": args.trajectory_pricing_interval,
+        "trajectory_pricing_time_limit_seconds": args.trajectory_pricing_time_limit,
+        "trajectory_pricing_max_candidate_count": args.trajectory_pricing_candidates,
         "cp_sat_diversification_interval": args.cp_sat_diversification_interval,
         "trajectory_slot_max_conflict_rounds": (
             args.trajectory_slot_max_conflict_rounds

@@ -10,6 +10,7 @@ class DddTrajectoryOptimizerMode(StrEnum):
 
     OFF = "off"
     RESTRICTED_PRIMAL = "restricted_primal"
+    HEURISTIC_PRICING = "heuristic_pricing"
 
 
 class DddTrajectoryBoundStatus(StrEnum):

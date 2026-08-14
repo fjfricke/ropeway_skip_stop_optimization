@@ -13,6 +13,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.aggregate_support import (
 )
 from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddMovementProblem,
+    DddRouteDecision,
     DddRouteOption,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
@@ -34,6 +35,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
     DddPartialTimedPath,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
+    DDD_TIME_TICKS_PER_SECOND,
     ddd_tick_to_seconds,
 )
 
@@ -44,6 +46,53 @@ class DddCpSatPrimalStatus(StrEnum):
     INFEASIBLE = "infeasible"
     EXHAUSTED = "exhausted"
     UNKNOWN = "unknown"
+
+
+class DddCpSatPassengerObjectiveEvent(StrEnum):
+    BOARDING = "boarding"
+    ALIGHTING = "alighting"
+
+
+@dataclass(frozen=True)
+class DddCpSatPassengerRidePreference:
+    """One dual-adjusted direct-ride opportunity used only for primal search."""
+
+    id: str
+    cabin_id: int
+    board_visit_index: int
+    alight_visit_index: int
+    release_tick: int
+    board_offset_tick: int
+    alight_offset_tick: int
+    service_horizon_tick: int
+    demand_dual_tick: int
+    passenger_weight: int
+    objective_event: DddCpSatPassengerObjectiveEvent
+
+    def validate(self) -> None:
+        if not self.id:
+            raise ValueError("CP-SAT Passenger pricing preference ID must not be empty")
+        if self.cabin_id < 0:
+            raise ValueError("CP-SAT Passenger pricing cabin ID must be nonnegative")
+        if (
+            self.board_visit_index < 0
+            or self.alight_visit_index <= self.board_visit_index
+        ):
+            raise ValueError("CP-SAT Passenger pricing visits are invalid")
+        if (
+            min(
+                self.release_tick,
+                self.board_offset_tick,
+                self.alight_offset_tick,
+                self.service_horizon_tick,
+            )
+            < 0
+        ):
+            raise ValueError("CP-SAT Passenger pricing times must be nonnegative")
+        if self.passenger_weight <= 0:
+            raise ValueError("CP-SAT Passenger pricing weight must be positive")
+        if not isinstance(self.objective_event, DddCpSatPassengerObjectiveEvent):
+            raise ValueError("CP-SAT Passenger pricing objective event is invalid")
 
 
 @dataclass(frozen=True)
@@ -64,6 +113,9 @@ class DddCpSatPrimalResult:
     distance_center: tuple[DddAggregateRouteCountLiteral, ...] = ()
     support_distance_primal: int | None = None
     support_distance_lower_bound: float | None = None
+    passenger_pricing_preference_count: int = 0
+    passenger_pricing_objective_value: float | None = None
+    passenger_pricing_objective_bound: float | None = None
 
 
 DddCpSatCandidateCallback = Callable[[int, float], None]
@@ -97,6 +149,7 @@ class DddCpSatPrimalOracle:
         fixed_cabin_paths: tuple[DddPartialTimedPath, ...] = (),
         enabled_resource_ids: tuple[str, ...] | None = None,
         excluded_schedules: tuple[tuple[DddRecoveredSchedule, ...], ...] = (),
+        passenger_ride_preferences: tuple[DddCpSatPassengerRidePreference, ...] = (),
         candidate_callback: DddCpSatCandidateCallback | None = None,
     ) -> DddCpSatPrimalResult:
         problem.validate()
@@ -115,6 +168,8 @@ class DddCpSatPrimalOracle:
                 )
         _validate_fixed_cabin_paths(problem, fixed_cabin_paths)
         _validate_excluded_schedules(problem, excluded_schedules)
+        for preference in passenger_ride_preferences:
+            preference.validate()
         selected_support_modes = sum(
             item
             for item in (
@@ -128,6 +183,10 @@ class DddCpSatPrimalOracle:
             raise ValueError(
                 "fixed aggregate, timed-flow, nearest, and fixed cabin-path "
                 "CP-SAT support are mutually exclusive"
+            )
+        if passenger_ride_preferences and nearest_support is not None:
+            raise ValueError(
+                "Passenger pricing and nearest-support objectives are mutually exclusive"
             )
         if self.time_limit_seconds <= 0:
             raise ValueError("DDD CP-SAT time limit must be positive")
@@ -250,6 +309,18 @@ class DddCpSatPrimalOracle:
             if intervals:
                 model.add_no_overlap(intervals)
 
+        passenger_pricing_expression = None
+        if passenger_ride_preferences:
+            passenger_pricing_expression = _add_passenger_pricing_objective(
+                model=model,
+                movement=movement,
+                preferences=passenger_ride_preferences,
+                states_by_cabin=states_by_cabin,
+                time_by_cabin=time_by_cabin,
+                selection_by_key=selection_by_key,
+                max_completion_tick=max_completion_tick,
+            )
+
         assumption_literal_by_index: dict[int, DddAggregateRouteCountLiteral] = {}
         if fixed_support is not None:
             assumption_literal_by_index = _fix_aggregate_route_support(
@@ -287,6 +358,8 @@ class DddCpSatPrimalOracle:
                 nearest_support=nearest_support,
             )
             model.minimize(distance_expression)
+        elif passenger_pricing_expression is not None:
+            model.minimize(passenger_pricing_expression)
 
         started = perf_counter()
         candidate_schedules: list[tuple[DddRecoveredSchedule, ...]] = []
@@ -295,7 +368,7 @@ class DddCpSatPrimalOracle:
         search_complete = False
         terminal_status = cp_model.UNKNOWN
         candidate_limit = 1 if nearest_support is not None else self.max_candidate_count
-        last_solver: cp_model.CpSolver | None = None
+        last_feasible_solver: cp_model.CpSolver | None = None
         while len(candidate_schedules) < candidate_limit:
             remaining_seconds = self.time_limit_seconds - (perf_counter() - started)
             if remaining_seconds <= 0:
@@ -306,9 +379,10 @@ class DddCpSatPrimalOracle:
             solver.parameters.num_search_workers = self.num_workers
             solver.parameters.log_search_progress = self.log_search_progress
             solver.parameters.random_seed = 0
-            solver.parameters.stop_after_first_solution = nearest_support is None
+            solver.parameters.stop_after_first_solution = (
+                nearest_support is None and not passenger_ride_preferences
+            )
             terminal_status = solver.solve(model)
-            last_solver = solver
             conflict_count += solver.num_conflicts
             branch_count += solver.num_branches
             if terminal_status not in (cp_model.FEASIBLE, cp_model.OPTIMAL):
@@ -317,6 +391,7 @@ class DddCpSatPrimalOracle:
                     and self.minimum_hamming_distance == 1
                 )
                 break
+            last_feasible_solver = solver
             schedules = _extract_schedules(
                 problem=problem,
                 solver=solver,
@@ -348,14 +423,30 @@ class DddCpSatPrimalOracle:
         cabin_path_infeasible_core: tuple[DddSupportLiteral, ...] = ()
         support_distance_primal: int | None = None
         support_distance_lower_bound: float | None = None
+        passenger_pricing_objective_value: float | None = None
+        passenger_pricing_objective_bound: float | None = None
         if candidate_schedules:
             schedules = candidate_schedules[0]
             result_status = DddCpSatPrimalStatus.FEASIBLE
             if nearest_support is not None:
-                if last_solver is None:
+                if last_feasible_solver is None:
                     raise RuntimeError("nearest-support CP-SAT solve has no solver")
-                support_distance_primal = int(round(last_solver.objective_value))
-                support_distance_lower_bound = float(last_solver.best_objective_bound)
+                support_distance_primal = int(
+                    round(last_feasible_solver.objective_value)
+                )
+                support_distance_lower_bound = float(
+                    last_feasible_solver.best_objective_bound
+                )
+            elif passenger_ride_preferences:
+                if last_feasible_solver is None:
+                    raise RuntimeError("Passenger pricing solve has no solver")
+                passenger_pricing_objective_value = float(
+                    last_feasible_solver.objective_value / DDD_TIME_TICKS_PER_SECOND
+                )
+                passenger_pricing_objective_bound = float(
+                    last_feasible_solver.best_objective_bound
+                    / DDD_TIME_TICKS_PER_SECOND
+                )
         elif terminal_status == cp_model.INFEASIBLE and excluded_schedules:
             schedules = ()
             result_status = DddCpSatPrimalStatus.EXHAUSTED
@@ -403,7 +494,114 @@ class DddCpSatPrimalOracle:
             distance_center=distance_center,
             support_distance_primal=support_distance_primal,
             support_distance_lower_bound=support_distance_lower_bound,
+            passenger_pricing_preference_count=len(passenger_ride_preferences),
+            passenger_pricing_objective_value=passenger_pricing_objective_value,
+            passenger_pricing_objective_bound=passenger_pricing_objective_bound,
         )
+
+
+def _add_passenger_pricing_objective(
+    *,
+    model: cp_model.CpModel,
+    movement: DddMovementProblem,
+    preferences: tuple[DddCpSatPassengerRidePreference, ...],
+    states_by_cabin: dict[int, tuple[str, ...]],
+    time_by_cabin: dict[int, list[cp_model.IntVar]],
+    selection_by_key: dict[tuple[int, int, str], cp_model.IntVar],
+    max_completion_tick: int,
+) -> cp_model.LinearExpr:
+    options_by_state = movement.route_options_by_state_id
+    terms = []
+    seen_ids: set[str] = set()
+    for index, preference in enumerate(preferences):
+        if preference.id in seen_ids:
+            raise ValueError("CP-SAT Passenger pricing preference IDs must be unique")
+        seen_ids.add(preference.id)
+        if preference.cabin_id not in states_by_cabin:
+            raise ValueError("CP-SAT Passenger pricing references an unknown cabin")
+        states = states_by_cabin[preference.cabin_id]
+        if preference.alight_visit_index >= len(states) - 1:
+            raise ValueError("CP-SAT Passenger pricing visit exceeds cabin horizon")
+
+        def stop_literal(visit_index: int) -> cp_model.IntVar:
+            state_id = states[visit_index]
+            stop_selections = tuple(
+                selection_by_key[preference.cabin_id, visit_index, option.id]
+                for option in options_by_state[state_id]
+                if option.decision is DddRouteDecision.STOP
+            )
+            if not stop_selections:
+                raise ValueError("CP-SAT Passenger pricing visit has no STOP option")
+            if len(stop_selections) == 1:
+                return stop_selections[0]
+            result = model.new_bool_var(f"pricing_stop[{index},{visit_index}]")
+            model.add(result == sum(stop_selections))
+            return result
+
+        board_stop = stop_literal(preference.board_visit_index)
+        alight_stop = stop_literal(preference.alight_visit_index)
+        board_time = (
+            time_by_cabin[preference.cabin_id][preference.board_visit_index]
+            + preference.board_offset_tick
+        )
+        alight_time = (
+            time_by_cabin[preference.cabin_id][preference.alight_visit_index]
+            + preference.alight_offset_tick
+        )
+        released = model.new_bool_var(f"pricing_released[{index}]")
+        model.add(board_time >= preference.release_tick).only_enforce_if(released)
+        model.add(board_time <= preference.release_tick - 1).only_enforce_if(
+            released.Not()
+        )
+        board_in_horizon = model.new_bool_var(f"pricing_board_horizon[{index}]")
+        model.add(board_time <= preference.service_horizon_tick).only_enforce_if(
+            board_in_horizon
+        )
+        model.add(board_time >= preference.service_horizon_tick + 1).only_enforce_if(
+            board_in_horizon.Not()
+        )
+        alight_in_horizon = model.new_bool_var(f"pricing_alight_horizon[{index}]")
+        model.add(alight_time <= preference.service_horizon_tick).only_enforce_if(
+            alight_in_horizon
+        )
+        model.add(alight_time >= preference.service_horizon_tick + 1).only_enforce_if(
+            alight_in_horizon.Not()
+        )
+        available = model.new_bool_var(f"pricing_available[{index}]")
+        requirements = (
+            board_stop,
+            alight_stop,
+            released,
+            board_in_horizon,
+            alight_in_horizon,
+        )
+        for requirement in requirements:
+            model.add(available <= requirement)
+        model.add(available >= sum(requirements) - (len(requirements) - 1))
+
+        event_time = (
+            board_time
+            if preference.objective_event is DddCpSatPassengerObjectiveEvent.BOARDING
+            else alight_time
+        )
+        maximum_event_tick = max_completion_tick + max(
+            preference.board_offset_tick,
+            preference.alight_offset_tick,
+        )
+        active_event_time = model.new_int_var(
+            0,
+            maximum_event_tick,
+            f"pricing_event[{index}]",
+        )
+        model.add_multiplication_equality(active_event_time, [event_time, available])
+        adjusted_horizon_tick = (
+            preference.service_horizon_tick + preference.demand_dual_tick
+        )
+        terms.append(
+            preference.passenger_weight
+            * (active_event_time - adjusted_horizon_tick * available)
+        )
+    return sum(terms)
 
 
 def _validate_fixed_cabin_paths(

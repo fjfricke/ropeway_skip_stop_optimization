@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from ropeway_skip_stop_optimization.benchmarking.ddd_cases import (
@@ -18,6 +20,8 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddCpSatFixedSupport,
     DddCpSatPrimalStatus,
     DddCpSatMasterCoupling,
+    DddCpSatPassengerObjectiveEvent,
+    DddCpSatPassengerRidePreference,
     DddFixedStart,
     DddMovementProblem,
     DddMovementState,
@@ -93,6 +97,92 @@ def test_cp_sat_primal_pool_excludes_previous_route_patterns() -> None:
             tolerance_seconds=1e-9,
         )
         assert validation.status is DddNetworkValidationStatus.FEASIBLE
+
+
+def test_cp_sat_passenger_pricing_prefers_available_direct_ride() -> None:
+    movement = DddMovementProblem(
+        scenario_id="cp_sat_passenger_pricing",
+        passenger_service_end_seconds=1.5,
+        operational_end_seconds=1.5,
+        states=(
+            DddMovementState("A"),
+            DddMovementState("B"),
+            DddMovementState("C"),
+        ),
+        starts=(DddFixedStart(0, "A", 0.0, 2),),
+        route_options=tuple(
+            DddRouteOption(
+                id=f"{state}_{decision.value}",
+                from_state_id=state,
+                to_state_id=target,
+                station_id=state,
+                decision=decision,
+                duration_seconds=1.0,
+                platform_entry_offset_seconds=(
+                    0.0 if decision is DddRouteDecision.STOP else None
+                ),
+                platform_exit_offset_seconds=(
+                    0.0 if decision is DddRouteDecision.STOP else None
+                ),
+                exit_switch_offset_seconds=0.0,
+                resource_usages=(),
+            )
+            for state, target in (("A", "B"), ("B", "C"))
+            for decision in (DddRouteDecision.STOP, DddRouteDecision.SKIP)
+        ),
+        resources=(),
+    )
+    problem = DddNetworkTimeProblem(
+        movement_problem=movement,
+        discretization=DddTimeDiscretization(
+            (
+                DddTimePartition("A", (0.0, 1.5, 4.0)),
+                DddTimePartition("B", (0.0, 1.5, 4.0)),
+                DddTimePartition("C", (0.0, 1.5, 4.0)),
+            )
+        ),
+        objective=DddNetworkTimeObjective(
+            route_option_costs=tuple(
+                DddRouteOptionCost(option.id, 0.0) for option in movement.route_options
+            )
+        ),
+    )
+    preference = DddCpSatPassengerRidePreference(
+        id="ride",
+        cabin_id=0,
+        board_visit_index=0,
+        alight_visit_index=1,
+        release_tick=0,
+        board_offset_tick=0,
+        alight_offset_tick=0,
+        service_horizon_tick=2_000_000,
+        demand_dual_tick=0,
+        passenger_weight=1,
+        objective_event=DddCpSatPassengerObjectiveEvent.ALIGHTING,
+    )
+
+    result = DddCpSatPrimalOracle(
+        time_limit_seconds=2.0,
+        num_workers=1,
+    ).solve(problem, passenger_ride_preferences=(preference,))
+
+    assert result.status is DddCpSatPrimalStatus.FEASIBLE
+    assert result.schedules[0].route_option_ids == ("A_stop", "B_stop")
+    assert result.passenger_pricing_preference_count == 1
+    assert result.passenger_pricing_objective_value == pytest.approx(-1.0)
+    assert result.passenger_pricing_objective_bound == pytest.approx(-1.0)
+
+    scarce = DddCpSatPrimalOracle(
+        time_limit_seconds=2.0,
+        num_workers=1,
+    ).solve(
+        problem,
+        passenger_ride_preferences=(replace(preference, demand_dual_tick=-2_000_000),),
+    )
+
+    assert scarce.status is DddCpSatPrimalStatus.FEASIBLE
+    assert "skip" in "::".join(scarce.schedules[0].route_option_ids)
+    assert scarce.passenger_pricing_objective_value == pytest.approx(0.0)
 
 
 def test_cp_sat_primal_oracle_excludes_archived_route_patterns() -> None:

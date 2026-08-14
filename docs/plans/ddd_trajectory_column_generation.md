@@ -771,6 +771,40 @@ Stop condition: if the RMP is dominated by nearly duplicate columns or does
 not improve the primal trace over the existing CP candidate pool, do not build
 exact pricing before diagnosing the column definition.
 
+#### Phase 3 implementation status (2026-08-14)
+
+The first heuristic-pricing variant is implemented as a joint physical
+CP-SAT schedule search rather than as an independent single-cabin beam search.
+For every structurally possible direct ride, it creates an availability
+literal for the conjunction of board STOP, alight STOP, release time, and
+Passenger horizon. Its objective uses the actual no-wait boarding or
+alighting event time and the current restricted-master demand dual. CP-SAT
+still contains every original resource interval, so every returned complete
+schedule is physically feasible. Exact fixed-movement Passenger recourse
+scores the result, its cabin trajectories enter the canonical pool, and the
+next restricted-master solve may recombine them.
+
+This implementation is deliberately a primal heuristic. It assigns the full
+local load upper bound to every ride opportunity independently and does not
+model shared cabin capacity, competing demand, or duals of pair-specific
+conflict rows inside CP-SAT. Its objective is therefore a dual-guided proxy,
+not a valid reduced cost. The bound status remains `PRIMAL_POOL_ONLY` and the
+global DDD lower bound is unchanged.
+
+In a five-round Eight-Worker smoke run on the Five-Station $K=19$ case, both
+variants started from a 21-column pool with restricted LP and integer value
+$694{,}914.10$. Restricted-primal alone retained this incumbent. Five
+ten-second pricing calls, each followed immediately by an RMP resolve,
+expanded the pool to 115 columns. Successive post-pricing restricted LP values
+were $687{,}011.63$, $665{,}137.77$, $658{,}756.43$, $655{,}129.33$, and
+$654{,}777.13$. The best fully validated integer Passenger plan reached
+$663{,}475.60$, an improvement of $31{,}438.51$ passenger-seconds or
+$4.52\%$. Total solve time increased from $8.70$ to $80.13$ seconds, of which
+roughly 51 seconds were pricing model construction and search. This is a
+strong primal signal, but formal matched-budget evidence still requires frozen
+seed replay; single-worker CP-SAT did not find the initial Five-Station
+incumbent within 30 seconds.
+
 ### Phase 4: Exact no-wait pricing gate
 
 - implement an exact joint route-and-load DP, CP-SAT, or MILP pricing oracle;

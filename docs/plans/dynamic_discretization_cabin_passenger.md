@@ -1466,6 +1466,57 @@ round, which is small compared with CP-SAT candidate generation and exact
 Passenger recourse.  Formal comparisons must replay a frozen candidate pool
 or use deterministic single-worker CP-SAT.
 
+### Dual-guided no-wait primal pricing
+
+Let $z_r$ indicate that direct-ride opportunity $r$ is structurally available
+in a CP-SAT timetable. It is the exact conjunction of the selected STOP
+options at its boarding and alighting visits, boarding after release, and both
+events lying in the Passenger horizon. Let $T_r$ be the boarding event tick
+for Waiting Time and the alighting event tick for Journey Time. With horizon
+$H$, raw restricted-master demand dual $\pi_{g(r)}\leq0$, and heuristic load
+
+$$
+q_r=\min\{d_{g(r)},Q\},
+$$
+
+the CP-SAT pricing proxy minimizes
+
+$$
+\sum_r q_r\left(T_r-H-\pi_{g(r)}\right)z_r.
+$$
+
+The expression follows the single-ride reduced-cost contribution: its
+Passenger objective delta is $T_r-H$, while subtracting the raw demand dual
+gives $T_r-H-\pi_{g(r)}$. CP-SAT linearizes $T_rz_r$ with one bounded product
+variable. Times remain in the canonical integer microsecond domain during
+optimization and are converted to passenger-seconds only for reporting.
+
+This is not a reduced-cost certificate. The proxy loads every opportunity
+independently, so several overlapping rides may each receive $q_r$ even when
+their combined load exceeds $Q$ or common demand. Pair-conflict duals are not
+transferable either: a new trajectory creates new pair rows that do not exist
+in the current restricted master. Consequently, `HEURISTIC_PRICING` can only
+improve the upper bound. Every returned CP schedule nevertheless obeys the
+complete no-wait resource model; exact fixed-movement Passenger Assignment
+then supplies a valid objective, and the canonical trajectory master performs
+the actual capacitated loading and cross-cabin recombination.
+
+The implemented iteration is therefore:
+
+1. solve and fully pair-separate the restricted Passenger LP;
+2. build the dual-guided ride proxy;
+3. optimize a complete physical CP-SAT timetable while excluding archived
+   route patterns;
+4. run exact integer Passenger recourse and archive every new cabin column;
+5. re-solve the persistent integer and LP restricted masters.
+
+On the Five-Station $K=19$ smoke case, a common 21-column starting pool had
+value $694{,}914.10$. Five heuristic-pricing calls grew it to 115 columns and
+produced a validated incumbent of $663{,}475.60$; the final restricted LP was
+$654{,}777.13$. The $8{,}698.47$ difference is only the final pool
+integrality gap, while the global certified lower bound remains the separate
+DDD value of zero in this short run.
+
 On `five_station_circle_cw_half_skip_no_wait_v0` with $K=19$, ten CP-SAT
 candidate timetables produced 44 distinct cabin trajectory options and 3,324
 direct-ride variables. The pool required two separation rounds, added eight
@@ -1478,15 +1529,15 @@ $0\le z^\star\le689{,}333.892688$.
 
 Next:
 
-1. design the direct-ride Passenger lower-bound relaxation and its pricing
-   gate; do not reuse the restricted trajectory-pool objective as a lower
-   bound;
-2. feed trajectory-pool selection and Passenger dual information back into
-   CP-SAT candidate generation, so new candidates are passenger-relevant
-   rather than merely route-vector-distinct;
-3. derive and implement bounded-wait route transitions and the resource wait
+1. freeze and replay identical initial trajectory archives for matched-budget
+   restricted versus heuristic-pricing experiments;
+2. compare the implemented joint CP-SAT proxy with capacitated single-cabin
+   pricing before attempting an exact pricing certificate;
+3. design the direct-ride Passenger lower-bound pricing gate; never reuse the
+   restricted trajectory-pool objective as a global lower bound;
+4. derive and implement bounded-wait route transitions and the resource wait
    coefficients used by both CP-SAT and DDD envelopes;
-4. benchmark time to first feasible plan, first passenger incumbent, LB/UB
+5. benchmark time to first feasible plan, first passenger incumbent, LB/UB
    gap, anonymous Hall rows, and
    exact infeasibility over low, medium, and near-capacity $K$;
 5. only then expand from fixed starts to optimized initial placement.

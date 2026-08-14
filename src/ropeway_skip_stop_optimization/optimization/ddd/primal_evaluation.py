@@ -28,6 +28,10 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_passenger_lp imp
     DddTrajectoryPassengerLpResult,
     DddTrajectoryPassengerLpStatus,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_pricing import (
+    DddTrajectoryHeuristicPricingSignal,
+    build_ddd_trajectory_heuristic_pricing_signal,
+)
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
 from ropeway_skip_stop_optimization.optimization.ean.builders.passenger_builder import (
     EanPassengerCandidateBuildResult,
@@ -172,6 +176,20 @@ class DddEanPassengerPrimalEvaluator:
         """Return the canonical cached Passenger candidate universe."""
 
         return self._passenger_candidates()
+
+    def build_trajectory_pricing_signal(
+        self,
+        problem: DddNetworkTimeProblem,
+        lp_result: DddTrajectoryPassengerLpResult,
+    ) -> DddTrajectoryHeuristicPricingSignal:
+        self.validate_problem(problem)
+        return build_ddd_trajectory_heuristic_pricing_signal(
+            movement_problem=problem.movement_problem,
+            artifact=self.artifact,
+            passenger_build=self._passenger_candidates(),
+            objective=self.objective,
+            lp_result=lp_result,
+        )
 
     def validate_problem(self, problem: DddNetworkTimeProblem) -> None:
         problem.validate()

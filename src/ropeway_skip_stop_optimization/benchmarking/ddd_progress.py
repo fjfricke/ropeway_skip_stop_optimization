@@ -177,6 +177,14 @@ def format_ddd_iteration_progress(
                 f"b={iteration.trajectory_pool_lp_build_seconds:.2f}s:"
                 f"s={iteration.trajectory_pool_lp_optimize_seconds:.2f}s/"
                 f"dual={iteration.trajectory_pool_lp_dual_fingerprint[:8] if iteration.trajectory_pool_lp_dual_fingerprint else '-'}"
+                "/price="
+                f"{iteration.trajectory_pricing_status.value}:"
+                f"{iteration.trajectory_pricing_candidate_count}c:"
+                f"{iteration.trajectory_pricing_preference_count}r:"
+                f"obj={_format_bound(iteration.trajectory_pricing_objective_value)}:"
+                f"bnd={_format_bound(iteration.trajectory_pricing_objective_bound)}:"
+                f"{iteration.trajectory_pricing_seconds:.2f}s:"
+                f"sig={iteration.trajectory_pricing_signal_fingerprint[:8] if iteration.trajectory_pricing_signal_fingerprint else '-'}"
             ),
             (
                 f"splits={iteration.time_split_count}:"

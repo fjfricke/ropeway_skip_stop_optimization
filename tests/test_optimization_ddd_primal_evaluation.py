@@ -14,6 +14,7 @@ from ropeway_skip_stop_optimization.examples.three_station import (
 from ropeway_skip_stop_optimization.optimization.ddd import (
     DddCpSatMasterCoupling,
     DddCpSatPrimalOracle,
+    DddCpSatPrimalStatus,
     DddEanPassengerPrimalEvaluator,
     DddPrimalEvaluationResult,
     DddNetworkTimeRefinementSolver,
@@ -141,6 +142,52 @@ def test_cp_sat_timetable_receives_exact_fixed_movement_passenger_assignment(
     assert result.global_upper_bound == min(candidate_objectives)
     assert result.global_upper_bound <= candidate_objectives[0]
     assert result.iterations[0].primal_objective_value == result.global_upper_bound
+
+
+def test_heuristic_pricing_uses_restricted_lp_duals_on_next_round() -> None:
+    pytest.importorskip("gurobipy")
+    pytest.importorskip("ortools")
+    artifact = build_three_station_network_combined_artifact()
+    scenario = replace(build_three_station_scenario(), id=artifact.scenario_id)
+    movement = EanArtifactToDddMovementProblemAdapter().build(artifact)
+    problem = build_initial_ddd_network_problem(movement)
+    evaluator = DddEanPassengerPrimalEvaluator(
+        scenario=scenario,
+        artifact=artifact,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+        time_limit_seconds=5.0,
+    )
+
+    result = DddNetworkTimeRefinementSolver(
+        max_iterations=2,
+        max_new_time_splits_per_iteration=100,
+        cp_sat_time_limit_seconds=5.0,
+        cp_sat_num_workers=1,
+        cp_sat_max_candidate_count=2,
+        trajectory_optimizer_mode=DddTrajectoryOptimizerMode.HEURISTIC_PRICING,
+        trajectory_pricing_time_limit_seconds=5.0,
+        trajectory_pricing_max_candidate_count=1,
+    ).solve(problem, primal_evaluator=evaluator)
+
+    assert len(result.iterations) == 2
+    first, priced = result.iterations
+    assert first.trajectory_pool_lp_status is DddTrajectoryPassengerLpStatus.OPTIMAL
+    assert priced.trajectory_optimizer_mode is (
+        DddTrajectoryOptimizerMode.HEURISTIC_PRICING
+    )
+    assert priced.trajectory_pricing_status in (
+        DddCpSatPrimalStatus.FEASIBLE,
+        DddCpSatPrimalStatus.EXHAUSTED,
+    )
+    assert priced.trajectory_pricing_preference_count > 0
+    assert priced.trajectory_pricing_signal_fingerprint
+    assert priced.trajectory_pricing_seconds > 0.0
+    assert priced.trajectory_bound_status is DddTrajectoryBoundStatus.PRIMAL_POOL_ONLY
+    assert priced.trajectory_certified_lower_bound is None
+    if priced.trajectory_pricing_status is DddCpSatPrimalStatus.FEASIBLE:
+        assert priced.trajectory_pricing_candidate_count == 1
+        assert priced.trajectory_pricing_objective_value is not None
+        assert priced.trajectory_pricing_objective_bound is not None
 
 
 def test_valid_movement_column_is_retained_when_passenger_recourse_is_unknown() -> None:
