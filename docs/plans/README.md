@@ -40,6 +40,9 @@ Current plans:
 - `ddd_fixed_k_certified_bounds.md`: general exact-cardinality Fixed-$K$ bound
   engine combining anonymous passenger DDD, resource-window cuts, adaptive
   cohort/prefix disaggregation, and independently validated primal schedules.
+- `ddd_trajectory_column_generation.md`: DDD-guided whole-horizon cabin
+  trajectory master, joint route-and-load pricing, delayed resource-conflict
+  rows, and the exact-pricing gate for a second certified fixed-$K$ lower bound.
 - `demand_driven_network_operations.md`: recommended finite-horizon
   passenger-guided planner using continuous-time resource reservations,
   bounded conflict repair, exact fixed-movement passenger evaluation, and

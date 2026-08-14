@@ -620,9 +620,11 @@ Decision gates:
    or materially reduce repeated CP rejections.
 2. Keep adaptive cohort refinement only if it strengthens bounds more cheaply
    than global cabin disaggregation on the reference matrix.
-3. Move toward trajectory column generation only if selective disaggregation
-   still enumerates supports without useful bound lift; complete pricing would
-   then be required before claiming a global lower bound.
+3. Move toward the whole-horizon trajectory process specified in
+   [`ddd_trajectory_column_generation.md`](ddd_trajectory_column_generation.md)
+   only if selective disaggregation still enumerates supports without useful
+   bound lift; complete pricing is required before claiming its LP value as a
+   global lower bound.
 4. Keep CP-SAT/LNS as the primal channel even if it produces no proof cuts,
    provided it improves validated upper bounds efficiently.
 
