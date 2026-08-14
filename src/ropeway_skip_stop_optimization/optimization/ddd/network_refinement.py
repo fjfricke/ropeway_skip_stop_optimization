@@ -279,6 +279,15 @@ class DddNetworkTimeRefinementIteration:
     trajectory_pool_candidate_count: int = 0
     trajectory_pool_added_option_count: int = 0
     trajectory_pool_option_count: int = 0
+    trajectory_pool_solved_this_round: bool = False
+    trajectory_pool_option_cache_hit_count: int = 0
+    trajectory_pool_option_cache_miss_count: int = 0
+    trajectory_pool_option_cache_seconds: float = 0.0
+    trajectory_pool_added_ride_variable_count: int = 0
+    trajectory_pool_master_model_created: bool = False
+    trajectory_pool_master_update_seconds: float = 0.0
+    trajectory_pool_time_to_first_incumbent_seconds: float | None = None
+    trajectory_pool_incumbent_improvement_count: int = 0
     trajectory_pool_ride_variable_count: int = 0
     trajectory_pool_conflict_round_count: int = 0
     trajectory_pool_incompatibility_count: int = 0
@@ -706,6 +715,7 @@ class DddNetworkTimeRefinementSolver:
             primal_candidate_summaries: list[DddPrimalEvaluationSummary] = []
             trajectory_pool_result = latest_trajectory_pool_result
             trajectory_pool_added_option_count = 0
+            trajectory_pool_solved_this_round = False
 
             def consider_primal_candidate(
                 schedules: tuple[DddRecoveredSchedule, ...],
@@ -1874,6 +1884,7 @@ class DddNetworkTimeRefinementSolver:
                 )
                 trajectory_pool_result = pool_evaluation.pool_result
                 latest_trajectory_pool_result = trajectory_pool_result
+                trajectory_pool_solved_this_round = True
                 last_trajectory_pool_fingerprint = trajectory_column_pool.fingerprint
                 evaluation = pool_evaluation.evaluation
                 if evaluation is not None:
@@ -2016,6 +2027,9 @@ class DddNetworkTimeRefinementSolver:
                         trajectory_pool_added_option_count
                     ),
                     trajectory_pool_option_count=(trajectory_column_pool.column_count),
+                    trajectory_pool_solved_this_round=(
+                        trajectory_pool_solved_this_round
+                    ),
                     aggregate_support_constraint_count=(
                         flow.aggregate_support_constraint_count
                     ),
@@ -2687,6 +2701,7 @@ def _iteration(
     trajectory_pool_candidate_count: int = 0,
     trajectory_pool_added_option_count: int = 0,
     trajectory_pool_option_count: int = 0,
+    trajectory_pool_solved_this_round: bool = False,
     cp_sat_cabin_path_status: DddCpSatPrimalStatus = (DddCpSatPrimalStatus.NOT_RUN),
     cp_sat_cabin_path_seconds: float = 0.0,
     cp_sat_cabin_path_core_cabin_ids: tuple[int, ...] = (),
@@ -2845,6 +2860,47 @@ def _iteration(
         trajectory_pool_candidate_count=trajectory_pool_candidate_count,
         trajectory_pool_added_option_count=trajectory_pool_added_option_count,
         trajectory_pool_option_count=trajectory_pool_option_count,
+        trajectory_pool_solved_this_round=trajectory_pool_solved_this_round,
+        trajectory_pool_option_cache_hit_count=(
+            trajectory_pool_result.option_cache_hit_count
+            if trajectory_pool_result is not None and trajectory_pool_solved_this_round
+            else 0
+        ),
+        trajectory_pool_option_cache_miss_count=(
+            trajectory_pool_result.option_cache_miss_count
+            if trajectory_pool_result is not None and trajectory_pool_solved_this_round
+            else 0
+        ),
+        trajectory_pool_option_cache_seconds=(
+            trajectory_pool_result.option_cache_seconds
+            if trajectory_pool_result is not None and trajectory_pool_solved_this_round
+            else 0.0
+        ),
+        trajectory_pool_added_ride_variable_count=(
+            trajectory_pool_result.added_ride_variable_count
+            if trajectory_pool_result is not None and trajectory_pool_solved_this_round
+            else 0
+        ),
+        trajectory_pool_master_model_created=(
+            trajectory_pool_result.master_model_created
+            if trajectory_pool_result is not None and trajectory_pool_solved_this_round
+            else False
+        ),
+        trajectory_pool_master_update_seconds=(
+            trajectory_pool_result.master_model_update_seconds
+            if trajectory_pool_result is not None and trajectory_pool_solved_this_round
+            else 0.0
+        ),
+        trajectory_pool_time_to_first_incumbent_seconds=(
+            trajectory_pool_result.time_to_first_incumbent_seconds
+            if trajectory_pool_result is not None and trajectory_pool_solved_this_round
+            else None
+        ),
+        trajectory_pool_incumbent_improvement_count=(
+            trajectory_pool_result.incumbent_improvement_count
+            if trajectory_pool_result is not None and trajectory_pool_solved_this_round
+            else 0
+        ),
         trajectory_pool_ride_variable_count=(
             trajectory_pool_result.ride_variable_count
             if trajectory_pool_result is not None
@@ -2862,7 +2918,7 @@ def _iteration(
         ),
         trajectory_pool_seconds=(
             trajectory_pool_result.total_seconds
-            if trajectory_pool_result is not None
+            if trajectory_pool_result is not None and trajectory_pool_solved_this_round
             else 0.0
         ),
         aggregate_support_constraint_count=aggregate_support_constraint_count,

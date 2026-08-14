@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 from hashlib import sha256
 import json
+import math
 from time import perf_counter
 from typing import Any
 
@@ -121,6 +122,8 @@ class DddTrajectoryColumnPool:
         self._instance_fingerprint: str | None = None
         self._fingerprint: str | None = None
         self._column_count_by_cabin_id: dict[int, int] = {}
+        self._last_option_cache_hit_count = 0
+        self._last_option_cache_miss_count = 0
 
     @property
     def columns(self) -> tuple[DddTrajectoryColumn, ...]:
@@ -302,6 +305,18 @@ class DddTrajectoryColumnPool:
     ) -> None:
         self._master_model_states[state.context_key] = state
 
+    def record_option_cache_access(self, *, hits: int, misses: int) -> None:
+        self._last_option_cache_hit_count = hits
+        self._last_option_cache_miss_count = misses
+
+    @property
+    def last_option_cache_hit_count(self) -> int:
+        return self._last_option_cache_hit_count
+
+    @property
+    def last_option_cache_miss_count(self) -> int:
+        return self._last_option_cache_miss_count
+
 
 @dataclass(frozen=True)
 class DddTrajectorySlotPoolResult:
@@ -321,6 +336,15 @@ class DddTrajectorySlotPoolResult:
     bound_status: DddTrajectoryBoundStatus = DddTrajectoryBoundStatus.PRIMAL_POOL_ONLY
     certified_lower_bound: float | None = None
     incompatibility_pairs: tuple[tuple[str, str], ...] = ()
+    option_cache_hit_count: int = 0
+    option_cache_miss_count: int = 0
+    option_cache_seconds: float = 0.0
+    added_trajectory_option_count: int = 0
+    added_ride_variable_count: int = 0
+    master_model_created: bool = False
+    master_model_update_seconds: float = 0.0
+    time_to_first_incumbent_seconds: float | None = None
+    incumbent_improvement_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -345,6 +369,20 @@ class _TrajectoryMasterModelState:
     group_by_id: dict[str, Any]
     unserved_cost_by_group_id: dict[str, float]
     incompatibility_pairs: set[tuple[str, str]]
+    has_incumbent: bool = False
+
+
+@dataclass
+class _TrajectoryPoolRunMetrics:
+    option_cache_hit_count: int
+    option_cache_miss_count: int
+    option_cache_seconds: float
+    added_trajectory_option_count: int
+    added_ride_variable_count: int
+    master_model_created: bool
+    master_model_update_seconds: float
+    time_to_first_incumbent_seconds: float | None
+    incumbent_improvement_count: int = 0
 
 
 def _trajectory_master_context_key(
@@ -522,32 +560,68 @@ class DddTrajectorySlotPoolOptimizer:
     ) -> DddTrajectorySlotPoolResult:
         started = perf_counter()
         self._validate(problem, artifact, passenger_build, column_pool)
+        option_build_started = perf_counter()
         options = _build_trajectory_options(
             column_pool=column_pool,
             passenger_build=passenger_build,
             horizon_seconds=artifact.config.horizon_seconds,
         )
+        option_cache_seconds = perf_counter() - option_build_started
         context_key = _trajectory_master_context_key(
             artifact=artifact,
             passenger_build=passenger_build,
             objective=objective,
         )
+        previous_state = column_pool.master_model_state(context_key)
+        previous_option_count = (
+            len(previous_state.options_by_id) if previous_state is not None else 0
+        )
+        previous_ride_count = (
+            len(previous_state.ride_count) if previous_state is not None else 0
+        )
+        model_update_started = perf_counter()
         state = _prepare_trajectory_master_model(
-            state=column_pool.master_model_state(context_key),
+            state=previous_state,
             options=options,
             artifact=artifact,
             passenger_build=passenger_build,
             objective=objective,
             output_flag=self.output_flag,
         )
+        model_update_seconds = perf_counter() - model_update_started
         column_pool.retain_master_model_state(state)
         model = state.model
         select = state.select
         ride_count = state.ride_count
+        run_metrics = _TrajectoryPoolRunMetrics(
+            option_cache_hit_count=column_pool.last_option_cache_hit_count,
+            option_cache_miss_count=column_pool.last_option_cache_miss_count,
+            option_cache_seconds=option_cache_seconds,
+            added_trajectory_option_count=(
+                len(state.options_by_id) - previous_option_count
+            ),
+            added_ride_variable_count=(len(state.ride_count) - previous_ride_count),
+            master_model_created=previous_state is None,
+            master_model_update_seconds=model_update_seconds,
+            time_to_first_incumbent_seconds=(0.0 if state.has_incumbent else None),
+        )
 
         solve_seconds = 0.0
         incompatibility_pairs = state.incompatibility_pairs
         conflict_round_count = 0
+        incumbent_best = math.inf
+
+        def incumbent_callback(callback_model: Any, where: int) -> None:
+            if where != GRB.Callback.MIPSOL:
+                return
+            nonlocal incumbent_best
+            objective_value = callback_model.cbGet(GRB.Callback.MIPSOL_OBJ)
+            if run_metrics.time_to_first_incumbent_seconds is None:
+                run_metrics.time_to_first_incumbent_seconds = perf_counter() - started
+            if objective_value < incumbent_best - 1e-9:
+                incumbent_best = objective_value
+                run_metrics.incumbent_improvement_count += 1
+
         for _ in range(self.max_conflict_rounds + 1):
             remaining = self.time_limit_seconds - (perf_counter() - started)
             if remaining <= 0:
@@ -559,12 +633,19 @@ class DddTrajectorySlotPoolOptimizer:
                     incompatibility_pairs=incompatibility_pairs,
                     solve_seconds=solve_seconds,
                     started=started,
+                    run_metrics=run_metrics,
                     detail="trajectory-slot pool time budget exhausted",
                 )
             model.Params.TimeLimit = remaining
             solve_started = perf_counter()
-            model.optimize()
+            model.optimize(incumbent_callback)
             solve_seconds += perf_counter() - solve_started
+            if model.SolCount > 0:
+                state.has_incumbent = True
+                if run_metrics.time_to_first_incumbent_seconds is None:
+                    run_metrics.time_to_first_incumbent_seconds = (
+                        perf_counter() - started
+                    )
             if model.Status == GRB.INFEASIBLE:
                 return self._result(
                     status=DddTrajectorySlotPoolStatus.POOL_INFEASIBLE,
@@ -574,6 +655,7 @@ class DddTrajectorySlotPoolOptimizer:
                     incompatibility_pairs=incompatibility_pairs,
                     solve_seconds=solve_seconds,
                     started=started,
+                    run_metrics=run_metrics,
                     detail="no compatible combination exists in the finite pool",
                 )
             if model.SolCount <= 0:
@@ -585,6 +667,7 @@ class DddTrajectorySlotPoolOptimizer:
                     incompatibility_pairs=incompatibility_pairs,
                     solve_seconds=solve_seconds,
                     started=started,
+                    run_metrics=run_metrics,
                     detail=f"trajectory-slot solver status {model.Status}",
                 )
             selected = tuple(option for option in options if select[option.id].X >= 0.5)
@@ -597,6 +680,7 @@ class DddTrajectorySlotPoolOptimizer:
                     incompatibility_pairs=incompatibility_pairs,
                     solve_seconds=solve_seconds,
                     started=started,
+                    run_metrics=run_metrics,
                     detail="trajectory-slot selection does not choose one per cabin",
                 )
             reference_solution = DddReferenceSolution(
@@ -652,6 +736,23 @@ class DddTrajectorySlotPoolOptimizer:
                     solve_seconds=solve_seconds,
                     total_seconds=perf_counter() - started,
                     incompatibility_pairs=tuple(sorted(incompatibility_pairs)),
+                    option_cache_hit_count=run_metrics.option_cache_hit_count,
+                    option_cache_miss_count=run_metrics.option_cache_miss_count,
+                    option_cache_seconds=run_metrics.option_cache_seconds,
+                    added_trajectory_option_count=(
+                        run_metrics.added_trajectory_option_count
+                    ),
+                    added_ride_variable_count=run_metrics.added_ride_variable_count,
+                    master_model_created=run_metrics.master_model_created,
+                    master_model_update_seconds=(
+                        run_metrics.master_model_update_seconds
+                    ),
+                    time_to_first_incumbent_seconds=(
+                        run_metrics.time_to_first_incumbent_seconds
+                    ),
+                    incumbent_improvement_count=(
+                        run_metrics.incumbent_improvement_count
+                    ),
                 )
 
             selected_by_cabin_id = {item.cabin_id: item for item in selected}
@@ -666,6 +767,7 @@ class DddTrajectorySlotPoolOptimizer:
                         incompatibility_pairs=incompatibility_pairs,
                         solve_seconds=solve_seconds,
                         started=started,
+                        run_metrics=run_metrics,
                         detail="pooled source trajectory contains a self-conflict",
                     )
                 first = selected_by_cabin_id[conflict.first_cabin_id].id
@@ -681,6 +783,7 @@ class DddTrajectorySlotPoolOptimizer:
                     incompatibility_pairs=incompatibility_pairs,
                     solve_seconds=solve_seconds,
                     started=started,
+                    run_metrics=run_metrics,
                     detail="trajectory conflicts produced no new incompatibility",
                 )
             if conflict_round_count >= self.max_conflict_rounds:
@@ -692,6 +795,7 @@ class DddTrajectorySlotPoolOptimizer:
                     incompatibility_pairs=incompatibility_pairs,
                     solve_seconds=solve_seconds,
                     started=started,
+                    run_metrics=run_metrics,
                     detail="trajectory-slot conflict-round limit exhausted",
                 )
             for first, second in sorted(new_pairs):
@@ -711,6 +815,7 @@ class DddTrajectorySlotPoolOptimizer:
             incompatibility_pairs=incompatibility_pairs,
             solve_seconds=solve_seconds,
             started=started,
+            run_metrics=run_metrics,
             detail="trajectory-slot conflict-round limit exhausted",
         )
 
@@ -744,6 +849,7 @@ class DddTrajectorySlotPoolOptimizer:
         incompatibility_pairs: set[tuple[str, str]],
         solve_seconds: float,
         started: float,
+        run_metrics: _TrajectoryPoolRunMetrics,
         detail: str,
     ) -> DddTrajectorySlotPoolResult:
         return DddTrajectorySlotPoolResult(
@@ -761,6 +867,17 @@ class DddTrajectorySlotPoolOptimizer:
             total_seconds=perf_counter() - started,
             detail=detail,
             incompatibility_pairs=tuple(sorted(incompatibility_pairs)),
+            option_cache_hit_count=run_metrics.option_cache_hit_count,
+            option_cache_miss_count=run_metrics.option_cache_miss_count,
+            option_cache_seconds=run_metrics.option_cache_seconds,
+            added_trajectory_option_count=run_metrics.added_trajectory_option_count,
+            added_ride_variable_count=run_metrics.added_ride_variable_count,
+            master_model_created=run_metrics.master_model_created,
+            master_model_update_seconds=run_metrics.master_model_update_seconds,
+            time_to_first_incumbent_seconds=(
+                run_metrics.time_to_first_incumbent_seconds
+            ),
+            incumbent_improvement_count=run_metrics.incumbent_improvement_count,
         )
 
 
@@ -820,9 +937,13 @@ def _build_trajectory_options(
         horizon_seconds=horizon_seconds,
     )
     template = column_pool.template_movement_plan
+    hit_count = 0
+    miss_count = 0
     for column in column_pool.columns:
         if column.id in cache:
+            hit_count += 1
             continue
+        miss_count += 1
         reference, ean_trajectory, schedule = column_pool.payload(column.id)
         one_trajectory_plan = EanMovementPlan(
             scenario_id=template.scenario_id,
@@ -844,6 +965,7 @@ def _build_trajectory_options(
                 horizon_seconds=horizon_seconds,
             ),
         )
+    column_pool.record_option_cache_access(hits=hit_count, misses=miss_count)
     return tuple(cache[key] for key in sorted(cache))
 
 

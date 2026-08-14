@@ -102,6 +102,23 @@ def test_cp_sat_timetable_receives_exact_fixed_movement_passenger_assignment(
         for iteration in result.iterations
     )
     assert result.iterations[0].trajectory_pool_ride_variable_count > 0
+    solved_pool_rounds = tuple(
+        iteration
+        for iteration in result.iterations
+        if iteration.trajectory_pool_solved_this_round
+    )
+    assert solved_pool_rounds
+    assert solved_pool_rounds[0].trajectory_pool_master_model_created
+    assert solved_pool_rounds[0].trajectory_pool_option_cache_miss_count > 0
+    assert (
+        solved_pool_rounds[0].trajectory_pool_time_to_first_incumbent_seconds
+        is not None
+    )
+    assert all(
+        iteration.trajectory_pool_seconds == 0.0
+        for iteration in result.iterations
+        if not iteration.trajectory_pool_solved_this_round
+    )
     assert len(result.iterations[0].primal_candidate_summaries) >= 3
     candidate_objectives = tuple(
         summary.objective_value
@@ -214,6 +231,15 @@ def test_restricted_master_reuses_model_when_pool_grows() -> None:
     assert add(schedule_sets[0]) == len(movement.starts)
     first = evaluator.evaluate_trajectory_pool(problem, pool)
     assert first.pool_result.status is DddTrajectorySlotPoolStatus.FEASIBLE
+    assert first.pool_result.master_model_created
+    assert first.pool_result.option_cache_hit_count == 0
+    assert first.pool_result.option_cache_miss_count == pool.column_count
+    assert first.pool_result.added_trajectory_option_count == pool.column_count
+    assert (
+        first.pool_result.added_ride_variable_count
+        == first.pool_result.ride_variable_count
+    )
+    assert first.pool_result.time_to_first_incumbent_seconds is not None
     first_state = next(iter(pool._master_model_states.values()))
     first_model_id = id(first_state.model)
     first_variable_count = first_state.model.NumVars
@@ -224,6 +250,14 @@ def test_restricted_master_reuses_model_when_pool_grows() -> None:
     assert id(second_state.model) == first_model_id
     assert second_state.model.NumVars > first_variable_count
     assert second.pool_result.trajectory_option_count == pool.column_count
+    assert not second.pool_result.master_model_created
+    assert second.pool_result.option_cache_hit_count > 0
+    assert second.pool_result.option_cache_miss_count > 0
+    assert second.pool_result.added_trajectory_option_count > 0
+    assert second.pool_result.added_ride_variable_count == (
+        second.pool_result.ride_variable_count - first.pool_result.ride_variable_count
+    )
+    assert second.pool_result.time_to_first_incumbent_seconds == 0.0
 
 
 def test_passenger_evaluator_rejects_unrelated_master_objective() -> None:

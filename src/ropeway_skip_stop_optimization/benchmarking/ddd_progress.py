@@ -160,6 +160,14 @@ def format_ddd_iteration_progress(
                 f"{iteration.trajectory_pool_ride_variable_count}r/"
                 f"{iteration.trajectory_pool_conflict_round_count}c/"
                 f"{iteration.trajectory_pool_incompatibility_count}i/"
+                f"run={int(iteration.trajectory_pool_solved_this_round)}/"
+                f"cache={iteration.trajectory_pool_option_cache_hit_count}h:"
+                f"{iteration.trajectory_pool_option_cache_miss_count}m/"
+                f"+{iteration.trajectory_pool_added_ride_variable_count}rv/"
+                f"model={'new' if iteration.trajectory_pool_master_model_created else 'reuse'}/"
+                f"update={iteration.trajectory_pool_master_update_seconds:.2f}s/"
+                f"first={_format_bound(iteration.trajectory_pool_time_to_first_incumbent_seconds)}s/"
+                f"imp={iteration.trajectory_pool_incumbent_improvement_count}/"
                 f"{iteration.trajectory_pool_seconds:.2f}s"
             ),
             (
