@@ -23,6 +23,9 @@ _EXPORTS_BY_MODULE: dict[str, tuple[str, ...]] = {
         'DddCpSatPrimalResult',
         'DddCpSatPrimalStatus',
     ),
+    'ropeway_skip_stop_optimization.optimization.ddd.cp_sat_round': (
+        'DddCpSatMasterCoupling',
+    ),
     'ropeway_skip_stop_optimization.optimization.ddd.ean_plan_adapter': (
         'DddReferenceToEanMovementPlanAdapter',
     ),
@@ -62,7 +65,6 @@ _EXPORTS_BY_MODULE: dict[str, tuple[str, ...]] = {
         'DddRouteOption',
     ),
     'ropeway_skip_stop_optimization.optimization.ddd.network_refinement': (
-        'DddCpSatMasterCoupling',
         'DddNetworkTimeRefinementIteration',
         'DddNetworkTimeRefinementProgressCallback',
         'DddNetworkTimeRefinementProgressEvent',

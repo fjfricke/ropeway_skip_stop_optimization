@@ -9,12 +9,15 @@ from time import perf_counter
 from ropeway_skip_stop_optimization.optimization.ddd.aggregate_support import (
     DddAggregateSupportCut,
     DddAggregateSupportDistanceCut,
-    DddCpSatFixedSupport,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_primal import (
     DddCpSatPrimalOracle,
     DddCpSatPrimalResult,
     DddCpSatPrimalStatus,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_round import (
+    DddCpSatMasterCoupling,
+    DddCpSatRoundSolver,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.local_resource_explainability import (
     DddCpSatLocalExplainabilityObservation,
@@ -34,8 +37,6 @@ from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
     DddLayeredTimeNetworkBuilder,
     DddNetworkPathProblemAdapter,
     DddNetworkTimeProblem,
-    build_ddd_cp_sat_timed_flow_support,
-    estimate_ddd_prefix_formulation_size,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.network_master_phase import (
     DddNetworkMasterPhaseSolver,
@@ -49,6 +50,10 @@ from ropeway_skip_stop_optimization.optimization.ddd.primal_evaluation import (
 )
 from ropeway_skip_stop_optimization.optimization.ddd.passenger_master import (
     DddPassengerMasterProblem,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.prefix_budget import (
+    ddd_prefix_formulation_within_budget,
+    select_ddd_prefix_cuts_within_budget,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_slot import (
     DddTrajectoryColumnPool,
@@ -71,7 +76,6 @@ from ropeway_skip_stop_optimization.optimization.ddd.resource_time import (
     build_ddd_universal_resource_row,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.lifting import (
-    build_ddd_cabin_path_core_cut,
     build_ddd_prefix_conflict_cuts,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.reference import (
@@ -120,11 +124,6 @@ class DddNetworkTimeRefinementStatus(StrEnum):
     REFINEMENT_STALLED = "refinement_stalled"
     REFINEMENT_BUDGET_EXHAUSTED = "refinement_budget_exhausted"
     INVALID_INTERNAL = "invalid_internal"
-
-
-class DddCpSatMasterCoupling(StrEnum):
-    FREE_ROUTE_CHOICES = "free_route_choices"
-    FIXED_AGGREGATE_SUPPORT = "fixed_aggregate_support"
 
 
 class DddNetworkValidationStatus(StrEnum):
@@ -608,6 +607,19 @@ class DddNetworkTimeRefinementSolver:
             time_limit_seconds=(self.cp_sat_local_explainability_time_limit_seconds),
             num_workers=self.cp_sat_num_workers,
         )
+        cp_sat_round_solver = DddCpSatRoundSolver(
+            use_primal_oracle=self.use_cp_sat_primal_oracle,
+            master_coupling=self.cp_sat_master_coupling,
+            use_timed_flow_covers=self.use_cp_sat_timed_flow_covers,
+            use_cabin_path_cuts=self.use_cp_sat_cabin_path_cuts,
+            use_nearest_support=self.use_cp_sat_nearest_support,
+            collect_local_explainability=self.collect_cp_sat_local_explainability,
+            retry_interval=self.cp_sat_retry_interval,
+            diversification_interval=self.cp_sat_diversification_interval,
+            max_prefix_variable_count=self.max_prefix_variable_count,
+            max_tracked_prefix_cabin_count=self.max_tracked_prefix_cabin_count,
+            max_prefix_visit_index=self.max_prefix_visit_index,
+        )
         current = problem
         lower_bound = -math.inf
         upper_bound = math.inf
@@ -901,7 +913,7 @@ class DddNetworkTimeRefinementSolver:
             )
             network = builder.build(current)
             network_build_seconds = perf_counter() - network_started
-            if not _prefix_formulation_within_budget(
+            if not ddd_prefix_formulation_within_budget(
                 network,
                 tuple(cuts),
                 max_variable_count=self.max_prefix_variable_count,
@@ -1178,294 +1190,123 @@ class DddNetworkTimeRefinementSolver:
                 round_index,
             )
 
-            cp_sat_status = DddCpSatPrimalStatus.NOT_RUN
-            cp_sat_seconds = 0.0
-            cp_sat_conflict_count = 0
-            cp_sat_branch_count = 0
             cp_sat_candidate_count = 0
-            cp_sat_search_complete = False
-            cp_sat_exact_infeasible = False
-            cp_sat_cabin_path_status = DddCpSatPrimalStatus.NOT_RUN
-            cp_sat_cabin_path_seconds = 0.0
-            cp_sat_cabin_path_core_cabin_ids: tuple[int, ...] = ()
-            cp_sat_cabin_path_core_literal_count = 0
-            cp_sat_cabin_path_cut_literal_count = 0
-            cp_sat_cabin_path_candidate_cuts: tuple[DddSupportConflictCut, ...] = ()
-            fixed_cp_support = (
-                DddCpSatFixedSupport.from_paths(paths)
-                if self.cp_sat_master_coupling
-                is DddCpSatMasterCoupling.FIXED_AGGREGATE_SUPPORT
-                else None
-            )
-            timed_flow_cp_support = (
-                build_ddd_cp_sat_timed_flow_support(
-                    network,
-                    flow,
-                    current.movement_problem,
-                )
-                if fixed_cp_support is not None and self.use_cp_sat_timed_flow_covers
-                else None
-            )
-            new_aggregate_support_cuts: tuple[DddAggregateSupportCut, ...] = ()
-            new_aggregate_distance_cuts: tuple[DddAggregateSupportDistanceCut, ...] = ()
-            new_timed_flow_cover_cuts: tuple[DddTimedFlowCoverCut, ...] = ()
-            cp_sat_core_literal_count = 0
-            cp_sat_timed_flow_core_literal_count = 0
-            cp_sat_timed_flow_core_resource_ids: tuple[str, ...] = ()
-            cp_sat_local_explainability: (
-                DddCpSatLocalExplainabilityObservation | None
-            ) = None
-            cp_sat_nearest_status = DddCpSatPrimalStatus.NOT_RUN
-            cp_sat_nearest_seconds = 0.0
-            cp_sat_nearest_distance_primal: int | None = None
-            cp_sat_nearest_distance_lower_bound: float | None = None
-            cp_sat_diversification_round = (
-                self.cp_sat_diversification_interval > 0
-                and round_index > 1
-                and (round_index - 1) % self.cp_sat_diversification_interval == 0
-            )
-            if self.use_cp_sat_primal_oracle and (
-                self.cp_sat_master_coupling
-                is DddCpSatMasterCoupling.FIXED_AGGREGATE_SUPPORT
-                or round_index == 1
-                or cp_sat_diversification_round
-                or (
-                    best_reference is None
-                    and (round_index - 1) % self.cp_sat_retry_interval == 0
-                )
-            ):
-                cp_result: DddCpSatPrimalResult | None = None
-                if self.use_cp_sat_cabin_path_cuts and not (
-                    cp_sat_diversification_round
-                ):
-                    cabin_path_result = cp_sat_oracle.solve(
-                        current,
-                        hint_paths=paths,
-                        fixed_cabin_paths=paths,
-                    )
-                    cp_sat_cabin_path_status = cabin_path_result.status
-                    cp_sat_cabin_path_seconds = cabin_path_result.wall_seconds
-                    cp_sat_cabin_path_core_cabin_ids = tuple(
-                        sorted(
-                            {
-                                literal.cabin_id
-                                for literal in (
-                                    cabin_path_result.cabin_path_infeasible_core
-                                )
-                            }
-                        )
-                    )
-                    if cabin_path_result.cabin_path_infeasible_core:
-                        cp_sat_cabin_path_core_literal_count = len(
-                            cabin_path_result.cabin_path_infeasible_core
-                        )
-                        cabin_path_cut = build_ddd_cabin_path_core_cut(
-                            paths,
-                            cabin_path_result.cabin_path_infeasible_core,
-                        )
-                        cp_sat_cabin_path_cut_literal_count = len(
-                            cabin_path_cut.literals
-                        )
-                        admissible_cuts, _ = _select_prefix_cuts_within_budget(
-                            network,
-                            tuple(cuts),
-                            (cabin_path_cut,),
-                            max_new_cuts=1,
-                            max_variable_count=self.max_prefix_variable_count,
-                            max_cabin_count=self.max_tracked_prefix_cabin_count,
-                            max_visit_index=self.max_prefix_visit_index,
-                        )
-                        if admissible_cuts:
-                            cp_sat_cabin_path_candidate_cuts = admissible_cuts
-                            cp_result = cabin_path_result
-                    elif cabin_path_result.status is not DddCpSatPrimalStatus.UNKNOWN:
-                        cp_result = cabin_path_result
-                if cp_result is None:
-                    cp_result = cp_sat_oracle.solve(
-                        current,
-                        hint_paths=paths,
-                        fixed_support=(
-                            fixed_cp_support if timed_flow_cp_support is None else None
-                        ),
-                        timed_flow_support=timed_flow_cp_support,
-                        excluded_schedules=(
-                            tuple(primal_candidate_schedules.values())
-                            if cp_sat_diversification_round
-                            else ()
-                        ),
-                        candidate_callback=(
-                            lambda candidate_index, elapsed_seconds: emit(
-                                DddNetworkTimeRefinementProgressStage.PRIMAL_ORACLE_CANDIDATE_FOUND,
-                                round_index,
-                                candidate_index=candidate_index,
-                                candidate_limit=self.cp_sat_max_candidate_count,
-                                candidate_elapsed_seconds=elapsed_seconds,
-                            )
-                        ),
-                    )
-                cp_sat_status = cp_result.status
-                cp_sat_seconds = cp_result.wall_seconds
-                cp_sat_conflict_count = cp_result.conflict_count
-                cp_sat_branch_count = cp_result.branch_count
-                cp_sat_candidate_count = len(cp_result.candidate_schedules)
-                cp_sat_search_complete = cp_result.search_complete
-                if cp_result.status is DddCpSatPrimalStatus.FEASIBLE:
-                    candidates = (
-                        cp_result.candidate_schedules
-                        if cp_result.candidate_schedules
-                        else (cp_result.schedules,)
-                    )
-                    for candidate_schedules in candidates:
-                        cp_validation = _validate_reference_solution(
-                            current,
-                            candidate_schedules,
-                            tolerance_seconds=self.tolerance_seconds,
-                        )
-                        if cp_validation.solution is None:
-                            return _result(
-                                status=(
-                                    DddNetworkTimeRefinementStatus.INVALID_INTERNAL
-                                ),
-                                schedules=best_schedules,
-                                reference_solution=best_reference,
-                                lower_bound=lower_bound,
-                                upper_bound=upper_bound,
-                                iterations=iterations,
-                                discretization=current.discretization,
-                                cuts=cuts,
-                                primal_evaluation=best_primal_evaluation,
-                                aggregate_support_cuts=aggregate_support_cuts,
-                                aggregate_distance_cuts=aggregate_distance_cuts,
-                                timed_flow_cover_cuts=timed_flow_cover_cuts,
-                                bootstrap_result=bootstrap_result,
-                                bootstrap_objective=bootstrap_objective,
-                            )
-                        consider_primal_candidate(
-                            candidate_schedules,
-                            cp_validation.solution,
-                        )
-                elif cp_result.status is DddCpSatPrimalStatus.INFEASIBLE:
-                    cp_sat_core_literal_count = len(cp_result.infeasible_core)
-                    cp_sat_timed_flow_core_literal_count = len(
-                        cp_result.timed_flow_infeasible_core
-                    )
-                    support_rejected = False
-                    if cp_result.cabin_path_infeasible_core:
-                        support_rejected = True
-                    elif cp_result.fixed_cabin_paths:
-                        cp_sat_exact_infeasible = True
-                    elif timed_flow_cp_support is not None:
-                        if not cp_result.timed_flow_infeasible_core:
-                            # No timed-flow assumption is needed for the proof:
-                            # the unrestricted physical model itself is infeasible.
-                            cp_sat_exact_infeasible = True
-                        else:
-                            timed_cut = DddTimedFlowCoverCut.from_core(
-                                cp_result.timed_flow_infeasible_core
-                            )
-                            cp_sat_timed_flow_core_resource_ids = timed_cut.resource_ids
-                            if self.collect_cp_sat_local_explainability:
-                                cp_sat_local_explainability = (
-                                    local_resource_analyzer.analyze(
-                                        current,
-                                        round_index=round_index,
-                                        full_support=timed_flow_cp_support,
-                                        core=cp_result.timed_flow_infeasible_core,
-                                        hint_schedules=best_schedules,
-                                    )
-                                )
-                            if timed_cut.id not in timed_flow_cover_cut_ids:
-                                timed_flow_cover_cuts.append(timed_cut)
-                                timed_flow_cover_cut_ids.add(timed_cut.id)
-                                new_timed_flow_cover_cuts = (timed_cut,)
-                            support_rejected = True
-                    elif fixed_cp_support is None or not cp_result.infeasible_core:
-                        cp_sat_exact_infeasible = True
-                    else:
-                        aggregate_cut = DddAggregateSupportCut.from_core(
-                            cp_result.infeasible_core
-                        )
-                        if aggregate_cut.id not in aggregate_support_cut_ids:
-                            aggregate_support_cuts.append(aggregate_cut)
-                            aggregate_support_cut_ids.add(aggregate_cut.id)
-                            new_aggregate_support_cuts = (aggregate_cut,)
-                        support_rejected = True
-                    if (
-                        support_rejected
-                        and not cp_result.fixed_cabin_paths
-                        and self.use_cp_sat_nearest_support
-                    ):
-                        if fixed_cp_support is None:
-                            raise RuntimeError(
-                                "DDD rejected support has no aggregate nearest center"
-                            )
-                        nearest_result = nearest_support_oracle.solve(
-                            current,
-                            hint_schedules=best_schedules,
-                            nearest_support=fixed_cp_support,
-                        )
-                        cp_sat_nearest_status = nearest_result.status
-                        cp_sat_nearest_seconds = nearest_result.wall_seconds
-                        cp_sat_nearest_distance_primal = (
-                            nearest_result.support_distance_primal
-                        )
-                        cp_sat_nearest_distance_lower_bound = (
-                            nearest_result.support_distance_lower_bound
-                        )
-                        if nearest_result.status is DddCpSatPrimalStatus.INFEASIBLE:
-                            cp_sat_exact_infeasible = True
-                        elif nearest_result.status is DddCpSatPrimalStatus.FEASIBLE:
-                            nearest_validation = _validate_reference_solution(
-                                current,
-                                nearest_result.schedules,
-                                tolerance_seconds=self.tolerance_seconds,
-                            )
-                            if nearest_validation.solution is None:
-                                return _result(
-                                    status=(
-                                        DddNetworkTimeRefinementStatus.INVALID_INTERNAL
-                                    ),
-                                    schedules=best_schedules,
-                                    reference_solution=best_reference,
-                                    lower_bound=lower_bound,
-                                    upper_bound=upper_bound,
-                                    iterations=iterations,
-                                    discretization=current.discretization,
-                                    cuts=cuts,
-                                    primal_evaluation=best_primal_evaluation,
-                                    aggregate_support_cuts=(aggregate_support_cuts),
-                                    aggregate_distance_cuts=(aggregate_distance_cuts),
-                                    timed_flow_cover_cuts=timed_flow_cover_cuts,
-                                    bootstrap_result=bootstrap_result,
-                                    bootstrap_objective=bootstrap_objective,
-                                )
-                            consider_primal_candidate(
-                                nearest_result.schedules,
-                                nearest_validation.solution,
-                            )
-                            distance_bound = nearest_result.support_distance_lower_bound
-                            if distance_bound is not None:
-                                certified_distance = max(
-                                    0,
-                                    math.ceil(distance_bound - 1e-6),
-                                )
-                                if certified_distance > 0:
-                                    distance_cut = (
-                                        DddAggregateSupportDistanceCut.from_center(
-                                            nearest_result.distance_center,
-                                            minimum_distance=certified_distance,
-                                        )
-                                    )
-                                    if (
-                                        distance_cut.id
-                                        not in aggregate_distance_cut_ids
-                                    ):
-                                        aggregate_distance_cuts.append(distance_cut)
-                                        aggregate_distance_cut_ids.add(distance_cut.id)
-                                        new_aggregate_distance_cuts = (distance_cut,)
-                emit(
+
+            def consume_cp_sat_candidate(
+                schedules: tuple[DddRecoveredSchedule, ...],
+                solution: DddReferenceSolution,
+                candidate_limit: int,
+            ) -> None:
+                nonlocal cp_sat_candidate_count
+                cp_sat_candidate_count = candidate_limit
+                consider_primal_candidate(schedules, solution)
+
+            cp_sat_round = cp_sat_round_solver.solve(
+                round_index=round_index,
+                problem=current,
+                network=network,
+                flow=flow,
+                paths=paths,
+                existing_prefix_cuts=tuple(cuts),
+                existing_aggregate_support_cut_ids=frozenset(
+                    aggregate_support_cut_ids
+                ),
+                existing_aggregate_distance_cut_ids=frozenset(
+                    aggregate_distance_cut_ids
+                ),
+                existing_timed_flow_cover_cut_ids=frozenset(
+                    timed_flow_cover_cut_ids
+                ),
+                has_incumbent=best_reference is not None,
+                best_schedules=best_schedules,
+                excluded_schedules=tuple(primal_candidate_schedules.values()),
+                primal_oracle=cp_sat_oracle,
+                nearest_support_oracle=nearest_support_oracle,
+                local_resource_analyzer=local_resource_analyzer,
+                validate_candidate=lambda schedules: _validate_reference_solution(
+                    current,
+                    schedules,
+                    tolerance_seconds=self.tolerance_seconds,
+                ).solution,
+                consume_candidate=consume_cp_sat_candidate,
+                on_candidate_found=lambda candidate_index, elapsed_seconds: emit(
+                    DddNetworkTimeRefinementProgressStage.PRIMAL_ORACLE_CANDIDATE_FOUND,
+                    round_index,
+                    candidate_index=candidate_index,
+                    candidate_limit=self.cp_sat_max_candidate_count,
+                    candidate_elapsed_seconds=elapsed_seconds,
+                ),
+                on_finished=lambda: emit(
                     DddNetworkTimeRefinementProgressStage.PRIMAL_ORACLE_FINISHED,
                     round_index,
+                ),
+            )
+            cp_sat_status = cp_sat_round.status
+            cp_sat_seconds = cp_sat_round.seconds
+            cp_sat_conflict_count = cp_sat_round.conflict_count
+            cp_sat_branch_count = cp_sat_round.branch_count
+            cp_sat_candidate_count = cp_sat_round.candidate_count
+            cp_sat_search_complete = cp_sat_round.search_complete
+            cp_sat_exact_infeasible = cp_sat_round.exact_infeasible
+            cp_sat_cabin_path_status = cp_sat_round.cabin_path_status
+            cp_sat_cabin_path_seconds = cp_sat_round.cabin_path_seconds
+            cp_sat_cabin_path_core_cabin_ids = (
+                cp_sat_round.cabin_path_core_cabin_ids
+            )
+            cp_sat_cabin_path_core_literal_count = (
+                cp_sat_round.cabin_path_core_literal_count
+            )
+            cp_sat_cabin_path_cut_literal_count = (
+                cp_sat_round.cabin_path_cut_literal_count
+            )
+            cp_sat_cabin_path_candidate_cuts = (
+                cp_sat_round.cabin_path_candidate_cuts
+            )
+            new_aggregate_support_cuts = cp_sat_round.aggregate_support_cuts
+            new_aggregate_distance_cuts = cp_sat_round.aggregate_distance_cuts
+            new_timed_flow_cover_cuts = cp_sat_round.timed_flow_cover_cuts
+            aggregate_support_cuts.extend(new_aggregate_support_cuts)
+            aggregate_support_cut_ids.update(
+                cut.id for cut in new_aggregate_support_cuts
+            )
+            aggregate_distance_cuts.extend(new_aggregate_distance_cuts)
+            aggregate_distance_cut_ids.update(
+                cut.id for cut in new_aggregate_distance_cuts
+            )
+            timed_flow_cover_cuts.extend(new_timed_flow_cover_cuts)
+            timed_flow_cover_cut_ids.update(
+                cut.id for cut in new_timed_flow_cover_cuts
+            )
+            cp_sat_core_literal_count = cp_sat_round.core_literal_count
+            cp_sat_timed_flow_core_literal_count = (
+                cp_sat_round.timed_flow_core_literal_count
+            )
+            cp_sat_timed_flow_core_resource_ids = (
+                cp_sat_round.timed_flow_core_resource_ids
+            )
+            cp_sat_local_explainability = cp_sat_round.local_explainability
+            cp_sat_nearest_status = cp_sat_round.nearest_status
+            cp_sat_nearest_seconds = cp_sat_round.nearest_seconds
+            cp_sat_nearest_distance_primal = cp_sat_round.nearest_distance_primal
+            cp_sat_nearest_distance_lower_bound = (
+                cp_sat_round.nearest_distance_lower_bound
+            )
+            if cp_sat_round.invalid_candidate:
+                return _result(
+                    status=DddNetworkTimeRefinementStatus.INVALID_INTERNAL,
+                    schedules=best_schedules,
+                    reference_solution=best_reference,
+                    lower_bound=lower_bound,
+                    upper_bound=upper_bound,
+                    iterations=iterations,
+                    discretization=current.discretization,
+                    cuts=cuts,
+                    primal_evaluation=best_primal_evaluation,
+                    aggregate_support_cuts=aggregate_support_cuts,
+                    aggregate_distance_cuts=aggregate_distance_cuts,
+                    timed_flow_cover_cuts=timed_flow_cover_cuts,
+                    bootstrap_result=bootstrap_result,
+                    bootstrap_objective=bootstrap_objective,
                 )
 
             new_cabin_path_core_cuts = tuple(
@@ -1869,7 +1710,7 @@ class DddNetworkTimeRefinementSolver:
                 )
             else:
                 candidate_cuts = ()
-            new_cuts, prefix_budget_exhausted = _select_prefix_cuts_within_budget(
+            new_cuts, prefix_budget_exhausted = select_ddd_prefix_cuts_within_budget(
                 network,
                 tuple(cuts),
                 tuple(cut for cut in candidate_cuts if cut.id not in cut_ids),
@@ -2776,68 +2617,6 @@ def _build_time_split_batch(
         if len(selected) >= max_splits:
             break
     return tuple(selected), refined
-
-
-def _prefix_depths(
-    cuts: tuple[DddSupportConflictCut, ...],
-) -> dict[int, int]:
-    depths: dict[int, int] = {}
-    for cut in cuts:
-        for literal in cut.literals:
-            depths[literal.cabin_id] = max(
-                depths.get(literal.cabin_id, 0),
-                literal.visit_index,
-            )
-    return depths
-
-
-def _prefix_formulation_within_budget(
-    network: DddLayeredTimeNetwork,
-    cuts: tuple[DddSupportConflictCut, ...],
-    *,
-    max_variable_count: int,
-    max_cabin_count: int,
-    max_visit_index: int,
-) -> bool:
-    depths = _prefix_depths(cuts)
-    if len(tuple(value for value in depths.values() if value > 0)) > max_cabin_count:
-        return False
-    if max(depths.values(), default=0) > max_visit_index:
-        return False
-    size = estimate_ddd_prefix_formulation_size(
-        network,
-        max_visit_index_by_cabin=depths,
-    )
-    return size.prefix_variable_count <= max_variable_count
-
-
-def _select_prefix_cuts_within_budget(
-    network: DddLayeredTimeNetwork,
-    existing: tuple[DddSupportConflictCut, ...],
-    candidates: tuple[DddSupportConflictCut, ...],
-    *,
-    max_new_cuts: int,
-    max_variable_count: int,
-    max_cabin_count: int,
-    max_visit_index: int,
-) -> tuple[tuple[DddSupportConflictCut, ...], bool]:
-    selected: list[DddSupportConflictCut] = []
-    budget_exhausted = False
-    for candidate in candidates:
-        if len(selected) >= max_new_cuts:
-            break
-        trial = (*existing, *selected, candidate)
-        if not _prefix_formulation_within_budget(
-            network,
-            trial,
-            max_variable_count=max_variable_count,
-            max_cabin_count=max_cabin_count,
-            max_visit_index=max_visit_index,
-        ):
-            budget_exhausted = True
-            continue
-        selected.append(candidate)
-    return tuple(selected), budget_exhausted
 
 
 def _master_diagnostic_kwargs(flow: DddAnonymousFlowResult) -> dict[str, object]:
