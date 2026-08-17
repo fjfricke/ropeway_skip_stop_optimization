@@ -24,7 +24,6 @@ from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
     DddAnonymousFlowDecomposer,
     DddAnonymousFlowMaster,
     DddAnonymousFlowResult,
-    DddAnonymousFlowWarmStart,
     DddAnonymousMasterIncumbent,
     DddAnonymousMasterProgress,
     DddAnonymousFlowStatus,
@@ -37,6 +36,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
     DddNetworkTimeProblem,
     build_ddd_cp_sat_timed_flow_support,
     estimate_ddd_prefix_formulation_size,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.network_master_phase import (
+    DddNetworkMasterPhaseSolver,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.primal_evaluation import (
     DddPrimalPoolEvaluationResult,
@@ -67,7 +69,6 @@ from ropeway_skip_stop_optimization.optimization.ddd.resource_time import (
     DddAnonymousResourceRowKind,
     DddResourceWindowCutMode,
     build_ddd_universal_resource_row,
-    separate_ddd_resource_window_rows,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.lifting import (
     build_ddd_cabin_path_core_cut,
@@ -568,6 +569,15 @@ class DddNetworkTimeRefinementSolver:
             output_flag=self.output_flag,
             include_mandatory_resource_rows=self.use_mandatory_resource_rows,
         )
+        master_phase_solver = DddNetworkMasterPhaseSolver(
+            resource_window_cut_mode=self.resource_window_cut_mode,
+            max_resource_window_rows_per_resolve=(
+                self.max_resource_window_rows_per_resolve
+            ),
+            max_resource_window_resolves=(
+                self.max_resource_window_resolves_per_iteration
+            ),
+        )
         warm_start_projector = DddAnonymousFlowWarmStartProjector()
         decomposer = DddAnonymousFlowDecomposer()
         path_adapter = DddNetworkPathProblemAdapter()
@@ -929,118 +939,77 @@ class DddNetworkTimeRefinementSolver:
                 if self.use_projected_warm_start and previous_paths
                 else None
             )
-            resource_windows = tuple(
-                window for arc in network.arcs for window in arc.resource_windows
-            )
-            round_resource_window_rows: list[DddAnonymousResourceRow] = []
-            resource_window_resolve_count = 0
-            resource_window_candidate_count = 0
-            resource_window_violated_count = 0
-            resource_window_duplicate_count = 0
-            resource_window_entry_row_count = 0
-            resource_window_energy_row_count = 0
-            resource_window_separation_seconds = 0.0
-            resource_window_master_seconds = 0.0
-            resource_window_lower_bound_before: float | None = None
-            resource_window_lower_bound_after: float | None = None
-            master_solve_seconds = 0.0
-            while True:
-                emit(
+            master_phase = master_phase_solver.solve(
+                master=master,
+                network=network,
+                cuts=active_cuts,
+                aggregate_support_cuts=tuple(aggregate_support_cuts),
+                aggregate_distance_cuts=tuple(aggregate_distance_cuts),
+                timed_flow_cover_cuts=tuple(timed_flow_cover_cuts),
+                resource_rows=tuple(active_resource_rows),
+                warm_start=warm_start,
+                passenger_problem=passenger_master_problem,
+                fixed_start_movement_problem=(
+                    current.movement_problem
+                    if self.cp_sat_master_coupling
+                    is DddCpSatMasterCoupling.FIXED_AGGREGATE_SUPPORT
+                    else None
+                ),
+                on_master_started=lambda: emit(
                     DddNetworkTimeRefinementProgressStage.MASTER_STARTED,
                     round_index,
-                )
-                master_started = perf_counter()
-                flow = master.solve(
-                    network,
-                    cuts=active_cuts,
-                    aggregate_support_cuts=tuple(aggregate_support_cuts),
-                    aggregate_distance_cuts=tuple(aggregate_distance_cuts),
-                    timed_flow_cover_cuts=tuple(timed_flow_cover_cuts),
-                    resource_rows=tuple(active_resource_rows),
-                    warm_start=warm_start,
-                    passenger_problem=passenger_master_problem,
-                    fixed_start_movement_problem=(
-                        current.movement_problem
-                        if self.cp_sat_master_coupling
-                        is DddCpSatMasterCoupling.FIXED_AGGREGATE_SUPPORT
-                        else None
-                    ),
-                    progress_callback=lambda item: emit(
-                        DddNetworkTimeRefinementProgressStage.MASTER_PROGRESS,
-                        round_index,
-                        master_progress=item,
-                    ),
-                )
-                solve_seconds = perf_counter() - master_started
-                master_solve_seconds += solve_seconds
-                if resource_window_resolve_count:
-                    resource_window_master_seconds += solve_seconds
-                emit(
+                ),
+                on_master_progress=lambda item: emit(
+                    DddNetworkTimeRefinementProgressStage.MASTER_PROGRESS,
+                    round_index,
+                    master_progress=item,
+                ),
+                on_master_finished=lambda: emit(
                     DddNetworkTimeRefinementProgressStage.MASTER_FINISHED,
                     round_index,
-                )
-                if flow.status is DddAnonymousFlowStatus.INFEASIBLE:
-                    break
-                if flow.best_bound is None:
-                    raise RuntimeError(
-                        "optimal DDD network flow returned no best bound"
-                    )
-                if resource_window_lower_bound_before is None:
-                    resource_window_lower_bound_before = flow.best_bound
-                resource_window_lower_bound_after = flow.best_bound
-                if self.resource_window_cut_mode is DddResourceWindowCutMode.OFF:
-                    break
-
-                separation_started = perf_counter()
-                separation = separate_ddd_resource_window_rows(
-                    resource_windows,
-                    arc_flow_by_id={
-                        item.arc_id: item.value for item in flow.arc_values
-                    },
-                    mode=self.resource_window_cut_mode,
-                    max_rows=self.max_resource_window_rows_per_resolve,
-                )
-                resource_window_separation_seconds += (
-                    perf_counter() - separation_started
-                )
-                resource_window_candidate_count += separation.candidate_window_count
-                resource_window_violated_count += separation.violated_candidate_count
-                resource_window_duplicate_count += separation.duplicate_candidate_count
-                active_resource_row_ids = {row.id for row in active_resource_rows}
-                new_rows = tuple(
-                    row
-                    for row in separation.rows
-                    if row.id not in active_resource_row_ids
-                )
-                resource_window_duplicate_count += len(separation.rows) - len(new_rows)
-                emit(
+                ),
+                on_separation_finished=lambda: emit(
                     DddNetworkTimeRefinementProgressStage.RESOURCE_WINDOW_SEPARATION_FINISHED,
                     round_index,
-                )
-                if (
-                    not new_rows
-                    or resource_window_resolve_count
-                    >= self.max_resource_window_resolves_per_iteration
-                ):
-                    break
-                active_resource_rows.extend(new_rows)
-                round_resource_window_rows.extend(new_rows)
-                interval_resource_row_ids.update(row.id for row in new_rows)
-                resource_window_entry_row_count += sum(
-                    row.kind is DddAnonymousResourceRowKind.INTERVAL_CAPACITY
-                    for row in new_rows
-                )
-                resource_window_energy_row_count += sum(
-                    row.kind is DddAnonymousResourceRowKind.INTERVAL_ENERGY
-                    for row in new_rows
-                )
-                resource_window_resolve_count += 1
-                warm_start = DddAnonymousFlowWarmStart(
-                    arc_values=flow.arc_values,
-                    prefix_arc_values=flow.prefix_arc_values,
-                    projected_cabin_count=len(network.cabin_ids),
-                    complete_cabin_count=0,
-                )
+                ),
+            )
+            flow = master_phase.flow
+            active_resource_rows = list(master_phase.active_resource_rows)
+            round_resource_window_rows = list(master_phase.added_resource_rows)
+            interval_resource_row_ids.update(
+                row.id for row in round_resource_window_rows
+            )
+            master_solve_seconds = master_phase.solve_seconds
+            resource_window_resolve_count = (
+                master_phase.resource_window_resolve_count
+            )
+            resource_window_candidate_count = (
+                master_phase.resource_window_candidate_count
+            )
+            resource_window_violated_count = (
+                master_phase.resource_window_violated_count
+            )
+            resource_window_duplicate_count = (
+                master_phase.resource_window_duplicate_count
+            )
+            resource_window_entry_row_count = (
+                master_phase.resource_window_entry_row_count
+            )
+            resource_window_energy_row_count = (
+                master_phase.resource_window_energy_row_count
+            )
+            resource_window_separation_seconds = (
+                master_phase.resource_window_separation_seconds
+            )
+            resource_window_master_seconds = (
+                master_phase.resource_window_master_seconds
+            )
+            resource_window_lower_bound_before = (
+                master_phase.resource_window_lower_bound_before
+            )
+            resource_window_lower_bound_after = (
+                master_phase.resource_window_lower_bound_after
+            )
             if flow.status is DddAnonymousFlowStatus.INFEASIBLE:
                 record_iteration(
                     _iteration(
