@@ -65,12 +65,14 @@ _EXPORTS_BY_MODULE: dict[str, tuple[str, ...]] = {
         'DddRouteOption',
     ),
     'ropeway_skip_stop_optimization.optimization.ddd.network_refinement': (
+        'DddNetworkTimeRefinementSolver',
+    ),
+    'ropeway_skip_stop_optimization.optimization.ddd.network_refinement_model': (
         'DddNetworkTimeRefinementIteration',
         'DddNetworkTimeRefinementProgressCallback',
         'DddNetworkTimeRefinementProgressEvent',
         'DddNetworkTimeRefinementProgressStage',
         'DddNetworkTimeRefinementResult',
-        'DddNetworkTimeRefinementSolver',
         'DddNetworkTimeRefinementStatus',
         'DddNetworkValidationResult',
         'DddNetworkValidationStatus',
