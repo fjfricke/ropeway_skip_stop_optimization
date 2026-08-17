@@ -956,7 +956,7 @@ def _add_resource_intervals(
         size_tick = (
             usage.leader_clear_offset_tick
             - usage.follower_enter_offset_tick
-            + resource.headway_tick
+            + usage.separation_after_tick(resource.minimum_headway_tick)
         )
         if size_tick <= 0:
             raise ValueError("DDD CP-SAT resource interval must have positive size")

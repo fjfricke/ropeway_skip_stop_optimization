@@ -13,6 +13,8 @@ from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddRouteOption,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
+    ddd_headway_seconds_to_tick,
+    ddd_quantize_headway_seconds,
     ddd_quantize_time_seconds,
     ddd_seconds_to_tick,
     ddd_tick_to_seconds,
@@ -43,6 +45,7 @@ class DddReferenceResourceOccurrence:
     visit_index: int
     leader_clear_time_seconds: float
     follower_enter_time_seconds: float
+    separation_after_seconds: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -55,6 +58,17 @@ class DddReferenceResourceOccurrence:
             "follower_enter_time_seconds",
             ddd_quantize_time_seconds(self.follower_enter_time_seconds),
         )
+        if self.separation_after_seconds is not None:
+            object.__setattr__(
+                self,
+                "separation_after_seconds",
+                ddd_quantize_headway_seconds(self.separation_after_seconds),
+            )
+
+    def separation_after_tick(self, resource: DddResource) -> int:
+        if self.separation_after_seconds is None:
+            return resource.minimum_headway_tick
+        return ddd_headway_seconds_to_tick(self.separation_after_seconds)
 
 
 @dataclass(frozen=True)
@@ -484,7 +498,9 @@ def find_ddd_reference_conflicts(
         reverse = ddd_seconds_to_tick(
             first.follower_enter_time_seconds
         ) - ddd_seconds_to_tick(second.leader_clear_time_seconds)
-        violation_tick = resource.headway_tick - max(forward, reverse)
+        forward_violation = first.separation_after_tick(resource) - forward
+        reverse_violation = second.separation_after_tick(resource) - reverse
+        violation_tick = min(forward_violation, reverse_violation)
         if violation_tick > ddd_seconds_to_tick(tolerance_seconds):
             result.append(
                 DddReferenceConflict(
@@ -568,6 +584,7 @@ def _resource_occurrence(
         follower_enter_time_seconds=ddd_tick_to_seconds(
             switch_tick + usage.follower_enter_offset_tick
         ),
+        separation_after_seconds=usage.separation_after_seconds,
     )
 
 
@@ -588,8 +605,9 @@ def _occurrence_sets_conflict(
             reverse = ddd_seconds_to_tick(
                 first.follower_enter_time_seconds
             ) - ddd_seconds_to_tick(second.leader_clear_time_seconds)
-            if resource.headway_tick - max(
-                forward, reverse
+            if min(
+                first.separation_after_tick(resource) - forward,
+                second.separation_after_tick(resource) - reverse,
             ) > ddd_seconds_to_tick(tolerance_seconds):
                 return True
     return False

@@ -68,6 +68,7 @@ from ropeway_skip_stop_optimization.optimization.ean.plan import (
     EanRouteDecision,
 )
 from ropeway_skip_stop_optimization.optimization.ean.validation import (
+    validate_ean_initial_boundary_against_artifact,
     validate_ean_movement_plan_against_artifact,
 )
 from ropeway_skip_stop_optimization.optimization.solver_progress import (
@@ -671,6 +672,11 @@ class EanOptimizer:
             )
 
         movement_plan = movement_model.extract_plan()
+        fleet_plan = (
+            movement_model.fleet_model.extract_plan()
+            if movement_model.fleet_model is not None
+            else None
+        )
         tolerance = (
             1e-5
             if optimization_config.formulation.horizon
@@ -717,6 +723,13 @@ class EanOptimizer:
                 movement_plan,
                 tolerance_seconds=tolerance,
             ).raise_for_errors()
+        if fleet_plan is not None:
+            validate_ean_initial_boundary_against_artifact(
+                problem.artifact,
+                movement_plan,
+                fleet_plan,
+                tolerance_seconds=tolerance,
+            ).raise_for_errors()
         passenger_plan = (
             passenger_model.extract_passenger_plan()
             if passenger_model is not None
@@ -750,11 +763,7 @@ class EanOptimizer:
                     diagnostic_headway_separation_seconds
                 ),
             ),
-            fleet_plan=(
-                movement_model.fleet_model.extract_plan()
-                if movement_model.fleet_model is not None
-                else None
-            ),
+            fleet_plan=fleet_plan,
         )
 
 

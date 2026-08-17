@@ -61,13 +61,20 @@ def time_reference_for_checkpoint_kind(kind: HeadwayCheckpointKind) -> EanTimeRe
         return EanTimeReference.PLATFORM_ENTRY_TIME
     if kind is HeadwayCheckpointKind.PLATFORM_EXIT:
         return EanTimeReference.PLATFORM_EXIT_TIME
-    if kind is HeadwayCheckpointKind.EXIT_SWITCH:
+    if kind in {
+        HeadwayCheckpointKind.EXIT_SWITCH,
+        HeadwayCheckpointKind.SERVICE_MECHANISM,
+    }:
         return EanTimeReference.EXIT_SWITCH_TIME
     raise ValueError(f"unsupported headway checkpoint kind: {kind}")
 
 
 def activation_reference_for_checkpoint_kind(kind: HeadwayCheckpointKind) -> EanActivationReference:
-    if kind in {HeadwayCheckpointKind.PLATFORM_ENTRY, HeadwayCheckpointKind.PLATFORM_EXIT}:
+    if kind in {
+        HeadwayCheckpointKind.PLATFORM_ENTRY,
+        HeadwayCheckpointKind.PLATFORM_EXIT,
+        HeadwayCheckpointKind.SERVICE_MECHANISM,
+    }:
         return EanActivationReference.SERVE
     if kind is HeadwayCheckpointKind.EXIT_SWITCH:
         return EanActivationReference.ACTIVE

@@ -220,7 +220,7 @@ def _ddd_trajectory_resource_interval_or_none(
     enter_tick = ddd_seconds_to_tick(occurrence.follower_enter_time_seconds)
     clear_with_headway_tick = (
         ddd_seconds_to_tick(occurrence.leader_clear_time_seconds)
-        + resource.headway_tick
+        + occurrence.separation_after_tick(resource)
     )
     if clear_with_headway_tick <= enter_tick:
         return None

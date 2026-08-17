@@ -215,6 +215,7 @@ _EXPORTS_BY_MODULE: dict[str, tuple[str, ...]] = {
         'project_ean_movement_plan_to_physical_replay',
     ),
     'ropeway_skip_stop_optimization.optimization.ean.validation': (
+        'validate_ean_initial_boundary_against_artifact',
         'validate_ean_movement_plan_against_artifact',
     ),
 }
@@ -393,6 +394,7 @@ __all__ = [
     'segment_packing_capacity',
     'solver_integer_upper_bound',
     'project_ean_movement_plan_to_physical_replay',
+    'validate_ean_initial_boundary_against_artifact',
     'validate_ean_movement_plan_against_artifact',
 ]
 

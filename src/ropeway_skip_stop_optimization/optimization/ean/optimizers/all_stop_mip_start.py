@@ -3,6 +3,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, replace
 
+from ropeway_skip_stop_optimization.models import HeadwayRouteBehavior
+
 from ropeway_skip_stop_optimization.optimization.ean.artifact import (
     EanBuildArtifact,
 )
@@ -303,8 +305,8 @@ def _validate_initial_placement_seed_order(
     if phase_indices != tuple(sorted(phase_indices)):
         raise ValueError("initial-placement seed violates phase-index symmetry")
 
-    exit_headway_by_switch_id = {
-        checkpoint.switch_id: checkpoint.headway_seconds
+    exit_checkpoint_by_switch_id = {
+        checkpoint.switch_id: checkpoint
         for checkpoint in artifact.headway_checkpoints
         if checkpoint.kind is HeadwayCheckpointKind.EXIT_SWITCH
     }
@@ -314,7 +316,12 @@ def _validate_initial_placement_seed_order(
             rope_states_by_visit_index.setdefault(state.visit_index, []).append(state)
     for rope_states in rope_states_by_visit_index.values():
         for leader, follower in zip(rope_states, rope_states[1:]):
-            headway_seconds = exit_headway_by_switch_id[leader.switch_id]
+            checkpoint = exit_checkpoint_by_switch_id[leader.switch_id]
+            rule = artifact.headway_rule_for_checkpoint(checkpoint)
+            headway_seconds = rule.required_seconds(
+                _initial_behavior(leader),
+                _initial_behavior(follower),
+            )
             if (
                 leader.previous_event_time_seconds + headway_seconds
                 > follower.previous_event_time_seconds + _TIME_TOLERANCE_SECONDS
@@ -323,6 +330,16 @@ def _validate_initial_placement_seed_order(
                     "initial-placement seed violates initial rope headway for "
                     f"cabins {leader.cabin_id}/{follower.cabin_id}"
                 )
+
+
+def _initial_behavior(
+    state: EanInitialPlacementState,
+) -> HeadwayRouteBehavior:
+    return (
+        HeadwayRouteBehavior.SERVICE
+        if state.previous_service is True
+        else HeadwayRouteBehavior.BYPASS
+    )
 
 
 def _project_phase_to_boundary(
@@ -418,6 +435,10 @@ def _project_phase_to_boundary(
             progress=min(1.0, max(0.0, -previous_exit_time / rope_seconds)),
             previous_event_time_seconds=previous_exit_time,
             next_event_time_seconds=next_switch_time,
+            previous_service=(
+                decisions_by_switch_id[previous_switch_id]
+                is EanRouteDecision.STOP
+            ),
         ),
         next_phase_index,
         next_switch_time,

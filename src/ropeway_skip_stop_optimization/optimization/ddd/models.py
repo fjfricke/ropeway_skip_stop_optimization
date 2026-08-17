@@ -6,6 +6,8 @@ import math
 
 from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
     DddTimeTick,
+    ddd_headway_seconds_to_tick,
+    ddd_quantize_headway_seconds,
     ddd_quantize_time_seconds,
     ddd_seconds_to_tick,
 )
@@ -54,22 +56,51 @@ class DddFixedStart:
 class DddResource:
     id: str
     headway_seconds: float
+    maximum_headway_seconds: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
             self,
             "headway_seconds",
-            ddd_quantize_time_seconds(self.headway_seconds),
+            ddd_quantize_headway_seconds(self.headway_seconds),
+        )
+        maximum = self.maximum_headway_seconds
+        if maximum is None:
+            maximum = self.headway_seconds
+        object.__setattr__(
+            self,
+            "maximum_headway_seconds",
+            ddd_quantize_headway_seconds(maximum),
         )
 
     @property
     def headway_tick(self) -> DddTimeTick:
-        return ddd_seconds_to_tick(self.headway_seconds)
+        """Compatibility alias for the anonymous minimum headway."""
+        return self.minimum_headway_tick
+
+    @property
+    def minimum_headway_seconds(self) -> float:
+        return self.headway_seconds
+
+    @property
+    def minimum_headway_tick(self) -> DddTimeTick:
+        return ddd_headway_seconds_to_tick(self.headway_seconds)
+
+    @property
+    def maximum_headway_tick(self) -> DddTimeTick:
+        assert self.maximum_headway_seconds is not None
+        return ddd_headway_seconds_to_tick(self.maximum_headway_seconds)
 
     def validate(self) -> None:
         _require_id("DDD resource id", self.id)
         _require_finite_positive("DDD resource headway_seconds", self.headway_seconds)
-        if self.headway_tick <= 0:
+        assert self.maximum_headway_seconds is not None
+        _require_finite_positive(
+            "DDD resource maximum_headway_seconds", self.maximum_headway_seconds
+        )
+        if self.maximum_headway_seconds < self.headway_seconds:
+            raise ValueError("DDD resource maximum headway must cover its minimum")
+        if self.minimum_headway_tick <= 0:
             raise ValueError("DDD resource headway must occupy at least one time tick")
 
 
@@ -78,6 +109,7 @@ class DddResourceUsage:
     resource_id: str
     leader_clear_offset_seconds: float
     follower_enter_offset_seconds: float
+    separation_after_seconds: float | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -90,6 +122,12 @@ class DddResourceUsage:
             "follower_enter_offset_seconds",
             ddd_quantize_time_seconds(self.follower_enter_offset_seconds),
         )
+        if self.separation_after_seconds is not None:
+            object.__setattr__(
+                self,
+                "separation_after_seconds",
+                ddd_quantize_headway_seconds(self.separation_after_seconds),
+            )
 
     @property
     def leader_clear_offset_tick(self) -> DddTimeTick:
@@ -98,6 +136,13 @@ class DddResourceUsage:
     @property
     def follower_enter_offset_tick(self) -> DddTimeTick:
         return ddd_seconds_to_tick(self.follower_enter_offset_seconds)
+
+    def separation_after_tick(
+        self, fallback_headway_tick: DddTimeTick
+    ) -> DddTimeTick:
+        if self.separation_after_seconds is None:
+            return fallback_headway_tick
+        return ddd_headway_seconds_to_tick(self.separation_after_seconds)
 
     def validate(self) -> None:
         _require_id("DDD resource usage resource_id", self.resource_id)
@@ -109,6 +154,11 @@ class DddResourceUsage:
             "DDD resource usage follower_enter_offset_seconds",
             self.follower_enter_offset_seconds,
         )
+        if self.separation_after_seconds is not None:
+            _require_finite_positive(
+                "DDD resource usage separation_after_seconds",
+                self.separation_after_seconds,
+            )
 
 
 @dataclass(frozen=True)
@@ -278,6 +328,19 @@ class DddMovementProblem:
                 raise ValueError(
                     f"DDD route option references unknown resources: {unknown_resources}"
                 )
+            resources_by_id = self.resources_by_id
+            for usage in option.resource_usages:
+                resource = resources_by_id[usage.resource_id]
+                exact_tick = usage.separation_after_tick(resource.minimum_headway_tick)
+                if not (
+                    resource.minimum_headway_tick
+                    <= exact_tick
+                    <= resource.maximum_headway_tick
+                ):
+                    raise ValueError(
+                        "DDD resource usage separation lies outside the resource "
+                        f"envelope: option={option.id!r}, resource={resource.id!r}"
+                    )
             outgoing_state_ids.add(option.from_state_id)
         reachable_start_states = {start.state_id for start in self.starts}
         if reachable_start_states - outgoing_state_ids:

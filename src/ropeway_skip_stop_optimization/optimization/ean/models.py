@@ -61,6 +61,7 @@ class HeadwayCheckpointKind(Enum):
     PLATFORM_ENTRY = "platform_entry"
     PLATFORM_EXIT = "platform_exit"
     EXIT_SWITCH = "exit_switch"
+    SERVICE_MECHANISM = "service_mechanism"
 
 
 class EanTimeReference(Enum):
@@ -245,12 +246,15 @@ class HeadwayCheckpointDefinition:
     applies_to_serve: bool
     applies_to_skip: bool
     waiting_modes: tuple[StationWaitingMode, ...]
+    headway_rule_id: str | None = None
 
     def validate(self) -> None:
         _require_id("headway checkpoint id", self.id)
         _require_id("headway checkpoint switch_id", self.switch_id)
         _require_id("headway checkpoint station_id", self.station_id)
         _require_positive("headway checkpoint headway_seconds", self.headway_seconds)
+        if self.headway_rule_id is not None:
+            _require_id("headway checkpoint headway_rule_id", self.headway_rule_id)
         if not (self.applies_to_serve or self.applies_to_skip):
             raise ValueError("headway checkpoint must apply to serve and/or skip")
         if not self.waiting_modes:

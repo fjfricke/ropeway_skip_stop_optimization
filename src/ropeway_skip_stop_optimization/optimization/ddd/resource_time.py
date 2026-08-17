@@ -113,7 +113,9 @@ class DddTimedResourceUsageWindow:
             source_interval=source_interval,
             follower_enter_offset_tick=usage.follower_enter_offset_tick,
             leader_clear_offset_tick=usage.leader_clear_offset_tick,
-            headway_tick=resource.headway_tick,
+            headway_tick=usage.separation_after_tick(
+                resource.minimum_headway_tick
+            ),
             usage_index=usage_index,
             follower_enter_delay=follower_enter_delay,
             leader_clear_delay=leader_clear_delay,
@@ -359,18 +361,20 @@ def find_ddd_universal_resource_conflict(
     second.validate()
     if first.resource_id != second.resource_id:
         raise ValueError("DDD universal conflict needs one shared resource")
-    if first.headway_tick != second.headway_tick:
-        raise ValueError("DDD shared resource headway envelopes differ")
     first_before_second = (
         second.latest_follower_enter_tick - first.earliest_leader_clear_tick
     )
     second_before_first = (
         first.latest_follower_enter_tick - second.earliest_leader_clear_tick
     )
-    best_separation = max(first_before_second, second_before_first)
-    minimum_violation = first.headway_tick - best_separation
-    if minimum_violation <= 0:
+    first_before_second_violation = first.headway_tick - first_before_second
+    second_before_first_violation = second.headway_tick - second_before_first
+    if first_before_second_violation <= 0 or second_before_first_violation <= 0:
         return None
+    minimum_violation = min(
+        first_before_second_violation,
+        second_before_first_violation,
+    )
     return DddUniversalResourceConflict(
         resource_id=first.resource_id,
         first_timed_arc_id=first.timed_arc_id,
@@ -387,15 +391,8 @@ def build_ddd_mandatory_resource_rows(
     """Enumerate maximal mandatory-core cliques by a deterministic sweep."""
 
     windows_by_resource: dict[str, list[DddTimedResourceUsageWindow]] = {}
-    headway_by_resource: dict[str, int] = {}
     for window in windows:
         window.validate()
-        known_headway = headway_by_resource.setdefault(
-            window.resource_id,
-            window.headway_tick,
-        )
-        if known_headway != window.headway_tick:
-            raise ValueError("DDD shared resource windows have different headways")
         if window.mandatory_occupancy_core is not None:
             windows_by_resource.setdefault(window.resource_id, []).append(window)
 
@@ -527,12 +524,12 @@ def separate_ddd_resource_window_rows(
             raise ValueError("DDD anonymous resource flow must be nonnegative")
         if not flow:
             continue
-        known_headway = headway_by_resource.setdefault(
-            window.resource_id,
-            window.headway_tick,
+        known_headway = headway_by_resource.get(window.resource_id)
+        headway_by_resource[window.resource_id] = (
+            window.headway_tick
+            if known_headway is None
+            else min(known_headway, window.headway_tick)
         )
-        if known_headway != window.headway_tick:
-            raise ValueError("DDD shared resource windows have different headways")
         selected_by_resource.setdefault(window.resource_id, []).append(window)
 
     candidates: list[tuple[int, int, int, DddAnonymousResourceRow]] = []

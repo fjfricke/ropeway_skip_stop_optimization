@@ -3,6 +3,12 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+from ropeway_skip_stop_optimization.models import (
+    DerivedHeadwayPolicy,
+    DerivedHeadwayResourceKind,
+    EffectiveHeadwayPolicy,
+)
+
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     HeadwayCheckpointDefinition,
     HeadwayCheckpointKind,
@@ -101,6 +107,70 @@ class SkipStopHeadwayCheckpointBuilder(HeadwayCheckpointBuilder):
         for checkpoint in checkpoints:
             checkpoint.validate()
         return tuple(checkpoints)
+
+
+@dataclass(frozen=True)
+class PolicyHeadwayCheckpointBuilder(HeadwayCheckpointBuilder):
+    policy: DerivedHeadwayPolicy | EffectiveHeadwayPolicy
+
+    def build(
+        self,
+        timings: tuple[SkipStopTiming, ...],
+        station_configs: tuple[StationEanConfig, ...],
+    ) -> tuple[HeadwayCheckpointDefinition, ...]:
+        self.policy.validate()
+        timings_by_switch_id = _timings_by_switch_id(timings)
+        station_configs_by_id = _station_configs_by_id(station_configs)
+        checkpoints: list[HeadwayCheckpointDefinition] = []
+        for resource in self.policy.resource_requirements:
+            timing = timings_by_switch_id.get(resource.state_id)
+            if timing is None:
+                raise ValueError(
+                    f"headway policy resource {resource.id!r} references unknown state"
+                )
+            station_config = station_configs_by_id.get(resource.station_id)
+            if station_config is None:
+                raise ValueError(
+                    f"headway policy resource {resource.id!r} references unknown station"
+                )
+            if (
+                resource.kind is DerivedHeadwayResourceKind.PLATFORM_EXIT
+                and station_config.waiting_mode
+                not in {
+                    StationWaitingMode.END_OF_PLATFORM_WAIT,
+                    StationWaitingMode.STATION_FIFO_BUFFER,
+                }
+            ):
+                continue
+            kind = _checkpoint_kind(resource.kind)
+            rule = self.policy.rule(resource.rule_id)
+            checkpoint = HeadwayCheckpointDefinition(
+                id=resource.id,
+                kind=kind,
+                switch_id=resource.state_id,
+                station_id=resource.station_id,
+                headway_seconds=rule.maximum_seconds,
+                applies_to_serve=resource.applies_to_service,
+                applies_to_skip=resource.applies_to_bypass,
+                waiting_modes=(station_config.waiting_mode,),
+                headway_rule_id=resource.rule_id,
+            )
+            checkpoint.validate()
+            checkpoints.append(checkpoint)
+        checkpoint_ids = [item.id for item in checkpoints]
+        duplicates = _duplicates(checkpoint_ids)
+        if duplicates:
+            raise ValueError(f"duplicate policy checkpoint ids: {duplicates}")
+        return tuple(checkpoints)
+
+
+def _checkpoint_kind(kind: DerivedHeadwayResourceKind) -> HeadwayCheckpointKind:
+    return {
+        DerivedHeadwayResourceKind.PLATFORM_ENTRY: HeadwayCheckpointKind.PLATFORM_ENTRY,
+        DerivedHeadwayResourceKind.PLATFORM_EXIT: HeadwayCheckpointKind.PLATFORM_EXIT,
+        DerivedHeadwayResourceKind.EXIT_SWITCH: HeadwayCheckpointKind.EXIT_SWITCH,
+        DerivedHeadwayResourceKind.SERVICE_MECHANISM: HeadwayCheckpointKind.SERVICE_MECHANISM,
+    }[kind]
 
 
 def _timings_by_switch_id(timings: tuple[SkipStopTiming, ...]) -> dict[str, SkipStopTiming]:

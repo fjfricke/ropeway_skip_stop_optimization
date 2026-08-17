@@ -9,6 +9,11 @@ import gurobipy as gp
 import numpy as np
 from scipy import sparse
 
+from ropeway_skip_stop_optimization.models import (
+    ConstantHeadwayRule,
+    LeaderBehaviorHeadwayRule,
+)
+
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
 from ropeway_skip_stop_optimization.optimization.ean.build_profile import (
     EanBuildProgressCallback,
@@ -153,6 +158,8 @@ class EanHeadwayConstraintPool:
     progress_started: float | None = None
     checkpoint_count: int | None = None
     matrix_pair_batch_size: int = DEFAULT_HEADWAY_MATRIX_PAIR_BATCH_SIZE
+    artifact: EanBuildArtifact | None = None
+    stop: dict[VisitKey, Any] = field(default_factory=dict)
 
     @property
     def materialized_pair_ids(self) -> frozenset[str]:
@@ -325,14 +332,25 @@ class EanHeadwayConstraintPool:
             if classification is EanHeadwayPairClassification.REDUNDANT:
                 continue
             first_times, second_times, inactive = self._pair_expressions(pair)
+            first_candidate = self.candidate_by_id[pair.first_candidate_id]
+            second_candidate = self.candidate_by_id[pair.second_candidate_id]
+            forward_base, forward_route_term = self._headway_terms(
+                pair,
+                leader=first_candidate,
+            )
+            reverse_base, reverse_route_term = self._headway_terms(
+                pair,
+                leader=second_candidate,
+            )
             first_inactive, second_inactive = inactive
             semantics = first_times.semantics_label
             if classification is EanHeadwayPairClassification.FIXED_FORWARD:
                 append_row(
                     first_times.leader_clear_time
                     - second_times.follower_enter_time
+                    + forward_route_term
                     - self.big_m * (first_inactive + second_inactive),
-                    -pair.headway_seconds,
+                    -forward_base,
                     f"headway_fixed_forward_{pair.id}_{semantics}",
                 )
                 continue
@@ -340,8 +358,9 @@ class EanHeadwayConstraintPool:
                 append_row(
                     second_times.leader_clear_time
                     - first_times.follower_enter_time
+                    + reverse_route_term
                     - self.big_m * (first_inactive + second_inactive),
-                    -pair.headway_seconds,
+                    -reverse_base,
                     f"headway_fixed_reverse_{pair.id}_{semantics}",
                 )
                 continue
@@ -357,17 +376,19 @@ class EanHeadwayConstraintPool:
             append_row(
                 first_times.leader_clear_time
                 - second_times.follower_enter_time
+                + forward_route_term
                 + self.big_m * order
                 - self.big_m * (first_inactive + second_inactive),
-                self.big_m - pair.headway_seconds,
+                self.big_m - forward_base,
                 f"headway_forward_{pair.id}_{semantics}",
             )
             append_row(
                 second_times.leader_clear_time
                 - first_times.follower_enter_time
+                + reverse_route_term
                 - self.big_m * order
                 - self.big_m * (first_inactive + second_inactive),
-                -pair.headway_seconds,
+                -reverse_base,
                 f"headway_reverse_{pair.id}_{semantics}",
             )
 
@@ -404,6 +425,30 @@ class EanHeadwayConstraintPool:
             if self.classifier is not None
             else EanHeadwayPairClassification.DISJUNCTIVE
         )
+
+    def _headway_terms(
+        self,
+        pair: HeadwayPair,
+        *,
+        leader: HeadwayCandidate,
+    ) -> tuple[float, Any]:
+        if self.artifact is None:
+            return pair.headway_seconds, 0.0
+        rule = self.artifact.headway_rule_for_pair(pair)
+        if isinstance(rule, ConstantHeadwayRule):
+            return rule.seconds, 0.0
+        if isinstance(rule, LeaderBehaviorHeadwayRule):
+            key = (leader.cabin_id, leader.visit_index)
+            stop = self.stop.get(key)
+            if stop is None:
+                raise ValueError(
+                    f"leader-dependent headway {pair.id!r} has no stop variable"
+                )
+            return (
+                rule.bypass_leader_seconds,
+                (rule.service_leader_seconds - rule.bypass_leader_seconds) * stop,
+            )
+        raise TypeError(f"unsupported headway rule: {rule!r}")
 
     def _pair_expressions(
         self,
@@ -1082,6 +1127,8 @@ def _add_headway_constraints(
         progress_started=progress_started,
         checkpoint_count=len(artifact.headway_checkpoints),
         matrix_pair_batch_size=matrix_pair_batch_size,
+        artifact=artifact,
+        stop=stop,
     )
     merge_relaxation_index = (
         EanDirectMergeHeadwayRelaxationIndex.build(artifact)
@@ -1534,6 +1581,8 @@ def service_entry_to_next_switch_seconds(timing: SkipStopTiming) -> float:
 def max_headway_seconds(artifact: EanBuildArtifact) -> float:
     if not artifact.headway_checkpoints:
         return 0.0
+    if artifact.headway_policy is not None:
+        return artifact.headway_policy.maximum_headway_seconds
     return max(checkpoint.headway_seconds for checkpoint in artifact.headway_checkpoints)
 
 

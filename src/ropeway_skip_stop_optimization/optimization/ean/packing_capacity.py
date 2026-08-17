@@ -5,8 +5,15 @@ from decimal import Decimal, ROUND_CEILING
 from enum import StrEnum
 
 from ropeway_skip_stop_optimization.models import Scenario
+from ropeway_skip_stop_optimization.models import DerivedSpatialRole
 from ropeway_skip_stop_optimization.optimization.ean.builders.physical_network_builder import (
     PhysicalMovementNetworkBuilder,
+)
+from ropeway_skip_stop_optimization.optimization.ean.builders.network_timing_builder import (
+    NetworkSkipStopTimingBuilder,
+)
+from ropeway_skip_stop_optimization.optimization.headway_policy import (
+    PhysicalHeadwayPolicyBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanConfig,
@@ -192,10 +199,29 @@ class EanInitialPlacementPackingBoundBuilder:
                     f"rope::{state_id}"
                 )
 
-        spacing_m = scenario.operating.required_cabin_spacing_m
+        timings = NetworkSkipStopTimingBuilder().build(scenario, network, pattern)
+        policy = PhysicalHeadwayPolicyBuilder().build(
+            scenario,
+            network,
+            timings,
+            pattern,
+        )
+        rope_spacing_m = policy.spatial_spacing(DerivedSpatialRole.ROPE)
+        service_spacing_m = policy.spatial_spacing(DerivedSpatialRole.SERVICE)
+        spacing_m = min(rope_spacing_m, service_spacing_m)
         regions: list[EanFleetPackingRegion] = []
         for segment_id in sorted(roles_by_segment_id):
             segment = segment_by_id[segment_id]
+            roles = roles_by_segment_id[segment_id]
+            role_spacings = []
+            if any(role.startswith("service::") for role in roles):
+                role_spacings.append(service_spacing_m)
+            if any(
+                role.startswith("skip::") or role.startswith("rope::")
+                for role in roles
+            ):
+                role_spacings.append(rope_spacing_m)
+            segment_spacing_m = min(role_spacings)
             regions.append(
                 EanFleetPackingRegion(
                     id=f"segment::{segment_id}",
@@ -203,13 +229,13 @@ class EanInitialPlacementPackingBoundBuilder:
                     physical_id=segment_id,
                     capacity=segment_packing_capacity(
                         segment.length_m,
-                        spacing_m,
+                        segment_spacing_m,
                     ),
                     source_roles=tuple(
                         sorted(roles_by_segment_id[segment_id])
                     ),
                     length_m=segment.length_m,
-                    required_spacing_m=spacing_m,
+                    required_spacing_m=segment_spacing_m,
                     half_open=True,
                 )
             )
@@ -249,7 +275,7 @@ class EanInitialPlacementPackingBoundBuilder:
                 "Every cabin reference point belongs to exactly one half-open "
                 "track segment or one explicit waiting resource.",
                 "Track-segment reference points are separated by at least the "
-                "required cabin spacing.",
+                "smallest role-specific physical spacing applicable to that segment.",
                 "An end-of-platform waiting resource holds at most one cabin.",
                 "Inactive cabins are outside the physical network.",
             ),

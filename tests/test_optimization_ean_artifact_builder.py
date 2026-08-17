@@ -14,6 +14,10 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanCirculationPatternDefinition,
     network_ean_builder_for_pattern,
     StationWaitingMode,
+    OperatingSpeedHeadwayDurationBuilder,
+)
+from ropeway_skip_stop_optimization.optimization.headway_policy import (
+    PhysicalHeadwayPolicyBuilder,
 )
 
 
@@ -77,6 +81,15 @@ def test_network_ean_build_artifact_builder_rejects_duplicate_pattern_states() -
                 state_node_ids=("M_entry_lr", "M_entry_lr"),
             )
         ).build(scenario, config)
+
+
+def test_network_builder_rejects_two_headway_derivation_sources() -> None:
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        network_ean_builder_for_pattern(
+            pattern_definition=build_three_station_ean_pattern_definition(),
+            headway_duration_builder=OperatingSpeedHeadwayDurationBuilder(),
+            headway_policy_builder=PhysicalHeadwayPolicyBuilder(),
+        )
 
 
 def test_ring_ean_build_artifact_reports_detailed_build_metrics() -> None:

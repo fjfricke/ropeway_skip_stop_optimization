@@ -16,6 +16,7 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
     SkipStopTiming,
 )
 from ropeway_skip_stop_optimization.optimization.ean.plan import EanRouteDecision
+from ropeway_skip_stop_optimization.models import HeadwayRouteBehavior
 
 
 _EPSILON_SECONDS = 1e-9
@@ -131,7 +132,7 @@ class EanPeriodicRouteCapacityBound:
             ) from error
         if self.legs != expected_legs:
             raise ValueError("periodic route certificate does not match its artifact")
-        expected = _bound_for_legs(expected_legs, artifact.headway_checkpoints)
+        expected = _bound_for_legs(expected_legs, artifact)
         if expected is None or self != expected:
             raise ValueError("periodic route capacity does not match its artifact")
 
@@ -158,9 +159,7 @@ class EanPeriodicRouteCapacityBoundBuilder:
             )
             for switch_id in artifact.circulation_state_ids
         }
-        thresholds = tuple(
-            sorted({checkpoint.headway_seconds for checkpoint in artifact.headway_checkpoints})
-        )
+        thresholds = tuple(sorted(_periodic_thresholds(artifact)))
         best: EanPeriodicRouteCapacityBound | None = None
         for threshold in thresholds:
             legs: list[EanPeriodicRouteLeg] = []
@@ -169,12 +168,13 @@ class EanPeriodicRouteCapacityBoundBuilder:
                     timing=timings[switch_id],
                     checkpoints=checkpoints_by_switch[switch_id],
                     threshold_seconds=threshold,
+                    artifact=artifact,
                 )
                 if leg is None:
                     break
                 legs.append(leg)
             else:
-                candidate = _bound_for_legs(tuple(legs), artifact.headway_checkpoints)
+                candidate = _bound_for_legs(tuple(legs), artifact)
                 if candidate is None:
                     continue
                 if best is None or _preference_key(candidate) > _preference_key(best):
@@ -202,6 +202,7 @@ def _longest_admissible_leg(
     timing: SkipStopTiming,
     checkpoints: tuple[HeadwayCheckpointDefinition, ...],
     threshold_seconds: float,
+    artifact: EanBuildArtifact,
 ) -> EanPeriodicRouteLeg | None:
     options: list[EanPeriodicRouteLeg] = []
     for decision in (EanRouteDecision.STOP, EanRouteDecision.SKIP):
@@ -218,7 +219,8 @@ def _longest_admissible_leg(
             if checkpoint.id in leg.checkpoint_ids
         )
         if not active or any(
-            checkpoint.headway_seconds > threshold_seconds + _EPSILON_SECONDS
+            _checkpoint_headway_for_decision(artifact, checkpoint, decision)
+            > threshold_seconds + _EPSILON_SECONDS
             for checkpoint in active
         ):
             continue
@@ -237,12 +239,18 @@ def _longest_admissible_leg(
 
 def _bound_for_legs(
     legs: tuple[EanPeriodicRouteLeg, ...],
-    checkpoints: tuple[HeadwayCheckpointDefinition, ...],
+    artifact: EanBuildArtifact,
 ) -> EanPeriodicRouteCapacityBound | None:
-    checkpoint_by_id = {checkpoint.id: checkpoint for checkpoint in checkpoints}
+    checkpoint_by_id = {
+        checkpoint.id: checkpoint for checkpoint in artifact.headway_checkpoints
+    }
     cycle_seconds = sum(leg.duration_seconds for leg in legs)
     bottleneck = max(
-        checkpoint_by_id[checkpoint_id].headway_seconds
+        _checkpoint_headway_for_decision(
+            artifact,
+            checkpoint_by_id[checkpoint_id],
+            leg.decision,
+        )
         for leg in legs
         for checkpoint_id in leg.checkpoint_ids
     )
@@ -255,6 +263,44 @@ def _bound_for_legs(
         bottleneck_headway_seconds=bottleneck,
         throughput_cabins_per_second=1.0 / bottleneck,
         fleet_lower_bound=fleet,
+    )
+
+
+def _periodic_thresholds(artifact: EanBuildArtifact) -> set[float]:
+    result: set[float] = set()
+    for checkpoint in artifact.headway_checkpoints:
+        if checkpoint.applies_to_serve:
+            result.add(
+                _checkpoint_headway_for_decision(
+                    artifact,
+                    checkpoint,
+                    EanRouteDecision.STOP,
+                )
+            )
+        if checkpoint.applies_to_skip:
+            result.add(
+                _checkpoint_headway_for_decision(
+                    artifact,
+                    checkpoint,
+                    EanRouteDecision.SKIP,
+                )
+            )
+    return result
+
+
+def _checkpoint_headway_for_decision(
+    artifact: EanBuildArtifact,
+    checkpoint: HeadwayCheckpointDefinition,
+    decision: EanRouteDecision,
+) -> float:
+    behavior = (
+        HeadwayRouteBehavior.SERVICE
+        if decision is EanRouteDecision.STOP
+        else HeadwayRouteBehavior.BYPASS
+    )
+    return artifact.headway_rule_for_checkpoint(checkpoint).required_seconds(
+        behavior,
+        behavior,
     )
 
 

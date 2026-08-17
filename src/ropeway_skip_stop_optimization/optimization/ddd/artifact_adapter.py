@@ -26,6 +26,7 @@ from ropeway_skip_stop_optimization.optimization.ean.network import (
     EanPassengerBehavior,
     EanRouteOption,
 )
+from ropeway_skip_stop_optimization.models import HeadwayRouteBehavior
 
 
 @dataclass(frozen=True)
@@ -86,6 +87,7 @@ class EanArtifactToDddMovementProblemAdapter:
                 options_by_id[option_id],
                 timing_by_state_id,
                 checkpoints_by_state_id,
+                artifact,
             )
             for option_id in sorted(allowed_option_ids)
         )
@@ -100,7 +102,12 @@ class EanArtifactToDddMovementProblemAdapter:
         resources = tuple(
             DddResource(
                 id=resource_id,
-                headway_seconds=checkpoint_by_id[resource_id].headway_seconds,
+                headway_seconds=artifact.headway_rule_for_checkpoint(
+                    checkpoint_by_id[resource_id]
+                ).minimum_seconds,
+                maximum_headway_seconds=artifact.headway_rule_for_checkpoint(
+                    checkpoint_by_id[resource_id]
+                ).maximum_seconds,
             )
             for resource_id in sorted(resource_ids)
         )
@@ -135,6 +142,7 @@ class EanArtifactToDddMovementProblemAdapter:
         option: EanRouteOption,
         timing_by_state_id: dict[str, SkipStopTiming],
         checkpoints_by_state_id: dict[str, list[HeadwayCheckpointDefinition]],
+        artifact: EanBuildArtifact,
     ) -> DddRouteOption:
         if option.movement_effect is not EanMovementEffect.CONTINUE:
             raise ValueError(
@@ -209,6 +217,14 @@ class EanArtifactToDddMovementProblemAdapter:
                     resource_id=checkpoint.id,
                     leader_clear_offset_seconds=offset,
                     follower_enter_offset_seconds=offset,
+                    separation_after_seconds=(
+                        artifact.headway_rule_for_checkpoint(
+                            checkpoint
+                        ).required_seconds(
+                            _headway_behavior(decision),
+                            _headway_behavior(decision),
+                        )
+                    ),
                 )
             )
         return DddRouteOption(
@@ -241,6 +257,17 @@ def _checkpoint_offset(
         if decision is not DddRouteDecision.STOP or platform_exit is None:
             raise ValueError("platform-exit checkpoint requires a STOP route")
         return platform_exit
-    if kind is HeadwayCheckpointKind.EXIT_SWITCH:
+    if kind in (
+        HeadwayCheckpointKind.EXIT_SWITCH,
+        HeadwayCheckpointKind.SERVICE_MECHANISM,
+    ):
         return exit_switch
     raise ValueError(f"unsupported DDD checkpoint kind: {kind}")
+
+
+def _headway_behavior(decision: DddRouteDecision) -> HeadwayRouteBehavior:
+    return (
+        HeadwayRouteBehavior.SERVICE
+        if decision is DddRouteDecision.STOP
+        else HeadwayRouteBehavior.BYPASS
+    )

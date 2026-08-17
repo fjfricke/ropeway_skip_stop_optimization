@@ -15,7 +15,15 @@ from ropeway_skip_stop_optimization.examples.base import ScenarioExample
 from ropeway_skip_stop_optimization.examples.discrete import DiscreteScenarioExample
 from ropeway_skip_stop_optimization.examples.ean import EanScenarioExample
 from ropeway_skip_stop_optimization.mapping import discretize_scenario
-from ropeway_skip_stop_optimization.models import DiscreteScenario, MovementPlan, ReplayMetrics, ReplayResult, Scenario
+from ropeway_skip_stop_optimization.models import (
+    DerivedHeadwayResourceKind,
+    DiscreteScenario,
+    HeadwayRouteBehavior,
+    MovementPlan,
+    ReplayMetrics,
+    ReplayResult,
+    Scenario,
+)
 from ropeway_skip_stop_optimization.optimization.discrete_time import (
     FixedCabinStart,
     MilpV0Config,
@@ -371,6 +379,9 @@ class EanModelBuildProfileArtifactBuilder(ArtifactBuilder):
                     "candidate_count": len(artifact.headway_candidates),
                     "pair_count": len(artifact.headway_pairs),
                     "build_metrics": artifact.build_metrics,
+                    "headway_summary": _ean_headway_summary(
+                        context.scenario(), artifact
+                    ),
                 },
                 "model": {
                     "variable_count": metadata.variable_count,
@@ -505,11 +516,17 @@ class EanBuildArtifactArtifactBuilder(ArtifactBuilder):
     label = "EAN build artifact"
 
     def build(self, context: ExportContext) -> ExportArtifact:
+        artifact = context.ean_artifact()
         return ExportArtifact(
             self.id,
             self.kind,
             self._path(context, "ean_build_artifact.json"),
-            context.ean_artifact(),
+            {
+                **artifact.__dict__,
+                "headway_summary": _ean_headway_summary(
+                    context.scenario(), artifact
+                ),
+            },
             self.label,
         )
 
@@ -674,6 +691,101 @@ def _passenger_service_objective_label(objective: EanPassengerObjective) -> str:
     if objective is EanPassengerObjective.JOURNEY_TIME:
         return "journey-time"
     return objective.value
+
+
+def _ean_headway_summary(
+    scenario: Scenario,
+    artifact: EanBuildArtifact,
+) -> dict[str, Any] | None:
+    policy = artifact.headway_policy
+    if policy is None:
+        return None
+    bypass = HeadwayRouteBehavior.BYPASS
+    service = HeadwayRouteBehavior.SERVICE
+    mechanisms = (
+        {
+            assignment.exit_switch_id: type(assignment.design).__name__
+            for assignment in scenario.headway_design.station_mechanisms
+        }
+        if scenario.headway_design is not None
+        else {}
+    )
+    merge_matrices = []
+    for resource in policy.resource_requirements:
+        if resource.kind is not DerivedHeadwayResourceKind.EXIT_SWITCH:
+            continue
+        rule = policy.rule(resource.rule_id)
+        merge_matrices.append(
+            {
+                "state_id": resource.state_id,
+                "exit_switch_id": resource.exit_switch_id,
+                "architecture": mechanisms.get(resource.exit_switch_id, "legacy"),
+                "BB_seconds": rule.required_seconds(bypass, bypass),
+                "BS_seconds": rule.required_seconds(bypass, service),
+                "SB_seconds": rule.required_seconds(service, bypass),
+                "SS_seconds": rule.required_seconds(service, service),
+            }
+        )
+    quantities = {
+        quantity.id: quantity.value for quantity in policy.derived_quantities
+    }
+    return {
+        "legacy": policy.legacy,
+        "rope_headway_seconds": quantities.get(
+            "rope_headway_seconds",
+            quantities.get("legacy_rope_headway_seconds"),
+        ),
+        "service_headway_seconds": quantities.get(
+            "service_headway_seconds",
+            quantities.get("legacy_station_headway_seconds"),
+        ),
+        "merge_matrices": merge_matrices,
+        "service_resources": [
+            {
+                "id": resource.id,
+                "physical_resource_id": resource.physical_resource_id,
+                "seconds": policy.rule(resource.rule_id).maximum_seconds,
+            }
+            for resource in policy.resource_requirements
+            if resource.kind is DerivedHeadwayResourceKind.SERVICE_MECHANISM
+        ],
+        "effective_resource_ids": (
+            [
+                resource.id
+                for resource in artifact.effective_headway_policy.resource_requirements
+            ]
+            if artifact.effective_headway_policy is not None
+            else [resource.id for resource in policy.resource_requirements]
+        ),
+        "dominance_certificates": (
+            [
+                {
+                    "dominated_resource_id": certificate.dominated_resource_id,
+                    "dominating_resource_id": certificate.dominating_resource_id,
+                    "proof_kind": certificate.proof_kind.value,
+                    "minimum_implied_headway_seconds": (
+                        certificate.minimum_implied_headway_seconds
+                    ),
+                    "required_headway_seconds": certificate.required_headway_seconds,
+                    "slack_seconds": certificate.slack_seconds,
+                    "retain_at_initial_boundary": (
+                        certificate.retain_at_initial_boundary
+                    ),
+                }
+                for certificate in artifact.effective_headway_policy.dominance_certificates
+            ]
+            if artifact.effective_headway_policy is not None
+            else []
+        ),
+        "component_resource_ids_by_effective_id": (
+            artifact.effective_headway_policy.component_resource_ids_by_effective_id
+            if artifact.effective_headway_policy is not None
+            else {
+                resource.id: (resource.id,)
+                for resource in policy.resource_requirements
+            }
+        ),
+    }
 
 
 @dataclass(frozen=True)

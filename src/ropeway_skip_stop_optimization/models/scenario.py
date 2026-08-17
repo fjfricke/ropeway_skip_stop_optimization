@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from datetime import time
 from enum import Enum
 
+from ropeway_skip_stop_optimization.models.headway import HeadwayDesign
+
 
 class StationKind(Enum):
     SERVICE = "service"
@@ -181,10 +183,13 @@ class Scenario:
     cabin_initial_states: tuple[CabinInitialState, ...]
     demands: tuple[Demand, ...]
     operating: OperatingParameters
+    headway_design: HeadwayDesign | None = None
 
     def validate(self) -> None:
         if self.service_end_time <= self.service_start_time:
             raise ValueError("service_end_time must be after service_start_time")
+        if self.headway_design is not None:
+            self.headway_design.validate()
 
         station_ids = _unique_ids("station", (station.id for station in self.stations))
         node_ids = _unique_ids("physical node", (node.id for node in self.physical_nodes))

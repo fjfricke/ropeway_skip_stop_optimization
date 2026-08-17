@@ -3,7 +3,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field, replace
 
-from ropeway_skip_stop_optimization.models import Scenario
+from ropeway_skip_stop_optimization.models import HeadwayRouteBehavior, Scenario
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
 from ropeway_skip_stop_optimization.optimization.ean.builders.network_artifact_builder import (
     NetworkEanBuildArtifactBuilder,
@@ -123,8 +123,12 @@ def canonical_all_stop_fleet_count(artifact: EanBuildArtifact) -> int:
         + timing.rope_to_next_switch_seconds
         for timing in timing_by_switch_id.values()
     )
+    service = HeadwayRouteBehavior.SERVICE
     headways = tuple(
-        checkpoint.headway_seconds
+        artifact.headway_rule_for_checkpoint(checkpoint).required_seconds(
+            service,
+            service,
+        )
         for checkpoint in artifact.headway_checkpoints
         if checkpoint.applies_to_serve
     )

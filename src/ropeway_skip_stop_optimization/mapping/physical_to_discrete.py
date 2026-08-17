@@ -56,6 +56,11 @@ def discretize_scenario(
 ) -> DiscreteScenario:
     config = config or DiscretizationConfig()
     config.validate()
+    if scenario.headway_design is not None:
+        raise NotImplementedError(
+            "the legacy physical-to-discrete model does not support derived "
+            "A/B/C headway designs; use the EAN or DDD network model"
+        )
     validate_scenario(scenario).raise_for_errors()
 
     physical_nodes_by_id = {node.id: node for node in scenario.physical_nodes}

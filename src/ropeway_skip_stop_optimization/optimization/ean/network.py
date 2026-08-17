@@ -268,14 +268,10 @@ class EanResourceConflictIndex:
     ) -> EanResourceConflictIndex:
         network.validate()
         checkpoint_ids = {checkpoint.id for checkpoint in checkpoints}
-        compatibility_resource_ids = {
-            resource.id
-            for resource in network.resources
-            if resource.kind is EanResourceKind.COMPATIBILITY
-        }
-        missing = checkpoint_ids - compatibility_resource_ids
+        network_resource_ids = {resource.id for resource in network.resources}
+        missing = checkpoint_ids - network_resource_ids
         if missing:
-            raise ValueError(f"network is missing compatibility resources for checkpoints: {missing}")
+            raise ValueError(f"network is missing resources for checkpoints: {missing}")
         route_options_by_resource: dict[str, list[str]] = {
             resource.id: [] for resource in network.resources
         }

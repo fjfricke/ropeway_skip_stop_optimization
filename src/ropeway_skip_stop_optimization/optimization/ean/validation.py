@@ -2,16 +2,39 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ropeway_skip_stop_optimization.models import (
+    HeadwayRouteBehavior,
+    HeadwayRule,
+    LeaderBehaviorHeadwayRule,
+)
+
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
+from ropeway_skip_stop_optimization.optimization.ean.builders.headway_candidate_builder import (
+    SwitchVisitHeadwayCandidateBuilder,
+)
+from ropeway_skip_stop_optimization.optimization.ean.builders.headway_checkpoint_builder import (
+    PolicyHeadwayCheckpointBuilder,
+)
+from ropeway_skip_stop_optimization.optimization.ean.builders.headway_pair_builder import (
+    AllPairsHeadwayPairBuilder,
+)
 from ropeway_skip_stop_optimization.optimization.ean.headway_semantics import (
     PLATFORM_EXIT_WAIT_OCCUPANCY_SEMANTICS,
     POINT_HEADWAY_SEMANTICS,
     headway_semantics_label,
     uses_platform_exit_wait_occupancy,
 )
+from ropeway_skip_stop_optimization.optimization.ean.headway_rule_evaluation import (
+    evaluate_headway_pair,
+)
 from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     EanHorizonFormulation,
     EanTimeBoundFormulation,
+)
+from ropeway_skip_stop_optimization.optimization.ean.fleet import (
+    EanFleetPlan,
+    EanInitialPlacementState,
+    EanInitialPlacementStateKind,
 )
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanActivationReference,
@@ -22,6 +45,7 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanTimeReference,
     HeadwayCandidate,
     HeadwayCheckpointDefinition,
+    HeadwayCheckpointKind,
     HeadwayPair,
     SkipStopTiming,
     StationEanConfig,
@@ -129,6 +153,7 @@ def validate_ean_movement_plan_against_artifact(
             )
     else:
         _validate_headways(
+            artifact=artifact,
             pairs=artifact.headway_pairs,
             candidate_by_id=candidate_by_id,
             checkpoint_by_id=checkpoint_by_id,
@@ -140,8 +165,217 @@ def validate_ean_movement_plan_against_artifact(
             issues=issues,
             tolerance_seconds=tolerance_seconds,
         )
+    _validate_dominated_physical_headways(
+        artifact=artifact,
+        visit_by_key=visit_by_key,
+        station_config_by_id=station_config_by_id,
+        timing_by_switch_id=timing_by_switch_id,
+        horizon_formulation=plan.horizon_formulation,
+        issues=issues,
+        tolerance_seconds=tolerance_seconds,
+    )
 
     return ValidationReport(tuple(issues))
+
+
+def validate_ean_initial_boundary_against_artifact(
+    artifact: EanBuildArtifact,
+    plan: EanMovementPlan,
+    fleet_plan: EanFleetPlan,
+    tolerance_seconds: float = 1e-6,
+) -> ValidationReport:
+    """Validate OIP rope-boundary provenance omitted from ordinary EAN pairs."""
+
+    issues: list[ValidationIssue] = []
+    if tolerance_seconds < 0:
+        raise ValueError("tolerance_seconds must be nonnegative")
+    try:
+        fleet_plan.validate()
+    except ValueError as exc:
+        _add_issue(
+            issues,
+            "EAN_FLEET_PLAN_STRUCTURE_ERROR",
+            str(exc),
+            "ean_fleet_plan",
+            artifact.scenario_id,
+        )
+        return ValidationReport(tuple(issues))
+    if artifact.fleet_mode is not EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT:
+        _add_issue(
+            issues,
+            "EAN_FLEET_MODE_MISMATCH",
+            "initial-boundary validation requires optimized initial placement",
+            "ean_artifact",
+            artifact.scenario_id,
+        )
+        return ValidationReport(tuple(issues))
+
+    visit_by_key = {
+        (visit.cabin_id, visit.visit_index): visit
+        for trajectory in plan.trajectories
+        for visit in trajectory.visits
+    }
+    timing_by_switch_id = _timings_by_switch_id(artifact.timings)
+    exit_checkpoint_by_switch_id = {
+        checkpoint.switch_id: checkpoint
+        for checkpoint in artifact.headway_checkpoints
+        if checkpoint.kind is HeadwayCheckpointKind.EXIT_SWITCH
+    }
+    rope_states_by_switch_id: dict[str, list[EanInitialPlacementState]] = {}
+    for state in fleet_plan.initial_states:
+        if state.kind is not EanInitialPlacementStateKind.ROPE:
+            continue
+        checkpoint = exit_checkpoint_by_switch_id.get(state.switch_id)
+        timing = timing_by_switch_id.get(state.switch_id)
+        visit = visit_by_key.get((state.cabin_id, state.visit_index))
+        if checkpoint is None or timing is None:
+            _add_issue(
+                issues,
+                "EAN_INITIAL_BOUNDARY_MISMATCH",
+                f"rope state for cabin {state.cabin_id} cannot be reconstructed",
+                "ean_fleet_state",
+                str(state.cabin_id),
+            )
+            continue
+        rule = artifact.headway_rule_for_checkpoint(checkpoint)
+        needs_previous_service = (
+            isinstance(rule, LeaderBehaviorHeadwayRule)
+            or artifact.initial_boundary_service_resource(state.switch_id)
+            is not None
+        )
+        if needs_previous_service and state.previous_service is None:
+            _add_issue(
+                issues,
+                "EAN_INITIAL_PREVIOUS_BEHAVIOR_MISSING",
+                f"rope state for cabin {state.cabin_id} needs previous_service",
+                "ean_fleet_state",
+                str(state.cabin_id),
+            )
+            continue
+        expected_previous = (
+            state.next_event_time_seconds - timing.rope_to_next_switch_seconds
+        )
+        visit_mismatch = visit is not None and not _close(
+            state.next_event_time_seconds,
+            visit.switch_time_seconds,
+            tolerance_seconds,
+        )
+        missing_covered_visit = (
+            visit is None
+            and state.next_event_time_seconds
+            <= artifact.config.model_end_seconds + tolerance_seconds
+        )
+        if visit_mismatch or missing_covered_visit or not _close(
+            state.previous_event_time_seconds,
+            expected_previous,
+            tolerance_seconds,
+        ):
+            _add_issue(
+                issues,
+                "EAN_INITIAL_BOUNDARY_MISMATCH",
+                f"rope state times for cabin {state.cabin_id} do not match its visit",
+                "ean_fleet_state",
+                str(state.cabin_id),
+            )
+            continue
+        rope_states_by_switch_id.setdefault(state.switch_id, []).append(state)
+
+    for switch_id, states in rope_states_by_switch_id.items():
+        exit_checkpoint = exit_checkpoint_by_switch_id[switch_id]
+        exit_rule = artifact.headway_rule_for_checkpoint(exit_checkpoint)
+        ordered = tuple(
+            sorted(states, key=lambda item: item.previous_event_time_seconds)
+        )
+        for leader, follower in zip(ordered, ordered[1:]):
+            _validate_initial_boundary_gap(
+                leader=leader,
+                follower_time_seconds=follower.previous_event_time_seconds,
+                rule=exit_rule,
+                code="EAN_INITIAL_ROPE_HEADWAY_VIOLATION",
+                issues=issues,
+                tolerance_seconds=tolerance_seconds,
+            )
+        regular_visits = tuple(
+            visit
+            for visit in visit_by_key.values()
+            if visit.switch_id == switch_id
+            and visit.exit_switch_time_seconds >= -tolerance_seconds
+        )
+        for leader in ordered:
+            for follower in regular_visits:
+                _validate_initial_boundary_gap(
+                    leader=leader,
+                    follower_time_seconds=follower.exit_switch_time_seconds,
+                    rule=exit_rule,
+                    code="EAN_INITIAL_ROPE_TO_EXIT_HEADWAY_VIOLATION",
+                    issues=issues,
+                    tolerance_seconds=tolerance_seconds,
+                )
+
+        boundary_service_resource = artifact.initial_boundary_service_resource(
+            switch_id
+        )
+        if boundary_service_resource is None:
+            continue
+        service_rule = artifact.headway_rule_for_full_resource(
+            boundary_service_resource
+        )
+        previous_services = tuple(
+            state for state in ordered if state.previous_service is True
+        )
+        for leader, follower in zip(previous_services, previous_services[1:]):
+            _validate_initial_boundary_gap(
+                leader=leader,
+                follower_time_seconds=follower.previous_event_time_seconds,
+                rule=service_rule,
+                code="EAN_INITIAL_SERVICE_RESOURCE_VIOLATION",
+                issues=issues,
+                tolerance_seconds=tolerance_seconds,
+            )
+        service_visits = tuple(
+            visit
+            for visit in regular_visits
+            if visit.decision is EanRouteDecision.STOP
+        )
+        for leader in previous_services:
+            for follower in service_visits:
+                _validate_initial_boundary_gap(
+                    leader=leader,
+                    follower_time_seconds=follower.exit_switch_time_seconds,
+                    rule=service_rule,
+                    code="EAN_INITIAL_SERVICE_RESOURCE_VIOLATION",
+                    issues=issues,
+                    tolerance_seconds=tolerance_seconds,
+                )
+
+    return ValidationReport(tuple(issues))
+
+
+def _validate_initial_boundary_gap(
+    *,
+    leader: EanInitialPlacementState,
+    follower_time_seconds: float,
+    rule: HeadwayRule,
+    code: str,
+    issues: list[ValidationIssue],
+    tolerance_seconds: float,
+) -> None:
+    leader_behavior = (
+        HeadwayRouteBehavior.SERVICE
+        if leader.previous_service is True
+        else HeadwayRouteBehavior.BYPASS
+    )
+    required = rule.required_seconds(leader_behavior, leader_behavior)
+    gap = follower_time_seconds - leader.previous_event_time_seconds
+    if gap + tolerance_seconds < required:
+        _add_issue(
+            issues,
+            code,
+            f"initial boundary cabin {leader.cabin_id} has gap {gap}, "
+            f"requires {required}",
+            "ean_fleet_state",
+            str(leader.cabin_id),
+        )
 
 
 def _validate_plan_identity(
@@ -440,6 +674,7 @@ def _validate_checkpoint_modes(
 
 
 def _validate_headways(
+    artifact: EanBuildArtifact,
     pairs: tuple[HeadwayPair, ...],
     candidate_by_id: dict[str, HeadwayCandidate],
     checkpoint_by_id: dict[str, HeadwayCheckpointDefinition],
@@ -450,6 +685,7 @@ def _validate_headways(
     horizon_formulation: EanHorizonFormulation,
     issues: list[ValidationIssue],
     tolerance_seconds: float,
+    use_full_policy: bool = False,
 ) -> None:
     for pair in pairs:
         first_candidate = candidate_by_id.get(pair.first_candidate_id)
@@ -493,7 +729,20 @@ def _validate_headways(
                 continue
         forward_gap = second_times.follower_enter_time - first_times.leader_clear_time
         reverse_gap = first_times.follower_enter_time - second_times.leader_clear_time
-        if max(forward_gap, reverse_gap) + tolerance_seconds < pair.headway_seconds:
+        evaluation = evaluate_headway_pair(
+            rule=(
+                artifact.headway_policy.rule(checkpoint.headway_rule_id)
+                if use_full_policy
+                and artifact.headway_policy is not None
+                and checkpoint.headway_rule_id is not None
+                else artifact.headway_rule_for_checkpoint(checkpoint)
+            ),
+            first_is_service=first_visit.decision is EanRouteDecision.STOP,
+            second_is_service=second_visit.decision is EanRouteDecision.STOP,
+            forward_gap_seconds=forward_gap,
+            reverse_gap_seconds=reverse_gap,
+        )
+        if evaluation.is_violated(tolerance_seconds=tolerance_seconds):
             semantics_label = headway_semantics_label(checkpoint, station_config)
             _add_issue(
                 issues,
@@ -503,10 +752,63 @@ def _validate_headways(
                 f"forward follower_enter_time={second_times.follower_enter_time}, "
                 f"reverse leader_clear_time={second_times.leader_clear_time}, "
                 f"reverse follower_enter_time={first_times.follower_enter_time}, "
-                f"needs headway_seconds={pair.headway_seconds}",
+                f"needs forward_headway_seconds={evaluation.forward_required_seconds}, "
+                f"reverse_headway_seconds={evaluation.reverse_required_seconds}",
                 "ean_headway_pair",
                 pair.id,
             )
+
+
+def _validate_dominated_physical_headways(
+    *,
+    artifact: EanBuildArtifact,
+    visit_by_key: dict[tuple[int, int], EanCabinVisit],
+    station_config_by_id: dict[str, StationEanConfig],
+    timing_by_switch_id: dict[str, SkipStopTiming],
+    horizon_formulation: EanHorizonFormulation,
+    issues: list[ValidationIssue],
+    tolerance_seconds: float,
+) -> None:
+    effective = artifact.effective_headway_policy
+    full = artifact.headway_policy
+    if effective is None or full is None or not effective.dominance_certificates:
+        return
+    dominated_ids = {
+        certificate.dominated_resource_id
+        for certificate in effective.dominance_certificates
+    }
+    checkpoints = tuple(
+        checkpoint
+        for checkpoint in PolicyHeadwayCheckpointBuilder(full).build(
+            timings=artifact.timings,
+            station_configs=artifact.config.station_configs,
+        )
+        if checkpoint.id in dominated_ids
+    )
+    if not checkpoints:
+        return
+    candidates = SwitchVisitHeadwayCandidateBuilder().build(
+        visits=artifact.switch_visits,
+        checkpoints=checkpoints,
+    )
+    pairs = AllPairsHeadwayPairBuilder().build(
+        candidates=candidates,
+        checkpoints=checkpoints,
+    )
+    _validate_headways(
+        artifact=artifact,
+        pairs=pairs,
+        candidate_by_id=_candidate_by_id(candidates),
+        checkpoint_by_id=_checkpoint_by_id(checkpoints),
+        station_config_by_id=station_config_by_id,
+        timing_by_switch_id=timing_by_switch_id,
+        visit_by_key=visit_by_key,
+        model_end_seconds=artifact.config.model_end_seconds,
+        horizon_formulation=horizon_formulation,
+        issues=issues,
+        tolerance_seconds=tolerance_seconds,
+        use_full_policy=True,
+    )
 
 
 def _candidate_is_active(

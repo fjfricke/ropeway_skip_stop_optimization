@@ -59,6 +59,7 @@ from ropeway_skip_stop_optimization.optimization.ean.periodic_route import (
     EanPeriodicRouteCapacityBoundBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ean.validation import (
+    validate_ean_initial_boundary_against_artifact,
     validate_ean_movement_plan_against_artifact,
 )
 
@@ -624,6 +625,12 @@ def _solve_eager_headway_probe(
             tolerance_seconds=1e-5,
         ).raise_for_errors()
         fleet_plan = context.movement_model.fleet_model.extract_plan()
+        validate_ean_initial_boundary_against_artifact(
+            artifact,
+            movement_plan,
+            fleet_plan,
+            tolerance_seconds=1e-5,
+        ).raise_for_errors()
         status = EanInitialPlacementFeasibilityStatus.FEASIBLE
     result = EanInitialPlacementCapacityProbeResult(
         fleet_count=context.problem.fleet_count,
@@ -756,6 +763,16 @@ def _solve_delayed_headway_probe(
         if non_headway_report.errors:
             if int(model.Status) == int(grb.OPTIMAL):
                 non_headway_report.raise_for_errors()
+            return result(EanInitialPlacementFeasibilityStatus.UNKNOWN)
+        boundary_report = validate_ean_initial_boundary_against_artifact(
+            artifact,
+            movement_plan,
+            fleet_plan,
+            tolerance_seconds=delayed.violation_tolerance_seconds,
+        )
+        if boundary_report.errors:
+            if int(model.Status) == int(grb.OPTIMAL):
+                boundary_report.raise_for_errors()
             return result(EanInitialPlacementFeasibilityStatus.UNKNOWN)
 
         separation_started = time.monotonic()

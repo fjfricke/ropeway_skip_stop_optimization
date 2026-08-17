@@ -41,6 +41,7 @@ class EanInitialPlacementState:
     progress: float
     previous_event_time_seconds: float
     next_event_time_seconds: float
+    previous_service: bool | None = None
 
     def validate(self) -> None:
         if self.cabin_id < 0:
@@ -55,6 +56,8 @@ class EanInitialPlacementState:
             raise ValueError("initial placement previous event must not be after the boundary")
         if self.next_event_time_seconds < 0:
             raise ValueError("initial placement next event must not be before the boundary")
+        if self.kind is not EanInitialPlacementStateKind.ROPE and self.previous_service is not None:
+            raise ValueError("only rope initial states may define previous_service")
 
 
 @dataclass(frozen=True)

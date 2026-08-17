@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from hashlib import sha256
 import json
 from time import perf_counter
@@ -358,6 +358,16 @@ def ddd_trajectory_instance_fingerprint(artifact: EanBuildArtifact) -> str:
         "model_end_seconds": artifact.config.model_end_seconds,
         "fleet_mode": artifact.fleet_mode.value,
         "cabin_ids": sorted(start.cabin_id for start in artifact.cabin_starts),
+        "headway_policy": (
+            asdict(artifact.headway_policy)
+            if artifact.headway_policy is not None
+            else None
+        ),
+        "effective_headway_policy": (
+            asdict(artifact.effective_headway_policy)
+            if artifact.effective_headway_policy is not None
+            else None
+        ),
     }
     return sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()

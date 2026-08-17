@@ -15,6 +15,9 @@ from ropeway_skip_stop_optimization.optimization.ean.headway_semantics import (
     POINT_HEADWAY_SEMANTICS,
     uses_platform_exit_wait_occupancy,
 )
+from ropeway_skip_stop_optimization.optimization.ean.headway_rule_evaluation import (
+    evaluate_headway_pair,
+)
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanActivationReference,
     EanTimeReference,
@@ -38,6 +41,8 @@ class EanHeadwayViolation:
     reverse_gap_seconds: float
     violation_seconds: float
     semantics_label: str
+    forward_required_seconds: float | None = None
+    reverse_required_seconds: float | None = None
 
 
 @dataclass(frozen=True)
@@ -93,15 +98,29 @@ def separate_all_headway_violations(
         for (first, first_times), (second, second_times) in combinations(active, 2):
             forward = second_times.follower_enter_time - first_times.leader_clear_time
             reverse = first_times.follower_enter_time - second_times.leader_clear_time
-            violation = checkpoint.headway_seconds - max(forward, reverse)
-            if violation > tolerance_seconds:
+            first_visit = visit_by_key[(first.cabin_id, first.visit_index)]
+            second_visit = visit_by_key[(second.cabin_id, second.visit_index)]
+            evaluation = evaluate_headway_pair(
+                rule=artifact.headway_rule_for_checkpoint(checkpoint),
+                first_is_service=first_visit.decision is EanRouteDecision.STOP,
+                second_is_service=second_visit.decision is EanRouteDecision.STOP,
+                forward_gap_seconds=forward,
+                reverse_gap_seconds=reverse,
+            )
+            if evaluation.is_violated(tolerance_seconds=tolerance_seconds):
                 violations.append(
                     EanHeadwayViolation(
                         pair=build_headway_pair(checkpoint, first, second),
                         forward_gap_seconds=forward,
                         reverse_gap_seconds=reverse,
-                        violation_seconds=violation,
+                        violation_seconds=evaluation.violation_seconds,
                         semantics_label=first_times.semantics_label,
+                        forward_required_seconds=(
+                            evaluation.forward_required_seconds
+                        ),
+                        reverse_required_seconds=(
+                            evaluation.reverse_required_seconds
+                        ),
                     )
                 )
     return tuple(sorted(violations, key=lambda item: (-item.violation_seconds, item.pair.id)))

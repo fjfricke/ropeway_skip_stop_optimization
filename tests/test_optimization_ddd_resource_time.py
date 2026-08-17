@@ -24,6 +24,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.resource_time import (
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_space import DddTimeCell
 from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
+    ddd_headway_seconds_to_tick,
     ddd_tick_to_seconds,
 )
 
@@ -332,14 +333,40 @@ def test_mandatory_resource_row_preserves_same_arc_multiplicity() -> None:
     assert row.terms[0].coefficient == 2
 
 
-def test_mandatory_resource_rows_reject_inconsistent_shared_headway() -> None:
+def test_mandatory_resource_rows_support_directed_usage_headways() -> None:
     windows = (
         _window("first", source=(0, 1), headway=2),
         _window("second", source=(0, 1), headway=3),
     )
 
-    with pytest.raises(ValueError, match="different headways"):
-        build_ddd_mandatory_resource_rows(windows)
+    rows = build_ddd_mandatory_resource_rows(windows)
+
+    assert rows
+    assert rows[0].right_hand_side == 1
+
+
+def test_safety_headways_round_outward_to_microsecond_ticks() -> None:
+    resource = DddResource("merge", 0.0000001, 0.0000011)
+    usage = DddResourceUsage("merge", 0.0, 0.0, 0.0000011)
+
+    assert resource.minimum_headway_tick == 1
+    assert resource.maximum_headway_tick == 2
+    assert usage.separation_after_tick(resource.minimum_headway_tick) == 2
+    assert ddd_headway_seconds_to_tick(0.0000011) == 2
+
+
+def test_universal_conflict_uses_each_possible_leaders_headway() -> None:
+    short_first = _window("first", source=(0, 1), headway=2)
+    long_second = _window("second", source=(3, 4), headway=5)
+
+    assert find_ddd_universal_resource_conflict(short_first, long_second) is None
+
+    long_first = _window("first", source=(0, 1), headway=5)
+    short_second = _window("second", source=(3, 4), headway=2)
+    conflict = find_ddd_universal_resource_conflict(long_first, short_second)
+
+    assert conflict is not None
+    assert conflict.minimum_violation_tick == 2
 
 
 def test_universal_conflict_builds_distinct_and_self_capacity_rows() -> None:

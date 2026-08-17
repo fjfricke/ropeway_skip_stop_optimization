@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING
 
 from ropeway_skip_stop_optimization.mapping.physical_to_discrete import travel_seconds_for_segment
 from ropeway_skip_stop_optimization.models import (
+    DerivedHeadwayPolicy,
+    HeadwayRouteBehavior,
     PhysicalNode,
     PhysicalNodeKind,
     Scenario,
@@ -24,9 +26,6 @@ from ropeway_skip_stop_optimization.optimization.ean.network import (
 )
 
 if TYPE_CHECKING:
-    from ropeway_skip_stop_optimization.optimization.ean.builders.headway_duration_builder import (
-        HeadwayDurations,
-    )
     from ropeway_skip_stop_optimization.optimization.ean.models import SkipStopTiming
 
 
@@ -38,6 +37,7 @@ class EanCabinStartBuilder(ABC):
         config: EanConfig,
         network: EanMovementNetwork,
         pattern: EanCirculationPattern,
+        headway_policy: DerivedHeadwayPolicy | None = None,
     ) -> tuple[EanCabinStart, ...]:
         """Derive EAN cabin starts from scenario-specific start data."""
 
@@ -57,7 +57,9 @@ class DeterministicPhysicalNodeToSwitchStartBuilder(EanCabinStartBuilder):
         config: EanConfig,
         network: EanMovementNetwork,
         pattern: EanCirculationPattern,
+        headway_policy: DerivedHeadwayPolicy | None = None,
     ) -> tuple[EanCabinStart, ...]:
+        del headway_policy
         scenario.validate()
         config.validate()
         _validate_selected_pattern(network, pattern)
@@ -106,6 +108,7 @@ class EvenlySpacedAllStopCabinStartBuilder(EanCabinStartBuilder):
         config: EanConfig,
         network: EanMovementNetwork,
         pattern: EanCirculationPattern,
+        headway_policy: DerivedHeadwayPolicy | None = None,
     ) -> tuple[EanCabinStart, ...]:
         cycle_boundaries, cycle_seconds, maximum_cabin_count = (
             _continuous_all_stop_start_parameters(
@@ -113,6 +116,7 @@ class EvenlySpacedAllStopCabinStartBuilder(EanCabinStartBuilder):
                 config=config,
                 network=network,
                 pattern=pattern,
+                headway_policy=headway_policy,
             )
         )
         if self.cabin_count <= 0:
@@ -145,6 +149,7 @@ class ContinuousAllStopMaxCabinStartBuilder(EanCabinStartBuilder):
         config: EanConfig,
         network: EanMovementNetwork,
         pattern: EanCirculationPattern,
+        headway_policy: DerivedHeadwayPolicy | None = None,
     ) -> tuple[EanCabinStart, ...]:
         cycle_boundaries, cycle_seconds, cabin_count = (
             _continuous_all_stop_start_parameters(
@@ -152,6 +157,7 @@ class ContinuousAllStopMaxCabinStartBuilder(EanCabinStartBuilder):
                 config=config,
                 network=network,
                 pattern=pattern,
+                headway_policy=headway_policy,
             )
         )
         return _evenly_spaced_all_stop_starts(
@@ -167,12 +173,13 @@ def _continuous_all_stop_start_parameters(
     config: EanConfig,
     network: EanMovementNetwork,
     pattern: EanCirculationPattern,
+    headway_policy: DerivedHeadwayPolicy | None,
 ) -> tuple[tuple[_CycleBoundary, ...], float, int]:
-    from ropeway_skip_stop_optimization.optimization.ean.builders.headway_duration_builder import (
-        OperatingSpeedHeadwayDurationBuilder,
-    )
     from ropeway_skip_stop_optimization.optimization.ean.builders.network_timing_builder import (
         NetworkSkipStopTimingBuilder,
+    )
+    from ropeway_skip_stop_optimization.optimization.headway_policy import (
+        PhysicalHeadwayPolicyBuilder,
     )
     scenario.validate()
     config.validate()
@@ -184,9 +191,13 @@ def _continuous_all_stop_start_parameters(
     )
     cycle_boundaries = _all_stop_cycle_boundaries(timings, pattern.state_ids)
     cycle_seconds = cycle_boundaries[-1].seconds
-    headway_seconds = _max_all_stop_headway_seconds(
-        OperatingSpeedHeadwayDurationBuilder().build(scenario, timings),
+    policy = headway_policy or PhysicalHeadwayPolicyBuilder().build(
+        scenario,
+        network,
+        timings,
+        pattern,
     )
+    headway_seconds = _max_all_stop_headway_seconds(policy)
     maximum_cabin_count = max(
         1,
         math.floor((cycle_seconds + 1e-9) / headway_seconds),
@@ -253,13 +264,14 @@ def _all_stop_switch_to_next_seconds(timing: "SkipStopTiming") -> float:
     )
 
 
-def _max_all_stop_headway_seconds(headway_durations: "HeadwayDurations") -> float:
-    headway_durations.validate()
-    headways = (
-        *headway_durations.station_headway_seconds_by_station_id.values(),
-        *headway_durations.exit_switch_headway_seconds_by_switch_id.values(),
+def _max_all_stop_headway_seconds(policy: DerivedHeadwayPolicy) -> float:
+    policy.validate()
+    service = HeadwayRouteBehavior.SERVICE
+    return max(
+        policy.rule(resource.rule_id).required_seconds(service, service)
+        for resource in policy.resource_requirements
+        if resource.applies_to_service
     )
-    return max(headways)
 
 
 def _start_for_phase(

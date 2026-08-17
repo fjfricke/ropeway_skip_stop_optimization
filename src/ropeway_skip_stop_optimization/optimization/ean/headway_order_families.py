@@ -171,7 +171,11 @@ def _order_source(
 ) -> tuple[str, str, EventPair]:
     current_switch_id = switch_id
     current_endpoints = endpoints
-    current_kind = checkpoint_kind
+    current_kind = (
+        HeadwayCheckpointKind.EXIT_SWITCH
+        if checkpoint_kind is HeadwayCheckpointKind.SERVICE_MECHANISM
+        else checkpoint_kind
+    )
     traversed: list[tuple[str, EventPair]] = []
     while True:
         cache_key = current_switch_id, current_endpoints

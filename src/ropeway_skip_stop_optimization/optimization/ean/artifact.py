@@ -2,6 +2,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ropeway_skip_stop_optimization.models import (
+    ConstantHeadwayRule,
+    DerivedHeadwayPolicy,
+    DerivedHeadwayResource,
+    DerivedHeadwayResourceKind,
+    EffectiveHeadwayPolicy,
+    HeadwayRule,
+)
+
 from ropeway_skip_stop_optimization.optimization.ean.build_profile import (
     EanArtifactBuildMetrics,
 )
@@ -50,6 +59,8 @@ class EanBuildArtifact:
     movement_network: EanMovementNetwork | None = None
     circulation_pattern_ids: tuple[str, ...] = ()
     resource_conflict_index: EanResourceConflictIndex | None = None
+    headway_policy: DerivedHeadwayPolicy | None = None
+    effective_headway_policy: EffectiveHeadwayPolicy | None = None
 
     @property
     def circulation_state_ids(self) -> tuple[str, ...]:
@@ -98,6 +109,7 @@ class EanBuildArtifact:
             switch_ids=set(self.state_ids),
             timing_by_switch_id=timing_by_switch_id,
         )
+        self._validate_headway_policy()
         candidate_checkpoint_by_id = _validate_headway_candidates(
             self.headway_candidates,
             checkpoint_ids=checkpoint_ids,
@@ -108,6 +120,154 @@ class EanBuildArtifact:
             checkpoint_ids=checkpoint_ids,
             candidate_checkpoint_by_id=candidate_checkpoint_by_id,
         )
+
+    def headway_rule_for_checkpoint(
+        self, checkpoint: HeadwayCheckpointDefinition
+    ) -> HeadwayRule:
+        solver_policy = self.effective_headway_policy or self.headway_policy
+        if checkpoint.headway_rule_id is None or solver_policy is None:
+            return ConstantHeadwayRule(
+                id=f"legacy_inline::{checkpoint.id}",
+                seconds=checkpoint.headway_seconds,
+            )
+        if self.headway_policy is not None and self.headway_policy.legacy:
+            return ConstantHeadwayRule(
+                id=checkpoint.headway_rule_id,
+                seconds=checkpoint.headway_seconds,
+            )
+        return solver_policy.rule(checkpoint.headway_rule_id)
+
+    def initial_boundary_service_resource(
+        self, switch_id: str
+    ) -> DerivedHeadwayResource | None:
+        """Return the full service resource retained across the OIP boundary."""
+
+        if self.headway_policy is None:
+            return None
+        active = next(
+            (
+                resource
+                for resource in (
+                    self.effective_headway_policy.resource_requirements
+                    if self.effective_headway_policy is not None
+                    else self.headway_policy.resource_requirements
+                )
+                if resource.state_id == switch_id
+                and resource.kind is DerivedHeadwayResourceKind.SERVICE_MECHANISM
+            ),
+            None,
+        )
+        if active is not None:
+            return active
+        if self.effective_headway_policy is None:
+            return None
+        retained_ids = {
+            certificate.dominated_resource_id
+            for certificate in self.effective_headway_policy.dominance_certificates
+            if certificate.retain_at_initial_boundary
+        }
+        return next(
+            (
+                resource
+                for resource in self.headway_policy.resource_requirements
+                if resource.id in retained_ids and resource.state_id == switch_id
+            ),
+            None,
+        )
+
+    def headway_rule_for_full_resource(
+        self, resource: DerivedHeadwayResource
+    ) -> HeadwayRule:
+        if self.headway_policy is None:
+            raise ValueError("full headway resources require a derived policy")
+        return self.headway_policy.rule(resource.rule_id)
+
+    def headway_rule_for_pair(self, pair: HeadwayPair) -> HeadwayRule:
+        checkpoint = next(
+            (
+                checkpoint
+                for checkpoint in self.headway_checkpoints
+                if checkpoint.id == pair.checkpoint_id
+            ),
+            None,
+        )
+        if checkpoint is None:
+            raise ValueError(f"unknown headway pair checkpoint {pair.checkpoint_id!r}")
+        return self.headway_rule_for_checkpoint(checkpoint)
+
+    def _validate_headway_policy(self) -> None:
+        if self.headway_policy is None:
+            return
+        self.headway_policy.validate()
+        solver_policy = self.effective_headway_policy or self.headway_policy
+        solver_policy.validate()
+        if self.effective_headway_policy is not None:
+            full_resource_ids = {
+                resource.id for resource in self.headway_policy.resource_requirements
+            }
+            accounted_ids = {
+                component_id
+                for components in self.effective_headway_policy.component_resource_ids_by_effective_id.values()
+                for component_id in components
+            } | {
+                certificate.dominated_resource_id
+                for certificate in self.effective_headway_policy.dominance_certificates
+            }
+            if accounted_ids != full_resource_ids:
+                raise ValueError(
+                    "effective headway policy must account for every full resource"
+                )
+            for certificate in self.effective_headway_policy.dominance_certificates:
+                dominated = self.headway_policy.resource(
+                    certificate.dominated_resource_id
+                )
+                dominating = self.headway_policy.resource(
+                    certificate.dominating_resource_id
+                )
+                if dominated.state_id != dominating.state_id:
+                    raise ValueError(
+                        "version-one headway dominance must remain state-local"
+                    )
+                required = max(
+                    self.headway_policy.rule(dominated.rule_id).required_seconds(
+                        leader, follower
+                    )
+                    for leader, follower in certificate.behavior_pairs
+                )
+                implied = min(
+                    self.headway_policy.rule(dominating.rule_id).required_seconds(
+                        leader, follower
+                    )
+                    for leader, follower in certificate.behavior_pairs
+                )
+                if abs(required - certificate.required_headway_seconds) > 1e-9:
+                    raise ValueError(
+                        "headway dominance certificate required value is stale"
+                    )
+                if (
+                    abs(
+                        implied
+                        - certificate.minimum_implied_headway_seconds
+                    )
+                    > 1e-9
+                ):
+                    raise ValueError(
+                        "headway dominance certificate implied value is stale"
+                    )
+        for checkpoint in self.headway_checkpoints:
+            if checkpoint.headway_rule_id is None:
+                raise ValueError(
+                    f"policy-backed checkpoint {checkpoint.id!r} needs a rule id"
+                )
+            rule = solver_policy.rule(checkpoint.headway_rule_id)
+            if (
+                not self.headway_policy.legacy
+                and abs(checkpoint.headway_seconds - rule.maximum_seconds) > 1e-9
+            ):
+                raise ValueError(
+                    f"checkpoint {checkpoint.id!r} compatibility headway must equal "
+                    "the rule maximum"
+                )
 
     def validate_network_compatibility(
         self, *, validate_conflict_index: bool = True

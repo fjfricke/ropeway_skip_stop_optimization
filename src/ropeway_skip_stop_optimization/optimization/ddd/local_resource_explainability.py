@@ -359,12 +359,12 @@ def _resource_windows(
                     blocked_until_lower_tick=(
                         literal.region.source_lower_tick
                         + usage.leader_clear_offset_tick
-                        + resource.headway_tick
+                        + usage.separation_after_tick(resource.minimum_headway_tick)
                     ),
                     blocked_until_upper_tick=(
                         literal.region.source_upper_tick
                         + usage.leader_clear_offset_tick
-                        + resource.headway_tick
+                        + usage.separation_after_tick(resource.minimum_headway_tick)
                     ),
                 )
             )

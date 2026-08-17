@@ -65,6 +65,15 @@ class EanArtifactBuildMetrics:
     candidate_count: int
     pair_count: int
     peak_rss_bytes: int | None
+    original_checkpoint_count: int | None = None
+    original_candidate_count: int | None = None
+    original_pair_count: int | None = None
+    dominated_checkpoint_count: int = 0
+    dominated_candidate_count: int = 0
+    dominated_pair_count: int = 0
+    merged_checkpoint_count: int = 0
+    merged_candidate_count: int = 0
+    merged_pair_count: int = 0
 
     def validate(self) -> None:
         if min(
@@ -79,6 +88,22 @@ class EanArtifactBuildMetrics:
             raise ValueError("artifact build times must be nonnegative")
         if min(self.checkpoint_count, self.candidate_count, self.pair_count) < 0:
             raise ValueError("artifact build counts must be nonnegative")
+        optional_counts = (
+            self.original_checkpoint_count,
+            self.original_candidate_count,
+            self.original_pair_count,
+        )
+        if any(value is not None and value < 0 for value in optional_counts):
+            raise ValueError("original artifact build counts must be nonnegative")
+        if min(
+            self.dominated_checkpoint_count,
+            self.dominated_candidate_count,
+            self.dominated_pair_count,
+            self.merged_checkpoint_count,
+            self.merged_candidate_count,
+            self.merged_pair_count,
+        ) < 0:
+            raise ValueError("headway reduction counts must be nonnegative")
         if self.peak_rss_bytes is not None and self.peak_rss_bytes <= 0:
             raise ValueError("artifact peak RSS must be positive when available")
 

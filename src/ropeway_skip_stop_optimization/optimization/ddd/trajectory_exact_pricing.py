@@ -1389,7 +1389,7 @@ def _add_resource_window_pricing_terms(
                     clear_limit = (
                         row.window.anchor_tick
                         - usage.leader_clear_offset_tick
-                        - resource.headway_tick
+                        - usage.separation_after_tick(resource.minimum_headway_tick)
                     )
                     model.addGenConstrIndicator(
                         entered,

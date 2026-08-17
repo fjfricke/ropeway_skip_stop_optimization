@@ -1,6 +1,10 @@
 from __future__ import annotations
 
 from ropeway_skip_stop_optimization.examples.base import ScenarioExample
+from ropeway_skip_stop_optimization.examples.artificial_headway_cases import (
+    FiveStationCircleCwFullSkipNoWaitHeadwayBExample,
+    artificial_physical_headway_examples,
+)
 from ropeway_skip_stop_optimization.examples.circular_skip_stop import (
     FiveStationOptimizedInitialPlacementAllStopSkipWaitExample,
     FiveStationOptimizedInitialPlacementNoSkipNoWaitExample,
@@ -35,6 +39,7 @@ EXAMPLES: dict[str, ScenarioExample] = {
     FiveStationHalfNoSkipNoWaitExample.metadata.id: FiveStationHalfNoSkipNoWaitExample(),
     FiveStationCircleCwFullNoSkipNoWaitExample.metadata.id: FiveStationCircleCwFullNoSkipNoWaitExample(),
     FiveStationCircleCwFullSkipNoWaitExample.metadata.id: FiveStationCircleCwFullSkipNoWaitExample(),
+    FiveStationCircleCwFullSkipNoWaitHeadwayBExample.metadata.id: FiveStationCircleCwFullSkipNoWaitHeadwayBExample(),
     FiveStationCircleCwHalfNoSkipNoWaitExample.metadata.id: FiveStationCircleCwHalfNoSkipNoWaitExample(),
     FiveStationCircleCwHalfSkipNoWaitExample.metadata.id: FiveStationCircleCwHalfSkipNoWaitExample(),
     FiveStationCircleCwHalfSkipWaitExample.metadata.id: FiveStationCircleCwHalfSkipWaitExample(),
@@ -42,6 +47,10 @@ EXAMPLES: dict[str, ScenarioExample] = {
     FiveStationOptimizedInitialPlacementNoSkipNoWaitExample.metadata.id: FiveStationOptimizedInitialPlacementNoSkipNoWaitExample(),
     FiveStationOptimizedInitialPlacementDoubleAllStopSkipWaitExample.metadata.id: FiveStationOptimizedInitialPlacementDoubleAllStopSkipWaitExample(),
     FiveStationOptimizedInitialPlacementAllStopSkipWaitExample.metadata.id: FiveStationOptimizedInitialPlacementAllStopSkipWaitExample(),
+    **{
+        example.metadata.id: example
+        for example in artificial_physical_headway_examples()
+    },
 }
 
 

@@ -4,6 +4,9 @@ from dataclasses import dataclass
 
 from ropeway_skip_stop_optimization.mapping.physical_to_discrete import travel_seconds_for_segment
 from ropeway_skip_stop_optimization.models import (
+    DefaultBypassStopOnFaultDesign,
+    FailSafeDiversionDesign,
+    MandatoryServiceStationDesign,
     PhysicalNodeKind,
     Scenario,
     StationRoute,
@@ -124,6 +127,11 @@ class PhysicalMovementNetworkBuilder:
                     behavior=behavior,
                     segments=route_segments + (continuation,),
                     resources=resources,
+                    service_mechanism=(
+                        scenario.headway_design.mechanism_for_exit_switch(exit_id)
+                        if scenario.headway_design is not None
+                        else None
+                    ),
                 )
                 option_id = f"route_option::{route.id}::to::{next_state_id}"
                 options.append(
@@ -259,6 +267,7 @@ def _resource_usages(
     behavior: EanPassengerBehavior,
     segments: tuple[TrackSegment, ...],
     resources: dict[str, EanResource],
+    service_mechanism: object | None,
 ) -> tuple[EanResourceUsage, ...]:
     usages: list[EanResourceUsage] = []
     seen_physical_resources: set[str] = set()
@@ -303,6 +312,29 @@ def _resource_usages(
                     else EanActivationReference.ACTIVE
                 ),
                 checkpoint_kind=kind,
+            )
+        )
+    if behavior is EanPassengerBehavior.SERVICE and isinstance(
+        service_mechanism,
+        DefaultBypassStopOnFaultDesign
+        | FailSafeDiversionDesign
+        | MandatoryServiceStationDesign,
+    ):
+        resource_id = f"service_mechanism::{state_id}"
+        resources.setdefault(
+            resource_id,
+            EanResource(
+                id=resource_id,
+                kind=EanResourceKind.PHYSICAL,
+                physical_resource_id=service_mechanism.service_resource_id,
+            ),
+        )
+        usages.append(
+            EanResourceUsage(
+                resource_id=resource_id,
+                time_reference=EanTimeReference.EXIT_SWITCH_TIME,
+                activation_reference=EanActivationReference.SERVE,
+                checkpoint_kind=HeadwayCheckpointKind.SERVICE_MECHANISM,
             )
         )
     return tuple(usages)

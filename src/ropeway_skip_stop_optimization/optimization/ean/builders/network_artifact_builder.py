@@ -2,9 +2,19 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from enum import Enum
+from inspect import signature
 from time import perf_counter
 
 from ropeway_skip_stop_optimization.models import Scenario
+from ropeway_skip_stop_optimization.optimization.headway_policy import (
+    HeadwayPolicyBuilder,
+    LegacyHeadwayPolicyAdapterBuilder,
+    PhysicalHeadwayPolicyBuilder,
+)
+from ropeway_skip_stop_optimization.optimization.headway_resource_reduction import (
+    HeadwayResourceReduction,
+    HeadwayResourceReductionMode,
+)
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
 from ropeway_skip_stop_optimization.optimization.ean.build_profile import (
     EanBuildProgressCallback,
@@ -71,8 +81,23 @@ def network_ean_builder_for_pattern(
     headway_candidate_builder: HeadwayCandidateBuilder | None = None,
     headway_pair_builder: HeadwayPairBuilder | None = None,
     fleet_config: EanFleetConfig | None = None,
+    headway_policy_builder: HeadwayPolicyBuilder | None = None,
+    headway_resource_reduction_mode: HeadwayResourceReductionMode = (
+        HeadwayResourceReductionMode.EXACT
+    ),
 ) -> NetworkEanBuildArtifactBuilder:
     """Build the stage-one network builder for one deterministic pattern."""
+
+    if headway_duration_builder is not None and headway_policy_builder is not None:
+        raise ValueError(
+            "legacy headway_duration_builder and headway_policy_builder are "
+            "mutually exclusive"
+        )
+    resolved_policy_builder: HeadwayPolicyBuilder = (
+        LegacyHeadwayPolicyAdapterBuilder(headway_duration_builder)
+        if headway_duration_builder is not None
+        else (headway_policy_builder or PhysicalHeadwayPolicyBuilder())
+    )
 
     return NetworkEanBuildArtifactBuilder(
         pattern_definition=pattern_definition,
@@ -87,6 +112,8 @@ def network_ean_builder_for_pattern(
         ),
         headway_pair_builder=headway_pair_builder or AllPairsHeadwayPairBuilder(),
         fleet_config=fleet_config or EanFleetConfig(),
+        headway_policy_builder=resolved_policy_builder,
+        headway_resource_reduction_mode=headway_resource_reduction_mode,
     )
 
 
@@ -108,6 +135,15 @@ class NetworkEanBuildArtifactBuilder(EanBuildArtifactBuilder):
     headway_candidate_builder: HeadwayCandidateBuilder = field(default_factory=SwitchVisitHeadwayCandidateBuilder)
     headway_pair_builder: HeadwayPairBuilder = field(default_factory=AllPairsHeadwayPairBuilder)
     fleet_config: EanFleetConfig = field(default_factory=EanFleetConfig)
+    headway_policy_builder: HeadwayPolicyBuilder = field(
+        default_factory=PhysicalHeadwayPolicyBuilder
+    )
+    headway_resource_reduction: HeadwayResourceReduction = field(
+        default_factory=HeadwayResourceReduction
+    )
+    headway_resource_reduction_mode: HeadwayResourceReductionMode = (
+        HeadwayResourceReductionMode.EXACT
+    )
 
     def build(
         self,
@@ -131,6 +167,23 @@ class NetworkEanBuildArtifactBuilder(EanBuildArtifactBuilder):
         network = self.network_builder.build(scenario, self.pattern_definition)
         pattern = network.pattern(self.pattern_definition.id)
         timings = self.timing_builder.build(scenario, network, pattern)
+        headway_policy = self.headway_policy_builder.build(
+            scenario,
+            network,
+            timings,
+            pattern,
+        )
+        effective_headway_policy = (
+            None
+            if headway_policy.legacy
+            else self.headway_resource_reduction.reduce(
+                policy=headway_policy,
+                network=network,
+                timings=timings,
+                station_configs=config.station_configs,
+                mode=self.headway_resource_reduction_mode,
+            )
+        )
         timing_seconds = perf_counter() - timing_started
         emit_build_progress(
             progress_callback,
@@ -167,12 +220,23 @@ class NetworkEanBuildArtifactBuilder(EanBuildArtifactBuilder):
                 for cabin_id in range(available_fleet_count)
             )
         else:
-            cabin_starts = self.start_builder.build(
-                scenario=scenario,
-                config=config,
-                network=network,
-                pattern=pattern,
-            )
+            if "headway_policy" in signature(
+                self.start_builder.build
+            ).parameters:
+                cabin_starts = self.start_builder.build(
+                    scenario=scenario,
+                    config=config,
+                    network=network,
+                    pattern=pattern,
+                    headway_policy=headway_policy,
+                )
+            else:
+                cabin_starts = self.start_builder.build(
+                    scenario=scenario,
+                    config=config,
+                    network=network,
+                    pattern=pattern,
+                )
         visit_result = NetworkVisitBuilder(
             pattern=pattern,
             selectable_initial_phase_count=selectable_initial_phase_count,
@@ -205,6 +269,8 @@ class NetworkEanBuildArtifactBuilder(EanBuildArtifactBuilder):
                 total_started=total_started,
                 movement_network=network,
                 circulation_pattern_ids=(pattern.id,),
+                headway_policy=headway_policy,
+                effective_headway_policy=effective_headway_policy,
             ),
             progress_callback=progress_callback,
         )
