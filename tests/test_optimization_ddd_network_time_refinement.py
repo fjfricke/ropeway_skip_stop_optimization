@@ -60,12 +60,12 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     build_ddd_layer_state_earliest_arrival_ticks,
     build_ddd_universal_resource_row,
 )
-from ropeway_skip_stop_optimization.optimization.ddd.network_refinement import (
-    _build_universal_resource_rows_for_conflicts,
-    _has_resource_conflict_refinement,
-)
 from ropeway_skip_stop_optimization.optimization.ddd.lifting_phase import (
     build_ddd_time_split_batch,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.resource_conflict_phase import (
+    DddResourceConflictPhaseResult,
+    build_ddd_universal_resource_rows_for_conflicts,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_refinement import (
     DddEventCellInconsistency,
@@ -525,7 +525,7 @@ def test_exact_conflict_separator_finds_empty_core_universal_row() -> None:
     )
     conflict = DddReferenceConflict("merge", 0, 0, 1, 0, 1e-6)
 
-    proofs = _build_universal_resource_rows_for_conflicts(
+    proofs = build_ddd_universal_resource_rows_for_conflicts(
         network,
         paths,
         (conflict,),
@@ -1084,11 +1084,18 @@ def test_network_refinement_rejects_nonpositive_time_split_batch() -> None:
 
 
 def test_resource_time_split_counts_as_a_valid_conflict_refinement() -> None:
-    assert _has_resource_conflict_refinement(
+    result = DddResourceConflictPhaseResult(
         time_splits=(DddTimeSplit("state", 1.0),),
-        new_cuts=(),
+        refined_discretization=DddTimeDiscretization(
+            (DddTimePartition("state", (0.0, 2.0)),)
+        ),
+        resource_time_split_count=1,
         new_resource_rows=(),
+        new_prefix_cuts=(),
+        prefix_budget_exhausted=False,
+        invalid_missing_support=False,
     )
+    assert result.has_refinement
 
 
 def test_decomposition_consumes_the_prefix_flow_that_satisfies_cuts() -> None:
