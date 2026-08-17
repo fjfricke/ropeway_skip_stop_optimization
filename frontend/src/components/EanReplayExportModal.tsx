@@ -5,6 +5,7 @@ import type { CSSProperties } from "react";
 import { flushSync } from "react-dom";
 import type { ScenarioLayout } from "../scenarioLayout";
 import type { EanPassengerServiceResult, EanPhysicalReplay, Scenario } from "../types";
+import type { ReplaySafetyReport } from "../safety";
 import {
   advanceReplayTime,
   clockLabel,
@@ -45,6 +46,7 @@ interface EanReplayExportModalProps {
   layout: ScenarioLayout;
   eanReplay: EanPhysicalReplay;
   eanPassengerService: EanPassengerServiceResult | null;
+  safetyReport: ReplaySafetyReport | null;
   toggles: ViewerToggles;
   arcColorMode: ArcColorMode;
   initialTimeSeconds: number;
@@ -63,6 +65,7 @@ export function EanReplayExportModal({
   layout,
   eanReplay,
   eanPassengerService,
+  safetyReport,
   toggles,
   arcColorMode,
   initialTimeSeconds,
@@ -125,16 +128,16 @@ export function EanReplayExportModal({
   const activeFramePreviewTime = framePreviewTimes[framePreviewIndex] ?? selectorTimeSeconds;
   const previewTimeSeconds = config.exportMode === "video" ? videoPreviewTimeSeconds : activeFramePreviewTime;
   const previewFrame = useMemo(
-    () => replayFrameAtTime({ scenario, layout, eventsByCabin, passengerPlan, timeSeconds: previewTimeSeconds }),
-    [eventsByCabin, layout, passengerPlan, previewTimeSeconds, scenario],
+    () => replayFrameAtTime({ scenario, layout, eventsByCabin, passengerPlan, safetyReport, timeSeconds: previewTimeSeconds }),
+    [eventsByCabin, layout, passengerPlan, previewTimeSeconds, safetyReport, scenario],
   );
   const selectorFrame = useMemo(
-    () => replayFrameAtTime({ scenario, layout, eventsByCabin, passengerPlan, timeSeconds: selectorTimeSeconds }),
-    [eventsByCabin, layout, passengerPlan, scenario, selectorTimeSeconds],
+    () => replayFrameAtTime({ scenario, layout, eventsByCabin, passengerPlan, safetyReport, timeSeconds: selectorTimeSeconds }),
+    [eventsByCabin, layout, passengerPlan, safetyReport, scenario, selectorTimeSeconds],
   );
   const sourceFrame = useMemo(
-    () => replayFrameAtTime({ scenario, layout, eventsByCabin, passengerPlan, timeSeconds: sourceFrameTimeSeconds }),
-    [eventsByCabin, layout, passengerPlan, scenario, sourceFrameTimeSeconds],
+    () => replayFrameAtTime({ scenario, layout, eventsByCabin, passengerPlan, safetyReport, timeSeconds: sourceFrameTimeSeconds }),
+    [eventsByCabin, layout, passengerPlan, safetyReport, scenario, sourceFrameTimeSeconds],
   );
 
   useEffect(() => {
@@ -316,7 +319,7 @@ export function EanReplayExportModal({
     setStatus(null);
   }
 
-  const canDownload = config.exportMode === "video" || config.selectedFrameTimes.length > 0;
+  const canDownload = safetyReport !== null && (config.exportMode === "video" || config.selectedFrameTimes.length > 0);
   const canStartVideoDownload = config.exportMode === "video" && canDownload && status === null && !isVideoExportRunning;
 
   return (
@@ -651,6 +654,9 @@ export function EanReplayExportModal({
               <p className="export-preview__stale">{status.message} · {Math.round(status.progress * 100)}%</p>
             ) : null}
             {downloadError ? <p className="export-preview__error">{downloadError}</p> : null}
+            {!safetyReport ? (
+              <p className="export-preview__stale">Waiting for the independent full-horizon safety check before export.</p>
+            ) : null}
           </div>
         </div>
       </section>

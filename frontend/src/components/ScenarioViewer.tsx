@@ -38,6 +38,7 @@ import type {
   Scenario,
   Selection,
 } from "../types";
+import { useReplaySafetyReport } from "../safety/useReplaySafetyReport";
 
 interface ScenarioViewerProps {
   scenario: Scenario;
@@ -129,6 +130,15 @@ export function ScenarioViewer({
   });
 
   const selectedBackend = artifactSelection.selectedBackend;
+  const safetyMovementPlan = eanPassengerService?.movement_plan ?? eanResult;
+  const safetyFleetPlan = safetyMovementPlan?.fleet_plan ?? eanPassengerService?.fleet_plan ?? null;
+  const replaySafety = useReplaySafetyReport({
+    scenario,
+    artifact: eanInput,
+    movementPlan: safetyMovementPlan,
+    fleetPlan: safetyFleetPlan,
+    replay: eanReplay,
+  });
   const visibleDiscreteScenario = selectedBackend === "discrete" ? discreteScenario : null;
   const scenarioLayout = useMemo(() => layoutForScenario(scenario), [scenario]);
   const counts = useMemo(
@@ -354,6 +364,9 @@ export function ScenarioViewer({
                 eanPassengerService={eanPassengerService}
                 eanReplayWarning={eanReplayWarning}
                 eanPassengerServiceWarning={eanPassengerServiceWarning}
+                safetyReport={replaySafety.report}
+                safetyError={replaySafety.error}
+                safetyChecking={replaySafety.isChecking}
                 toggles={eanReplayToggles}
                 arcColorMode={eanReplayArcColorMode}
                 onExportClick={(timeSeconds) => setEanReplayExportTime(timeSeconds)}
@@ -364,6 +377,7 @@ export function ScenarioViewer({
                   layout={scenarioLayout}
                   eanReplay={eanReplay}
                   eanPassengerService={eanPassengerService}
+                  safetyReport={replaySafety.report}
                   toggles={eanReplayToggles}
                   arcColorMode={eanReplayArcColorMode}
                   initialTimeSeconds={eanReplayExportTime}
@@ -376,6 +390,7 @@ export function ScenarioViewer({
                       layout: scenarioLayout,
                       eanReplay,
                       eanPassengerService,
+                      safetyReport: replaySafety.report,
                       config,
                       format,
                     });

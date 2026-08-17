@@ -1,9 +1,9 @@
 import type { ScenarioLayout } from "../../scenarioLayout";
 import type { EanPassengerServicePlan, Scenario } from "../../types";
+import { replaySafetyMarkersAtTime, type ReplaySafetyReport } from "../../safety";
 import {
   buildEanPassengerState,
   eanCabinMarkersAtTime,
-  eanReplayCollisionMarkers,
   EVENT_TOLERANCE_SECONDS,
   groupEventsByCabin,
 } from "../EanReplayView";
@@ -36,19 +36,23 @@ export function replayFrameAtTime({
   layout,
   eventsByCabin,
   passengerPlan,
+  safetyReport,
   timeSeconds,
 }: {
   scenario: Scenario;
   layout: ScenarioLayout;
   eventsByCabin: ReturnType<typeof groupEventsByCabin>;
   passengerPlan: EanPassengerServicePlan | null;
+  safetyReport: ReplaySafetyReport | null;
   timeSeconds: number;
 }) {
   const passengerState = buildEanPassengerState(scenario, passengerPlan, timeSeconds, EVENT_TOLERANCE_SECONDS);
   const cabins = eanCabinMarkersAtTime(scenario, layout, eventsByCabin, timeSeconds, passengerState.cabinLoadsById);
   return {
     cabins,
-    collisions: eanReplayCollisionMarkers(scenario, cabins),
+    collisions: safetyReport
+      ? replaySafetyMarkersAtTime(safetyReport, cabins, layout, timeSeconds)
+      : [],
     queues: passengerState.queueMarkers,
   };
 }
@@ -58,11 +62,13 @@ export function createReplayVideoFrameBuilder({
   layout,
   eventsByCabin,
   passengerPlan,
+  safetyReport,
 }: {
   scenario: Scenario;
   layout: ScenarioLayout;
   eventsByCabin: ReturnType<typeof groupEventsByCabin>;
   passengerPlan: EanPassengerServicePlan | null;
+  safetyReport: ReplaySafetyReport | null;
 }) {
   const passengerTimeline = createPassengerTimeline(scenario, passengerPlan);
   return {
@@ -71,7 +77,9 @@ export function createReplayVideoFrameBuilder({
       const cabins = eanCabinMarkersAtTime(scenario, layout, eventsByCabin, timeSeconds, passengerState.cabinLoadsById);
       return {
         cabins,
-        collisions: eanReplayCollisionMarkers(scenario, cabins),
+        collisions: safetyReport
+          ? replaySafetyMarkersAtTime(safetyReport, cabins, layout, timeSeconds)
+          : [],
         queues: passengerState.queueMarkers,
       };
     },

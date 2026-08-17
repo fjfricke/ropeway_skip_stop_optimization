@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { RefObject } from "react";
 import type { ScenarioLayout } from "../scenarioLayout";
 import type { EanPassengerServiceResult, EanPhysicalReplay, Scenario } from "../types";
+import type { ReplaySafetyReport } from "../safety";
 import { groupEventsByCabin } from "./EanReplayView";
 import { downloadBlob, loadSvgImage, nextAnimationFrame } from "./export/exportDom";
 import type { ReplayExportConfig, ReplayVideoExportFormat } from "./export/exportTypes";
@@ -17,6 +18,7 @@ export type EanReplayVideoExportJob = {
   layout: ScenarioLayout;
   eanReplay: EanPhysicalReplay;
   eanPassengerService: EanPassengerServiceResult | null;
+  safetyReport: ReplaySafetyReport | null;
   config: ReplayExportConfig;
   format: ReplayVideoExportFormat;
 };
@@ -142,6 +144,7 @@ async function runVideoExport(
     layout: job.layout,
     eventsByCabin,
     passengerPlan,
+    safetyReport: job.safetyReport,
   });
 
   await nextAnimationFrame();

@@ -76,5 +76,8 @@ Current plans:
   parallel canonical network builder and eventual removal of the ring stack.
 - `discrete_time_backlog.md`: low-priority discrete prototype work.
 - `software_visualization_and_delivery.md`: replay, tooling, UI, and delivery work.
+- `frontend_independent_replay_safety.md`: independent continuous frontend
+  certification of geometric spacing, A/B/C resource headways, waiting
+  occupancy, and OIP boundary safety from raw exported plans and policies.
 
 Git history preserves superseded implementation plans.

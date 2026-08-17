@@ -147,9 +147,7 @@ export function ReplayCollisionLayer({
           <text x="0" y="2" dominantBaseline="central">
             !
           </text>
-          <title>
-            Cabin spacing violation: C{collision.cabinIds.join(", C")} · {collision.distanceM.toFixed(2)}m
-          </title>
+          <title>{collision.message ?? `Cabin spacing violation: C${collision.cabinIds.join(", C")} · ${collision.distanceM.toFixed(2)}m`}</title>
         </g>
       ))}
     </g>

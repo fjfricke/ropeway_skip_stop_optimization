@@ -1,4 +1,4 @@
-import { CircleAlert, FastForward, Pause, Play, RotateCcw, RotateCw, SkipBack, SkipForward, Waypoints } from "lucide-react";
+import { CircleAlert, CircleCheckBig, CircleHelp, FastForward, Pause, Play, RotateCcw, RotateCw, ShieldAlert, SkipBack, SkipForward, Waypoints } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { CSSProperties } from "react";
 import { layoutForScenario } from "../scenarioLayout";
@@ -20,6 +20,8 @@ import { pointOnSegment } from "./networkGeometry";
 import { stationVisualColor } from "./stationColors";
 import { useNetworkPanelContentHeight } from "./useNetworkPanelContentHeight";
 import type { ArcColorMode, DiscreteViewerToggles, ViewerToggles } from "./viewerTypes";
+import { replaySafetyMarkersAtTime } from "../safety/markers";
+import type { ReplaySafetyReport, ReplaySafetyViolationKind } from "../safety";
 
 interface EanReplayViewProps {
   scenario: Scenario;
@@ -27,6 +29,9 @@ interface EanReplayViewProps {
   eanPassengerService: EanPassengerServiceResult | null;
   eanReplayWarning: string | null;
   eanPassengerServiceWarning: string | null;
+  safetyReport: ReplaySafetyReport | null;
+  safetyError: string | null;
+  safetyChecking: boolean;
   toggles: ViewerToggles;
   arcColorMode: ArcColorMode;
   onExportClick?: (timeSeconds: number) => void;
@@ -78,6 +83,11 @@ export const MANUAL_STEP_SECONDS = 0.5;
 const SLIDER_STEP_SECONDS = 0.1;
 export const EVENT_TOLERANCE_SECONDS = 0.25;
 const HEADWAY_WARNING_EPSILON_M = 1e-6;
+const ALL_SAFETY_KINDS: ReplaySafetyViolationKind[] = [
+  "resource_headway",
+  "initial_boundary",
+  "geometric_spacing",
+];
 
 export function EanReplayView({
   scenario,
@@ -85,6 +95,9 @@ export function EanReplayView({
   eanPassengerService,
   eanReplayWarning,
   eanPassengerServiceWarning,
+  safetyReport,
+  safetyError,
+  safetyChecking,
   toggles,
   arcColorMode,
   onExportClick,
@@ -97,6 +110,9 @@ export function EanReplayView({
   const [playbackSpeed, setPlaybackSpeed] = useState(1);
   const [playbackDirection, setPlaybackDirection] = useState<PlaybackDirection>(1);
   const [selectedCabinId, setSelectedCabinId] = useState<number | null>(eanReplay?.events[0]?.cabin_id ?? null);
+  const [visibleSafetyKinds, setVisibleSafetyKinds] = useState<Set<ReplaySafetyViolationKind>>(
+    () => new Set(ALL_SAFETY_KINDS),
+  );
 
   const timeBounds = useMemo(() => eanReplayTimeBounds(eanReplay), [eanReplay]);
   const eventsByCabin = useMemo(() => groupEventsByCabin(eanReplay?.events ?? []), [eanReplay]);
@@ -109,7 +125,16 @@ export function EanReplayView({
     () => eanCabinMarkersAtTime(scenario, layout, eventsByCabin, timeSeconds, passengerState.cabinLoadsById),
     [eventsByCabin, layout, passengerState.cabinLoadsById, scenario, timeSeconds],
   );
-  const collisionMarkers = useMemo(() => eanReplayCollisionMarkers(scenario, markers), [markers, scenario]);
+  const collisionMarkers = useMemo(
+    () => safetyReport
+      ? replaySafetyMarkersAtTime(safetyReport, markers, layout, timeSeconds, visibleSafetyKinds)
+      : eanReplayCollisionMarkers(scenario, markers).map((marker) => ({
+          ...marker,
+          violationKind: "legacy_geometric_preview" as const,
+          message: "Legacy geometric preview; final frontend certification is unavailable",
+        })),
+    [layout, markers, safetyReport, scenario, timeSeconds, visibleSafetyKinds],
+  );
   const selectedMarker = markers.find((marker) => marker.cabinId === selectedCabinId) ?? markers[0] ?? null;
   const selectedEvent = selectedMarker ? latestEventAtOrBefore(eventsByCabin.get(selectedMarker.cabinId) ?? [], timeSeconds) : null;
   const currentEvents = useMemo(
@@ -189,6 +214,18 @@ export function EanReplayView({
       </div>
 
       <aside className="side-panel replay-side" style={sidePanelMaxHeight === null ? undefined : { maxHeight: sidePanelMaxHeight }}>
+        <ReplaySafetyPanel
+          report={safetyReport}
+          error={safetyError}
+          checking={safetyChecking}
+          visibleKinds={visibleSafetyKinds}
+          onToggleKind={(kind) => setVisibleSafetyKinds((current) => {
+            const next = new Set(current);
+            if (next.has(kind)) next.delete(kind);
+            else next.add(kind);
+            return next;
+          })}
+        />
         <section className="panel replay-controls">
           <header className="panel__header">
             <Play size={17} />
@@ -403,6 +440,88 @@ export function EanReplayView({
       </aside>
     </section>
   );
+}
+
+function ReplaySafetyPanel({
+  report,
+  error,
+  checking,
+  visibleKinds,
+  onToggleKind,
+}: {
+  report: ReplaySafetyReport | null;
+  error: string | null;
+  checking: boolean;
+  visibleKinds: ReadonlySet<ReplaySafetyViolationKind>;
+  onToggleKind: (kind: ReplaySafetyViolationKind) => void;
+}) {
+  const status = error ? "indeterminate" : report?.status ?? "checking";
+  const Icon = status === "safe"
+    ? CircleCheckBig
+    : status === "unsafe"
+      ? ShieldAlert
+      : CircleHelp;
+  const label = status === "safe"
+    ? "Independently safe"
+    : status === "unsafe"
+      ? "Collision violation"
+      : status === "checking" || checking
+        ? "Checking full horizon"
+        : "Safety indeterminate";
+  return (
+    <section className={`panel replay-safety replay-safety--${status}`} aria-live="polite">
+      <header className="panel__header">
+        <Icon size={18} />
+        <h2>Replay Safety</h2>
+        <span className="replay-safety__verdict">{label}</span>
+      </header>
+      {report ? (
+        <>
+          <div className="replay-safety__line">
+            <strong>{report.totalViolationCount}</strong>
+            <span>violations across 0–{formatSeconds(report.checkedUntilSeconds)}</span>
+          </div>
+          <div className="replay-safety__facts">
+            <span>{report.counts.resourcePairs.toLocaleString()} resource pairs</span>
+            <span>{report.counts.geometricPairs.toLocaleString()} swept geometry pairs</span>
+            <span>headway slack {formatSigned(report.minimumHeadwaySlackSeconds, "s")}</span>
+            <span>spacing slack {formatSigned(report.minimumSpacingSlackM, "m")}</span>
+          </div>
+          {report.totalViolationCount > 0 ? (
+            <div className="replay-safety__filters" aria-label="Safety marker filters">
+              {ALL_SAFETY_KINDS.map((kind) => (
+                <button
+                  key={kind}
+                  type="button"
+                  className={visibleKinds.has(kind) ? "is-active" : ""}
+                  aria-pressed={visibleKinds.has(kind)}
+                  onClick={() => onToggleKind(kind)}
+                >
+                  {safetyKindLabel(kind)}
+                </button>
+              ))}
+            </div>
+          ) : null}
+          {report.diagnostics.length > 0 ? (
+            <p className="replay-safety__diagnostic">{report.diagnostics[0]}</p>
+          ) : null}
+        </>
+      ) : (
+        <p className="replay-safety__diagnostic">{error ?? "Reconstructing physical resource usage and continuous cabin motion…"}</p>
+      )}
+    </section>
+  );
+}
+
+function safetyKindLabel(kind: ReplaySafetyViolationKind) {
+  if (kind === "resource_headway") return "Resource";
+  if (kind === "initial_boundary") return "Initial boundary";
+  return "Geometry";
+}
+
+function formatSigned(value: number | null, unit: string) {
+  if (value === null || !Number.isFinite(value)) return "n/a";
+  return `${value >= 0 ? "+" : ""}${value.toFixed(3)} ${unit}`;
 }
 
 export function eanCabinMarkersAtTime(
