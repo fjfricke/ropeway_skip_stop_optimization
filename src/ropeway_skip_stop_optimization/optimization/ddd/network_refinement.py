@@ -66,7 +66,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generatio
 )
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_passenger_lp import (
     DddTrajectoryPassengerLpResult,
-    DddTrajectoryPassengerLpStatus,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_phase import (
+    DddTrajectoryPhaseSolver,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.resource_time import (
     DddAnonymousResourceRow,
@@ -338,6 +340,11 @@ class DddNetworkTimeRefinementSolver:
             max_tracked_prefix_cabin_count=self.max_tracked_prefix_cabin_count,
             max_prefix_visit_index=self.max_prefix_visit_index,
             tolerance_seconds=self.tolerance_seconds,
+        )
+        trajectory_phase_solver = DddTrajectoryPhaseSolver(
+            pool_enabled=trajectory_pool_enabled,
+            pricing_enabled=trajectory_pricing_enabled,
+            pricing_interval=self.trajectory_pricing_interval,
         )
         recovery = DddCellFreeSupportRecovery(tolerance_seconds=self.tolerance_seconds)
         recovery_phase_solver = DddRecoveryPhaseSolver(recovery=recovery)
@@ -1362,162 +1369,98 @@ class DddNetworkTimeRefinementSolver:
                 DddNetworkTimeRefinementProgressStage.LIFTING_FINISHED,
                 round_index,
             )
-            if (
-                trajectory_pool_enabled
-                and primal_evaluator is not None
-                and trajectory_column_pool.has_recombination_choice
-                and trajectory_column_pool.fingerprint
-                != last_trajectory_pool_fingerprint
-            ):
-                emit(
+
+            def consume_trajectory_pool_evaluation(
+                pool_evaluation: DddPrimalPoolEvaluationResult,
+            ) -> None:
+                evaluation = pool_evaluation.evaluation
+                if evaluation is None:
+                    return
+                pool_result = pool_evaluation.pool_result
+                primal_tracker.record_external_evaluation(
+                    schedules=pool_result.schedules,
+                    solution=pool_result.reference_solution,
+                    evaluation=evaluation,
+                    round_state=primal_round_state,
+                )
+                sync_primal_state()
+
+            trajectory_phase = trajectory_phase_solver.solve(
+                round_index=round_index,
+                problem=current,
+                paths=paths,
+                column_pool=trajectory_column_pool,
+                evaluator=primal_evaluator,
+                pricing_oracle=trajectory_pricing_oracle,
+                previous_pool_result=trajectory_pool_result,
+                previous_pool_lp_result=trajectory_pool_lp_result,
+                previous_pool_fingerprint=last_trajectory_pool_fingerprint,
+                best_schedules=lambda: best_schedules,
+                validate_candidate=lambda schedules: _validate_reference_solution(
+                    current,
+                    schedules,
+                    tolerance_seconds=self.tolerance_seconds,
+                ).solution,
+                consume_candidate=consider_primal_candidate,
+                consume_pool_evaluation=consume_trajectory_pool_evaluation,
+                on_pool_started=lambda: emit(
                     DddNetworkTimeRefinementProgressStage.TRAJECTORY_POOL_STARTED,
                     round_index,
-                )
-                pool_evaluation: DddPrimalPoolEvaluationResult = (
-                    primal_evaluator.evaluate_trajectory_pool(
-                        current,
-                        trajectory_column_pool,
-                    )
-                )
-                trajectory_pool_result = pool_evaluation.pool_result
-                latest_trajectory_pool_result = trajectory_pool_result
-                trajectory_pool_lp_result = pool_evaluation.lp_result
-                latest_trajectory_pool_lp_result = trajectory_pool_lp_result
-                trajectory_pool_solved_this_round = True
-                last_trajectory_pool_fingerprint = trajectory_column_pool.fingerprint
-                evaluation = pool_evaluation.evaluation
-                if evaluation is not None:
-                    primal_tracker.record_external_evaluation(
-                        schedules=trajectory_pool_result.schedules,
-                        solution=trajectory_pool_result.reference_solution,
-                        evaluation=evaluation,
-                        round_state=primal_round_state,
-                    )
-                    sync_primal_state()
-                emit(
+                ),
+                on_pool_finished=lambda: emit(
                     DddNetworkTimeRefinementProgressStage.TRAJECTORY_POOL_FINISHED,
                     round_index,
+                ),
+                on_candidate_found=lambda candidate_index, elapsed_seconds: emit(
+                    DddNetworkTimeRefinementProgressStage.PRIMAL_ORACLE_CANDIDATE_FOUND,
+                    round_index,
+                    candidate_index=candidate_index,
+                    candidate_limit=self.trajectory_pricing_max_candidate_count,
+                    candidate_elapsed_seconds=elapsed_seconds,
+                ),
+            )
+            trajectory_pool_result = trajectory_phase.pool_result
+            trajectory_pool_lp_result = trajectory_phase.pool_lp_result
+            latest_trajectory_pool_result = trajectory_pool_result
+            latest_trajectory_pool_lp_result = trajectory_pool_lp_result
+            last_trajectory_pool_fingerprint = trajectory_phase.pool_fingerprint
+            trajectory_pool_solved_this_round = (
+                trajectory_phase.pool_solved_this_round
+            )
+            trajectory_pricing_status = trajectory_phase.pricing_status
+            trajectory_pricing_preference_count = (
+                trajectory_phase.pricing_preference_count
+            )
+            trajectory_pricing_candidate_count = (
+                trajectory_phase.pricing_candidate_count
+            )
+            trajectory_pricing_objective_value = (
+                trajectory_phase.pricing_objective_value
+            )
+            trajectory_pricing_objective_bound = (
+                trajectory_phase.pricing_objective_bound
+            )
+            trajectory_pricing_signal_fingerprint = (
+                trajectory_phase.pricing_signal_fingerprint
+            )
+            trajectory_pricing_seconds = trajectory_phase.pricing_seconds
+            if trajectory_phase.invalid_candidate:
+                return _result(
+                    status=DddNetworkTimeRefinementStatus.INVALID_INTERNAL,
+                    schedules=best_schedules,
+                    reference_solution=best_reference,
+                    lower_bound=lower_bound,
+                    upper_bound=upper_bound,
+                    iterations=iterations,
+                    discretization=current.discretization,
+                    cuts=cuts,
+                    primal_evaluation=best_primal_evaluation,
+                    aggregate_support_cuts=aggregate_support_cuts,
+                    aggregate_distance_cuts=aggregate_distance_cuts,
+                    timed_flow_cover_cuts=timed_flow_cover_cuts,
+                    bootstrap_result=bootstrap_result,
+                    bootstrap_objective=bootstrap_objective,
                 )
-            if (
-                trajectory_pricing_enabled
-                and trajectory_pool_lp_result is not None
-                and trajectory_pool_lp_result.status
-                is DddTrajectoryPassengerLpStatus.OPTIMAL
-                and trajectory_pool_lp_result.duals is not None
-                and (round_index - 1) % self.trajectory_pricing_interval == 0
-            ):
-                pricing_signal_builder = getattr(
-                    primal_evaluator,
-                    "build_trajectory_pricing_signal",
-                    None,
-                )
-                if pricing_signal_builder is None:
-                    raise ValueError(
-                        "trajectory pricing evaluator has no pricing signal builder"
-                    )
-                pricing_signal = pricing_signal_builder(
-                    current,
-                    trajectory_pool_lp_result,
-                )
-                trajectory_pricing_preference_count = len(pricing_signal.preferences)
-                trajectory_pricing_signal_fingerprint = pricing_signal.fingerprint
-                option_count_before_pricing = trajectory_column_pool.column_count
-                pricing_started = perf_counter()
-                pricing_result = trajectory_pricing_oracle.solve(
-                    current,
-                    hint_paths=paths,
-                    hint_schedules=best_schedules,
-                    excluded_schedules=tuple(
-                        candidate.schedules
-                        for candidate in trajectory_column_pool.candidates
-                    ),
-                    passenger_ride_preferences=pricing_signal.preferences,
-                    candidate_callback=(
-                        lambda candidate_index, elapsed_seconds: emit(
-                            DddNetworkTimeRefinementProgressStage.PRIMAL_ORACLE_CANDIDATE_FOUND,
-                            round_index,
-                            candidate_index=candidate_index,
-                            candidate_limit=(
-                                self.trajectory_pricing_max_candidate_count
-                            ),
-                            candidate_elapsed_seconds=elapsed_seconds,
-                        )
-                    ),
-                )
-                trajectory_pricing_status = pricing_result.status
-                trajectory_pricing_candidate_count = len(
-                    pricing_result.candidate_schedules
-                )
-                trajectory_pricing_objective_value = (
-                    pricing_result.passenger_pricing_objective_value
-                )
-                trajectory_pricing_objective_bound = (
-                    pricing_result.passenger_pricing_objective_bound
-                )
-                trajectory_pricing_seconds = perf_counter() - pricing_started
-                if pricing_result.status is DddCpSatPrimalStatus.FEASIBLE:
-                    pricing_candidates = (
-                        pricing_result.candidate_schedules
-                        if pricing_result.candidate_schedules
-                        else (pricing_result.schedules,)
-                    )
-                    for candidate_schedules in pricing_candidates:
-                        pricing_validation = _validate_reference_solution(
-                            current,
-                            candidate_schedules,
-                            tolerance_seconds=self.tolerance_seconds,
-                        )
-                        if pricing_validation.solution is None:
-                            return _result(
-                                status=DddNetworkTimeRefinementStatus.INVALID_INTERNAL,
-                                schedules=best_schedules,
-                                reference_solution=best_reference,
-                                lower_bound=lower_bound,
-                                upper_bound=upper_bound,
-                                iterations=iterations,
-                                discretization=current.discretization,
-                                cuts=cuts,
-                                primal_evaluation=best_primal_evaluation,
-                                aggregate_support_cuts=aggregate_support_cuts,
-                                aggregate_distance_cuts=aggregate_distance_cuts,
-                                timed_flow_cover_cuts=timed_flow_cover_cuts,
-                                bootstrap_result=bootstrap_result,
-                                bootstrap_objective=bootstrap_objective,
-                            )
-                        consider_primal_candidate(
-                            candidate_schedules,
-                            pricing_validation.solution,
-                        )
-                if trajectory_column_pool.column_count > option_count_before_pricing:
-                    emit(
-                        DddNetworkTimeRefinementProgressStage.TRAJECTORY_POOL_STARTED,
-                        round_index,
-                    )
-                    priced_pool_evaluation = primal_evaluator.evaluate_trajectory_pool(
-                        current,
-                        trajectory_column_pool,
-                    )
-                    trajectory_pool_result = priced_pool_evaluation.pool_result
-                    latest_trajectory_pool_result = trajectory_pool_result
-                    trajectory_pool_lp_result = priced_pool_evaluation.lp_result
-                    latest_trajectory_pool_lp_result = trajectory_pool_lp_result
-                    trajectory_pool_solved_this_round = True
-                    last_trajectory_pool_fingerprint = (
-                        trajectory_column_pool.fingerprint
-                    )
-                    priced_evaluation = priced_pool_evaluation.evaluation
-                    if priced_evaluation is not None:
-                        primal_tracker.record_external_evaluation(
-                            schedules=trajectory_pool_result.schedules,
-                            solution=trajectory_pool_result.reference_solution,
-                            evaluation=priced_evaluation,
-                            round_state=primal_round_state,
-                        )
-                        sync_primal_state()
-                    emit(
-                        DddNetworkTimeRefinementProgressStage.TRAJECTORY_POOL_FINISHED,
-                        round_index,
-                    )
             record_iteration(
                 _iteration(
                     round_index=round_index,
