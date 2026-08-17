@@ -4,37 +4,28 @@ from dataclasses import dataclass
 import math
 from time import perf_counter
 
-from ropeway_skip_stop_optimization.optimization.ddd.bootstrap_phase import (
-    DddBootstrapPhaseSolver,
-)
 from ropeway_skip_stop_optimization.optimization.ddd.aggregate_support import (
     DddAggregateSupportCut,
     DddAggregateSupportDistanceCut,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_primal import (
-    DddCpSatPrimalOracle,
     DddCpSatPrimalResult,
     DddCpSatPrimalStatus,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_round import (
     DddCpSatMasterCoupling,
-    DddCpSatRoundSolver,
-)
-from ropeway_skip_stop_optimization.optimization.ddd.local_resource_explainability import (
-    DddCpSatLocalResourceAnalyzer,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
-    DddAnonymousFlowDecomposer,
-    DddAnonymousFlowMaster,
     DddAnonymousMasterProgress,
     DddAnonymousFlowStatus,
-    DddAnonymousFlowWarmStartProjector,
     DddLayeredTimeNetworkBuilder,
-    DddNetworkPathProblemAdapter,
     DddNetworkTimeProblem,
 )
-from ropeway_skip_stop_optimization.optimization.ddd.network_master_phase import (
-    DddNetworkMasterPhaseSolver,
+from ropeway_skip_stop_optimization.optimization.ddd.network_refinement_config import (
+    DddNetworkTimeRefinementConfig,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.network_refinement_runtime import (
+    DddNetworkRefinementRuntime,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.primal_evaluation import (
     DddPrimalPoolEvaluationResult,
@@ -44,9 +35,6 @@ from ropeway_skip_stop_optimization.optimization.ddd.primal_evaluation import (
 from ropeway_skip_stop_optimization.optimization.ddd.primal_tracking import (
     DddPrimalIncumbentTracker,
     DddPrimalRoundState,
-)
-from ropeway_skip_stop_optimization.optimization.ddd.recovery_phase import (
-    DddRecoveryPhaseSolver,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.passenger_master import (
     DddPassengerMasterProblem,
@@ -58,31 +46,15 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_slot import (
     DddTrajectoryColumnPool,
     DddTrajectorySlotPoolResult,
 )
-from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generation import (
-    DddTrajectoryOptimizerMode,
-)
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_passenger_lp import (
     DddTrajectoryPassengerLpResult,
-)
-from ropeway_skip_stop_optimization.optimization.ddd.trajectory_phase import (
-    DddTrajectoryPhaseSolver,
-)
-from ropeway_skip_stop_optimization.optimization.ddd.termination_policy import (
-    DddRoundTerminationPolicy,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.resource_time import (
     DddAnonymousResourceRow,
     DddAnonymousResourceRowKind,
-    DddResourceWindowCutMode,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.lifting import (
     build_ddd_prefix_conflict_cuts,
-)
-from ropeway_skip_stop_optimization.optimization.ddd.lifting_phase import (
-    DddLiftingPhaseSolver,
-)
-from ropeway_skip_stop_optimization.optimization.ddd.resource_conflict_phase import (
-    DddResourceConflictPhaseSolver,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.round_snapshot import (
     build_ddd_round_snapshot,
@@ -102,9 +74,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.support_master import (
     DddSupportSelection,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_refinement import (
-    DddCellFreeSupportRecovery,
     DddRecoveredSchedule,
-    DddStrictTimeCellLifter,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
     DddTimeDiscretization,
@@ -127,51 +97,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.network_refinement_model im
 
 
 @dataclass(frozen=True)
-class DddNetworkTimeRefinementSolver:
-    max_iterations: int = 100
-    tolerance_seconds: float = 1e-9
-    bound_tolerance: float = 1e-9
-    output_flag: bool = False
-    max_new_cuts_per_iteration: int = 10_000
-    max_new_time_splits_per_iteration: int = 1
-    reuse_network_fragments: bool = True
-    use_projected_warm_start: bool = True
-    use_structural_earliest_times: bool = True
-    use_mandatory_resource_rows: bool = True
-    use_universal_resource_rows: bool = True
-    resource_window_cut_mode: DddResourceWindowCutMode = DddResourceWindowCutMode.OFF
-    max_resource_window_rows_per_resolve: int = 100
-    max_resource_window_resolves_per_iteration: int = 10
-    max_prefix_variable_count: int = 20_000
-    max_tracked_prefix_cabin_count: int = 8
-    max_prefix_visit_index: int = 3
-    use_cp_sat_primal_oracle: bool = True
-    cp_sat_time_limit_seconds: float = 5.0
-    cp_sat_num_workers: int = 8
-    cp_sat_retry_interval: int = 10
-    cp_sat_max_candidate_count: int = 1
-    cp_sat_minimum_hamming_distance: int = 1
-    cp_sat_diversification_interval: int = 0
-    cp_sat_master_coupling: DddCpSatMasterCoupling = (
-        DddCpSatMasterCoupling.FREE_ROUTE_CHOICES
-    )
-    use_cp_sat_primal_bootstrap: bool = True
-    use_cp_sat_nearest_support: bool = True
-    use_cp_sat_timed_flow_covers: bool = False
-    use_cp_sat_cabin_path_cuts: bool = False
-    collect_cp_sat_local_explainability: bool = False
-    cp_sat_local_explainability_time_limit_seconds: float = 0.5
-    cp_sat_nearest_support_time_limit_seconds: float = 5.0
-    # The restricted trajectory pool is a passenger-objective primal
-    # heuristic.  It must be enabled explicitly and is deliberately absent
-    # from movement-only feasibility experiments.
-    use_trajectory_slot_pool: bool = False
-    trajectory_optimizer_mode: DddTrajectoryOptimizerMode = (
-        DddTrajectoryOptimizerMode.OFF
-    )
-    trajectory_pricing_interval: int = 1
-    trajectory_pricing_time_limit_seconds: float = 5.0
-    trajectory_pricing_max_candidate_count: int = 1
+class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
 
     def solve(
         self,
@@ -181,224 +107,33 @@ class DddNetworkTimeRefinementSolver:
         primal_evaluator: DddPrimalEvaluator | None = None,
         passenger_master_problem: DddPassengerMasterProblem | None = None,
     ) -> DddNetworkTimeRefinementResult:
-        problem.validate()
-        if not isinstance(self.trajectory_optimizer_mode, DddTrajectoryOptimizerMode):
-            raise ValueError("DDD trajectory optimizer mode is invalid")
-        trajectory_pool_enabled = (
-            self.use_trajectory_slot_pool
-            or self.trajectory_optimizer_mode is not DddTrajectoryOptimizerMode.OFF
+        self.validate_solve_context(
+            problem,
+            primal_evaluator=primal_evaluator,
+            passenger_master_problem=passenger_master_problem,
         )
+        trajectory_pool_enabled = self.trajectory_pool_enabled
         resolved_trajectory_optimizer_mode = (
-            (
-                DddTrajectoryOptimizerMode.RESTRICTED_PRIMAL
-                if self.use_trajectory_slot_pool
-                and self.trajectory_optimizer_mode is DddTrajectoryOptimizerMode.OFF
-                else self.trajectory_optimizer_mode
-            )
-            if trajectory_pool_enabled
-            else DddTrajectoryOptimizerMode.OFF
+            self.resolved_trajectory_optimizer_mode
         )
-        trajectory_pricing_enabled = (
-            resolved_trajectory_optimizer_mode
-            is DddTrajectoryOptimizerMode.HEURISTIC_PRICING
-        )
-        if self.use_cp_sat_timed_flow_covers and self.cp_sat_master_coupling is not (
-            DddCpSatMasterCoupling.FIXED_AGGREGATE_SUPPORT
-        ):
-            raise ValueError(
-                "DDD timed-flow covers require fixed aggregate master coupling"
-            )
-        if self.use_cp_sat_cabin_path_cuts and not self.use_cp_sat_primal_oracle:
-            raise ValueError("DDD cabin-path cuts require the CP-SAT primal oracle")
-        if (
-            self.collect_cp_sat_local_explainability
-            and not self.use_cp_sat_timed_flow_covers
-        ):
-            raise ValueError(
-                "DDD local CP-SAT explainability requires timed-flow covers"
-            )
-        if primal_evaluator is not None:
-            primal_evaluator.validate_problem(problem)
-        if passenger_master_problem is not None:
-            passenger_master_problem.validate()
-            if passenger_master_problem.movement_problem != problem.movement_problem:
-                raise ValueError(
-                    "DDD passenger master and refinement movement problems differ"
-                )
-            if primal_evaluator is None:
-                raise ValueError(
-                    "DDD passenger master requires exact passenger primal evaluation"
-                )
-            evaluator_objective = getattr(primal_evaluator, "objective", None)
-            if (
-                evaluator_objective is not None
-                and evaluator_objective != passenger_master_problem.objective
-            ):
-                raise ValueError(
-                    "DDD passenger master and primal evaluator objectives differ"
-                )
-            if any(
-                not math.isclose(item.cost, 0.0, abs_tol=1e-12)
-                for item in problem.objective.route_option_costs
-            ):
-                raise ValueError(
-                    "DDD passenger master requires zero movement route costs"
-                )
-            if (
-                self.cp_sat_master_coupling
-                is not DddCpSatMasterCoupling.FIXED_AGGREGATE_SUPPORT
-            ):
-                raise ValueError(
-                    "DDD passenger master requires fixed aggregate CP-SAT support"
-                )
-        if self.max_iterations <= 0:
-            raise ValueError("DDD network refinement max_iterations must be positive")
-        if self.max_new_cuts_per_iteration <= 0:
-            raise ValueError(
-                "DDD network refinement max_new_cuts_per_iteration must be positive"
-            )
-        if self.max_new_time_splits_per_iteration <= 0:
-            raise ValueError(
-                "DDD network refinement max_new_time_splits_per_iteration "
-                "must be positive"
-            )
-        if not isinstance(self.resource_window_cut_mode, DddResourceWindowCutMode):
-            raise ValueError("DDD resource-window cut mode is invalid")
-        if self.max_resource_window_rows_per_resolve <= 0:
-            raise ValueError("DDD resource-window row limit must be positive")
-        if self.max_resource_window_resolves_per_iteration <= 0:
-            raise ValueError("DDD resource-window resolve limit must be positive")
-        if self.max_prefix_variable_count <= 0:
-            raise ValueError("DDD prefix variable budget must be positive")
-        if self.max_tracked_prefix_cabin_count <= 0:
-            raise ValueError("DDD tracked-prefix cabin budget must be positive")
-        if self.max_prefix_visit_index <= 0:
-            raise ValueError("DDD prefix visit budget must be positive")
-        if self.cp_sat_time_limit_seconds <= 0:
-            raise ValueError("DDD CP-SAT time limit must be positive")
-        if self.cp_sat_nearest_support_time_limit_seconds <= 0:
-            raise ValueError("DDD nearest-support CP-SAT time limit must be positive")
-        if self.cp_sat_local_explainability_time_limit_seconds <= 0:
-            raise ValueError(
-                "DDD local explainability CP-SAT time limit must be positive"
-            )
-        if self.cp_sat_num_workers <= 0:
-            raise ValueError("DDD CP-SAT worker count must be positive")
-        if self.cp_sat_retry_interval <= 0:
-            raise ValueError("DDD CP-SAT retry interval must be positive")
-        if self.cp_sat_max_candidate_count <= 0:
-            raise ValueError("DDD CP-SAT candidate count must be positive")
-        if self.cp_sat_minimum_hamming_distance <= 0:
-            raise ValueError("DDD CP-SAT Hamming distance must be positive")
-        if self.cp_sat_diversification_interval < 0:
-            raise ValueError("DDD CP-SAT diversification interval must be nonnegative")
-        if self.cp_sat_diversification_interval > 0 and not (
-            self.use_cp_sat_primal_oracle
-        ):
-            raise ValueError("DDD CP-SAT diversification requires the CP-SAT oracle")
-        if self.trajectory_pricing_interval <= 0:
-            raise ValueError("DDD trajectory pricing interval must be positive")
-        if self.trajectory_pricing_time_limit_seconds <= 0:
-            raise ValueError("DDD trajectory pricing time limit must be positive")
-        if self.trajectory_pricing_max_candidate_count <= 0:
-            raise ValueError("DDD trajectory pricing candidate count must be positive")
-        if trajectory_pricing_enabled and not self.use_cp_sat_primal_oracle:
-            raise ValueError("DDD trajectory pricing requires the CP-SAT oracle")
-        if trajectory_pricing_enabled and primal_evaluator is None:
-            raise ValueError("DDD trajectory pricing requires a Passenger evaluator")
-        if self.tolerance_seconds < 0 or self.bound_tolerance < 0:
-            raise ValueError("DDD network refinement tolerances must be nonnegative")
-        shared_builder = DddLayeredTimeNetworkBuilder(
-            tolerance_seconds=self.tolerance_seconds,
-            use_structural_earliest_times=self.use_structural_earliest_times,
-        )
-        master = DddAnonymousFlowMaster(
-            output_flag=self.output_flag,
-            include_mandatory_resource_rows=self.use_mandatory_resource_rows,
-        )
-        master_phase_solver = DddNetworkMasterPhaseSolver(
-            resource_window_cut_mode=self.resource_window_cut_mode,
-            max_resource_window_rows_per_resolve=(
-                self.max_resource_window_rows_per_resolve
-            ),
-            max_resource_window_resolves=(
-                self.max_resource_window_resolves_per_iteration
-            ),
-        )
-        warm_start_projector = DddAnonymousFlowWarmStartProjector()
-        decomposer = DddAnonymousFlowDecomposer()
-        path_adapter = DddNetworkPathProblemAdapter()
-        cell_lifter = DddStrictTimeCellLifter(tolerance_seconds=self.tolerance_seconds)
-        lifting_phase_solver = DddLiftingPhaseSolver(
-            lifter=cell_lifter,
-            max_time_splits=self.max_new_time_splits_per_iteration,
-            tolerance_seconds=self.tolerance_seconds,
-        )
-        resource_conflict_phase_solver = DddResourceConflictPhaseSolver(
-            use_universal_resource_rows=self.use_universal_resource_rows,
-            max_new_constraints_per_type=self.max_new_cuts_per_iteration,
-            max_time_splits=self.max_new_time_splits_per_iteration,
-            max_prefix_variable_count=self.max_prefix_variable_count,
-            max_tracked_prefix_cabin_count=self.max_tracked_prefix_cabin_count,
-            max_prefix_visit_index=self.max_prefix_visit_index,
-            tolerance_seconds=self.tolerance_seconds,
-        )
-        trajectory_phase_solver = DddTrajectoryPhaseSolver(
-            pool_enabled=trajectory_pool_enabled,
-            pricing_enabled=trajectory_pricing_enabled,
-            pricing_interval=self.trajectory_pricing_interval,
-        )
-        termination_policy = DddRoundTerminationPolicy(
-            bound_tolerance=self.bound_tolerance
-        )
-        recovery = DddCellFreeSupportRecovery(tolerance_seconds=self.tolerance_seconds)
-        recovery_phase_solver = DddRecoveryPhaseSolver(recovery=recovery)
-        cp_sat_oracle = DddCpSatPrimalOracle(
-            time_limit_seconds=self.cp_sat_time_limit_seconds,
-            num_workers=self.cp_sat_num_workers,
-            log_search_progress=self.output_flag,
-            max_candidate_count=self.cp_sat_max_candidate_count,
-            minimum_hamming_distance=self.cp_sat_minimum_hamming_distance,
-        )
-        nearest_support_oracle = DddCpSatPrimalOracle(
-            time_limit_seconds=self.cp_sat_nearest_support_time_limit_seconds,
-            num_workers=self.cp_sat_num_workers,
-            log_search_progress=self.output_flag,
-            max_candidate_count=1,
-            minimum_hamming_distance=1,
-        )
-        trajectory_pricing_oracle = DddCpSatPrimalOracle(
-            time_limit_seconds=self.trajectory_pricing_time_limit_seconds,
-            num_workers=self.cp_sat_num_workers,
-            log_search_progress=self.output_flag,
-            max_candidate_count=self.trajectory_pricing_max_candidate_count,
-            minimum_hamming_distance=self.cp_sat_minimum_hamming_distance,
-        )
-        local_resource_analyzer = DddCpSatLocalResourceAnalyzer(
-            time_limit_seconds=(self.cp_sat_local_explainability_time_limit_seconds),
-            num_workers=self.cp_sat_num_workers,
-        )
-        cp_sat_round_solver = DddCpSatRoundSolver(
-            use_primal_oracle=self.use_cp_sat_primal_oracle,
-            master_coupling=self.cp_sat_master_coupling,
-            use_timed_flow_covers=self.use_cp_sat_timed_flow_covers,
-            use_cabin_path_cuts=self.use_cp_sat_cabin_path_cuts,
-            use_nearest_support=self.use_cp_sat_nearest_support,
-            collect_local_explainability=self.collect_cp_sat_local_explainability,
-            retry_interval=self.cp_sat_retry_interval,
-            diversification_interval=self.cp_sat_diversification_interval,
-            max_prefix_variable_count=self.max_prefix_variable_count,
-            max_tracked_prefix_cabin_count=self.max_tracked_prefix_cabin_count,
-            max_prefix_visit_index=self.max_prefix_visit_index,
-        )
-        bootstrap_phase_solver = DddBootstrapPhaseSolver(
-            enabled=(
-                self.use_cp_sat_primal_oracle
-                and self.use_cp_sat_primal_bootstrap
-                and self.cp_sat_master_coupling
-                is DddCpSatMasterCoupling.FIXED_AGGREGATE_SUPPORT
-            )
-        )
+        runtime = DddNetworkRefinementRuntime.build(self)
+        shared_builder = runtime.network_builder
+        master = runtime.flow_master
+        master_phase_solver = runtime.master_phase_solver
+        warm_start_projector = runtime.warm_start_projector
+        decomposer = runtime.flow_decomposer
+        path_adapter = runtime.path_problem_adapter
+        lifting_phase_solver = runtime.lifting_phase_solver
+        resource_conflict_phase_solver = runtime.resource_conflict_phase_solver
+        trajectory_phase_solver = runtime.trajectory_phase_solver
+        termination_policy = runtime.termination_policy
+        recovery_phase_solver = runtime.recovery_phase_solver
+        cp_sat_oracle = runtime.primal_oracle
+        nearest_support_oracle = runtime.nearest_support_oracle
+        trajectory_pricing_oracle = runtime.trajectory_pricing_oracle
+        local_resource_analyzer = runtime.local_resource_analyzer
+        cp_sat_round_solver = runtime.cp_sat_round_solver
+        bootstrap_phase_solver = runtime.bootstrap_phase_solver
         current = problem
         lower_bound = -math.inf
         upper_bound = math.inf

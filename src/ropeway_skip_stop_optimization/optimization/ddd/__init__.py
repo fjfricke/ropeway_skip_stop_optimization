@@ -67,6 +67,9 @@ _EXPORTS_BY_MODULE: dict[str, tuple[str, ...]] = {
     'ropeway_skip_stop_optimization.optimization.ddd.network_refinement': (
         'DddNetworkTimeRefinementSolver',
     ),
+    'ropeway_skip_stop_optimization.optimization.ddd.network_refinement_config': (
+        'DddNetworkTimeRefinementConfig',
+    ),
     'ropeway_skip_stop_optimization.optimization.ddd.network_refinement_model': (
         'DddNetworkTimeRefinementIteration',
         'DddNetworkTimeRefinementProgressCallback',
