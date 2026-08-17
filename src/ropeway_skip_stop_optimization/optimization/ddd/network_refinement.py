@@ -4,6 +4,9 @@ from dataclasses import dataclass
 import math
 from time import perf_counter
 
+from ropeway_skip_stop_optimization.optimization.ddd.bootstrap_phase import (
+    DddBootstrapPhaseSolver,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.aggregate_support import (
     DddAggregateSupportCut,
     DddAggregateSupportDistanceCut,
@@ -388,6 +391,14 @@ class DddNetworkTimeRefinementSolver:
             max_tracked_prefix_cabin_count=self.max_tracked_prefix_cabin_count,
             max_prefix_visit_index=self.max_prefix_visit_index,
         )
+        bootstrap_phase_solver = DddBootstrapPhaseSolver(
+            enabled=(
+                self.use_cp_sat_primal_oracle
+                and self.use_cp_sat_primal_bootstrap
+                and self.cp_sat_master_coupling
+                is DddCpSatMasterCoupling.FIXED_AGGREGATE_SUPPORT
+            )
+        )
         current = problem
         lower_bound = -math.inf
         upper_bound = math.inf
@@ -461,78 +472,71 @@ class DddNetworkTimeRefinementSolver:
                 iteration=iteration,
             )
 
-        if (
-            self.use_cp_sat_primal_oracle
-            and self.use_cp_sat_primal_bootstrap
-            and self.cp_sat_master_coupling
-            is DddCpSatMasterCoupling.FIXED_AGGREGATE_SUPPORT
-        ):
-            emit(DddNetworkTimeRefinementProgressStage.PRIMAL_BOOTSTRAP_STARTED, 0)
-            bootstrap_result = cp_sat_oracle.solve(current)
-            if bootstrap_result.status is DddCpSatPrimalStatus.INFEASIBLE:
-                emit(DddNetworkTimeRefinementProgressStage.PRIMAL_BOOTSTRAP_FINISHED, 0)
-                return _result(
-                    status=(
-                        DddNetworkTimeRefinementStatus.INVALID_INTERNAL
-                        if best_reference is not None
-                        else DddNetworkTimeRefinementStatus.EXACT_INFEASIBLE
-                    ),
-                    schedules=best_schedules,
-                    reference_solution=best_reference,
-                    lower_bound=lower_bound,
-                    upper_bound=math.inf,
-                    iterations=iterations,
-                    discretization=current.discretization,
-                    cuts=cuts,
-                    aggregate_support_cuts=aggregate_support_cuts,
-                    aggregate_distance_cuts=aggregate_distance_cuts,
-                    timed_flow_cover_cuts=timed_flow_cover_cuts,
-                    bootstrap_result=bootstrap_result,
+        bootstrap_phase = bootstrap_phase_solver.solve(
+            problem=current,
+            oracle=cp_sat_oracle,
+            validate_candidate=lambda schedules: _validate_reference_solution(
+                current,
+                schedules,
+                tolerance_seconds=self.tolerance_seconds,
+            ).solution,
+            consume_candidate=lambda schedules, solution: (
+                primal_tracker.consider_candidate(
+                    current,
+                    schedules,
+                    solution,
+                    require_movement_plan=False,
                 )
-            if bootstrap_result.status is DddCpSatPrimalStatus.FEASIBLE:
-                bootstrap_candidates = (
-                    bootstrap_result.candidate_schedules
-                    if bootstrap_result.candidate_schedules
-                    else (bootstrap_result.schedules,)
-                )
-                for candidate_schedules in bootstrap_candidates:
-                    validation = _validate_reference_solution(
-                        current,
-                        candidate_schedules,
-                        tolerance_seconds=self.tolerance_seconds,
-                    )
-                    if validation.solution is None:
-                        emit(
-                            DddNetworkTimeRefinementProgressStage.PRIMAL_BOOTSTRAP_FINISHED,
-                            0,
-                        )
-                        return _result(
-                            status=DddNetworkTimeRefinementStatus.INVALID_INTERNAL,
-                            schedules=(),
-                            reference_solution=None,
-                            lower_bound=lower_bound,
-                            upper_bound=math.inf,
-                            iterations=iterations,
-                            discretization=current.discretization,
-                            cuts=cuts,
-                            aggregate_support_cuts=aggregate_support_cuts,
-                            aggregate_distance_cuts=aggregate_distance_cuts,
-                            timed_flow_cover_cuts=timed_flow_cover_cuts,
-                            bootstrap_result=bootstrap_result,
-                        )
-                    outcome = primal_tracker.consider_candidate(
-                        current,
-                        candidate_schedules,
-                        validation.solution,
-                        require_movement_plan=False,
-                    )
-                    upper_bound = primal_tracker.upper_bound
-                    best_schedules = primal_tracker.best_schedules
-                    best_reference = primal_tracker.best_reference
-                    best_primal_evaluation = primal_tracker.best_evaluation
-                    if outcome.improved_incumbent:
-                        bootstrap_objective = outcome.objective_value
-            emit(DddNetworkTimeRefinementProgressStage.PRIMAL_BOOTSTRAP_FINISHED, 0)
+            ),
+            on_started=lambda: emit(
+                DddNetworkTimeRefinementProgressStage.PRIMAL_BOOTSTRAP_STARTED,
+                0,
+            ),
+            on_finished=lambda: emit(
+                DddNetworkTimeRefinementProgressStage.PRIMAL_BOOTSTRAP_FINISHED,
+                0,
+            ),
+        )
+        bootstrap_result = bootstrap_phase.oracle_result
+        bootstrap_objective = bootstrap_phase.objective_value
+        upper_bound = primal_tracker.upper_bound
+        best_schedules = primal_tracker.best_schedules
+        best_reference = primal_tracker.best_reference
+        best_primal_evaluation = primal_tracker.best_evaluation
+        if bootstrap_phase.exact_infeasible:
+            return _result(
+                status=(
+                    DddNetworkTimeRefinementStatus.INVALID_INTERNAL
+                    if best_reference is not None
+                    else DddNetworkTimeRefinementStatus.EXACT_INFEASIBLE
+                ),
+                schedules=best_schedules,
+                reference_solution=best_reference,
+                lower_bound=lower_bound,
+                upper_bound=math.inf,
+                iterations=iterations,
+                discretization=current.discretization,
+                cuts=cuts,
+                aggregate_support_cuts=aggregate_support_cuts,
+                aggregate_distance_cuts=aggregate_distance_cuts,
+                timed_flow_cover_cuts=timed_flow_cover_cuts,
+                bootstrap_result=bootstrap_result,
+            )
+        if bootstrap_phase.invalid_candidate:
+            return _result(
+                status=DddNetworkTimeRefinementStatus.INVALID_INTERNAL,
+                schedules=(),
+                reference_solution=None,
+                lower_bound=lower_bound,
+                upper_bound=math.inf,
+                iterations=iterations,
+                discretization=current.discretization,
+                cuts=cuts,
+                aggregate_support_cuts=aggregate_support_cuts,
+                aggregate_distance_cuts=aggregate_distance_cuts,
+                timed_flow_cover_cuts=timed_flow_cover_cuts,
+                bootstrap_result=bootstrap_result,
+            )
 
         for round_index in range(1, self.max_iterations + 1):
             round_started = perf_counter()
