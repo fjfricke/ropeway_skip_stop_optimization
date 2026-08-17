@@ -19,6 +19,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddTrajectoryColumnPool,
     DddTrajectoryFactorizedLpOptimizer,
     DddTrajectoryIntegratedLpReferenceOptimizer,
+    DddTrajectoryMasterDualMode,
     DddTrajectoryPassengerLpStatus,
     DddTrajectoryPassengerMasterProblem,
     DddTrajectoryPassengerOption,
@@ -111,11 +112,17 @@ def test_factorized_and_integrated_passenger_lps_are_equivalent() -> None:
     )
 
     factorized = DddTrajectoryFactorizedLpOptimizer().solve(problem)
+    barrier = DddTrajectoryFactorizedLpOptimizer(
+        dual_mode=DddTrajectoryMasterDualMode.BARRIER_NO_CROSSOVER
+    ).solve(problem)
     integrated_optimizer = DddTrajectoryIntegratedLpReferenceOptimizer()
     integrated = integrated_optimizer.solve(problem)
     repeated = integrated_optimizer.solve(problem)
 
     assert factorized.status is DddTrajectoryPassengerLpStatus.OPTIMAL
+    assert barrier.status is DddTrajectoryPassengerLpStatus.OPTIMAL
+    assert barrier.objective_value == pytest.approx(factorized.objective_value)
+    assert barrier.duals is not None
     assert integrated.status is DddTrajectoryPassengerLpStatus.OPTIMAL
     assert factorized.objective_value == pytest.approx(6.0)
     assert integrated.objective_value == pytest.approx(factorized.objective_value)
@@ -147,6 +154,40 @@ def test_factorized_and_integrated_passenger_lps_are_equivalent() -> None:
         assert reduced_cost >= -1e-7
         if integrated.pattern_values_by_id[pattern.id] > 1e-7:
             assert reduced_cost == pytest.approx(0.0, abs=1e-7)
+
+
+def test_complete_column_provenance_promotes_only_certified_lp_bounds() -> None:
+    problem = DddTrajectoryPassengerMasterProblem(
+        cabin_ids=(0,),
+        demand_by_group_id={"g": 1.0},
+        options=(DddTrajectoryPassengerOption("empty", 0, ()),),
+        cabin_capacity=1.0,
+        objective_constant=7.0,
+    )
+
+    restricted = DddTrajectoryFactorizedLpOptimizer().solve(problem)
+    columns_complete = DddTrajectoryFactorizedLpOptimizer().solve(
+        replace(problem, trajectory_columns_complete=True)
+    )
+    fully_complete = DddTrajectoryFactorizedLpOptimizer().solve(
+        replace(
+            problem,
+            trajectory_columns_complete=True,
+            incompatibility_rows_complete=True,
+        )
+    )
+
+    assert restricted.certified_lower_bound is None
+    assert restricted.bound_status is DddTrajectoryBoundStatus.PRIMAL_POOL_ONLY
+    assert columns_complete.certified_lower_bound == pytest.approx(7.0)
+    assert (
+        columns_complete.bound_status
+        is DddTrajectoryBoundStatus.TRAJECTORY_RELAXATION_BOUND
+    )
+    assert fully_complete.certified_lower_bound == pytest.approx(7.0)
+    assert (
+        fully_complete.bound_status is DddTrajectoryBoundStatus.FULL_ROOT_LP_CERTIFIED
+    )
 
 
 def test_integrated_demand_dual_matches_finite_difference() -> None:

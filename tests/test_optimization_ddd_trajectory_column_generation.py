@@ -93,6 +93,33 @@ def test_restricted_or_heuristic_pricing_never_claims_a_lower_bound() -> None:
     assert certificate.bound_status is DddTrajectoryBoundStatus.PRIMAL_POOL_ONLY
 
 
+def test_inexact_pricing_solver_bounds_certify_safe_correction() -> None:
+    certificate = _certificate(
+        rmp=100.0,
+        reduced_costs=(
+            DddTrajectoryReducedCost(
+                0,
+                0.0,
+                exact=False,
+                certified_lower_bound=-20.0,
+            ),
+            DddTrajectoryReducedCost(
+                1,
+                0.0,
+                exact=False,
+                certified_lower_bound=5.0,
+            ),
+        ),
+    )
+
+    assert not certificate.pricing_complete
+    assert certificate.pricing_bound_complete
+    assert certificate.certified_lower_bound == pytest.approx(80.0)
+    assert (
+        certificate.bound_status is DddTrajectoryBoundStatus.TRAJECTORY_RELAXATION_BOUND
+    )
+
+
 def test_no_wait_pricing_does_not_certify_waiting_enabled_target() -> None:
     certificate = _certificate(
         rmp=100.0,

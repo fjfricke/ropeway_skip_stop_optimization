@@ -8,6 +8,8 @@ from ropeway_skip_stop_optimization.optimization.ddd.models import (
 )
 from ropeway_skip_stop_optimization.optimization.ddd.reference import (
     DddReferenceSolution,
+    DddReferenceTrajectory,
+    validate_ddd_reference_trajectory,
     validate_ddd_reference_solution,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
@@ -58,74 +60,83 @@ class DddReferenceToEanMovementPlanAdapter:
             solution,
             tolerance_seconds=self.tolerance_seconds,
         )
-        options_by_id = {option.id: option for option in problem.route_options}
-        trajectories: list[EanCabinTrajectory] = []
-        for trajectory in sorted(solution.trajectories, key=lambda item: item.cabin_id):
-            visits: list[EanCabinVisit] = []
-            for reference_visit in trajectory.visits:
-                option = options_by_id[reference_visit.route_option_id]
-                is_stop = option.decision is DddRouteDecision.STOP
-                visits.append(
-                    EanCabinVisit(
-                        cabin_id=trajectory.cabin_id,
-                        visit_index=reference_visit.visit_index,
-                        switch_id=reference_visit.state_id,
-                        station_id=option.station_id,
-                        decision=(
-                            EanRouteDecision.STOP
-                            if is_stop
-                            else EanRouteDecision.SKIP
-                        ),
-                        switch_time_seconds=reference_visit.switch_time_seconds,
-                        platform_entry_time_seconds=(
-                            ddd_tick_to_seconds(
-                                ddd_seconds_to_tick(
-                                    reference_visit.switch_time_seconds
-                                )
-                                + ddd_seconds_to_tick(
-                                    option.platform_entry_offset_seconds
-                                )
-                            )
-                            if option.platform_entry_offset_seconds is not None
-                            else None
-                        ),
-                        platform_exit_time_seconds=(
-                            ddd_tick_to_seconds(
-                                ddd_seconds_to_tick(
-                                    reference_visit.switch_time_seconds
-                                )
-                                + ddd_seconds_to_tick(
-                                    option.platform_exit_offset_seconds
-                                )
-                            )
-                            if option.platform_exit_offset_seconds is not None
-                            else None
-                        ),
-                        exit_switch_time_seconds=ddd_tick_to_seconds(
-                            ddd_seconds_to_tick(
-                                reference_visit.switch_time_seconds
-                            )
-                            + option.exit_switch_offset_tick
-                        ),
-                        next_switch_time_seconds=(
-                            reference_visit.next_switch_time_seconds
-                        ),
-                        wait_seconds=0.0,
-                    )
-                )
-            trajectories.append(
-                EanCabinTrajectory(
-                    cabin_id=trajectory.cabin_id,
-                    visits=tuple(visits),
-                )
+        trajectories = tuple(
+            self.build_trajectory(problem=problem, trajectory=trajectory)
+            for trajectory in sorted(
+                solution.trajectories,
+                key=lambda item: item.cabin_id,
             )
+        )
         plan = EanMovementPlan(
             scenario_id=artifact.scenario_id,
             horizon_seconds=artifact.config.horizon_seconds,
             model_end_seconds=artifact.config.model_end_seconds,
-            trajectories=tuple(trajectories),
+            trajectories=trajectories,
             horizon_formulation=EanHorizonFormulation.EXACT_TIME_ACTIVATION,
             fleet_mode=EanFleetMode.FIXED_STARTS,
         )
         plan.validate()
         return plan
+
+    def build_trajectory(
+        self,
+        *,
+        problem: DddMovementProblem,
+        trajectory: DddReferenceTrajectory,
+    ) -> EanCabinTrajectory:
+        """Convert one locally valid DDD trajectory for exhaustive references."""
+
+        validate_ddd_reference_trajectory(
+            problem,
+            trajectory,
+            tolerance_seconds=self.tolerance_seconds,
+        )
+        options_by_id = {option.id: option for option in problem.route_options}
+        visits: list[EanCabinVisit] = []
+        for reference_visit in trajectory.visits:
+            option = options_by_id[reference_visit.route_option_id]
+            is_stop = option.decision is DddRouteDecision.STOP
+            visits.append(
+                EanCabinVisit(
+                    cabin_id=trajectory.cabin_id,
+                    visit_index=reference_visit.visit_index,
+                    switch_id=reference_visit.state_id,
+                    station_id=option.station_id,
+                    decision=(
+                        EanRouteDecision.STOP if is_stop else EanRouteDecision.SKIP
+                    ),
+                    switch_time_seconds=reference_visit.switch_time_seconds,
+                    platform_entry_time_seconds=(
+                        ddd_tick_to_seconds(
+                            ddd_seconds_to_tick(reference_visit.switch_time_seconds)
+                            + ddd_seconds_to_tick(
+                                option.platform_entry_offset_seconds
+                            )
+                        )
+                        if option.platform_entry_offset_seconds is not None
+                        else None
+                    ),
+                    platform_exit_time_seconds=(
+                        ddd_tick_to_seconds(
+                            ddd_seconds_to_tick(reference_visit.switch_time_seconds)
+                            + ddd_seconds_to_tick(
+                                option.platform_exit_offset_seconds
+                            )
+                        )
+                        if option.platform_exit_offset_seconds is not None
+                        else None
+                    ),
+                    exit_switch_time_seconds=ddd_tick_to_seconds(
+                        ddd_seconds_to_tick(reference_visit.switch_time_seconds)
+                        + option.exit_switch_offset_tick
+                    ),
+                    next_switch_time_seconds=reference_visit.next_switch_time_seconds,
+                    wait_seconds=0.0,
+                )
+            )
+        result = EanCabinTrajectory(
+            cabin_id=trajectory.cabin_id,
+            visits=tuple(visits),
+        )
+        result.validate()
+        return result

@@ -1,17 +1,36 @@
 # DDD-Guided Whole-Horizon Trajectory Column Generation
 
-Status: **proposed implementation and research plan**
+Status: **exact no-wait root prototype implemented; scalable pricing and
+compatible-column generation remain experimental**
 
-Implementation checkpoint (2026-08-14): the Phase-1 in-memory kernel is now
-available as `restricted_primal`. It provides deterministic whole-horizon
-column IDs, an append-only pool across DDD rounds, an incrementally extended
-Gurobi restricted master, cached validation and Passenger-service
-coefficients, retained incompatibility rows, a separately named restricted
-master, explicit bound-status fields, and provenance-bound reduced-cost
-certificate arithmetic. It intentionally remains `PRIMAL_POOL_ONLY`: exact
-route-load pricing, persistent checkpoint files, resource/clique indices, and
-root row-and-column convergence are later phases and are not claimed by this
-checkpoint.
+Implementation checkpoint (2026-08-16): in addition to the Phase-1
+`restricted_primal` kernel, a guarded exhaustive tiny-instance oracle, an exact
+single-cabin no-wait route--load pricing MILP, and a standalone root
+row-and-column prototype are available. Randomized-dual tests compare pricing
+against complete enumeration. Solver dual bounds from interrupted pricing are
+used conservatively in the reduced-cost correction; only exact pricing may
+claim convergence. The scalable Five-Station experiment remains open because
+short pricing calls generate improving but mutually incompatible columns and
+their corrected bound is weaker than the independent DDD bound. The proof
+channel now records each pricing MILP's incumbent, certified reduced-cost
+lower bound, gap, model size, node count, and the resulting aggregate bound
+correction. Proof and post-proof pricing expose separate `MIPFocus` settings.
+The proof default remains Gurobi's balanced mode (`0`) because matched 2- and
+5-second experiments found stronger bounds than explicit bound focus (`3`);
+post-proof column enumeration defaults to feasibility focus (`1`).
+
+Pair-specific conflict rows require special care. Their coefficient is defined
+only for the generated trajectory IDs named by the row. The current pricing
+MILP does not encode equality to every named trajectory. It therefore prices
+the omitted-column universe by excluding the current pool with exact route
+No-Goods. This is not heuristic diversity: RMP dual feasibility proves all
+current columns have nonnegative reduced cost, while every omitted column has
+zero coefficient in the fixed pair rows. Hence the complete minimum is
+`min(0, omitted-column minimum)`. Removing these proof exclusions without
+pricing the pair-row membership produces artificially negative reduced costs
+for existing columns and is invalid as a convergence test. Extensible
+resource-window rows remain priced directly through their physical membership
+predicate.
 
 ## Decision Summary
 
@@ -44,7 +63,8 @@ LB
 \le UB,
 $$
 
-where $LB_{\mathrm{traj}}$ is absent until its pricing certificate is complete.
+where $LB_{\mathrm{traj}}$ is absent until every cabin supplies either an exact
+pricing value or a certified lower bound on it.
 
 This plan specializes the exact-pricing direction left open in
 [`rotation_passenger_flow_hybrid.md`](rotation_passenger_flow_hybrid.md).
@@ -165,8 +185,12 @@ $$
 
 At column convergence every $\rho_c\ge-\varepsilon_{\mathrm{price}}$ and the
 corrected value approaches the RMP LP value within the declared numerical
-tolerance. This bound is reported only when every $\rho_c$ is itself certified
-by an exact pricing solve; heuristic reduced costs never enter it.
+tolerance. More generally, if pricing returns a proved lower bound
+$\underline\rho_c\le\rho_c$, then replacing $\rho_c$ in the correction by
+$\underline\rho_c$ is conservative and remains valid. A MIP timeout may
+therefore contribute its finite solver `ObjBound`; its incumbent may add a
+primal column but may not certify convergence. Purely heuristic reduced costs
+never enter the correction.
 
 Every result records one of:
 
@@ -807,33 +831,395 @@ incumbent within 30 seconds.
 
 ### Phase 4: Exact no-wait pricing gate
 
-- implement an exact joint route-and-load DP, CP-SAT, or MILP pricing oracle;
-- compare its minimum reduced cost with exhaustive trajectory enumeration on
-  tiny instances for randomized dual vectors;
-- compute the dual-corrected lower bound from every complete set of exact
-  cabin pricing results;
-- prove every state reduction and dominance rule;
-- solve every cabin start class and return explicit optimality status;
-- reject pricing certificates on time limit, incomplete search, or unsupported
-  conflict-row vocabulary.
+The exhaustive side of this gate is now implemented. A guarded tiny-instance
+builder generates every locally feasible no-wait cabin trajectory, constructs
+all pairwise cross-cabin incompatibility rows, and solves the complete
+factorized Passenger LP and MIP. Completeness is explicit model provenance;
+only a complete column set plus complete row separation can report
+`FULL_ROOT_LP_CERTIFIED`. The runner
+`benchmarks/run_ddd_trajectory_bound_reference.py` aborts on its trajectory or
+pair-check limits instead of returning a partial value.
 
-Exit criterion: exhaustive tiny tests show identical minimum reduced costs and
-columns, and a complete set of exact cabin pricing results can safely mark the
-pricing-corrected value as `TRAJECTORY_RELAXATION_BOUND`. Root-LP completion is
-reserved for Phase 5.
+Initial physical Three-Station results have zero LP--MIP gap for Journey Time
+and Waiting Time at $K\in\{3,4\}$ and horizons through 500 seconds. The largest
+run contains 177 trajectories and 4,273 incompatibility rows. This supports
+continuing the pricing investigation, but it is not yet evidence that the
+relaxation is generally tight: demand/start variants and adversarial linear
+column costs still need to expose possible fractional conflict-graph gaps.
+The exact pricing side is now also implemented for fixed starts and No-Wait.
+It chooses the complete Stop/Skip sequence, exact integer event ticks, and an
+integral extreme point of the local direct-ride loading polytope. Passenger
+counts use binary expansion, reducing up to $Q$ interchangeable unit binaries
+per ride to $O(\log Q)$ bits. Earliest-event bounds remove a ride only when its
+best possible marginal reduced cost is already nonnegative or its earliest
+alighting lies beyond the service horizon. Both reductions are exact.
+
+Five randomized dual vectors for every cabin in the exhaustive Three-Station
+fixture give the same minimum reduced cost, route column, and Passenger load
+as explicit enumeration. The exact root loop reaches the complete LP and MIP
+value after two rounds for $K=3,H=250$ and $K=4,H=500$; these instances have
+zero observed root integrality gap.
+
+On `five_station_circle_cw_half_skip_no_wait_v0` with $K=19$, two-second
+pricing calls do not prove any of the 19 cabin subproblems. Their Gurobi bounds
+still yield a valid correction, but it is negative and hence dominated by the
+known nonnegative objective bound. Nevertheless, every call returns a valid
+negative-reduced-cost incumbent: the pool grows from 19 to 38 and then 57
+trajectories in two rounds. The restricted LP decreases from $668{,}769$ to
+$625{,}948$, while the validated integer upper bound stays at $668{,}769$.
+The 176 incompatibility rows created in round two explain the failure: one
+best column per cabin gives little compatible diversity.
+
+Exit criterion: **met on the exhaustive tiny reference**. It is not a
+scalability claim. The remaining practical gate is to obtain stronger pricing
+bounds and several compatible/diverse improving columns per cabin without
+losing the proof contract.
 
 ### Phase 5: Exact alternating row-and-column root solve
 
-- separate fractional resource conflicts and cliques;
-- price against all active dual rows;
-- repeat until neither a violated row nor a negative-reduced-cost column
-  exists;
-- handle numerical tolerances and duplicate columns deterministically;
-- combine the resulting bound with the anonymous DDD lower bound.
+The first standalone implementation rebuilds every incompatibility pair among
+the current columns, solves the factorized LP and finite-pool MIP, prices every
+cabin, validates every returned physical trajectory, and repeats. It is exact
+on the exhaustive fixtures. On pricing timeout, a valid negative-cost
+incumbent is retained as a heuristic column and the solver objective bound is
+used only for the conservative lower-bound correction.
 
-Exit criterion: on all exhaustively enumerable cases, the generated root LP
-equals the full-column, full-row root LP. Every reported bound satisfies the
-known integer optimum.
+The next implementation is split into a proof-producing row-and-column path
+and two explicitly primal-only accelerators. Pair conflicts remain the exact
+reference and fallback until equivalence of every current headway family with
+the new resource rows has been tested exhaustively.
+
+Implementation status, 16 August 2026: Phases 5A--5C are implemented behind
+opt-in settings. `PAIR_ONLY` remains the default. The resource mode retains
+the complete eager pair fallback, alternates LP solve and window separation,
+prices every active window in the exact No-Wait MILP, and records window,
+separation and extra-column metrics. Multiple columns are generated only after
+the complete-universe proof-pricing call. In the current pair-row
+implementation that call prices the omitted-column complement with exact
+No-Goods and combines its result with the known nonnegative reduced costs of
+the RMP columns. Incumbent-compatible replacement pricing
+from Phase 5D remains conditional on the matched diversity experiment.
+
+In the matched two-round Five-Station $K=19$ smoke run with two seconds per
+proof-pricing call, Pair-only produced restricted LP values $668{,}769$ and
+$626{,}423$. The resource mode added 21 windows in round two and raised its
+restricted LP back to $668{,}769$, equal to the current validated incumbent.
+Setup and separation remained below one second; total time stayed at roughly
+77 seconds in both variants because pricing consumed 38 seconds per round.
+The global certified lower bound nevertheless remained zero: none of the 19
+pricing MILPs proved optimal, so the conservative pricing correction was
+negative. This is strong evidence that the identity gap in the restricted
+master is addressed, but the immediate bottleneck has moved to pricing bounds.
+
+A ten-round bound-focused run (two seconds per cabin and round) confirmed that
+additional root-CG rounds do not fix that bottleneck. The pool grew from 19 to
+80 trajectories, fixed pair rows from 0 to 614, and resource windows from 0 to
+104 in 396 seconds. The restricted LP and validated UB stayed at $668{,}769$,
+while the final correction was $-1{,}463{,}733$ and the admitted global LB
+therefore remained zero. In the last round every one of the 19 pricing MILPs
+stopped after its root node; individual certified reduced-cost bounds ranged
+from roughly $-66{,}000$ to $-101{,}000$. This is a systematic weak-pricing-
+relaxation effect, not one pathological cabin.
+
+Matched first-round pricing confirms that more time helps but does not yet
+make the channel useful:
+
+| Slice per cabin | `MIPFocus` | Pricing correction | Corrected value | Added columns |
+| ---: | ---: | ---: | ---: | ---: |
+| 2 s | 0 | $-1{,}588{,}322$ | $-919{,}553$ | 19 |
+| 2 s | 3 | $-1{,}693{,}057$ | $-1{,}024{,}288$ | 19 |
+| 5 s | 0 | $-1{,}240{,}224$ | $-571{,}455$ | 19 |
+| 5 s | 3 | $-1{,}634{,}675$ | $-965{,}906$ | 19 |
+
+Thus longer regression tests are useful for correctness and trend checks, but
+running hundreds of unchanged rounds is not the next algorithmic lever. The
+next bound milestone is a stronger pricing relaxation or an exact acyclic
+dynamic-programming/shortest-path pricing formulation, benchmarked first on a
+single representative cabin and frozen RMP dual vector.
+
+That milestone was reached on 16 August 2026. The implemented
+`TIME_EXPANDED_PATH` pricer enumerates only exactly reachable No-Wait nodes
+$(k,s,t)$, selects one whole-horizon path, and sends continuous Passenger flow
+on the same selected time arcs from a release-feasible STOP boarding arc to a
+service-horizon-feasible STOP alighting arc. Arc-time costs are constants;
+there are no Passenger-count--event-time products. Per-time-arc capacity rows
+prevent Passenger flow from combining the boarding time of one fractional
+route with the alighting time or capacity of another.
+
+The Five-Station graph for one fixed start has only 457 reachable time nodes
+over 37 visit layers and at most 24 nodes in one layer. On the frozen all-stop
+RMP, cabin 0 changed from an unresolved 30-second compact-MILP gap of 4,472 to
+an exact time-expanded optimum in 0.51 seconds. All 19 first-round pricing
+problems then solved exactly in 8.97 seconds and produced the first positive
+trajectory correction bound, $23{,}026$.
+
+The matched ten-round Pair-only run is the new scalable checkpoint:
+
+| Round | Columns before pricing | Certified LB | Validated UB | Gap |
+| ---: | ---: | ---: | ---: | ---: |
+| 1 | 19 | $23{,}026$ | $668{,}769$ | 96.56% |
+| 2 | 38 | $473{,}293$ | $668{,}769$ | 29.23% |
+| 5 | 95 | $502{,}535$ | $668{,}769$ | 24.86% |
+| 8 | 152 | $549{,}407$ | $659{,}493$ | 16.69% |
+| 10 | 190 | $549{,}407$ | $572{,}136$ | 3.97% |
+
+The run took 108 seconds, ended only at its configured iteration limit, and
+solved all 190 cabin-pricing calls exactly. It generated 209 trajectories in
+total and 2,385 current-pool Pair rows. This is the first Five-Station result
+where the trajectory channel both beats the anonymous DDD bound and leaves a
+small certified global gap.
+
+Continuation to the actual fixed point required only eleven more rounds. In
+round 20 the gap was already 0.045%; round 21 found no negative reduced-cost
+trajectory for any cabin and therefore certified the complete Root-LP:
+
+| Quantity | Fixed-point result |
+| --- | ---: |
+| Rounds | 21 |
+| Generated trajectories | 372 |
+| Current-pool Pair rows | 7,109 |
+| Certified Root-LP lower bound | $556{,}628.822$ |
+| Feasible integer upper bound | $556{,}809.568$ |
+| Certified relative gap | $0.0325\%$ |
+| Total runtime | 420 s |
+
+Every one of the 399 proof-pricing calls solved exactly. The remaining gap is
+therefore the restricted integer-master versus complete Root-LP integrality
+gap, not missing trajectories or an uncertified pricing correction. Late-round
+pricing remained near ten seconds for all 19 cabins combined, while master
+work grew to about 31 seconds. Future performance work should consequently
+target incremental Pair indexing and master reconstruction rather than a
+larger default pricing budget.
+
+Resource-window pricing is no longer the scalable default. It raised the bound
+to $240{,}073$ by round four, but 142--161 active windows made pricing setup
+exceed the two-second per-cabin budget; the run correctly ended `UNKNOWN` in
+round six. Pair-only remains exact because current Pair rows name generated
+columns, omitted trajectories have coefficient zero, and proof pricing uses
+the exact current-pool complement. Physical windows remain an optional root
+strengthening experiment pending sparse/delayed pricing membership generation.
+
+The root loop also has a persistent continuation contract. After every
+completed round it can atomically store the complete trajectory pool, monotone
+global bounds, the best feasible integer option selection, full round history,
+accumulated runtime, and any separated resource windows. Resume reconstructs
+the master deterministically and starts with round `completed_rounds + 1`.
+Instance fingerprint, objective, conflict-row mode, round numbering, bounds,
+incumbent membership, and window ordering are checked before solving. The
+round limit is total: a ten-round checkpoint resumed with a limit of 30 runs
+rounds 11 through 30 without discarding the already certified bounds.
+
+#### Phase 5A: Canonical resource-window rows
+
+For every physical resource $r$, a trajectory contains zero or more protected
+occupancy intervals. For a fixed canonical anchor tick $\tau$, define
+
+$$
+a_{r\tau,cp}
+=
+\#\{I\in\mathcal I_r(p):\tau\in I\}.
+$$
+
+The first No-Wait implementation supports capacity-one resource families for
+which individual trajectory validation guarantees
+$a_{r\tau,cp}\in\{0,1\}$. The valid master row is
+
+$$
+\sum_{c,p}a_{r\tau,cp}\lambda_{cp}\le b_r,
+$$
+
+with $b_r=1$ for the current headway resources. Capacity $b_r>1$ remains in
+the type and proof contract but is not required by the first experiment.
+
+Implementation objects:
+
+- `DddTrajectoryResourceWindow`: stable resource ID, anchor tick, half-open
+  interval convention, capacity, headway/occupancy provenance and waiting
+  domain;
+- `DddTrajectoryResourceWindowIndex`: exact coefficients for current columns,
+  endpoint sweep separation and deterministic row IDs;
+- `DddTrajectoryResourceWindowRow`: sparse master row plus provenance and
+  completeness state;
+- `DddTrajectoryResourceWindowPricingTerm`: the same membership predicate in
+  the single-cabin pricing MILP;
+- `DddTrajectoryConflictRowMode`:
+  `PAIR_ONLY`, `RESOURCE_WINDOWS_WITH_PAIR_FALLBACK`; no resource-only exact
+  mode is exposed until the fallback is empirically and mathematically
+  redundant.
+
+Half-open protected intervals are canonical. For the current directional
+occurrence semantics, use
+
+$$
+[t^{\mathrm{enter}},t^{\mathrm{clear}}+h_r).
+$$
+
+For a point headway $h_r$ and event tick $t$, this reduces to $[t,t+h_r)$;
+an anchor belongs exactly when
+$t\le\tau<t+h_r$. Platform occupancy uses the existing entry/clear semantics
+and is converted to the same protected-interval representation. Boundary
+events at exactly $t+h_r$ do not conflict. All conversions use integer ticks;
+there is no floating-point window comparison in the master or separator.
+
+The separator considers only positive current master columns, groups
+occurrences by physical resource and sweeps sorted entry/exit endpoints. At an
+identical integer tick, exits are processed before entries, consistently with
+the half-open convention $[s,e)$.
+Whenever weighted occupancy exceeds $b_r$, it adds the canonical row anchored
+at the first deterministic violating endpoint. Repeated separation of the same
+solution is idempotent. Pair separation still runs afterwards and treats an
+uncovered pair as a metric and, in strict verification mode, an internal
+coverage error for supported resource families.
+
+Every active resource-window row must be extensible to future columns. The
+pricing MIP receives its dual and an exact binary membership expression. With
+minimization convention $\mu_{r\tau}\le0$, the reduced cost includes
+
+$$
+-\sum_{r,\tau}\mu_{r\tau}a_{r\tau,cp},
+$$
+
+which is a nonnegative congestion penalty. A row may enter the certified
+pricing correction only when the master coefficient builder and pricing
+membership expression share the same canonical predicate and fingerprint.
+
+For bounded Waiting, the row family remains valid, but its coefficient must be
+derived from the selected entry and clear ticks including the actual wait. A
+No-Wait endpoint formula may never be reused to certify the Waiting model.
+Waiting support is therefore a separate capability flag and becomes
+certificate-eligible only after exhaustive master/pricing coefficient tests
+over all integer wait values. Direction-dependent or otherwise asymmetric
+headways that cannot be represented by one protected-interval predicate remain
+in the exact pair fallback.
+
+#### Phase 5B: Alternating solve order and certificates
+
+Each root round performs:
+
+1. build or update the current restricted master;
+2. solve its LP to optimality;
+3. separate all violated active resource-window rows; if any are added, return
+   to step 2 without pricing;
+4. run pair-conflict separation as the exact fallback; if rows are added,
+   return to step 2;
+5. solve complete-universe pricing for every cabin using Passenger and active
+   resource-window duals; computationally, fixed pair rows require pricing the
+   omitted-column complement because their named RMP columns already have
+   their pair duals in the master;
+6. record exact reduced cost or a certified solver lower bound for every
+   cabin, validate and add every improving incumbent column, then repeat;
+7. declare root convergence only if separation is complete, every pricing
+   problem is exact, and no reduced cost is below tolerance.
+
+Missing valid rows relax the model and therefore preserve the lower-bound
+direction. Missing columns do not; they are handled only through exact pricing
+or the conservative solver-bound correction. `FULL_ROOT_LP_CERTIFIED` requires
+both clean separation and exact no-negative-column pricing. The global bound
+remains
+
+$$
+LB=\max\{LB_{\mathrm{DDD}},LB_{\mathrm{traj}}\}.
+$$
+
+#### Phase 5C: Multiple and diverse pricing columns
+
+After the complete-universe proof pricing call, optionally enumerate up to $m$
+additional negative-reduced-cost columns per cabin. The proof solve is never
+subject to diversity constraints. Extra columns are obtained from a separate
+model copy or a post-proof phase using deterministic no-good rows.
+
+Supported diversity signatures, in priority order:
+
+1. resource-window occupancy signature at merges;
+2. Stop/Skip signature by circulation visit;
+3. Passenger offer signature;
+4. complete route-option sequence as the final duplicate key.
+
+The selector first orders candidates by reduced cost, then greedily accepts a
+candidate only if its Hamming distance in the configured signature reaches the
+threshold; deterministic Pair-ID breaks ties. Configuration:
+
+```text
+columns_per_cabin_per_round = 1
+diversity_mode = OFF | RESOURCE_WINDOWS | STOP_SKIP
+minimum_diversity_distance = 1
+extra_column_time_limit_seconds
+```
+
+Defaults reproduce the current single-column algorithm. Multiple-column
+generation can reduce rounds and improve the finite-pool integer solution but
+does not strengthen the certificate by itself. A timeout incumbent is a
+primal column; only the complete-universe pricing optimum/bound enters $LB$.
+
+#### Phase 5D: Incumbent-compatible primal pricing
+
+An optional, separately reported heuristic fixes the current trajectories of
+all cabins except $c$ and requires the new trajectory of $c$ to be compatible
+with them. It searches a feasible one-cabin replacement, re-solves exact
+Passenger recourse and cycles deterministically through cabins until a full
+pass makes no improvement or its budget expires. These columns enter the
+shared pool and can update $UB$, but neither infeasibility nor reduced cost in
+this restricted neighborhood has lower-bound meaning.
+
+#### Phase 5E: Diagnostics and matched experiment
+
+Expose per round and per cabin:
+
+- protected occurrences, active windows, separated rows and pair fallback
+  coverage;
+- pricing variables, linear/general constraints, incumbent, solver bound,
+  pricing gap, proof status and self-conflict rounds;
+- proof, diverse and incumbent-compatible columns separately;
+- master LP, corrected trajectory bound, DDD bound, integer upper bound and
+  certified global gap;
+- build, separation, LP, MIP, proof-pricing and extra-column time.
+
+Run four matched-budget variants on the Five-Station $K=19$ case:
+
+1. pair-only, one column;
+2. pair-only, up to five diverse columns;
+3. resource windows plus pair fallback, one column;
+4. resource windows plus pair fallback, up to five diverse columns.
+
+Use identical all-stop seeds, solver parameters, one- and ten-second pricing
+slices and total budgets of 2 and 10 minutes. The primary comparison is the
+time trace of certified $LB$, validated $UB$ and gap; restricted-master LP
+values alone are not compared as bounds.
+
+#### Literature rationale
+
+The path-master, exact pricing and branch-price certificate follow Barnhart et
+al. (1998) and Desrosiers--Lübbecke (2005). Railway path column generation
+with conflict cliques is used by Cacchiani--Caprara--Toth (2008, 2010).
+Schälicke--Nachtigall (2025) is the closest direct analogue: complete train
+paths are columns, clique shadow prices enter a MIP pricing problem and new
+cliques are updated with new paths. Martin-Iradi--Ropke (2022) supports the
+separate use of cut-and-price, Passenger feedback and Large Neighborhood
+Search for integer solutions. Lamorgese--Mannino (2015) motivates local
+station/merge decomposition but is not treated as a proof of this column
+formulation.
+
+Immediate implementation order:
+
+1. canonical interval/window types and exhaustive coefficient tests;
+2. sweep separator and master rows behind an opt-in mode;
+3. exact pricing membership and randomized-dual oracle comparison;
+4. complete alternating root loop and matched tiny-master proof;
+5. multiple/diverse columns as an independent option;
+6. incumbent-compatible primal pricing only if the diverse pool still fails
+   to improve $UB$;
+7. Five-Station matched experiment and decision gate;
+8. parallel pricing only after model-size and license-safe concurrency
+   measurements justify it.
+
+Exit criterion: on all exhaustively enumerable cases, the generated augmented
+root LP equals the explicitly complete column/window/pair master. Its integer
+feasible set equals the pair-reference problem, every pricing coefficient
+matches enumeration, and every reported bound satisfies the known integer
+optimum. On Five-Station, proceed to the hybrid coordinator only if resource
+rows strengthen the matched-budget certified lower-bound trace or the diverse
+variant improves the validated upper-bound trace without excessive master
+growth.
 
 ### Phase 6: Hybrid fixed-$K$ coordinator
 
@@ -881,10 +1267,29 @@ Only after the root method passes its performance gates, consider:
 - exact reconstruction of Stop/Skip and event ticks;
 - resource-interval equality with the existing validator;
 - Passenger service-leg coefficients and capacity;
-- pair and clique conflict validity;
-- reduced-cost arithmetic and dual signs;
+- half-open point-headway windows at $t$, $t+h_r-1$ and $t+h_r$;
+- platform entry/clear occupancy conversion and capacity-$b_r$ rows;
+- repeated use of one resource by a trajectory without double counting at one
+  anchor;
+- stable window IDs, anchor canonicalization and waiting-domain provenance;
+- sweep separation versus brute-force weighted interval depth;
+- duplicate-row suppression and idempotent repeated separation;
+- every supported pair conflict covered by at least one window, with explicit
+  fallback for unsupported families;
+- pair and clique validity, including a fractional example cut by the clique
+  but not by all pair rows;
+- equality of master and pricing membership coefficients for every generated
+  column/window combination;
+- equality of master, pricing and validator coefficients for every bounded
+  integer wait value on the exhaustive Waiting fixture;
+- reduced-cost arithmetic and dual signs with nonzero resource-window duals;
 - pricing-corrected lower-bound arithmetic;
 - pricing dominance safety;
+- proof pricing unaffected by extra-column diversity constraints, except for
+  the exact current-pool complement required by fixed pair rows;
+- deterministic $k$-best no-good exclusion, diversity selection and tie
+  breaking;
+- incumbent-compatible pricing accepted only as `PRIMAL_POOL_ONLY`;
 - checkpoint roundtrip and provenance.
 
 ### Exhaustive mathematical tests
@@ -894,15 +1299,25 @@ For tiny rings, enumerate every no-wait Stop/Skip sequence and compare:
 - complete trajectory universe;
 - complete extreme-point load-pattern universe for tiny fractional
   demand/capacity relaxations;
-- exact pricing minimum reduced cost under randomized duals;
-- generated versus full master LP;
+- exact pricing minimum reduced cost under randomized Passenger, convexity and
+  resource-window duals;
+- bounded-Wait coefficient equivalence on the complete tiny route--wait
+  universe, while keeping its certificate domain separate from No-Wait;
+- generated versus full augmented master LP;
+- all compatible integer trajectory selections satisfy every enumerated
+  resource-window row;
+- complete augmented-master MIP has the same feasible selections and optimum
+  as the pair-reference MIP;
+- root convergence requires clean row separation after the last generated
+  column;
 - full-pool primal MIP versus the exhaustively enumerated physical integer
   optimum on tiny cases;
 - independently evaluated Passenger objective;
 - all reported $LB\le z^\star\le UB$ relations.
 
 Use deliberately conflicting columns, identical Passenger offers, horizon-edge
-events, Stop/Skip merges, and multiple columns with equal reduced cost.
+events, Stop/Skip merges, three-or-more-column conflict cliques, repeated
+resource visits and multiple columns with equal reduced cost.
 
 ### Regression tests
 
@@ -912,7 +1327,24 @@ events, Stop/Skip merges, and multiple columns with equal reduced cost.
 - CP-SAT and EAN validation remain authoritative;
 - No-Wait and Waiting certificates cannot be combined accidentally;
 - restricted-pool infeasibility never becomes global infeasibility;
-- solver time limits never masquerade as pricing optimality.
+- solver time limits never masquerade as pricing optimality;
+- `PAIR_ONLY` reproduces the current root traces and generated columns;
+- disabling diversity reproduces one column per cabin per round;
+- adding valid windows never decreases a solved master LP value;
+- interruption after separation or pricing retains only fully certified bound
+  components;
+- No-Wait window coefficients are never reused for a bounded-Wait certificate.
+
+### Performance tests
+
+- on complete Three-Station fixtures, sweep separation must match brute force
+  and remain below the existing exhaustive pair-build time;
+- on Five-Station, record row count, pair fallback count, master nonzeros and
+  pricing size before enforcing any hard performance threshold;
+- after the diagnostic baseline, require resource-window coefficient lookup to
+  be amortized sublinear in the total column pool through resource grouping;
+- reject a default switch if peak RSS or root-round wall time grows by more
+  than 25% without a stronger certified bound or validated incumbent.
 
 ## Benchmark and Acceptance Matrix
 

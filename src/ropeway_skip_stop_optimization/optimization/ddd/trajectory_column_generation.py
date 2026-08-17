@@ -32,12 +32,28 @@ class DddTrajectoryReducedCost:
     cabin_id: int
     minimum_reduced_cost: float
     exact: bool
+    certified_lower_bound: float | None = None
 
     def __post_init__(self) -> None:
         if self.cabin_id < 0:
             raise ValueError("trajectory pricing cabin_id must be nonnegative")
         if not math.isfinite(self.minimum_reduced_cost):
             raise ValueError("trajectory reduced cost must be finite")
+        if self.certified_lower_bound is not None and not math.isfinite(
+            self.certified_lower_bound
+        ):
+            raise ValueError("trajectory reduced-cost lower bound must be finite")
+        if self.exact and (
+            self.certified_lower_bound is not None
+            and self.certified_lower_bound > self.minimum_reduced_cost + 1e-9
+        ):
+            raise ValueError("trajectory reduced-cost lower bound exceeds exact value")
+
+    @property
+    def proof_lower_bound(self) -> float | None:
+        if self.exact:
+            return self.minimum_reduced_cost
+        return self.certified_lower_bound
 
 
 @dataclass(frozen=True)
@@ -45,8 +61,10 @@ class DddTrajectoryPricingCertificate:
     """Proof-safe reduced-cost correction for a trajectory RMP LP.
 
     A restricted-master value alone is not a lower bound.  The correction is
-    exposed only when every required cabin pricing problem was solved exactly
-    over the same waiting domain as the target problem.
+    exposed only when every required cabin pricing problem supplies either its
+    exact optimum or a certified lower bound over the same waiting domain as
+    the target problem.  Exact pricing remains necessary for a convergence
+    certificate.
     """
 
     restricted_master_lp_value: float
@@ -94,17 +112,27 @@ class DddTrajectoryPricingCertificate:
         )
 
     @property
+    def pricing_bound_complete(self) -> bool:
+        return self.pricing_waiting_domain is self.target_waiting_domain and all(
+            item.proof_lower_bound is not None for item in self.reduced_costs
+        )
+
+    @property
     def certified_lower_bound(self) -> float | None:
-        if not self.pricing_complete:
+        if not self.pricing_bound_complete:
             return None
         return self.restricted_master_lp_value + sum(
-            min(0.0, item.minimum_reduced_cost) for item in self.reduced_costs
+            min(0.0, item.proof_lower_bound)
+            for item in self.reduced_costs
+            if item.proof_lower_bound is not None
         )
 
     @property
     def bound_status(self) -> DddTrajectoryBoundStatus:
-        if not self.pricing_complete:
+        if not self.pricing_bound_complete:
             return DddTrajectoryBoundStatus.PRIMAL_POOL_ONLY
+        if not self.pricing_complete:
+            return DddTrajectoryBoundStatus.TRAJECTORY_RELAXATION_BOUND
         converged = all(
             item.minimum_reduced_cost >= -self.tolerance for item in self.reduced_costs
         )

@@ -1,8 +1,9 @@
 # Dynamic Discretization Discovery for Cabin and Passenger Planning
 
-Status: **proposed research and implementation plan**
+Status: **active research implementation; anonymous DDD and exact no-wait
+trajectory-root prototypes available**
 
-Research snapshot: **2026-08-05**
+Research snapshot: **2026-08-15**
 
 ## Decision Summary
 
@@ -1517,6 +1518,65 @@ $654{,}777.13$. The $8{,}698.47$ difference is only the final pool
 integrality gap, while the global certified lower bound remains the separate
 DDD value of zero in this short run.
 
+### Exhaustive no-wait trajectory root reference
+
+For a genuinely small fixed-start instance, let $\mathcal P_c$ contain every
+locally feasible whole-horizon no-wait trajectory of cabin $c$. The exhaustive
+reference materializes all $\mathcal P_c$ and every cross-cabin conflicting
+pair $\mathcal I$. Its factorized master uses trajectory selection
+$\lambda_{cp}$ and direct-ride Passenger flow $f_{gpr}$:
+
+$$
+\sum_{p\in\mathcal P_c}\lambda_{cp}=1,
+\qquad
+0\le f_{gpr}\le \bar d_{gpr}\lambda_{cp},
+$$
+
+$$
+\sum_{p,r}f_{gpr}\le d_g,
+\qquad
+\sum_{g,r:\,s\in r}f_{gpr}\le Q\lambda_{cp},
+$$
+
+and, for every incompatible pair $((c,p),(c',p'))\in\mathcal I$,
+
+$$
+\lambda_{cp}+\lambda_{c'p'}\le1.
+$$
+
+With binary $\lambda$ and integer $f$, the complete finite master is the exact
+declared fixed-start/no-wait direct-ride problem. Relaxing both domains gives
+
+$$
+z_{\mathrm{LP}}\le z_{\mathrm{IP}}=z^*_{\text{declared}},
+$$
+
+so $z_{\mathrm{LP}}$ is a certified lower bound. This statement depends on
+both completeness conditions. A restricted column set is not a lower bound;
+an incomplete conflict-row set is a relaxation, but cannot repair missing
+columns. The implementation therefore records column and row completeness
+separately and emits `FULL_ROOT_LP_CERTIFIED` only when both are true.
+
+The executable tiny reference uses explicit trajectory and pair-check limits
+and fails when either is exceeded. It cannot accidentally fall back to a
+restricted master. On the physical Three-Station fixture the first results
+are:
+
+| $K$ | $H$ | objective | columns | conflict rows | $z_{\mathrm{LP}}$ | $z_{\mathrm{IP}}$ | gap |
+|---:|---:|---|---:|---:|---:|---:|---:|
+| 3 | 250 s | Journey Time | 23 | 63 | 860,821.818 | 860,821.818 | 0.000% |
+| 3 | 500 s | Journey Time | 144 | 3,244 | 1,693,978.763 | 1,693,978.763 | 0.000% |
+| 3 | 500 s | Waiting Time | 144 | 3,244 | 1,687,342.400 | 1,687,342.400 | 0.000% |
+| 4 | 500 s | Journey Time | 177 | 4,273 | 1,681,211.345 | 1,681,211.345 | 0.000% |
+| 4 | 500 s | Waiting Time | 177 | 4,273 | 1,672,451.345 | 1,672,451.345 | 0.000% |
+
+Thus the declared root relaxation is exact on these first Passenger-relevant
+instances. This is encouraging evidence that exact pricing may yield useful
+bounds, not a general tightness proof. The next diagnostic must vary demand,
+start spacing, horizon, and network structure and include adversarial column
+costs that expose fractional conflict-graph solutions. The reference remains
+No-Wait scoped: it is not a lower bound for a target that permits Waiting.
+
 On `five_station_circle_cw_half_skip_no_wait_v0` with $K=19$, ten CP-SAT
 candidate timetables produced 44 distinct cabin trajectory options and 3,324
 direct-ride variables. The pool required two separation rounds, added eight
@@ -1527,20 +1587,57 @@ best validated Journey-Time upper bound improved from 693,275.021968 to
 first timetable. The certificate remains
 $0\le z^\star\le689{,}333.892688$.
 
+### Exact single-cabin pricing and generated root
+
+The No-Wait pricing gate is now implemented as a single-cabin MILP. It chooses
+the full Stop/Skip sequence, propagates exact integer event ticks, and jointly
+optimizes a local direct-ride load pattern against the current cabin-choice
+and demand duals. Because direct rides occupy consecutive visit segments, the
+local interval-capacity polytope has integral extreme points. Passenger counts
+can therefore be represented exactly with binary expansion: a ride bounded by
+$U$ uses $O(\log U)$ bits instead of $U$ symmetric unit variables.
+
+For a minimization pricing problem, a timeout with Gurobi lower bound
+$\underline\rho_c$ still permits the conservative correction
+
+$$
+z_{\mathrm{RMP}}+
+\sum_c\min\{0,\underline\rho_c\}\le z^\star.
+$$
+
+Its incumbent trajectory is only a primal column. It may be inserted after
+complete physical validation, but it cannot prove that pricing has converged.
+Randomized-dual tests on the complete Three-Station universe match exhaustive
+minimum reduced costs and load patterns. Root generation reaches the complete
+LP value in two rounds on the tested $K=3$ and $K=4$ fixtures.
+
+The first Five-Station $K=19$ diagnosis uses 19 initial All-Stop trajectories
+and two seconds per cabin pricing problem. No pricing problem is proved
+optimal, so the corrected bound is weaker than the independent nonnegative
+DDD bound. All 19 calls nevertheless find valid negative-cost trajectories in
+each of two rounds. The pool grows $19\to38\to57$, and its LP value drops from
+$668{,}769$ to $625{,}948$, but the validated integer upper bound remains
+$668{,}769$. Round two creates 176 pair incompatibilities. Thus the immediate
+obstacle is not failure to find Passenger-relevant routes; it is failure to
+generate a sufficiently compatible and diverse set when each cabin returns
+only its individually best route.
+
 Next:
 
-1. freeze and replay identical initial trajectory archives for matched-budget
-   restricted versus heuristic-pricing experiments;
-2. compare the implemented joint CP-SAT proxy with capacitated single-cabin
-   pricing before attempting an exact pricing certificate;
-3. design the direct-ride Passenger lower-bound pricing gate; never reuse the
-   restricted trajectory-pool objective as a global lower bound;
+1. introduce priceable resource-window clique rows, retaining exact pair
+   separation as fallback, so new columns see congestion before their pair
+   conflicts are materialized;
+2. generate several $k$-best or deliberately diverse valid columns per cabin
+   after the unrestricted proof-pricing call and measure whether the
+   finite-pool integer upper bound improves;
+3. compare pricing solver bounds, incumbents, model sizes, and the trajectory
+   correction against the anonymous DDD lower bound under matched budgets;
 4. derive and implement bounded-wait route transitions and the resource wait
    coefficients used by both CP-SAT and DDD envelopes;
 5. benchmark time to first feasible plan, first passenger incumbent, LB/UB
    gap, anonymous Hall rows, and
    exact infeasibility over low, medium, and near-capacity $K$;
-5. only then expand from fixed starts to optimized initial placement.
+6. only then expand from fixed starts to optimized initial placement.
 
 This sequence is intentionally conservative. The main value of the approach
 is the certificate
@@ -1550,3 +1647,7 @@ LB\leq z^\star\leq UB,
 $$
 
 so no performance shortcut may silently weaken that contract.
+
+The implementation objects, alternating solve order, test matrix and decision
+gate for these first two items are specified in Phase 5 of
+[`ddd_trajectory_column_generation.md`](ddd_trajectory_column_generation.md).

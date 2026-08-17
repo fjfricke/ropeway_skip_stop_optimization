@@ -55,6 +55,9 @@ THREE_STATION_TIME_REFINEMENT_HORIZON_SECONDS = 70.0
 THREE_STATION_NETWORK_COMBINED_CASE_ID = (
     "three_station_two_cabin_network_refinement_v0"
 )
+THREE_STATION_EXHAUSTIVE_BOUND_CASE_ID = (
+    "three_station_exhaustive_trajectory_bound_v0"
+)
 
 
 @dataclass(frozen=True)
@@ -98,6 +101,32 @@ class _OneCabinTimeRefinementStartBuilder(EanCabinStartBuilder):
                 kind=EanCabinStartKind.FIXED,
                 time_seconds=0.0,
             ),
+        )
+
+
+@dataclass(frozen=True)
+class _FixedSpacingStartBuilder(EanCabinStartBuilder):
+    cabin_count: int
+    spacing_seconds: float = THREE_STATION_TWO_CABIN_SECOND_START_SECONDS
+
+    def build(
+        self,
+        scenario: Scenario,
+        config: EanConfig,
+        network: EanMovementNetwork,
+        pattern: EanCirculationPattern,
+    ) -> tuple[EanCabinStart, ...]:
+        del config, network
+        if self.cabin_count <= 0 or self.cabin_count > len(scenario.cabins):
+            raise ValueError("exhaustive DDD fixture cabin count is unsupported")
+        return tuple(
+            EanCabinStart(
+                cabin_id=cabin_id,
+                first_switch_id=pattern.state_ids[0],
+                kind=EanCabinStartKind.FIXED,
+                time_seconds=cabin_id * self.spacing_seconds,
+            )
+            for cabin_id in range(self.cabin_count)
         )
 
 
@@ -158,7 +187,10 @@ def build_three_station_time_refinement_artifact() -> EanBuildArtifact:
     ).build(scenario, config)
 
 
-def build_three_station_network_combined_artifact() -> EanBuildArtifact:
+def build_three_station_network_combined_artifact(
+    *,
+    horizon_seconds: float = THREE_STATION_TIME_REFINEMENT_HORIZON_SECONDS,
+) -> EanBuildArtifact:
     scenario = replace(
         build_three_station_scenario(),
         id=THREE_STATION_NETWORK_COMBINED_CASE_ID,
@@ -166,7 +198,7 @@ def build_three_station_network_combined_artifact() -> EanBuildArtifact:
     base_config = build_three_station_ean_config(scenario)
     config = replace(
         base_config,
-        horizon_seconds=THREE_STATION_TIME_REFINEMENT_HORIZON_SECONDS,
+        horizon_seconds=horizon_seconds,
         tail_seconds=0.0,
         station_configs=tuple(
             replace(station, waiting_mode=StationWaitingMode.NO_WAITING)
@@ -176,6 +208,34 @@ def build_three_station_network_combined_artifact() -> EanBuildArtifact:
     return network_ean_builder_for_pattern(
         pattern_definition=build_three_station_ean_pattern_definition(),
         start_builder=_TwoCabinMergeStartBuilder(),
+        headway_pair_builder=SparseHeadwayPairBuilder(),
+    ).build(scenario, config)
+
+
+def build_three_station_exhaustive_bound_artifact(
+    *,
+    cabin_count: int = 3,
+    horizon_seconds: float = 250.0,
+) -> EanBuildArtifact:
+    """Build a small but Passenger-relevant full-trajectory bound fixture."""
+
+    scenario = replace(
+        build_three_station_scenario(),
+        id=THREE_STATION_EXHAUSTIVE_BOUND_CASE_ID,
+    )
+    base_config = build_three_station_ean_config(scenario)
+    config = replace(
+        base_config,
+        horizon_seconds=horizon_seconds,
+        tail_seconds=0.0,
+        station_configs=tuple(
+            replace(station, waiting_mode=StationWaitingMode.NO_WAITING)
+            for station in base_config.station_configs
+        ),
+    )
+    return network_ean_builder_for_pattern(
+        pattern_definition=build_three_station_ean_pattern_definition(),
+        start_builder=_FixedSpacingStartBuilder(cabin_count),
         headway_pair_builder=SparseHeadwayPairBuilder(),
     ).build(scenario, config)
 

@@ -34,6 +34,108 @@ validation. `--enumerate-all` is intended only for genuinely tiny cases.
 Waiting, OIP, and dynamic routing fail before enumeration.
 Registered fixed-start/no-wait examples remain selectable with `--example`.
 
+Measure the complete whole-horizon trajectory root relaxation on a small,
+Passenger-relevant physical case:
+
+```bash
+.venv/bin/python benchmarks/run_ddd_trajectory_bound_reference.py \
+  --cabins 3 \
+  --horizon 250 \
+  --objective journey_time
+```
+
+This reference explicitly enumerates every local No-Wait trajectory and every
+cross-cabin incompatibility pair, then solves both the complete factorized LP
+and its integer master. Its LP value is therefore a certified lower bound for
+the declared fixed-start/no-wait problem, and the reported LP--MIP gap measures
+the intrinsic relaxation strength. Hard trajectory and pair-check limits make
+the runner fail instead of silently returning a restricted-pool value. It is a
+small-instance research gate for exact pricing, not the scalable algorithm.
+
+Run the exact single-cabin pricing loop without enumerating the trajectory
+universe:
+
+```bash
+.venv/bin/python benchmarks/run_ddd_trajectory_root_column_generation.py \
+  --cabins 3 \
+  --horizon 250 \
+  --objective journey_time \
+  --pricing-time-limit 10 \
+  --conflict-row-mode resource_windows_with_pair_fallback
+```
+
+The restricted factorized Passenger LP starts from one all-stop trajectory per
+cabin. Every round solves an exact no-wait route-and-load pricing MILP per
+cabin, adds negative-reduced-cost trajectories, rebuilds all incompatibility
+rows for the current pool, and solves the restricted integer master for an
+upper bound. The LP is certified only when every pricing solve is optimal and
+no negative column remains. Use `--example` for a registered fixed-start,
+no-wait network case; a pricing timeout retains completed bounds but cannot
+certify root convergence. The optional resource-window mode separates
+capacity-one clique rows, passes their dual prices into future-column pricing,
+and still rebuilds every incompatibility pair as the exact fallback. The
+default `pair_only` reproduces the previous implementation.
+
+The default exact No-Wait pricer uses a time-expanded route path and continuous
+Passenger flows on the same path. This removes event-time products and proves
+each Five-Station single-cabin pricing problem in roughly half a second in the
+current reference run. Reproduce one frozen all-stop-RMP pricing call with:
+
+```bash
+.venv/bin/python benchmarks/run_ddd_frozen_trajectory_pricing.py \
+  --example five_station_circle_cw_half_skip_no_wait_v0 \
+  --cabin-id 0 \
+  --pricing-time-limit 2
+```
+
+Use `--pricing-formulation legacy_indicators` or `tight_convex_hull` only for
+matched formulation ablations. Resource-window pricing remains experimental;
+the scalable certified reference uses the default Pair-only master because
+hundreds of active windows currently dominate pricing setup.
+
+The research-runner defaults are 30 total rounds, five seconds per cabin
+proof-pricing call, one pricing thread, `MIPFocus=2`, one generated column per
+cabin and round, default simplex master duals, Pair-only conflicts, and no
+diversity pass. The Five-Station reference already solved all 399 pricing calls
+exactly with a two-second limit; five seconds is the less brittle general
+default. Larger budgets should be used only when the diagnostics report
+non-exact pricing, not pre-emptively.
+
+The runner atomically writes a complete checkpoint after every finished round
+to `<output-dir>/<case>__<objective>.checkpoint.json`. Continue a run by raising
+the total round limit and passing that file back in:
+
+```bash
+.venv/bin/python benchmarks/run_ddd_trajectory_root_column_generation.py \
+  --example five_station_circle_cw_half_skip_no_wait_v0 \
+  --max-iterations 30 \
+  --pricing-time-limit 2 \
+  --resume-checkpoint benchmarks/output/ddd_trajectory_root_cg/five_station_circle_cw_half_skip_no_wait_v0__journey_time.checkpoint.json
+```
+
+`--max-iterations` is the total limit, not the number of additional rounds.
+The checkpoint contains the trajectory pool, certified global bounds, best
+integer selection, its positive Passenger ride values, complete round history,
+and optional resource windows. It
+is rejected when its instance, objective, or conflict-row mode differs. Use
+`--checkpoint-path` to select another destination or `--no-checkpoint` for
+short disposable ablations.
+
+Export a validated root-CG incumbent to the scenario frontend with:
+
+```bash
+.venv/bin/python benchmarks/export_ddd_root_cg_frontend.py \
+  --example five_station_circle_cw_half_skip_no_wait_v0 \
+  --checkpoint benchmarks/output/ddd_trajectory_root_cg/passenger_flow_pair_only_30r/five_station_circle_cw_half_skip_no_wait_v0__journey_time.checkpoint.json
+```
+
+New checkpoints already contain the Passenger assignment, so this conversion
+does not solve an optimization problem. For a legacy checkpoint without ride
+values, the exporter solves the small integer Passenger Assignment on the
+already fixed incumbent trajectories exactly once and upgrades the checkpoint.
+It writes a separate `ddd_root_cg_journey_time` EAN artifact set and makes that
+set the frontend default for the exported variant.
+
 Run the first closed delayed-conflict loop on the physical two-cabin fixture:
 
 ```bash

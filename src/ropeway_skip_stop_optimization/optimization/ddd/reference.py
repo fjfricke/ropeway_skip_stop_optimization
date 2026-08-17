@@ -371,60 +371,22 @@ def validate_ddd_reference_solution(
     if tolerance_seconds < 0:
         raise ValueError("DDD validation tolerance_seconds must be nonnegative")
     starts_by_cabin_id = {start.cabin_id: start for start in problem.starts}
-    options_by_id = {option.id: option for option in problem.route_options}
-    actual_cabin_ids = {trajectory.cabin_id for trajectory in solution.trajectories}
-    if actual_cabin_ids != set(starts_by_cabin_id):
+    actual_cabin_ids = tuple(
+        trajectory.cabin_id for trajectory in solution.trajectories
+    )
+    if (
+        len(set(actual_cabin_ids)) != len(actual_cabin_ids)
+        or set(actual_cabin_ids) != set(starts_by_cabin_id)
+    ):
         raise ValueError("DDD solution cabin set does not match fixed starts")
     all_occurrences: list[DddReferenceResourceOccurrence] = []
     for trajectory in solution.trajectories:
-        start = starts_by_cabin_id[trajectory.cabin_id]
-        if not trajectory.visits:
-            raise ValueError("DDD reference trajectory must contain an active visit")
-        expected_state = start.state_id
-        expected_time_tick = start.time_tick
-        expected_occurrences: list[DddReferenceResourceOccurrence] = []
-        for visit_index, reference_visit in enumerate(trajectory.visits):
-            if reference_visit.cabin_id != trajectory.cabin_id:
-                raise ValueError("DDD trajectory contains a visit for another cabin")
-            if reference_visit.visit_index != visit_index:
-                raise ValueError("DDD trajectory visit indices must be contiguous")
-            if reference_visit.state_id != expected_state:
-                raise ValueError("DDD trajectory state chain is inconsistent")
-            if (
-                ddd_seconds_to_tick(reference_visit.switch_time_seconds)
-                != expected_time_tick
-            ):
-                raise ValueError("DDD trajectory event-time chain is inconsistent")
-            if (
-                ddd_seconds_to_tick(reference_visit.switch_time_seconds)
-                > problem.operational_end_tick
-            ):
-                raise ValueError("DDD trajectory contains a post-horizon route entry")
-            option = options_by_id[reference_visit.route_option_id]
-            if option.from_state_id != reference_visit.state_id:
-                raise ValueError("DDD visit uses a route from another state")
-            rebuilt = build_ddd_reference_visit(
-                start=start,
-                visit_index=visit_index,
-                switch_time_seconds=reference_visit.switch_time_seconds,
-                option=option,
-                operational_end_seconds=problem.operational_end_seconds,
-                tolerance_seconds=tolerance_seconds,
-            )
-            if rebuilt != reference_visit:
-                raise ValueError("DDD visit timing or resource occurrences are inconsistent")
-            expected_occurrences.extend(rebuilt.resource_occurrences)
-            expected_state = option.to_state_id
-            expected_time_tick = ddd_seconds_to_tick(
-                rebuilt.next_switch_time_seconds
-            )
-        if expected_time_tick <= problem.operational_end_tick:
-            raise DddReferenceHorizonCoverageError(
-                "DDD trajectory ends before covering the operational horizon"
-            )
-        if len(trajectory.visits) > start.max_visit_count:
-            raise ValueError("DDD trajectory exceeds its certified visit bound")
-        all_occurrences.extend(expected_occurrences)
+        validate_ddd_reference_trajectory(
+            problem,
+            trajectory,
+            tolerance_seconds=tolerance_seconds,
+        )
+        all_occurrences.extend(trajectory.resource_occurrences)
     conflicts = find_ddd_reference_conflicts(
         tuple(all_occurrences),
         problem,
@@ -433,6 +395,74 @@ def validate_ddd_reference_solution(
     if conflicts:
         raise DddReferenceResourceConflictError(
             f"DDD reference solution has resource conflicts: {conflicts[0]}"
+        )
+
+
+def validate_ddd_reference_trajectory(
+    problem: DddMovementProblem,
+    trajectory: DddReferenceTrajectory,
+    *,
+    tolerance_seconds: float = 1e-9,
+) -> None:
+    """Validate one locally feasible no-wait trajectory without other cabins."""
+
+    problem.validate()
+    if tolerance_seconds < 0:
+        raise ValueError("DDD validation tolerance_seconds must be nonnegative")
+    starts_by_cabin_id = {start.cabin_id: start for start in problem.starts}
+    start = starts_by_cabin_id.get(trajectory.cabin_id)
+    if start is None:
+        raise ValueError("DDD trajectory references an unknown fixed start")
+    if not trajectory.visits:
+        raise ValueError("DDD reference trajectory must contain an active visit")
+    options_by_id = {option.id: option for option in problem.route_options}
+    expected_state = start.state_id
+    expected_time_tick = start.time_tick
+    for visit_index, reference_visit in enumerate(trajectory.visits):
+        if reference_visit.cabin_id != trajectory.cabin_id:
+            raise ValueError("DDD trajectory contains a visit for another cabin")
+        if reference_visit.visit_index != visit_index:
+            raise ValueError("DDD trajectory visit indices must be contiguous")
+        if reference_visit.state_id != expected_state:
+            raise ValueError("DDD trajectory state chain is inconsistent")
+        if (
+            ddd_seconds_to_tick(reference_visit.switch_time_seconds)
+            != expected_time_tick
+        ):
+            raise ValueError("DDD trajectory event-time chain is inconsistent")
+        if expected_time_tick > problem.operational_end_tick:
+            raise ValueError("DDD trajectory contains a post-horizon route entry")
+        option = options_by_id.get(reference_visit.route_option_id)
+        if option is None:
+            raise ValueError("DDD trajectory references an unknown route option")
+        if option.from_state_id != reference_visit.state_id:
+            raise ValueError("DDD visit uses a route from another state")
+        rebuilt = build_ddd_reference_visit(
+            start=start,
+            visit_index=visit_index,
+            switch_time_seconds=reference_visit.switch_time_seconds,
+            option=option,
+            operational_end_seconds=problem.operational_end_seconds,
+            tolerance_seconds=tolerance_seconds,
+        )
+        if rebuilt != reference_visit:
+            raise ValueError("DDD visit timing or resource occurrences are inconsistent")
+        expected_state = option.to_state_id
+        expected_time_tick = ddd_seconds_to_tick(rebuilt.next_switch_time_seconds)
+    if expected_time_tick <= problem.operational_end_tick:
+        raise DddReferenceHorizonCoverageError(
+            "DDD trajectory ends before covering the operational horizon"
+        )
+    if len(trajectory.visits) > start.max_visit_count:
+        raise ValueError("DDD trajectory exceeds its certified visit bound")
+    conflicts = find_ddd_reference_conflicts(
+        trajectory.resource_occurrences,
+        problem,
+        tolerance_seconds=tolerance_seconds,
+    )
+    if conflicts:
+        raise DddReferenceResourceConflictError(
+            f"DDD reference trajectory has a self-conflict: {conflicts[0]}"
         )
 
 

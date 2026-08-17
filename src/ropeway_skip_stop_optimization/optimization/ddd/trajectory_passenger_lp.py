@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from hashlib import sha256
 from itertools import combinations
@@ -14,6 +14,10 @@ import numpy as np
 
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generation import (
     DddTrajectoryBoundStatus,
+    DddTrajectoryWaitingDomain,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_resource_windows import (
+    DddTrajectoryResourceWindowRow,
 )
 
 
@@ -26,6 +30,11 @@ class DddTrajectoryPassengerLpStatus(StrEnum):
 class DddTrajectoryPassengerLpFormulation(StrEnum):
     FACTORIZED = "factorized"
     INTEGRATED_LOAD_PATTERN = "integrated_load_pattern"
+
+
+class DddTrajectoryMasterDualMode(StrEnum):
+    DEFAULT = "default"
+    BARRIER_NO_CROSSOVER = "barrier_no_crossover"
 
 
 @dataclass(frozen=True)
@@ -73,9 +82,14 @@ class DddTrajectoryPassengerMasterProblem:
     cabin_capacity: float
     objective_constant: float
     incompatibility_pairs: tuple[tuple[str, str], ...] = ()
+    resource_window_rows: tuple[DddTrajectoryResourceWindowRow, ...] = ()
     incompatibility_rows_complete: bool = False
+    trajectory_columns_complete: bool = False
+    waiting_domain: DddTrajectoryWaitingDomain = DddTrajectoryWaitingDomain.NO_WAIT
 
     def validate(self) -> None:
+        if not isinstance(self.waiting_domain, DddTrajectoryWaitingDomain):
+            raise ValueError("trajectory Passenger master waiting domain is invalid")
         if tuple(sorted(set(self.cabin_ids))) != self.cabin_ids or not self.cabin_ids:
             raise ValueError("trajectory Passenger cabin IDs must be sorted and unique")
         if self.cabin_ids[0] < 0:
@@ -126,6 +140,17 @@ class DddTrajectoryPassengerMasterProblem:
             for pair in normalized_pairs
         ):
             raise ValueError("trajectory incompatibility pair is invalid")
+        row_ids = tuple(row.id for row in self.resource_window_rows)
+        if tuple(sorted(set(row_ids))) != row_ids:
+            raise ValueError(
+                "trajectory resource-window rows must have sorted unique IDs"
+            )
+        for row in self.resource_window_rows:
+            row.validate()
+            if not set(row.coefficient_by_option_id) <= known_options:
+                raise ValueError(
+                    "trajectory resource-window row references an unknown option"
+                )
 
     @property
     def fingerprint(self) -> str:
@@ -136,7 +161,17 @@ class DddTrajectoryPassengerMasterProblem:
             "capacity": self.cabin_capacity,
             "objective_constant": self.objective_constant,
             "incompatibilities": self.incompatibility_pairs,
+            "resource_windows": [
+                {
+                    "id": row.id,
+                    "capacity": row.window.capacity,
+                    "coefficients": row.coefficients,
+                }
+                for row in self.resource_window_rows
+            ],
             "incompatibility_rows_complete": self.incompatibility_rows_complete,
+            "trajectory_columns_complete": self.trajectory_columns_complete,
+            "waiting_domain": self.waiting_domain.value,
             "options": [
                 {
                     "id": option.id,
@@ -178,6 +213,7 @@ class DddTrajectoryPassengerDuals:
     ride_activation_raw_by_ride_id: dict[str, float]
     capacity_raw_by_option_segment: dict[tuple[str, str], float]
     fingerprint: str
+    resource_window_raw_by_row_id: dict[str, float] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -190,6 +226,7 @@ class DddTrajectoryPassengerLpResult:
     pattern_values_by_id: dict[str, float]
     pattern_count: int
     incompatibility_constraint_count: int
+    resource_window_constraint_count: int
     row_separation_complete: bool
     duals: DddTrajectoryPassengerDuals | None
     master_fingerprint: str
@@ -198,6 +235,18 @@ class DddTrajectoryPassengerLpResult:
     total_seconds: float
     bound_status: DddTrajectoryBoundStatus = DddTrajectoryBoundStatus.PRIMAL_POOL_ONLY
     certified_lower_bound: float | None = None
+    waiting_domain: DddTrajectoryWaitingDomain = DddTrajectoryWaitingDomain.NO_WAIT
+
+
+@dataclass(frozen=True)
+class DddTrajectoryPassengerMipResult:
+    status: DddTrajectoryPassengerLpStatus
+    objective_value: float | None
+    option_values_by_id: dict[str, float]
+    ride_values_by_id: dict[str, float]
+    build_seconds: float
+    optimize_seconds: float
+    total_seconds: float
 
 
 @dataclass(frozen=True)
@@ -211,15 +260,21 @@ class DddTrajectoryLoadPattern:
 @dataclass(frozen=True)
 class DddTrajectoryFactorizedLpOptimizer:
     output_flag: bool = False
+    dual_mode: DddTrajectoryMasterDualMode = DddTrajectoryMasterDualMode.DEFAULT
 
     def solve(
         self,
         problem: DddTrajectoryPassengerMasterProblem,
     ) -> DddTrajectoryPassengerLpResult:
         problem.validate()
+        if not isinstance(self.dual_mode, DddTrajectoryMasterDualMode):
+            raise ValueError("trajectory master dual mode is invalid")
         started = perf_counter()
         model = gp.Model("ddd_trajectory_factorized_lp")
         model.Params.OutputFlag = int(self.output_flag)
+        if self.dual_mode is DddTrajectoryMasterDualMode.BARRIER_NO_CROSSOVER:
+            model.Params.Method = 2
+            model.Params.Crossover = 0
         model.ModelSense = GRB.MINIMIZE
         model.ObjCon = problem.objective_constant
 
@@ -287,6 +342,17 @@ class DddTrajectoryFactorizedLpOptimizer:
             )
             for index, pair in enumerate(problem.incompatibility_pairs)
         }
+        resource_windows = {
+            row.id: model.addConstr(
+                gp.quicksum(
+                    coefficient * select[option_id]
+                    for option_id, coefficient in row.coefficients
+                )
+                <= row.window.capacity,
+                name=f"resource_window[{index}]",
+            )
+            for index, row in enumerate(problem.resource_window_rows)
+        }
         build_seconds = perf_counter() - started
         optimize_started = perf_counter()
         model.optimize()
@@ -301,9 +367,127 @@ class DddTrajectoryFactorizedLpOptimizer:
             choose=choose,
             demand=demand,
             incompatible=incompatible,
+            resource_windows=resource_windows,
             activation=activation,
             capacity=capacity,
             pattern_count=0,
+            build_seconds=build_seconds,
+            optimize_seconds=optimize_seconds,
+            total_seconds=perf_counter() - started,
+        )
+
+
+@dataclass(frozen=True)
+class DddTrajectoryFactorizedMipReferenceOptimizer:
+    """Solve a finite complete trajectory master integrally for tiny references."""
+
+    output_flag: bool = False
+
+    def solve(
+        self,
+        problem: DddTrajectoryPassengerMasterProblem,
+    ) -> DddTrajectoryPassengerMipResult:
+        problem.validate()
+        started = perf_counter()
+        model = gp.Model("ddd_trajectory_factorized_mip_reference")
+        model.Params.OutputFlag = int(self.output_flag)
+        model.ModelSense = GRB.MINIMIZE
+        model.ObjCon = problem.objective_constant
+
+        select = {
+            option.id: model.addVar(
+                lb=0.0,
+                ub=1.0,
+                vtype=GRB.BINARY,
+                name=f"select[{index}]",
+            )
+            for index, option in enumerate(problem.options)
+        }
+        ride = {
+            item.id: model.addVar(
+                lb=0.0,
+                ub=item.upper_bound,
+                obj=item.objective_delta,
+                vtype=GRB.INTEGER,
+                name=f"ride[{index}]",
+            )
+            for index, item in enumerate(_rides(problem))
+        }
+        for cabin_id in problem.cabin_ids:
+            model.addConstr(
+                gp.quicksum(
+                    select[option.id]
+                    for option in problem.options
+                    if option.cabin_id == cabin_id
+                )
+                == 1.0,
+                name=f"choose_cabin[{cabin_id}]",
+            )
+        for index, (group_id, count) in enumerate(
+            sorted(problem.demand_by_group_id.items())
+        ):
+            model.addConstr(
+                gp.quicksum(
+                    ride[item.id]
+                    for item in _rides(problem)
+                    if item.demand_group_id == group_id
+                )
+                <= count,
+                name=f"demand[{index}]",
+            )
+        for option in problem.options:
+            for item in option.rides:
+                model.addConstr(
+                    ride[item.id] <= item.upper_bound * select[option.id],
+                    name=f"activate[{item.id}]",
+                )
+            for segment_id in _segment_ids(option):
+                model.addConstr(
+                    gp.quicksum(
+                        ride[item.id]
+                        for item in option.rides
+                        if segment_id in item.onboard_segment_ids
+                    )
+                    <= problem.cabin_capacity * select[option.id],
+                    name=f"capacity[{option.id},{segment_id}]",
+                )
+        for index, pair in enumerate(problem.incompatibility_pairs):
+            model.addConstr(
+                select[pair[0]] + select[pair[1]] <= 1.0,
+                name=f"incompatible[{index}]",
+            )
+        for index, row in enumerate(problem.resource_window_rows):
+            model.addConstr(
+                gp.quicksum(
+                    coefficient * select[option_id]
+                    for option_id, coefficient in row.coefficients
+                )
+                <= row.window.capacity,
+                name=f"resource_window[{index}]",
+            )
+        build_seconds = perf_counter() - started
+        optimize_started = perf_counter()
+        model.optimize()
+        optimize_seconds = perf_counter() - optimize_started
+        status = _status(model.Status)
+        objective_value = (
+            float(model.ObjVal)
+            if status is DddTrajectoryPassengerLpStatus.OPTIMAL
+            else None
+        )
+        return DddTrajectoryPassengerMipResult(
+            status=status,
+            objective_value=objective_value,
+            option_values_by_id=(
+                {key: float(value.X) for key, value in select.items()}
+                if objective_value is not None
+                else {}
+            ),
+            ride_values_by_id=(
+                {key: float(value.X) for key, value in ride.items()}
+                if objective_value is not None
+                else {}
+            ),
             build_seconds=build_seconds,
             optimize_seconds=optimize_seconds,
             total_seconds=perf_counter() - started,
@@ -393,6 +577,18 @@ class DddTrajectoryIntegratedLpReferenceOptimizer:
             )
             for index, pair in enumerate(problem.incompatibility_pairs)
         }
+        resource_windows = {
+            row.id: model.addConstr(
+                gp.quicksum(
+                    coefficient * theta[pattern.id]
+                    for option_id, coefficient in row.coefficients
+                    for pattern in patterns_by_option_id[option_id]
+                )
+                <= row.window.capacity,
+                name=f"resource_window[{index}]",
+            )
+            for index, row in enumerate(problem.resource_window_rows)
+        }
         build_seconds = perf_counter() - started
         optimize_started = perf_counter()
         model.optimize()
@@ -428,6 +624,7 @@ class DddTrajectoryIntegratedLpReferenceOptimizer:
             choose=choose,
             demand=demand,
             incompatible=incompatible,
+            resource_windows=resource_windows,
             activation={},
             capacity={},
             pattern_count=len(patterns),
@@ -535,6 +732,7 @@ def _lp_result(
     choose: dict[int, gp.Constr],
     demand: dict[str, gp.Constr],
     incompatible: dict[tuple[str, str], gp.Constr],
+    resource_windows: dict[str, gp.Constr],
     activation: dict[str, gp.Constr],
     capacity: dict[tuple[str, str], gp.Constr],
     pattern_count: int,
@@ -578,6 +776,9 @@ def _lp_result(
             "incompatible": sorted(
                 (pair, float(row.Pi)) for pair, row in incompatible.items()
             ),
+            "resource_windows": sorted(
+                (row_id, float(row.Pi)) for row_id, row in resource_windows.items()
+            ),
             "activation": sorted(
                 (key, float(row.Pi)) for key, row in activation.items()
             ),
@@ -607,7 +808,19 @@ def _lp_result(
                     separators=(",", ":"),
                 ).encode()
             ).hexdigest(),
+            resource_window_raw_by_row_id={
+                key: float(row.Pi) for key, row in resource_windows.items()
+            },
         )
+    if objective_value is None or not problem.trajectory_columns_complete:
+        bound_status = DddTrajectoryBoundStatus.PRIMAL_POOL_ONLY
+        certified_lower_bound = None
+    elif problem.incompatibility_rows_complete:
+        bound_status = DddTrajectoryBoundStatus.FULL_ROOT_LP_CERTIFIED
+        certified_lower_bound = objective_value
+    else:
+        bound_status = DddTrajectoryBoundStatus.TRAJECTORY_RELAXATION_BOUND
+        certified_lower_bound = objective_value
     return DddTrajectoryPassengerLpResult(
         status=status,
         formulation=formulation,
@@ -617,6 +830,7 @@ def _lp_result(
         pattern_values_by_id=pattern_values,
         pattern_count=pattern_count,
         incompatibility_constraint_count=len(problem.incompatibility_pairs),
+        resource_window_constraint_count=len(problem.resource_window_rows),
         row_separation_complete=problem.incompatibility_rows_complete,
         duals=duals,
         master_fingerprint=sha256(
@@ -625,6 +839,9 @@ def _lp_result(
         build_seconds=build_seconds,
         optimize_seconds=optimize_seconds,
         total_seconds=total_seconds,
+        bound_status=bound_status,
+        certified_lower_bound=certified_lower_bound,
+        waiting_domain=problem.waiting_domain,
     )
 
 
