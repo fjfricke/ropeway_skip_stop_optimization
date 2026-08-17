@@ -149,6 +149,34 @@ class FiveStationCircleCwFullNoSkipNoWaitExample(ScenarioExample):
         )
 
 
+class FiveStationCircleCwFullSkipNoWaitExample(
+    FiveStationCircleCwFullNoSkipNoWaitExample
+):
+    metadata = ScenarioExampleMetadata(
+        id="five_station_circle_cw_full_skip_no_wait_v0",
+        label="Five station circle cw full cabins skip+no_wait",
+        description=(
+            "Clockwise five-station circular ropeway with all EAN start cabins, "
+            "skip enabled, and station waiting disabled."
+        ),
+        tags=("circle", "cw", "skip-stop", "ean-demo", "scaling-demo", "full-cabins", "no-waiting"),
+        family_id="five_station_circle",
+        family_label="Five station circle",
+        variant_id="full_skip_no_wait",
+        variant_label="Full cabins skip+no_wait",
+    )
+
+    spec = CircularSkipStopSpec(
+        scenario_id=metadata.id,
+        station_ids=FiveStationCircleCwFullNoSkipNoWaitExample.spec.station_ids,
+        label=metadata.label,
+        description=metadata.description,
+        include_skip_routes=True,
+        service_station_waiting_mode=StationWaitingMode.NO_WAITING,
+        demand_count_per_od_pair=128,
+    )
+
+
 class FiveStationCircleCwHalfNoSkipNoWaitExample(FiveStationCircleCwFullNoSkipNoWaitExample):
     metadata = ScenarioExampleMetadata(
         id="five_station_circle_cw_half_no_skip_no_wait_v0",
@@ -426,6 +454,10 @@ def build_five_station_circle_cw_full_no_skip_no_wait_scenario() -> Scenario:
     return build_circular_skip_stop_scenario(FiveStationCircleCwFullNoSkipNoWaitExample.spec)
 
 
+def build_five_station_circle_cw_full_skip_no_wait_scenario() -> Scenario:
+    return build_circular_skip_stop_scenario(FiveStationCircleCwFullSkipNoWaitExample.spec)
+
+
 def build_five_station_circle_cw_half_no_skip_no_wait_scenario() -> Scenario:
     return build_circular_skip_stop_scenario(FiveStationCircleCwHalfNoSkipNoWaitExample.spec)
 
@@ -444,6 +476,17 @@ def build_five_station_circle_cw_full_no_skip_no_wait_ean_config(
 ) -> EanConfig:
     return build_circular_skip_stop_ean_config(
         scenario or build_five_station_circle_cw_full_no_skip_no_wait_scenario(),
+        waiting_mode=StationWaitingMode.NO_WAITING,
+        tail_seconds=tail_seconds,
+    )
+
+
+def build_five_station_circle_cw_full_skip_no_wait_ean_config(
+    scenario: Scenario | None = None,
+    tail_seconds: float = 0.0,
+) -> EanConfig:
+    return build_circular_skip_stop_ean_config(
+        scenario or build_five_station_circle_cw_full_skip_no_wait_scenario(),
         waiting_mode=StationWaitingMode.NO_WAITING,
         tail_seconds=tail_seconds,
     )

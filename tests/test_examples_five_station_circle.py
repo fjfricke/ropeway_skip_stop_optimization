@@ -2,12 +2,15 @@ from __future__ import annotations
 
 from ropeway_skip_stop_optimization.examples.circular_skip_stop import (
     FiveStationCircleCwFullNoSkipNoWaitExample,
+    FiveStationCircleCwFullSkipNoWaitExample,
     FiveStationCircleCwHalfNoSkipNoWaitExample,
     FiveStationCircleCwHalfSkipNoWaitExample,
     FiveStationCircleCwHalfSkipWaitExample,
     build_five_station_circle_cw_ean_pattern_definition,
     build_five_station_circle_cw_full_no_skip_no_wait_ean_config,
     build_five_station_circle_cw_full_no_skip_no_wait_scenario,
+    build_five_station_circle_cw_full_skip_no_wait_ean_config,
+    build_five_station_circle_cw_full_skip_no_wait_scenario,
     build_five_station_circle_cw_half_no_skip_no_wait_ean_config,
     build_five_station_circle_cw_half_no_skip_no_wait_scenario,
     build_five_station_circle_cw_half_skip_no_wait_ean_config,
@@ -26,6 +29,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
 def test_five_station_circle_cw_scenarios_validate() -> None:
     scenario_cases = (
         (build_five_station_circle_cw_full_no_skip_no_wait_scenario(), 128),
+        (build_five_station_circle_cw_full_skip_no_wait_scenario(), 128),
         (build_five_station_circle_cw_half_no_skip_no_wait_scenario(), 64),
         (build_five_station_circle_cw_half_skip_no_wait_scenario(), 64),
         (build_five_station_circle_cw_half_skip_wait_scenario(), 64),
@@ -54,6 +58,7 @@ def test_five_station_circle_cw_skip_route_variants() -> None:
         build_five_station_circle_cw_half_no_skip_no_wait_scenario(),
     )
     skip_scenarios = (
+        build_five_station_circle_cw_full_skip_no_wait_scenario(),
         build_five_station_circle_cw_half_skip_no_wait_scenario(),
         build_five_station_circle_cw_half_skip_wait_scenario(),
     )
@@ -67,6 +72,7 @@ def test_five_station_circle_cw_skip_route_variants() -> None:
 def test_five_station_circle_cw_ean_waiting_modes() -> None:
     no_wait_configs = (
         build_five_station_circle_cw_full_no_skip_no_wait_ean_config(),
+        build_five_station_circle_cw_full_skip_no_wait_ean_config(),
         build_five_station_circle_cw_half_no_skip_no_wait_ean_config(),
         build_five_station_circle_cw_half_skip_no_wait_ean_config(),
     )
@@ -102,25 +108,28 @@ def test_five_station_circle_cw_pattern_has_stable_state_order() -> None:
 
 
 def test_five_station_circle_cw_full_examples_build_ean_artifacts_with_all_start_cabins() -> None:
-    example = FiveStationCircleCwFullNoSkipNoWaitExample()
-    scenario = example.build_scenario()
-    config = example.build_ean_config(scenario)
-    pattern_definition = build_five_station_circle_cw_ean_pattern_definition(scenario)
-    artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
-    assert artifact.movement_network is not None
-    pattern = artifact.movement_network.pattern(artifact.circulation_pattern_ids[0])
-    max_starts = ContinuousAllStopMaxCabinStartBuilder().build(
-        scenario=scenario,
-        config=config,
-        network=artifact.movement_network,
-        pattern=pattern,
-    )
+    for example in (
+        FiveStationCircleCwFullNoSkipNoWaitExample(),
+        FiveStationCircleCwFullSkipNoWaitExample(),
+    ):
+        scenario = example.build_scenario()
+        config = example.build_ean_config(scenario)
+        pattern_definition = build_five_station_circle_cw_ean_pattern_definition(scenario)
+        artifact = example.build_ean_artifact_builder(scenario, config).build(scenario, config)
+        assert artifact.movement_network is not None
+        pattern = artifact.movement_network.pattern(artifact.circulation_pattern_ids[0])
+        max_starts = ContinuousAllStopMaxCabinStartBuilder().build(
+            scenario=scenario,
+            config=config,
+            network=artifact.movement_network,
+            pattern=pattern,
+        )
 
-    assert artifact.scenario_id == scenario.id
-    assert artifact.circulation_state_ids == pattern_definition.state_node_ids
-    assert len(artifact.timings) == 5
-    assert artifact.cabin_starts == max_starts
-    assert artifact.cabin_starts
+        assert artifact.scenario_id == scenario.id
+        assert artifact.circulation_state_ids == pattern_definition.state_node_ids
+        assert len(artifact.timings) == 5
+        assert artifact.cabin_starts == max_starts
+        assert artifact.cabin_starts
 
 
 def test_five_station_circle_cw_half_examples_build_ean_artifacts_with_every_second_start_cabin() -> None:
@@ -203,6 +212,10 @@ def test_five_station_circle_cw_examples_are_registered() -> None:
     assert isinstance(
         get_example("five_station_circle_cw_full_no_skip_no_wait_v0"),
         FiveStationCircleCwFullNoSkipNoWaitExample,
+    )
+    assert isinstance(
+        get_example("five_station_circle_cw_full_skip_no_wait_v0"),
+        FiveStationCircleCwFullSkipNoWaitExample,
     )
     assert isinstance(
         get_example("five_station_circle_cw_half_no_skip_no_wait_v0"),
