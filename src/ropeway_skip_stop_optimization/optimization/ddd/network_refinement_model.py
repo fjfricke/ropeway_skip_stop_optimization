@@ -317,5 +317,3 @@ class DddNetworkTimeRefinementResult:
     cp_sat_bootstrap_seconds: float = 0.0
     cp_sat_bootstrap_candidate_count: int = 0
     cp_sat_bootstrap_objective: float | None = None
-
-
