@@ -8,7 +8,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddMovementProblem,
     DddRouteDecision,
 )
-from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
+from ropeway_skip_stop_optimization.optimization.ddd.network_model import (
     DddLayeredTimeArc,
     DddLayeredTimeArcKind,
     DddLayeredTimeNetwork,

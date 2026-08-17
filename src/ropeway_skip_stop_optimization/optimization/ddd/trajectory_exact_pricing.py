@@ -11,7 +11,6 @@ from gurobipy import GRB
 from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddFixedStart,
     DddMovementProblem,
-    DddRouteDecision,
     DddRouteOption,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.reference import (
@@ -19,6 +18,10 @@ from ropeway_skip_stop_optimization.optimization.ddd.reference import (
     DddReferenceTrajectory,
     build_ddd_reference_visit,
     validate_ddd_reference_trajectory,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.route_topology import (
+    deterministic_route_state_ids,
+    unique_stop_route_option,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
     DDD_TIME_TICK_SECONDS,
@@ -473,10 +476,11 @@ def _build_exact_pricing_model(
     model.Params.MIPFocus = mip_focus
     model.ModelSense = GRB.MINIMIZE
     model.ObjCon = -duals.cabin_choice_raw_by_cabin_id[start.cabin_id]
-    states = _deterministic_state_ids(
+    states = deterministic_route_state_ids(
         movement_problem,
         start_state_id=start.state_id,
         max_visit_count=start.max_visit_count,
+        error_context="exact trajectory pricing",
     )
     event_time_bounds = _event_time_bounds(
         movement_problem=movement_problem,
@@ -561,13 +565,15 @@ def _build_exact_pricing_model(
             )
         ):
             continue
-        board_stop = _unique_stop_option(
+        board_stop = unique_stop_route_option(
             movement_problem,
             states[candidate.board_visit_index],
+            error_context="exact trajectory pricing",
         )
-        alight_stop = _unique_stop_option(
+        alight_stop = unique_stop_route_option(
             movement_problem,
             states[candidate.alight_visit_index],
+            error_context="exact trajectory pricing",
         )
         if (
             board_stop.platform_exit_offset_seconds is None
@@ -1479,38 +1485,6 @@ def _exclude_route_sequence(
     if not matching:
         raise ValueError("excluded trajectory sequence must not be empty")
     model.addConstr(gp.quicksum(matching) <= len(matching) - 1, name=name)
-
-
-def _deterministic_state_ids(
-    movement_problem: DddMovementProblem,
-    *,
-    start_state_id: str,
-    max_visit_count: int,
-) -> tuple[str, ...]:
-    states = [start_state_id]
-    for _ in range(max_visit_count):
-        options = movement_problem.route_options_by_state_id.get(states[-1], ())
-        if not options:
-            raise ValueError("exact trajectory pricing state has no route option")
-        targets = {option.to_state_id for option in options}
-        if len(targets) != 1:
-            raise ValueError("exact trajectory pricing requires deterministic targets")
-        states.append(next(iter(targets)))
-    return tuple(states)
-
-
-def _unique_stop_option(
-    movement_problem: DddMovementProblem,
-    state_id: str,
-) -> DddRouteOption:
-    options = tuple(
-        option
-        for option in movement_problem.route_options_by_state_id[state_id]
-        if option.decision is DddRouteDecision.STOP
-    )
-    if len(options) != 1:
-        raise ValueError("exact trajectory pricing requires one STOP option")
-    return options[0]
 
 
 def _segment_ids(option: DddTrajectoryPassengerOption) -> tuple[str, ...]:

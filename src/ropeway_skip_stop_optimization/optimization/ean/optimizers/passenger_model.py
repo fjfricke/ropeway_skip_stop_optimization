@@ -996,27 +996,6 @@ def _all_stop_platform_exit_time(
     return time_seconds
 
 
-def _waiting_time_objective(
-    passenger_build: EanPassengerCandidateBuildResult,
-    group_by_id: dict[str, EanDemandGroup],
-    slot: dict[tuple[str, int], Any],
-    slot_board_time: dict[tuple[str, int], Any],
-    unserved: dict[str, Any],
-    horizon_seconds: float,
-    gp: Any,
-) -> Any:
-    return _served_time_minus_release_objective(
-        objective=EanPassengerObjective.WAITING_TIME,
-        passenger_build=passenger_build,
-        group_by_id=group_by_id,
-        slot=slot,
-        slot_time=slot_board_time,
-        unserved=unserved,
-        horizon_seconds=horizon_seconds,
-        gp=gp,
-    )
-
-
 def _served_time_minus_release_objective(
     objective: EanPassengerObjective,
     passenger_build: EanPassengerCandidateBuildResult,

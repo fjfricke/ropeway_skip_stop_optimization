@@ -4,6 +4,12 @@ from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 
 from ropeway_skip_stop_optimization.examples.base import ScenarioExample, ScenarioExampleMetadata
+from ropeway_skip_stop_optimization.examples.start_builders import (
+    KeepEverySecondCabinStartBuilder,
+)
+from ropeway_skip_stop_optimization.examples.time_helpers import (
+    service_duration_seconds as _service_duration_seconds,
+)
 from ropeway_skip_stop_optimization.mapping import DiscretizationConfig
 from ropeway_skip_stop_optimization.models import (
     Cabin,
@@ -24,13 +30,9 @@ from ropeway_skip_stop_optimization.models import (
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
     ContinuousAllStopMaxCabinStartBuilder,
-    EanCabinStart,
-    EanCabinStartBuilder,
     EanBuildArtifactBuilder,
-    EanCirculationPattern,
     EanCirculationPatternDefinition,
     EanConfig,
-    EanMovementNetwork,
     network_ean_builder_for_pattern,
     StationEanConfig,
     StationWaitingMode,
@@ -69,26 +71,6 @@ class LinearSkipStopSpec:
             raise ValueError("service_end_time must be after service_start_time")
         if self.scenario_cabin_count <= 0:
             raise ValueError("scenario_cabin_count must be positive")
-
-
-@dataclass(frozen=True)
-class KeepEverySecondCabinStartBuilder(EanCabinStartBuilder):
-    base_builder: EanCabinStartBuilder
-
-    def build(
-        self,
-        scenario: Scenario,
-        config: EanConfig,
-        network: EanMovementNetwork,
-        pattern: EanCirculationPattern,
-    ) -> tuple[EanCabinStart, ...]:
-        starts = self.base_builder.build(
-            scenario=scenario,
-            config=config,
-            network=network,
-            pattern=pattern,
-        )
-        return tuple(start for index, start in enumerate(starts) if index % 2 == 0)
 
 
 class FiveStationExample(ScenarioExample):
@@ -739,12 +721,6 @@ def _linear_skip_stop_initial_states(
             )
         )
     return tuple(states)
-
-
-def _service_duration_seconds(scenario: Scenario) -> float:
-    start = datetime.combine(datetime.min.date(), scenario.service_start_time)
-    end = datetime.combine(datetime.min.date(), scenario.service_end_time)
-    return (end - start).total_seconds()
 
 
 def _add_seconds_to_time(value: time, seconds: int) -> time:

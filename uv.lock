@@ -276,6 +276,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "gurobipy" },
+    { name = "numpy" },
     { name = "ortools" },
     { name = "scipy" },
     { name = "tqdm" },
@@ -289,6 +290,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "gurobipy", specifier = ">=13.0.2" },
+    { name = "numpy", specifier = ">=2.5.1" },
     { name = "ortools", specifier = ">=9.15.6755" },
     { name = "scipy", specifier = ">=1.18.0" },
     { name = "tqdm", specifier = ">=4.67.3" },

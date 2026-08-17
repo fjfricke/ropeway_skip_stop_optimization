@@ -5,7 +5,7 @@ import json
 import platform
 import socket
 import sys
-from dataclasses import asdict, dataclass, field, replace
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -293,7 +293,3 @@ def _short_run_id_part(value: str) -> str:
 
 def _default_label(config: BenchmarkRunConfig) -> str:
     return f"{config.example_id} / {config.artifact_set_id} / {config.ean_solver_policy.value}"
-
-
-def benchmark_result_to_dict(result: BenchmarkRunResult) -> dict[str, Any]:
-    return to_jsonable(asdict(result))

@@ -10,7 +10,10 @@ from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_primal import (
 )
 from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddMovementProblem,
-    DddRouteDecision,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.route_topology import (
+    deterministic_route_state_ids,
+    unique_stop_route_option,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
     ddd_seconds_to_tick,
@@ -73,10 +76,11 @@ def build_ddd_trajectory_heuristic_pricing_signal(
     group_by_id = {group.id: group for group in passenger_build.demand_groups}
     starts_by_cabin_id = {start.cabin_id: start for start in movement_problem.starts}
     state_ids_by_cabin_id = {
-        cabin_id: _deterministic_state_ids(
+        cabin_id: deterministic_route_state_ids(
             movement_problem,
             start_state_id=start.state_id,
             max_visit_count=start.max_visit_count,
+            error_context="trajectory pricing",
         )
         for cabin_id, start in starts_by_cabin_id.items()
     }
@@ -88,13 +92,15 @@ def build_ddd_trajectory_heuristic_pricing_signal(
         states = state_ids_by_cabin_id[candidate.cabin_id]
         if candidate.alight_visit_index >= len(states) - 1:
             continue
-        board_option = _unique_stop_option(
+        board_option = unique_stop_route_option(
             movement_problem,
             states[candidate.board_visit_index],
+            error_context="trajectory pricing",
         )
-        alight_option = _unique_stop_option(
+        alight_option = unique_stop_route_option(
             movement_problem,
             states[candidate.alight_visit_index],
+            error_context="trajectory pricing",
         )
         if (
             board_option.platform_exit_offset_seconds is None
@@ -150,32 +156,3 @@ def build_ddd_trajectory_heuristic_pricing_signal(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest(),
     )
-
-
-def _deterministic_state_ids(
-    movement_problem: DddMovementProblem,
-    *,
-    start_state_id: str,
-    max_visit_count: int,
-) -> tuple[str, ...]:
-    states = [start_state_id]
-    for _ in range(max_visit_count):
-        options = movement_problem.route_options_by_state_id.get(states[-1], ())
-        if not options:
-            raise ValueError("trajectory pricing state has no route option")
-        targets = {option.to_state_id for option in options}
-        if len(targets) != 1:
-            raise ValueError("trajectory pricing requires deterministic route targets")
-        states.append(next(iter(targets)))
-    return tuple(states)
-
-
-def _unique_stop_option(movement_problem: DddMovementProblem, state_id: str):
-    stop_options = tuple(
-        option
-        for option in movement_problem.route_options_by_state_id[state_id]
-        if option.decision is DddRouteDecision.STOP
-    )
-    if len(stop_options) != 1:
-        raise ValueError("trajectory pricing requires one STOP option per state")
-    return stop_options[0]

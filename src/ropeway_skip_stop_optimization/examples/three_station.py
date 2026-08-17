@@ -1,9 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 from datetime import time
 
 from ropeway_skip_stop_optimization.examples.base import ScenarioExample, ScenarioExampleMetadata
+from ropeway_skip_stop_optimization.examples.start_builders import (
+    KeepEverySecondCabinStartBuilder,
+)
+from ropeway_skip_stop_optimization.examples.time_helpers import (
+    service_duration_seconds as _service_duration_seconds,
+)
 from ropeway_skip_stop_optimization.mapping import DiscretizationConfig
 from ropeway_skip_stop_optimization.models import (
     Cabin,
@@ -24,38 +30,15 @@ from ropeway_skip_stop_optimization.models import (
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
     ContinuousAllStopMaxCabinStartBuilder,
-    EanCabinStart,
-    EanCabinStartBuilder,
     EanBuildArtifactBuilder,
+    EanCirculationPatternDefinition,
     EanConfig,
     EanFleetConfig,
     EanFleetMode,
-    EanCirculationPattern,
-    EanMovementNetwork,
     network_ean_builder_for_pattern,
     StationEanConfig,
     StationWaitingMode,
 )
-
-
-@dataclass(frozen=True)
-class KeepEverySecondCabinStartBuilder(EanCabinStartBuilder):
-    base_builder: EanCabinStartBuilder
-
-    def build(
-        self,
-        scenario: Scenario,
-        config: EanConfig,
-        network: EanMovementNetwork,
-        pattern: EanCirculationPattern,
-    ) -> tuple[EanCabinStart, ...]:
-        starts = self.base_builder.build(
-            scenario=scenario,
-            config=config,
-            network=network,
-            pattern=pattern,
-        )
-        return tuple(start for index, start in enumerate(starts) if index % 2 == 0)
 
 
 class ThreeStationExample(ScenarioExample):
@@ -82,8 +65,6 @@ class ThreeStationExample(ScenarioExample):
         return config
 
     def build_ean_config(self, scenario: Scenario) -> EanConfig:
-        from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_config
-
         return build_three_station_ean_config(scenario)
 
     def build_ean_artifact_builder(
@@ -91,8 +72,6 @@ class ThreeStationExample(ScenarioExample):
         scenario: Scenario,
         config: EanConfig,
     ) -> EanBuildArtifactBuilder:
-        from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_pattern_definition
-
         pattern_definition = build_three_station_ean_pattern_definition()
         return network_ean_builder_for_pattern(
             pattern_definition=pattern_definition,
@@ -121,8 +100,6 @@ class ThreeStationFullNoSkipNoWaitExample(ThreeStationExample):
         return build_three_station_no_skip_no_wait_scenario(self.metadata.id)
 
     def build_ean_config(self, scenario: Scenario) -> EanConfig:
-        from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_config
-
         base_config = build_three_station_ean_config(scenario)
         return EanConfig(
             horizon_seconds=base_config.horizon_seconds,
@@ -139,8 +116,6 @@ class ThreeStationFullNoSkipNoWaitExample(ThreeStationExample):
         scenario: Scenario,
         config: EanConfig,
     ) -> EanBuildArtifactBuilder:
-        from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_pattern_definition
-
         pattern_definition = build_three_station_ean_pattern_definition()
         return network_ean_builder_for_pattern(
             pattern_definition=pattern_definition,
@@ -168,8 +143,6 @@ class ThreeStationHalfNoSkipNoWaitExample(ThreeStationFullNoSkipNoWaitExample):
         scenario: Scenario,
         config: EanConfig,
     ) -> EanBuildArtifactBuilder:
-        from ropeway_skip_stop_optimization.examples.three_station_ean import build_three_station_ean_pattern_definition
-
         pattern_definition = build_three_station_ean_pattern_definition()
         return network_ean_builder_for_pattern(
             pattern_definition=pattern_definition,
@@ -202,10 +175,6 @@ class ThreeStationOptimizedInitialPlacementExample(ThreeStationExample):
         scenario: Scenario,
         config: EanConfig,
     ) -> EanBuildArtifactBuilder:
-        from ropeway_skip_stop_optimization.examples.three_station_ean import (
-            build_three_station_ean_pattern_definition,
-        )
-
         return network_ean_builder_for_pattern(
             pattern_definition=build_three_station_ean_pattern_definition(),
             fleet_config=EanFleetConfig(
@@ -213,6 +182,47 @@ class ThreeStationOptimizedInitialPlacementExample(ThreeStationExample):
                 available_fleet_count=len(scenario.cabins),
             ),
         )
+
+
+def build_three_station_ean_config(
+    scenario: Scenario | None = None,
+    tail_seconds: float = 0.0,
+) -> EanConfig:
+    """Build the v0 EAN config for the three-station scenario."""
+    scenario = scenario or build_three_station_scenario()
+    scenario.validate()
+
+    config = EanConfig(
+        horizon_seconds=_service_duration_seconds(scenario),
+        tail_seconds=tail_seconds,
+        cabin_capacity=scenario.operating.cabin_capacity,
+        station_configs=tuple(
+            StationEanConfig(
+                station_id=station.id,
+                waiting_mode=(
+                    StationWaitingMode.END_OF_PLATFORM_WAIT
+                    if station.kind is StationKind.SERVICE
+                    else StationWaitingMode.NO_WAITING
+                ),
+            )
+            for station in scenario.stations
+            if station.kind in {StationKind.SERVICE, StationKind.TERMINAL}
+        ),
+    )
+    config.validate()
+    return config
+
+
+def build_three_station_ean_pattern_definition() -> EanCirculationPatternDefinition:
+    return EanCirculationPatternDefinition(
+        id="selected_pattern",
+        state_node_ids=(
+            "M_entry_lr",
+            "R_entry_lr",
+            "M_entry_rl",
+            "L_entry_rl",
+        ),
+    )
 
 
 def build_three_station_scenario() -> Scenario:
