@@ -91,7 +91,7 @@ class DddLiftingPhaseSolver:
             max_splits=self.max_time_splits,
             tolerance_seconds=self.tolerance_seconds,
         )
-        validation = _not_run_validation()
+        validation = DddNetworkValidationResult.not_run()
         if stalled_detail is not None:
             validation = DddNetworkValidationResult(
                 status=DddNetworkValidationStatus.INVALID,
@@ -155,13 +155,3 @@ def build_ddd_time_split_batch(
         if len(selected) >= max_splits:
             break
     return tuple(selected), refined
-
-
-def _not_run_validation() -> DddNetworkValidationResult:
-    return DddNetworkValidationResult(
-        status=DddNetworkValidationStatus.NOT_RUN,
-        solution=None,
-        detail=None,
-        conflicts=(),
-        cuts=(),
-    )

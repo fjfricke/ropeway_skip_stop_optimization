@@ -586,7 +586,7 @@ class EanPassengerServiceArtifactBuilder(ArtifactBuilder):
 
     @property
     def label(self) -> str:
-        return f"EAN passenger {self._objective_label()} result"
+        return f"EAN passenger {_passenger_service_objective_label(self.objective)} result"
 
     def build(self, context: ExportContext) -> ExportArtifact:
         result = context.ean_passenger_service_result(self.objective)
@@ -603,14 +603,6 @@ class EanPassengerServiceArtifactBuilder(ArtifactBuilder):
             self.label,
         )
 
-    def _objective_label(self) -> str:
-        if self.objective is EanPassengerObjective.WAITING_TIME:
-            return "waiting-time"
-        if self.objective is EanPassengerObjective.JOURNEY_TIME:
-            return "journey-time"
-        return self.objective.value
-
-
 @dataclass(frozen=True)
 class EanPassengerServiceMovementPlanArtifactBuilder(ArtifactBuilder):
     objective: EanPassengerObjective = EanPassengerObjective.WAITING_TIME
@@ -623,7 +615,8 @@ class EanPassengerServiceMovementPlanArtifactBuilder(ArtifactBuilder):
 
     @property
     def label(self) -> str:
-        return f"EAN passenger {self._objective_label()} movement plan"
+        objective_label = _passenger_service_objective_label(self.objective)
+        return f"EAN passenger {objective_label} movement plan"
 
     def build(self, context: ExportContext) -> ExportArtifact:
         result = context.ean_passenger_service_result(self.objective)
@@ -637,14 +630,6 @@ class EanPassengerServiceMovementPlanArtifactBuilder(ArtifactBuilder):
             self.label,
         )
 
-    def _objective_label(self) -> str:
-        if self.objective is EanPassengerObjective.WAITING_TIME:
-            return "waiting-time"
-        if self.objective is EanPassengerObjective.JOURNEY_TIME:
-            return "journey-time"
-        return self.objective.value
-
-
 @dataclass(frozen=True)
 class EanPassengerServicePhysicalReplayArtifactBuilder(ArtifactBuilder):
     objective: EanPassengerObjective = EanPassengerObjective.WAITING_TIME
@@ -657,7 +642,8 @@ class EanPassengerServicePhysicalReplayArtifactBuilder(ArtifactBuilder):
 
     @property
     def label(self) -> str:
-        return f"EAN passenger {self._objective_label()} physical replay"
+        objective_label = _passenger_service_objective_label(self.objective)
+        return f"EAN passenger {objective_label} physical replay"
 
     def build(self, context: ExportContext) -> ExportArtifact:
         return ExportArtifact(
@@ -667,14 +653,6 @@ class EanPassengerServicePhysicalReplayArtifactBuilder(ArtifactBuilder):
             context.ean_passenger_service_replay(self.objective),
             self.label,
         )
-
-    def _objective_label(self) -> str:
-        if self.objective is EanPassengerObjective.WAITING_TIME:
-            return "waiting-time"
-        if self.objective is EanPassengerObjective.JOURNEY_TIME:
-            return "journey-time"
-        return self.objective.value
-
 
 def _passenger_service_filename(objective: EanPassengerObjective, artifact_kind: str) -> str:
     if objective is EanPassengerObjective.WAITING_TIME:
@@ -688,6 +666,14 @@ def _passenger_service_filename(objective: EanPassengerObjective, artifact_kind:
         "movement_plan": f"ean_passenger_service_{objective.value}_movement_plan.json",
         "physical_replay": f"ean_passenger_service_{objective.value}_physical_replay.json",
     }[artifact_kind]
+
+
+def _passenger_service_objective_label(objective: EanPassengerObjective) -> str:
+    if objective is EanPassengerObjective.WAITING_TIME:
+        return "waiting-time"
+    if objective is EanPassengerObjective.JOURNEY_TIME:
+        return "journey-time"
+    return objective.value
 
 
 @dataclass(frozen=True)

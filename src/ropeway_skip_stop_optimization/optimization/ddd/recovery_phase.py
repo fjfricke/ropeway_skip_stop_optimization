@@ -6,7 +6,6 @@ from time import perf_counter
 
 from ropeway_skip_stop_optimization.optimization.ddd.network_refinement_model import (
     DddNetworkValidationResult,
-    DddNetworkValidationStatus,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.reference import (
     DddReferenceSolution,
@@ -66,7 +65,7 @@ class DddRecoveryPhaseSolver:
                     schedules=tuple(schedules),
                     feasible=False,
                     objective_value=None,
-                    validation=_not_run_validation(),
+                    validation=DddNetworkValidationResult.not_run(),
                     seconds=perf_counter() - started,
                 )
             schedules.append(recovered.schedule)
@@ -91,13 +90,3 @@ class DddRecoveryPhaseSolver:
             validation=validation,
             seconds=perf_counter() - started,
         )
-
-
-def _not_run_validation() -> DddNetworkValidationResult:
-    return DddNetworkValidationResult(
-        status=DddNetworkValidationStatus.NOT_RUN,
-        solution=None,
-        detail=None,
-        conflicts=(),
-        cuts=(),
-    )

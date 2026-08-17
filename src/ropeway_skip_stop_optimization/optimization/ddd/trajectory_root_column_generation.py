@@ -32,10 +32,12 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generatio
 )
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_exact_pricing import (
     DddTrajectoryExactNoWaitPricingOracle,
+    DddTrajectoryExactPricingResult,
     DddTrajectoryExactPricingStatus,
     DddTrajectoryPricingFormulation,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_exhaustive_reference import (
+    DddTrajectoryReferenceMasterBuildResult,
     build_ddd_trajectory_reference_master,
     ddd_trajectory_instance_fingerprint,
 )
@@ -43,7 +45,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_passenger_lp imp
     DddTrajectoryFactorizedLpOptimizer,
     DddTrajectoryFactorizedMipReferenceOptimizer,
     DddTrajectoryMasterDualMode,
+    DddTrajectoryPassengerLpResult,
     DddTrajectoryPassengerLpStatus,
+    DddTrajectoryPassengerMipResult,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_slot import (
     ddd_trajectory_column,
@@ -160,6 +164,49 @@ class DddTrajectoryRootCgState:
     total_seconds: float
 
 
+@dataclass
+class _DddTrajectoryRootCgRun:
+    instance_fingerprint: str
+    trajectory_by_id: dict[str, DddReferenceTrajectory]
+    iterations: list[DddTrajectoryRootCgIteration]
+    lower_bound: float
+    upper_bound: float | None
+    incumbent_option_ids: tuple[str, ...]
+    incumbent_ride_values_by_id: dict[str, float]
+    elapsed_offset_seconds: float
+    resource_windows: tuple[DddTrajectoryResourceWindow, ...]
+    first_round: int
+
+
+@dataclass(frozen=True)
+class _DddTrajectoryRestrictedMasterRound:
+    reference_master: DddTrajectoryReferenceMasterBuildResult
+    lp: DddTrajectoryPassengerLpResult
+    mip: DddTrajectoryPassengerMipResult
+    resource_windows: tuple[DddTrajectoryResourceWindow, ...]
+    added_resource_window_count: int
+    master_seconds: float
+    lp_seconds: float
+    resource_separation_seconds: float
+
+
+@dataclass(frozen=True)
+class _DddTrajectoryPricingRound:
+    results: tuple[DddTrajectoryExactPricingResult, ...]
+    candidate_results: tuple[DddTrajectoryExactPricingResult, ...]
+    diagnostics: tuple[DddTrajectoryRootCgPricingDiagnostic, ...]
+    certificate: DddTrajectoryPricingCertificate
+    bound_correction: float | None
+    minimum_certified_reduced_cost_bound: float | None
+    proof_exclusion_count: int
+    extra_call_count: int
+    seconds: float
+
+
+class _DddTrajectoryRootCgAbort(RuntimeError):
+    """Expected round failure that preserves the last certified bounds."""
+
+
 @dataclass(frozen=True)
 class DddTrajectoryExactRootColumnGenerationSolver:
     """Prototype exact no-wait root column generation for fixed starts."""
@@ -199,6 +246,128 @@ class DddTrajectoryExactRootColumnGenerationSolver:
     ) -> DddTrajectoryRootCgResult:
         started = perf_counter()
         self._validate(problem, artifact)
+        run = self._initialize_run(
+            problem=problem,
+            artifact=artifact,
+            objective=objective,
+            initial_trajectories=initial_trajectories,
+            resume_state=resume_state,
+        )
+        if resume_state is not None and resume_state.root_lp_certified:
+            return self._run_result(
+                status=DddTrajectoryRootCgStatus.OPTIMAL_ROOT_LP,
+                run=run,
+                started=started,
+                detail=None,
+                root_lp_certified=True,
+            )
+        pricing_oracle = self._proof_pricing_oracle()
+        try:
+            for round_index in range(run.first_round, self.max_iterations + 1):
+                round_started = perf_counter()
+                master_round = self._solve_restricted_master_round(
+                    problem=problem,
+                    artifact=artifact,
+                    passenger_build=passenger_build,
+                    objective=objective,
+                    run=run,
+                )
+                run.resource_windows = master_round.resource_windows
+                restricted_upper = self._update_incumbent(
+                    problem=problem,
+                    master_round=master_round,
+                    run=run,
+                )
+                pricing_round = self._solve_pricing_round(
+                    problem=problem,
+                    artifact=artifact,
+                    passenger_build=passenger_build,
+                    objective=objective,
+                    run=run,
+                    master_round=master_round,
+                    pricing_oracle=pricing_oracle,
+                )
+                corrected = pricing_round.certificate.certified_lower_bound
+                if corrected is not None:
+                    run.lower_bound = max(run.lower_bound, corrected, 0.0)
+                added, diverse_added = self._add_priced_columns(
+                    run=run,
+                    pricing_round=pricing_round,
+                )
+                iteration = self._build_iteration(
+                    round_index=round_index,
+                    round_started=round_started,
+                    run=run,
+                    master_round=master_round,
+                    pricing_round=pricing_round,
+                    restricted_upper=restricted_upper,
+                    added=added,
+                    diverse_added=diverse_added,
+                )
+                run.iterations.append(iteration)
+                if progress_callback is not None:
+                    progress_callback(iteration)
+                root_lp_certified = (
+                    added == 0
+                    and pricing_round.certificate.bound_status
+                    is DddTrajectoryBoundStatus.FULL_ROOT_LP_CERTIFIED
+                )
+                if checkpoint_callback is not None:
+                    checkpoint_callback(
+                        self._checkpoint_state(
+                            run=run,
+                            objective=objective,
+                            round_index=round_index,
+                            root_lp_certified=root_lp_certified,
+                            started=started,
+                        )
+                    )
+                if not all(item.exact for item in pricing_round.results) and added == 0:
+                    return self._run_result(
+                        status=DddTrajectoryRootCgStatus.UNKNOWN,
+                        run=run,
+                        started=started,
+                        detail=(
+                            "pricing was not certified and produced no improving "
+                            "incumbent column"
+                        ),
+                    )
+                if added == 0:
+                    if not root_lp_certified:
+                        raise RuntimeError(
+                            "converged pricing did not certify the root LP"
+                        )
+                    return self._run_result(
+                        status=DddTrajectoryRootCgStatus.OPTIMAL_ROOT_LP,
+                        run=run,
+                        started=started,
+                        detail=None,
+                        root_lp_certified=True,
+                    )
+        except _DddTrajectoryRootCgAbort as error:
+            return self._run_result(
+                status=DddTrajectoryRootCgStatus.UNKNOWN,
+                run=run,
+                started=started,
+                detail=str(error),
+            )
+
+        return self._run_result(
+            status=DddTrajectoryRootCgStatus.ITERATION_LIMIT,
+            run=run,
+            started=started,
+            detail="trajectory root column-generation iteration limit exhausted",
+        )
+
+    def _initialize_run(
+        self,
+        *,
+        problem: DddNetworkTimeProblem,
+        artifact: EanBuildArtifact,
+        objective: EanPassengerObjective,
+        initial_trajectories: tuple[DddReferenceTrajectory, ...] | None,
+        resume_state: DddTrajectoryRootCgState | None,
+    ) -> _DddTrajectoryRootCgRun:
         instance_fingerprint = ddd_trajectory_instance_fingerprint(artifact)
         if resume_state is not None and initial_trajectories is not None:
             raise ValueError(
@@ -235,499 +404,489 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             raise ValueError("initial trajectory root pool does not cover every cabin")
         for trajectory in trajectories:
             validate_ddd_reference_trajectory(problem.movement_problem, trajectory)
-        iterations = list(resume_state.iterations) if resume_state is not None else []
-        global_lower_bound = (
-            resume_state.certified_lower_bound if resume_state is not None else 0.0
+        return _DddTrajectoryRootCgRun(
+            instance_fingerprint=instance_fingerprint,
+            trajectory_by_id=trajectory_by_id,
+            iterations=(
+                list(resume_state.iterations) if resume_state is not None else []
+            ),
+            lower_bound=(
+                resume_state.certified_lower_bound
+                if resume_state is not None
+                else 0.0
+            ),
+            upper_bound=(
+                resume_state.best_upper_bound if resume_state is not None else None
+            ),
+            incumbent_option_ids=(
+                resume_state.incumbent_option_ids if resume_state is not None else ()
+            ),
+            incumbent_ride_values_by_id=(
+                dict(resume_state.incumbent_ride_values_by_id)
+                if resume_state is not None
+                else {}
+            ),
+            elapsed_offset_seconds=(
+                resume_state.total_seconds if resume_state is not None else 0.0
+            ),
+            resource_windows=(
+                resume_state.resource_windows if resume_state is not None else ()
+            ),
+            first_round=(
+                resume_state.completed_rounds + 1 if resume_state is not None else 1
+            ),
         )
-        global_upper_bound = (
-            resume_state.best_upper_bound if resume_state is not None else None
-        )
-        incumbent_option_ids = (
-            resume_state.incumbent_option_ids if resume_state is not None else ()
-        )
-        incumbent_ride_values_by_id = (
-            dict(resume_state.incumbent_ride_values_by_id)
-            if resume_state is not None
-            else {}
-        )
-        elapsed_offset_seconds = (
-            resume_state.total_seconds if resume_state is not None else 0.0
-        )
-        if resume_state is not None and resume_state.root_lp_certified:
-            return self._result(
-                status=DddTrajectoryRootCgStatus.OPTIMAL_ROOT_LP,
-                lower_bound=global_lower_bound,
-                upper_bound=global_upper_bound,
-                iterations=iterations,
-                trajectory_by_id=trajectory_by_id,
-                started=started,
-                elapsed_offset_seconds=elapsed_offset_seconds,
-                incumbent_option_ids=incumbent_option_ids,
-                incumbent_ride_values_by_id=incumbent_ride_values_by_id,
-                detail=None,
-                root_lp_certified=True,
-            )
-        pricing_oracle = DddTrajectoryExactNoWaitPricingOracle(
+
+    def _proof_pricing_oracle(self) -> DddTrajectoryExactNoWaitPricingOracle:
+        return DddTrajectoryExactNoWaitPricingOracle(
             time_limit_seconds=self.pricing_time_limit_seconds,
             threads=self.pricing_threads,
             output_flag=self.output_flag,
             mip_focus=self.proof_pricing_mip_focus,
             formulation=self.pricing_formulation,
         )
-        resource_windows = (
-            resume_state.resource_windows if resume_state is not None else ()
-        )
-        first_round = (
-            resume_state.completed_rounds + 1 if resume_state is not None else 1
-        )
 
-        for round_index in range(first_round, self.max_iterations + 1):
-            round_started = perf_counter()
-            master_started = perf_counter()
-            reference_master = build_ddd_trajectory_reference_master(
-                problem=problem,
-                artifact=artifact,
-                passenger_build=passenger_build,
-                objective=objective,
-                reference_trajectories=tuple(trajectory_by_id.values()),
-                max_incompatibility_pair_checks=(self.max_incompatibility_pair_checks),
-                resource_windows=resource_windows,
-            )
-            master_seconds = perf_counter() - master_started
-            lp_seconds = 0.0
-            resource_separation_seconds = 0.0
-            added_resource_window_count = 0
-            for resource_round in range(self.max_resource_window_rounds + 1):
-                lp = DddTrajectoryFactorizedLpOptimizer(
-                    output_flag=self.output_flag,
-                    dual_mode=self.master_dual_mode,
-                ).solve(reference_master.master_problem)
-                lp_seconds += lp.total_seconds
-                if (
-                    lp.status is not DddTrajectoryPassengerLpStatus.OPTIMAL
-                    or lp.objective_value is None
-                    or lp.duals is None
-                ):
-                    return self._result(
-                        status=DddTrajectoryRootCgStatus.UNKNOWN,
-                        lower_bound=global_lower_bound,
-                        upper_bound=global_upper_bound,
-                        iterations=iterations,
-                        trajectory_by_id=trajectory_by_id,
-                        started=started,
-                        elapsed_offset_seconds=elapsed_offset_seconds,
-                        incumbent_option_ids=incumbent_option_ids,
-                        incumbent_ride_values_by_id=incumbent_ride_values_by_id,
-                        detail="trajectory restricted LP did not solve to optimality",
-                    )
-                if self.conflict_row_mode is DddTrajectoryConflictRowMode.PAIR_ONLY:
-                    break
-                separation_started = perf_counter()
-                separation = separate_ddd_trajectory_resource_windows(
-                    movement_problem=problem.movement_problem,
-                    trajectory_by_option_id=(
-                        reference_master.reference_trajectory_by_option_id
-                    ),
-                    option_values_by_id=lp.option_values_by_id,
-                    existing_windows=resource_windows,
-                    tolerance=self.pricing_tolerance,
-                )
-                resource_separation_seconds += perf_counter() - separation_started
-                if not separation.new_windows:
-                    break
-                if resource_round >= self.max_resource_window_rounds:
-                    return self._result(
-                        status=DddTrajectoryRootCgStatus.UNKNOWN,
-                        lower_bound=global_lower_bound,
-                        upper_bound=global_upper_bound,
-                        iterations=iterations,
-                        trajectory_by_id=trajectory_by_id,
-                        started=started,
-                        elapsed_offset_seconds=elapsed_offset_seconds,
-                        incumbent_option_ids=incumbent_option_ids,
-                        incumbent_ride_values_by_id=incumbent_ride_values_by_id,
-                        detail="trajectory resource-window round limit exhausted",
-                    )
-                resource_windows = tuple(
-                    sorted({*resource_windows, *separation.new_windows})
-                )
-                added_resource_window_count += len(separation.new_windows)
-                row_build_started = perf_counter()
-                rows = build_ddd_trajectory_resource_window_rows(
-                    windows=resource_windows,
-                    movement_problem=problem.movement_problem,
-                    trajectory_by_option_id=(
-                        reference_master.reference_trajectory_by_option_id
-                    ),
-                )
-                master_seconds += perf_counter() - row_build_started
-                reference_master = replace(
-                    reference_master,
-                    master_problem=replace(
-                        reference_master.master_problem,
-                        resource_window_rows=rows,
-                    ),
-                )
-            else:
-                raise RuntimeError("unreachable resource-window separation loop")
+    def _solve_restricted_master_round(
+        self,
+        *,
+        problem: DddNetworkTimeProblem,
+        artifact: EanBuildArtifact,
+        passenger_build: EanPassengerCandidateBuildResult,
+        objective: EanPassengerObjective,
+        run: _DddTrajectoryRootCgRun,
+    ) -> _DddTrajectoryRestrictedMasterRound:
+        master_started = perf_counter()
+        reference_master = build_ddd_trajectory_reference_master(
+            problem=problem,
+            artifact=artifact,
+            passenger_build=passenger_build,
+            objective=objective,
+            reference_trajectories=tuple(run.trajectory_by_id.values()),
+            max_incompatibility_pair_checks=self.max_incompatibility_pair_checks,
+            resource_windows=run.resource_windows,
+        )
+        master_seconds = perf_counter() - master_started
+        lp_seconds = 0.0
+        separation_seconds = 0.0
+        added_window_count = 0
+        resource_windows = run.resource_windows
+        for resource_round in range(self.max_resource_window_rounds + 1):
+            lp = DddTrajectoryFactorizedLpOptimizer(
+                output_flag=self.output_flag,
+                dual_mode=self.master_dual_mode,
+            ).solve(reference_master.master_problem)
+            lp_seconds += lp.total_seconds
             if (
                 lp.status is not DddTrajectoryPassengerLpStatus.OPTIMAL
                 or lp.objective_value is None
                 or lp.duals is None
             ):
-                return self._result(
-                    status=DddTrajectoryRootCgStatus.UNKNOWN,
-                    lower_bound=global_lower_bound,
-                    upper_bound=global_upper_bound,
-                    iterations=iterations,
-                    trajectory_by_id=trajectory_by_id,
-                    started=started,
-                    elapsed_offset_seconds=elapsed_offset_seconds,
-                    incumbent_option_ids=incumbent_option_ids,
-                    incumbent_ride_values_by_id=incumbent_ride_values_by_id,
-                    detail="trajectory restricted LP did not solve to optimality",
+                raise _DddTrajectoryRootCgAbort(
+                    "trajectory restricted LP did not solve to optimality"
                 )
-            mip = DddTrajectoryFactorizedMipReferenceOptimizer(
-                output_flag=self.output_flag
-            ).solve(reference_master.master_problem)
-            restricted_upper = mip.objective_value
-            if restricted_upper is not None:
-                selected = tuple(
-                    reference_master.reference_trajectory_by_option_id[option_id]
-                    for option_id, value in mip.option_values_by_id.items()
+            if self.conflict_row_mode is DddTrajectoryConflictRowMode.PAIR_ONLY:
+                break
+            separation_started = perf_counter()
+            separation = separate_ddd_trajectory_resource_windows(
+                movement_problem=problem.movement_problem,
+                trajectory_by_option_id=(
+                    reference_master.reference_trajectory_by_option_id
+                ),
+                option_values_by_id=lp.option_values_by_id,
+                existing_windows=resource_windows,
+                tolerance=self.pricing_tolerance,
+            )
+            separation_seconds += perf_counter() - separation_started
+            if not separation.new_windows:
+                break
+            if resource_round >= self.max_resource_window_rounds:
+                raise _DddTrajectoryRootCgAbort(
+                    "trajectory resource-window round limit exhausted"
+                )
+            resource_windows = tuple(
+                sorted({*resource_windows, *separation.new_windows})
+            )
+            added_window_count += len(separation.new_windows)
+            row_build_started = perf_counter()
+            rows = build_ddd_trajectory_resource_window_rows(
+                windows=resource_windows,
+                movement_problem=problem.movement_problem,
+                trajectory_by_option_id=(
+                    reference_master.reference_trajectory_by_option_id
+                ),
+            )
+            master_seconds += perf_counter() - row_build_started
+            reference_master = replace(
+                reference_master,
+                master_problem=replace(
+                    reference_master.master_problem,
+                    resource_window_rows=rows,
+                ),
+            )
+        else:
+            raise RuntimeError("unreachable resource-window separation loop")
+        mip = DddTrajectoryFactorizedMipReferenceOptimizer(
+            output_flag=self.output_flag
+        ).solve(reference_master.master_problem)
+        return _DddTrajectoryRestrictedMasterRound(
+            reference_master=reference_master,
+            lp=lp,
+            mip=mip,
+            resource_windows=resource_windows,
+            added_resource_window_count=added_window_count,
+            master_seconds=master_seconds,
+            lp_seconds=lp_seconds,
+            resource_separation_seconds=separation_seconds,
+        )
+
+    def _update_incumbent(
+        self,
+        *,
+        problem: DddNetworkTimeProblem,
+        master_round: _DddTrajectoryRestrictedMasterRound,
+        run: _DddTrajectoryRootCgRun,
+    ) -> float | None:
+        restricted_upper = master_round.mip.objective_value
+        if restricted_upper is None:
+            return None
+        selected = tuple(
+            master_round.reference_master.reference_trajectory_by_option_id[option_id]
+            for option_id, value in master_round.mip.option_values_by_id.items()
+            if value >= 0.5
+        )
+        validate_ddd_reference_solution(
+            problem.movement_problem,
+            DddReferenceSolution(
+                trajectories=tuple(sorted(selected, key=lambda item: item.cabin_id))
+            ),
+        )
+        if (
+            run.upper_bound is None
+            or restricted_upper < run.upper_bound - self.pricing_tolerance
+        ):
+            run.upper_bound = restricted_upper
+            run.incumbent_option_ids = tuple(
+                sorted(
+                    option_id
+                    for option_id, value in master_round.mip.option_values_by_id.items()
                     if value >= 0.5
                 )
-                validate_ddd_reference_solution(
-                    problem.movement_problem,
-                    DddReferenceSolution(
-                        trajectories=tuple(
-                            sorted(selected, key=lambda item: item.cabin_id)
-                        )
-                    ),
-                )
-                if (
-                    global_upper_bound is None
-                    or restricted_upper < global_upper_bound - self.pricing_tolerance
-                ):
-                    global_upper_bound = restricted_upper
-                    incumbent_option_ids = tuple(
-                        sorted(
-                            option_id
-                            for option_id, value in mip.option_values_by_id.items()
-                            if value >= 0.5
-                        )
-                    )
-                    incumbent_ride_values_by_id = {
-                        ride_id: value
-                        for ride_id, value in mip.ride_values_by_id.items()
-                        if value > self.pricing_tolerance
-                    }
+            )
+            run.incumbent_ride_values_by_id = {
+                ride_id: value
+                for ride_id, value in master_round.mip.ride_values_by_id.items()
+                if value > self.pricing_tolerance
+            }
+        return restricted_upper
 
-            pricing_started = perf_counter()
-            pricing_results = []
-            primal_pricing_results = []
-            extra_pricing_call_count = 0
-            proof_pricing_exclusion_count = 0
-            for cabin_id in reference_master.master_problem.cabin_ids:
-                excluded_sequences = {
-                    trajectory.support_signature
-                    for trajectory in trajectory_by_id.values()
-                    if trajectory.cabin_id == cabin_id
-                }
-                proof_result = pricing_oracle.solve(
+    def _solve_pricing_round(
+        self,
+        *,
+        problem: DddNetworkTimeProblem,
+        artifact: EanBuildArtifact,
+        passenger_build: EanPassengerCandidateBuildResult,
+        objective: EanPassengerObjective,
+        run: _DddTrajectoryRootCgRun,
+        master_round: _DddTrajectoryRestrictedMasterRound,
+        pricing_oracle: DddTrajectoryExactNoWaitPricingOracle,
+    ) -> _DddTrajectoryPricingRound:
+        if master_round.lp.objective_value is None or master_round.lp.duals is None:
+            raise RuntimeError("optimal restricted LP is missing objective or duals")
+        pricing_started = perf_counter()
+        pricing_results: list[DddTrajectoryExactPricingResult] = []
+        candidate_results: list[DddTrajectoryExactPricingResult] = []
+        extra_call_count = 0
+        proof_exclusion_count = 0
+        for cabin_id in master_round.reference_master.master_problem.cabin_ids:
+            excluded_sequences = {
+                trajectory.support_signature
+                for trajectory in run.trajectory_by_id.values()
+                if trajectory.cabin_id == cabin_id
+            }
+            proof_result = pricing_oracle.solve(
+                movement_problem=problem.movement_problem,
+                artifact=artifact,
+                passenger_build=passenger_build,
+                objective=objective,
+                cabin_id=cabin_id,
+                duals=master_round.lp.duals,
+                excluded_route_option_sequences=frozenset(excluded_sequences),
+                resource_window_rows=(
+                    master_round.reference_master.master_problem.resource_window_rows
+                ),
+            )
+            pricing_results.append(proof_result)
+            proof_exclusion_count += len(excluded_sequences)
+            if (
+                proof_result.minimum_reduced_cost < -self.pricing_tolerance
+                and proof_result.reference_trajectory is not None
+            ):
+                candidate_results.append(proof_result)
+                excluded_sequences.add(proof_result.reference_trajectory.support_signature)
+            accepted_signatures = (
+                [
+                    _trajectory_diversity_signature(
+                        proof_result.reference_trajectory,
+                        mode=self.diversity_mode,
+                        problem=problem.movement_problem,
+                        resource_windows=run.resource_windows,
+                    )
+                ]
+                if proof_result.reference_trajectory is not None
+                else []
+            )
+            extra_started = perf_counter()
+            while (
+                proof_result.minimum_reduced_cost < -self.pricing_tolerance
+                and proof_result.reference_trajectory is not None
+                and len(accepted_signatures) < self.columns_per_cabin_per_round
+                and perf_counter() - extra_started
+                < self.extra_column_time_limit_seconds
+            ):
+                remaining = self.extra_column_time_limit_seconds - (
+                    perf_counter() - extra_started
+                )
+                extra = DddTrajectoryExactNoWaitPricingOracle(
+                    time_limit_seconds=max(remaining, 1e-6),
+                    threads=self.pricing_threads,
+                    output_flag=self.output_flag,
+                    mip_focus=self.extra_pricing_mip_focus,
+                    formulation=self.pricing_formulation,
+                ).solve(
                     movement_problem=problem.movement_problem,
                     artifact=artifact,
                     passenger_build=passenger_build,
                     objective=objective,
                     cabin_id=cabin_id,
-                    duals=lp.duals,
+                    duals=master_round.lp.duals,
                     excluded_route_option_sequences=frozenset(excluded_sequences),
                     resource_window_rows=(
-                        reference_master.master_problem.resource_window_rows
+                        master_round.reference_master.master_problem.resource_window_rows
                     ),
                 )
-                pricing_results.append(proof_result)
-                proof_pricing_exclusion_count += len(excluded_sequences)
+                extra_call_count += 1
                 if (
-                    proof_result.minimum_reduced_cost < -self.pricing_tolerance
-                    and proof_result.reference_trajectory is not None
+                    extra.minimum_reduced_cost >= -self.pricing_tolerance
+                    or extra.reference_trajectory is None
                 ):
-                    primal_pricing_results.append(proof_result)
-                    excluded_sequences.add(
-                        proof_result.reference_trajectory.support_signature
-                    )
-                accepted_signatures = (
-                    [
-                        _trajectory_diversity_signature(
-                            proof_result.reference_trajectory,
-                            mode=self.diversity_mode,
-                            problem=problem.movement_problem,
-                            resource_windows=resource_windows,
-                        )
-                    ]
-                    if proof_result.reference_trajectory is not None
-                    else []
+                    break
+                excluded_sequences.add(extra.reference_trajectory.support_signature)
+                signature = _trajectory_diversity_signature(
+                    extra.reference_trajectory,
+                    mode=self.diversity_mode,
+                    problem=problem.movement_problem,
+                    resource_windows=run.resource_windows,
                 )
-                extra_started = perf_counter()
-                while (
-                    proof_result.minimum_reduced_cost < -self.pricing_tolerance
-                    and proof_result.reference_trajectory is not None
-                    and len(accepted_signatures) < self.columns_per_cabin_per_round
-                    and perf_counter() - extra_started
-                    < self.extra_column_time_limit_seconds
+                if self.diversity_mode is DddTrajectoryDiversityMode.OFF or all(
+                    _hamming_distance(signature, prior)
+                    >= self.minimum_diversity_distance
+                    for prior in accepted_signatures
                 ):
-                    remaining = self.extra_column_time_limit_seconds - (
-                        perf_counter() - extra_started
-                    )
-                    extra_oracle = DddTrajectoryExactNoWaitPricingOracle(
-                        time_limit_seconds=max(remaining, 1e-6),
-                        threads=self.pricing_threads,
-                        output_flag=self.output_flag,
-                        mip_focus=self.extra_pricing_mip_focus,
-                        formulation=self.pricing_formulation,
-                    )
-                    extra = extra_oracle.solve(
-                        movement_problem=problem.movement_problem,
-                        artifact=artifact,
-                        passenger_build=passenger_build,
-                        objective=objective,
-                        cabin_id=cabin_id,
-                        duals=lp.duals,
-                        excluded_route_option_sequences=frozenset(excluded_sequences),
-                        resource_window_rows=(
-                            reference_master.master_problem.resource_window_rows
-                        ),
-                    )
-                    extra_pricing_call_count += 1
-                    if (
-                        extra.minimum_reduced_cost >= -self.pricing_tolerance
-                        or extra.reference_trajectory is None
-                    ):
-                        break
-                    excluded_sequences.add(extra.reference_trajectory.support_signature)
-                    signature = _trajectory_diversity_signature(
-                        extra.reference_trajectory,
-                        mode=self.diversity_mode,
-                        problem=problem.movement_problem,
-                        resource_windows=resource_windows,
-                    )
-                    if self.diversity_mode is DddTrajectoryDiversityMode.OFF or all(
-                        _hamming_distance(signature, prior)
-                        >= self.minimum_diversity_distance
-                        for prior in accepted_signatures
-                    ):
-                        primal_pricing_results.append(extra)
-                        accepted_signatures.append(signature)
-            pricing_seconds = perf_counter() - pricing_started
-            pricing_diagnostics = tuple(
-                DddTrajectoryRootCgPricingDiagnostic(
-                    cabin_id=result.cabin_id,
-                    status=result.status,
-                    incumbent_reduced_cost=result.minimum_reduced_cost,
-                    certified_reduced_cost_lower_bound=(
-                        result.certified_reduced_cost_lower_bound
-                    ),
-                    absolute_pricing_gap=(
-                        result.minimum_reduced_cost
-                        - result.certified_reduced_cost_lower_bound
-                        if result.certified_reduced_cost_lower_bound is not None
-                        else None
-                    ),
-                    exact=result.exact,
-                    option_is_existing=(
-                        result.option_id is not None
-                        and result.option_id in trajectory_by_id
-                    ),
-                    model_variable_count=result.model_variable_count,
-                    model_linear_constraint_count=(
-                        result.model_linear_constraint_count
-                    ),
-                    model_general_constraint_count=(
-                        result.model_general_constraint_count
-                    ),
-                    solver_node_count=result.solver_node_count,
-                    solve_seconds=result.solve_seconds,
-                )
-                for result in pricing_results
-            )
-            certified_pricing_bounds = tuple(
-                result.certified_reduced_cost_lower_bound
-                for result in pricing_results
-                if result.certified_reduced_cost_lower_bound is not None
-            )
-            all_pricing_bounds_available = len(certified_pricing_bounds) == len(
-                pricing_results
-            )
-            pricing_bound_correction = (
-                sum(min(0.0, value) for value in certified_pricing_bounds)
-                if all_pricing_bounds_available
-                else None
-            )
-            minimum_certified_reduced_cost_bound = (
-                min(certified_pricing_bounds) if certified_pricing_bounds else None
-            )
-            reduced_costs = tuple(
-                DddTrajectoryReducedCost(
-                    cabin_id=result.cabin_id,
-                    minimum_reduced_cost=result.minimum_reduced_cost,
-                    exact=result.exact,
-                    certified_lower_bound=(result.certified_reduced_cost_lower_bound),
-                )
-                for result in pricing_results
-            )
-            certificate = DddTrajectoryPricingCertificate(
-                restricted_master_lp_value=lp.objective_value,
-                expected_cabin_ids=reference_master.master_problem.cabin_ids,
-                reduced_costs=reduced_costs,
-                instance_fingerprint=ddd_trajectory_instance_fingerprint(artifact),
-                objective_fingerprint=sha256(objective.value.encode()).hexdigest(),
-                master_fingerprint=lp.master_fingerprint,
-                dual_fingerprint=lp.duals.fingerprint,
-                row_pool_fingerprint=_row_fingerprint(
-                    reference_master.master_problem.incompatibility_pairs,
-                    reference_master.master_problem.resource_window_rows,
+                    candidate_results.append(extra)
+                    accepted_signatures.append(signature)
+        pricing_result_tuple = tuple(pricing_results)
+        diagnostics = tuple(
+            DddTrajectoryRootCgPricingDiagnostic(
+                cabin_id=result.cabin_id,
+                status=result.status,
+                incumbent_reduced_cost=result.minimum_reduced_cost,
+                certified_reduced_cost_lower_bound=(
+                    result.certified_reduced_cost_lower_bound
                 ),
-                pricing_waiting_domain=DddTrajectoryWaitingDomain.NO_WAIT,
-                target_waiting_domain=DddTrajectoryWaitingDomain.NO_WAIT,
-                row_separation_complete=True,
-                tolerance=self.pricing_tolerance,
+                absolute_pricing_gap=(
+                    result.minimum_reduced_cost
+                    - result.certified_reduced_cost_lower_bound
+                    if result.certified_reduced_cost_lower_bound is not None
+                    else None
+                ),
+                exact=result.exact,
+                option_is_existing=(
+                    result.option_id is not None
+                    and result.option_id in run.trajectory_by_id
+                ),
+                model_variable_count=result.model_variable_count,
+                model_linear_constraint_count=result.model_linear_constraint_count,
+                model_general_constraint_count=result.model_general_constraint_count,
+                solver_node_count=result.solver_node_count,
+                solve_seconds=result.solve_seconds,
             )
-            corrected = certificate.certified_lower_bound
-            if corrected is not None:
-                global_lower_bound = max(global_lower_bound, corrected, 0.0)
+            for result in pricing_result_tuple
+        )
+        certified_bounds = tuple(
+            result.certified_reduced_cost_lower_bound
+            for result in pricing_result_tuple
+            if result.certified_reduced_cost_lower_bound is not None
+        )
+        all_bounds_available = len(certified_bounds) == len(pricing_result_tuple)
+        bound_correction = (
+            sum(min(0.0, value) for value in certified_bounds)
+            if all_bounds_available
+            else None
+        )
+        reduced_costs = tuple(
+            DddTrajectoryReducedCost(
+                cabin_id=result.cabin_id,
+                minimum_reduced_cost=result.minimum_reduced_cost,
+                exact=result.exact,
+                certified_lower_bound=result.certified_reduced_cost_lower_bound,
+            )
+            for result in pricing_result_tuple
+        )
+        certificate = DddTrajectoryPricingCertificate(
+            restricted_master_lp_value=master_round.lp.objective_value,
+            expected_cabin_ids=master_round.reference_master.master_problem.cabin_ids,
+            reduced_costs=reduced_costs,
+            instance_fingerprint=run.instance_fingerprint,
+            objective_fingerprint=sha256(objective.value.encode()).hexdigest(),
+            master_fingerprint=master_round.lp.master_fingerprint,
+            dual_fingerprint=master_round.lp.duals.fingerprint,
+            row_pool_fingerprint=_row_fingerprint(
+                master_round.reference_master.master_problem.incompatibility_pairs,
+                master_round.reference_master.master_problem.resource_window_rows,
+            ),
+            pricing_waiting_domain=DddTrajectoryWaitingDomain.NO_WAIT,
+            target_waiting_domain=DddTrajectoryWaitingDomain.NO_WAIT,
+            row_separation_complete=True,
+            tolerance=self.pricing_tolerance,
+        )
+        return _DddTrajectoryPricingRound(
+            results=pricing_result_tuple,
+            candidate_results=tuple(candidate_results),
+            diagnostics=diagnostics,
+            certificate=certificate,
+            bound_correction=bound_correction,
+            minimum_certified_reduced_cost_bound=(
+                min(certified_bounds) if certified_bounds else None
+            ),
+            proof_exclusion_count=proof_exclusion_count,
+            extra_call_count=extra_call_count,
+            seconds=perf_counter() - pricing_started,
+        )
 
-            added = 0
-            diverse_added = 0
-            proof_result_ids = {id(item) for item in pricing_results}
-            for pricing_result in primal_pricing_results:
-                if (
-                    pricing_result.minimum_reduced_cost >= -self.pricing_tolerance
-                    or pricing_result.reference_trajectory is None
-                    or pricing_result.option_id is None
-                ):
-                    continue
-                if pricing_result.option_id in trajectory_by_id:
-                    raise RuntimeError("exact pricing returned an excluded trajectory")
-                trajectory_by_id[pricing_result.option_id] = (
-                    pricing_result.reference_trajectory
-                )
-                added += 1
-                if id(pricing_result) not in proof_result_ids:
-                    diverse_added += 1
-            minimum_reduced_cost = (
-                min(item.minimum_reduced_cost for item in pricing_results)
-                if pricing_results
-                else None
+    def _add_priced_columns(
+        self,
+        *,
+        run: _DddTrajectoryRootCgRun,
+        pricing_round: _DddTrajectoryPricingRound,
+    ) -> tuple[int, int]:
+        added = 0
+        diverse_added = 0
+        proof_result_ids = {id(item) for item in pricing_round.results}
+        for pricing_result in pricing_round.candidate_results:
+            if (
+                pricing_result.minimum_reduced_cost >= -self.pricing_tolerance
+                or pricing_result.reference_trajectory is None
+                or pricing_result.option_id is None
+            ):
+                continue
+            if pricing_result.option_id in run.trajectory_by_id:
+                raise RuntimeError("exact pricing returned an excluded trajectory")
+            run.trajectory_by_id[pricing_result.option_id] = (
+                pricing_result.reference_trajectory
             )
-            iteration = DddTrajectoryRootCgIteration(
-                round_index=round_index,
-                trajectory_count=len(reference_master.master_problem.options),
-                incompatibility_pair_count=len(
-                    reference_master.master_problem.incompatibility_pairs
-                ),
-                resource_window_count=len(
-                    reference_master.master_problem.resource_window_rows
-                ),
-                added_resource_window_count=added_resource_window_count,
-                restricted_lp_value=lp.objective_value,
-                pricing_corrected_lower_bound=corrected,
-                pricing_bound_correction=pricing_bound_correction,
-                minimum_certified_reduced_cost_bound=(
-                    minimum_certified_reduced_cost_bound
-                ),
-                proof_pricing_exclusion_count=proof_pricing_exclusion_count,
-                global_lower_bound=global_lower_bound,
-                restricted_integer_upper_bound=restricted_upper,
-                global_upper_bound=global_upper_bound,
-                minimum_reduced_cost=minimum_reduced_cost,
-                exact_pricing_cabin_count=sum(item.exact for item in pricing_results),
-                added_trajectory_count=added,
-                diverse_added_trajectory_count=diverse_added,
-                extra_pricing_call_count=extra_pricing_call_count,
-                master_build_seconds=master_seconds,
-                lp_seconds=lp_seconds,
-                mip_seconds=mip.total_seconds,
-                pricing_seconds=pricing_seconds,
-                resource_separation_seconds=resource_separation_seconds,
-                total_seconds=perf_counter() - round_started,
-                pricing_diagnostics=pricing_diagnostics,
-            )
-            iterations.append(iteration)
-            if progress_callback is not None:
-                progress_callback(iteration)
-            if checkpoint_callback is not None:
-                checkpoint_callback(
-                    DddTrajectoryRootCgState(
-                        instance_fingerprint=instance_fingerprint,
-                        objective=objective,
-                        conflict_row_mode=self.conflict_row_mode,
-                        completed_rounds=round_index,
-                        certified_lower_bound=global_lower_bound,
-                        best_upper_bound=global_upper_bound,
-                        root_lp_certified=(
-                            added == 0
-                            and certificate.bound_status
-                            is DddTrajectoryBoundStatus.FULL_ROOT_LP_CERTIFIED
-                        ),
-                        incumbent_option_ids=incumbent_option_ids,
-                        incumbent_ride_values_by_id=dict(incumbent_ride_values_by_id),
-                        iterations=tuple(iterations),
-                        trajectories=tuple(
-                            trajectory_by_id[key] for key in sorted(trajectory_by_id)
-                        ),
-                        resource_windows=resource_windows,
-                        total_seconds=(
-                            elapsed_offset_seconds + perf_counter() - started
-                        ),
-                    )
-                )
-            if not all(item.exact for item in pricing_results) and added == 0:
-                return self._result(
-                    status=DddTrajectoryRootCgStatus.UNKNOWN,
-                    lower_bound=global_lower_bound,
-                    upper_bound=global_upper_bound,
-                    iterations=iterations,
-                    trajectory_by_id=trajectory_by_id,
-                    started=started,
-                    elapsed_offset_seconds=elapsed_offset_seconds,
-                    incumbent_option_ids=incumbent_option_ids,
-                    incumbent_ride_values_by_id=incumbent_ride_values_by_id,
-                    detail=(
-                        "pricing was not certified and produced no improving "
-                        "incumbent column"
-                    ),
-                )
-            if added == 0:
-                if (
-                    certificate.bound_status
-                    is not DddTrajectoryBoundStatus.FULL_ROOT_LP_CERTIFIED
-                ):
-                    raise RuntimeError("converged pricing did not certify the root LP")
-                return self._result(
-                    status=DddTrajectoryRootCgStatus.OPTIMAL_ROOT_LP,
-                    lower_bound=global_lower_bound,
-                    upper_bound=global_upper_bound,
-                    iterations=iterations,
-                    trajectory_by_id=trajectory_by_id,
-                    started=started,
-                    elapsed_offset_seconds=elapsed_offset_seconds,
-                    incumbent_option_ids=incumbent_option_ids,
-                    incumbent_ride_values_by_id=incumbent_ride_values_by_id,
-                    detail=None,
-                    root_lp_certified=True,
-                )
+            added += 1
+            if id(pricing_result) not in proof_result_ids:
+                diverse_added += 1
+        return added, diverse_added
 
+    @staticmethod
+    def _build_iteration(
+        *,
+        round_index: int,
+        round_started: float,
+        run: _DddTrajectoryRootCgRun,
+        master_round: _DddTrajectoryRestrictedMasterRound,
+        pricing_round: _DddTrajectoryPricingRound,
+        restricted_upper: float | None,
+        added: int,
+        diverse_added: int,
+    ) -> DddTrajectoryRootCgIteration:
+        minimum_reduced_cost = (
+            min(item.minimum_reduced_cost for item in pricing_round.results)
+            if pricing_round.results
+            else None
+        )
+        master_problem = master_round.reference_master.master_problem
+        return DddTrajectoryRootCgIteration(
+            round_index=round_index,
+            trajectory_count=len(master_problem.options),
+            incompatibility_pair_count=len(master_problem.incompatibility_pairs),
+            resource_window_count=len(master_problem.resource_window_rows),
+            added_resource_window_count=master_round.added_resource_window_count,
+            restricted_lp_value=master_round.lp.objective_value,
+            pricing_corrected_lower_bound=(
+                pricing_round.certificate.certified_lower_bound
+            ),
+            pricing_bound_correction=pricing_round.bound_correction,
+            minimum_certified_reduced_cost_bound=(
+                pricing_round.minimum_certified_reduced_cost_bound
+            ),
+            proof_pricing_exclusion_count=pricing_round.proof_exclusion_count,
+            global_lower_bound=run.lower_bound,
+            restricted_integer_upper_bound=restricted_upper,
+            global_upper_bound=run.upper_bound,
+            minimum_reduced_cost=minimum_reduced_cost,
+            exact_pricing_cabin_count=sum(item.exact for item in pricing_round.results),
+            added_trajectory_count=added,
+            diverse_added_trajectory_count=diverse_added,
+            extra_pricing_call_count=pricing_round.extra_call_count,
+            master_build_seconds=master_round.master_seconds,
+            lp_seconds=master_round.lp_seconds,
+            mip_seconds=master_round.mip.total_seconds,
+            pricing_seconds=pricing_round.seconds,
+            resource_separation_seconds=master_round.resource_separation_seconds,
+            total_seconds=perf_counter() - round_started,
+            pricing_diagnostics=pricing_round.diagnostics,
+        )
+
+    def _checkpoint_state(
+        self,
+        *,
+        run: _DddTrajectoryRootCgRun,
+        objective: EanPassengerObjective,
+        round_index: int,
+        root_lp_certified: bool,
+        started: float,
+    ) -> DddTrajectoryRootCgState:
+        return DddTrajectoryRootCgState(
+            instance_fingerprint=run.instance_fingerprint,
+            objective=objective,
+            conflict_row_mode=self.conflict_row_mode,
+            completed_rounds=round_index,
+            certified_lower_bound=run.lower_bound,
+            best_upper_bound=run.upper_bound,
+            root_lp_certified=root_lp_certified,
+            incumbent_option_ids=run.incumbent_option_ids,
+            incumbent_ride_values_by_id=dict(run.incumbent_ride_values_by_id),
+            iterations=tuple(run.iterations),
+            trajectories=tuple(
+                run.trajectory_by_id[key] for key in sorted(run.trajectory_by_id)
+            ),
+            resource_windows=run.resource_windows,
+            total_seconds=run.elapsed_offset_seconds + perf_counter() - started,
+        )
+
+    def _run_result(
+        self,
+        *,
+        status: DddTrajectoryRootCgStatus,
+        run: _DddTrajectoryRootCgRun,
+        started: float,
+        detail: str | None,
+        root_lp_certified: bool = False,
+    ) -> DddTrajectoryRootCgResult:
         return self._result(
-            status=DddTrajectoryRootCgStatus.ITERATION_LIMIT,
-            lower_bound=global_lower_bound,
-            upper_bound=global_upper_bound,
-            iterations=iterations,
-            trajectory_by_id=trajectory_by_id,
+            status=status,
+            lower_bound=run.lower_bound,
+            upper_bound=run.upper_bound,
+            iterations=run.iterations,
+            trajectory_by_id=run.trajectory_by_id,
             started=started,
-            elapsed_offset_seconds=elapsed_offset_seconds,
-            incumbent_option_ids=incumbent_option_ids,
-            incumbent_ride_values_by_id=incumbent_ride_values_by_id,
-            detail="trajectory root column-generation iteration limit exhausted",
+            elapsed_offset_seconds=run.elapsed_offset_seconds,
+            incumbent_option_ids=run.incumbent_option_ids,
+            incumbent_ride_values_by_id=run.incumbent_ride_values_by_id,
+            detail=detail,
+            root_lp_certified=root_lp_certified,
         )
 
     def _validate_resume_state(

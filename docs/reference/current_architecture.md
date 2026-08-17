@@ -186,15 +186,26 @@ The detailed formulation and its design rationale are recorded in
 `ean_initial_placement_model.md` and
 `ean_optimized_initial_placement_design.md`.
 
-## DDD Phase-0 Reference Path
+## DDD Optimization and Certification Paths
 
-The optional DDD research path currently stops at a solver-free exact reference
-oracle. `EanArtifactToDddMovementProblemAdapter` projects a sparse,
-network-backed EAN artifact into domain types that import neither Gurobi nor EAN
-model classes. The adapter accepts fixed starts, one deterministic circulation
-pattern, exact Stop/Skip durations, and no station waiting. OIP, Waiting,
-dynamic movement effects, and inconsistent route or horizon semantics fail
-before enumeration.
+DDD is an experimental solver family for certified fixed-start optimization,
+not merely a solver-free reference oracle. Its production-facing research path
+combines a network-derived anonymous-flow relaxation, adaptive time
+discretization, delayed labelled prefixes, exact lifting and resource
+validation, CP-SAT primal support oracles, and optional passenger-aware
+trajectory optimization. A separate exact root column-generation path derives
+certified passenger-objective lower bounds from exact no-wait trajectory
+pricing. These algorithms share domain models and validation contracts but
+remain distinct solver strategies.
+
+`EanArtifactToDddMovementProblemAdapter` projects a sparse, network-backed EAN
+artifact into domain types that import neither Gurobi nor EAN model classes. The
+currently certified DDD domain accepts fixed starts, one deterministic
+circulation pattern, exact Stop/Skip durations, and no station waiting. OIP,
+Waiting, dynamic movement effects, and inconsistent route or horizon semantics
+fail explicitly at the relevant solver boundary. Supporting code contains
+waiting-aware contracts for later extensions; this does not make the current
+exact no-wait certificates valid for waiting-enabled instances.
 
 `DddReferenceSolver` enumerates every exact individual trajectory within the
 certified visit bound, prunes same-cabin resource conflicts, and combines one
@@ -206,9 +217,10 @@ semantics, including leader clearance after the operational horizon.
 A feasible reference solution converts back to the existing `EanMovementPlan`
 with exact-time horizon activation. It then uses complete sparse headway
 separation and normal movement-plan validation, replay, and export contracts.
-The reference path does not consume materialized `HeadwayPair` objects and is
-not yet a public production solver family. Its benchmark entry points are
-`run_ddd_phase0_census.py` and `run_ddd_phase0_reference.py`.
+The reference oracle does not consume materialized `HeadwayPair` objects. It is
+retained as an independent correctness oracle for small instances; its
+benchmark entry points are `run_ddd_phase0_census.py` and
+`run_ddd_phase0_reference.py`.
 
 The benchmark-only
 `three_station_two_cabin_stop_skip_merge_v0` fixture reuses the physical
@@ -314,6 +326,33 @@ one visit-one prefix. The final model has nine anonymous arcs and only six
 prefix variables, closes `LB = UB = 4` in four rounds, and passes complete EAN
 validation. This establishes integration correctness, not large-instance
 performance.
+
+### Exact trajectory root column generation
+
+`DddTrajectoryExactRootColumnGenerationSolver` is the current certified
+passenger-objective root-bound path for fixed starts without waiting. Its
+restricted master contains a finite pool of exact individual cabin
+trajectories, passenger rides, incompatibility rows, and optionally separated
+resource-window rows. Solving the restricted LP provides dual values for one
+exact pricing problem per cabin. The pricing oracle searches the complete
+no-wait trajectory domain and either returns a negative-reduced-cost trajectory
+or a certified reduced-cost lower bound.
+
+The sum of the negative certified pricing bounds corrects the restricted-master
+LP value into a valid global lower bound. The restricted integer master yields
+feasible trajectory selections and therefore upper bounds only after exact
+combined-trajectory validation. Root optimality is certified only when resource
+row separation is complete and every cabin pricing problem proves that no
+negative-reduced-cost column remains. Pricing time limits without such a proof
+can still improve the primal pool but produce `UNKNOWN`, never a false lower
+bound certificate.
+
+The root-CG state records its trajectory pool, row pool, incumbent, certified
+bounds, iteration history, fingerprints, and elapsed time. Checkpoint resume
+therefore continues the same mathematical root process; it does not preserve a
+Gurobi branch-and-bound tree. The exhaustive trajectory master remains the
+small-instance equivalence oracle. The primary benchmark entry point is
+`run_ddd_trajectory_root_column_generation.py`.
 
 OIP fleet capacity is analyzed by a separate certificate layer. A shared
 physical ring-topology builder identifies the service, enabled skip, and rope

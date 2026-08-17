@@ -514,7 +514,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                         recovery_validation_status=(DddNetworkValidationStatus.NOT_RUN),
                         upper_bound=upper_bound,
                         cell_lift_statuses=(),
-                        cell_lift_validation=_not_run_validation(),
+                        cell_lift_validation=DddNetworkValidationResult.not_run(),
                         conflict_count=0,
                         added_cut_ids=(),
                         total_conflict_cut_count=len(cuts),
@@ -842,7 +842,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                         recovery_validation_status=(DddNetworkValidationStatus.NOT_RUN),
                         upper_bound=upper_bound,
                         cell_lift_statuses=(),
-                        cell_lift_validation=_not_run_validation(),
+                        cell_lift_validation=DddNetworkValidationResult.not_run(),
                         conflict_count=0,
                         added_cut_ids=tuple(cut.id for cut in new_cabin_path_core_cuts),
                         total_conflict_cut_count=len(cuts),
@@ -1554,16 +1554,6 @@ def _validate_reference_solution(
     return DddNetworkValidationResult(
         status=DddNetworkValidationStatus.FEASIBLE,
         solution=solution,
-        detail=None,
-        conflicts=(),
-        cuts=(),
-    )
-
-
-def _not_run_validation() -> DddNetworkValidationResult:
-    return DddNetworkValidationResult(
-        status=DddNetworkValidationStatus.NOT_RUN,
-        solution=None,
         detail=None,
         conflicts=(),
         cuts=(),

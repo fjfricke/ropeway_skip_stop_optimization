@@ -38,6 +38,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_exhaustive_refer
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_passenger_lp import (
     DddTrajectoryPassengerDuals,
     DddTrajectoryPassengerOption,
+    ddd_trajectory_passenger_segment_ids,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_resource_windows import (
     DddTrajectoryResourceWindowPricingTerm,
@@ -189,7 +190,7 @@ class DddTrajectoryExhaustivePricingOracle:
                 )
                 for index, item in enumerate(option.rides)
             }
-            for segment_id in _segment_ids(option):
+            for segment_id in ddd_trajectory_passenger_segment_ids(option):
                 model.addConstr(
                     gp.quicksum(
                         ride[item.id]
@@ -1485,18 +1486,6 @@ def _exclude_route_sequence(
     if not matching:
         raise ValueError("excluded trajectory sequence must not be empty")
     model.addConstr(gp.quicksum(matching) <= len(matching) - 1, name=name)
-
-
-def _segment_ids(option: DddTrajectoryPassengerOption) -> tuple[str, ...]:
-    return tuple(
-        sorted(
-            {
-                segment_id
-                for ride in option.rides
-                for segment_id in ride.onboard_segment_ids
-            }
-        )
-    )
 
 
 def _unknown_result(

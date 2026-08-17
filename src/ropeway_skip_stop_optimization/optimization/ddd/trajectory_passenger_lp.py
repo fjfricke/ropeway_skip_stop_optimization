@@ -325,7 +325,7 @@ class DddTrajectoryFactorizedLpOptimizer:
                     ride[item.id] <= item.upper_bound * select[option.id],
                     name=f"activate[{len(activation)}]",
                 )
-            for segment_id in _segment_ids(option):
+            for segment_id in ddd_trajectory_passenger_segment_ids(option):
                 capacity[option.id, segment_id] = model.addConstr(
                     gp.quicksum(
                         ride[item.id]
@@ -441,7 +441,7 @@ class DddTrajectoryFactorizedMipReferenceOptimizer:
                     ride[item.id] <= item.upper_bound * select[option.id],
                     name=f"activate[{item.id}]",
                 )
-            for segment_id in _segment_ids(option):
+            for segment_id in ddd_trajectory_passenger_segment_ids(option):
                 model.addConstr(
                     gp.quicksum(
                         ride[item.id]
@@ -663,7 +663,7 @@ def enumerate_ddd_trajectory_load_patterns(
         right_hand_sides.append(0.0)
         rows.append(identity[index])
         right_hand_sides.append(ride.upper_bound)
-    for segment_id in _segment_ids(option):
+    for segment_id in ddd_trajectory_passenger_segment_ids(option):
         row = np.array(
             [
                 1.0 if segment_id in ride.onboard_segment_ids else 0.0
@@ -872,7 +872,9 @@ def _ride_lookup(
     return next(ride for ride in option.rides if ride.id == ride_id)
 
 
-def _segment_ids(option: DddTrajectoryPassengerOption) -> tuple[str, ...]:
+def ddd_trajectory_passenger_segment_ids(
+    option: DddTrajectoryPassengerOption,
+) -> tuple[str, ...]:
     return tuple(
         sorted(
             {

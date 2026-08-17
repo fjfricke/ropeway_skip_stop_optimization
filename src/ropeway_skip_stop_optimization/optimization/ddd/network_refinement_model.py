@@ -140,6 +140,16 @@ class DddNetworkValidationResult:
     cuts: tuple[DddSupportConflictCut, ...]
     support_selection: DddSupportSelection | None = None
 
+    @classmethod
+    def not_run(cls) -> DddNetworkValidationResult:
+        return cls(
+            status=DddNetworkValidationStatus.NOT_RUN,
+            solution=None,
+            detail=None,
+            conflicts=(),
+            cuts=(),
+        )
+
 
 @dataclass(frozen=True)
 class DddNetworkTimeRefinementIteration:
