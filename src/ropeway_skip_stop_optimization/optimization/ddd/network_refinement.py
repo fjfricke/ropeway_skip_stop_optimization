@@ -81,6 +81,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.resource_time import (
 from ropeway_skip_stop_optimization.optimization.ddd.lifting import (
     build_ddd_prefix_conflict_cuts,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.lifting_phase import (
+    DddLiftingPhaseSolver,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.reference import (
     DddReferenceConflict,
     DddReferenceHorizonCoverageError,
@@ -97,11 +100,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.support_master import (
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_refinement import (
     DddCellFreeSupportRecovery,
-    DddEventCellInconsistency,
     DddRecoveredSchedule,
     DddStrictTimeCellLifter,
     DddStrictTimeLiftStatus,
-    DddTimeRefinementStalledError,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
     DddPartialTimedPath,
@@ -332,6 +333,11 @@ class DddNetworkTimeRefinementSolver:
         decomposer = DddAnonymousFlowDecomposer()
         path_adapter = DddNetworkPathProblemAdapter()
         cell_lifter = DddStrictTimeCellLifter(tolerance_seconds=self.tolerance_seconds)
+        lifting_phase_solver = DddLiftingPhaseSolver(
+            lifter=cell_lifter,
+            max_time_splits=self.max_new_time_splits_per_iteration,
+            tolerance_seconds=self.tolerance_seconds,
+        )
         recovery = DddCellFreeSupportRecovery(tolerance_seconds=self.tolerance_seconds)
         recovery_phase_solver = DddRecoveryPhaseSolver(recovery=recovery)
         cp_sat_oracle = DddCpSatPrimalOracle(
@@ -1251,49 +1257,24 @@ class DddNetworkTimeRefinementSolver:
             )
 
             lifting_started = perf_counter()
-            cell_lift_statuses: list[DddStrictTimeLiftStatus] = []
-            cell_lift_schedules: list[DddRecoveredSchedule] = []
-            inconsistencies: list[DddEventCellInconsistency] = []
-            refinement_stalled_detail: str | None = None
-            for path_problem, path in zip(path_problems, paths, strict=True):
-                try:
-                    cell_lift = cell_lifter.lift(path_problem, path)
-                except DddTimeRefinementStalledError as error:
-                    if refinement_stalled_detail is None:
-                        refinement_stalled_detail = str(error)
-                    continue
-                cell_lift_statuses.append(cell_lift.status)
-                if cell_lift.schedule is not None:
-                    cell_lift_schedules.append(cell_lift.schedule)
-                inconsistencies.extend(cell_lift.inconsistencies)
-            time_splits, refined_discretization = _build_time_split_batch(
-                current.discretization,
-                tuple(inconsistencies),
-                max_splits=self.max_new_time_splits_per_iteration,
-                tolerance_seconds=self.tolerance_seconds,
+            lifting_phase = lifting_phase_solver.solve(
+                discretization=current.discretization,
+                path_problems=path_problems,
+                paths=paths,
+                validate_candidate=lambda schedules: _validate_reference_solution(
+                    current,
+                    schedules,
+                    tolerance_seconds=self.tolerance_seconds,
+                ),
+                consume_candidate=consider_primal_candidate,
             )
+            cell_lift_statuses = lifting_phase.statuses
+            cell_lift_validation = lifting_phase.validation
+            time_splits = lifting_phase.time_splits
+            refined_discretization = lifting_phase.refined_discretization
+            refinement_stalled_detail = lifting_phase.stalled_detail
             trajectory_time_split_count = len(time_splits)
             resource_time_split_count = 0
-            cell_lift_validation = _not_run_validation()
-            if refinement_stalled_detail is not None:
-                cell_lift_validation = DddNetworkValidationResult(
-                    status=DddNetworkValidationStatus.INVALID,
-                    solution=None,
-                    detail=refinement_stalled_detail,
-                    conflicts=(),
-                    cuts=(),
-                )
-            elif len(cell_lift_schedules) == len(paths):
-                cell_lift_validation = _validate_reference_solution(
-                    current,
-                    tuple(cell_lift_schedules),
-                    tolerance_seconds=self.tolerance_seconds,
-                )
-                if cell_lift_validation.solution is not None:
-                    consider_primal_candidate(
-                        tuple(cell_lift_schedules),
-                        cell_lift_validation.solution,
-                    )
 
             resource_row_proofs = (
                 _build_universal_resource_rows_for_conflicts(
@@ -2213,48 +2194,6 @@ def _has_resource_conflict_refinement(
     """Return whether a resource conflict has any safe next refinement."""
 
     return bool(time_splits or new_cuts or new_resource_rows)
-
-
-def _build_time_split_batch(
-    discretization: DddTimeDiscretization,
-    inconsistencies: tuple[DddEventCellInconsistency, ...],
-    *,
-    max_splits: int,
-    tolerance_seconds: float,
-) -> tuple[tuple[DddTimeSplit, ...], DddTimeDiscretization]:
-    """Apply a deterministic batch of tolerance-safe partition refinements."""
-    selected: list[DddTimeSplit] = []
-    refined = discretization
-    for inconsistency in sorted(
-        inconsistencies,
-        key=lambda item: (
-            item.state_id,
-            item.split_boundary_seconds,
-            item.selected_cell_id,
-            item.exact_source_time_seconds,
-            item.failed_target_cell_id,
-        ),
-    ):
-        split = DddTimeSplit(
-            state_id=inconsistency.state_id,
-            boundary_seconds=inconsistency.split_boundary_seconds,
-        )
-        if any(
-            existing.state_id == split.state_id
-            and ddd_seconds_to_tick(existing.boundary_seconds)
-            == ddd_seconds_to_tick(split.boundary_seconds)
-            for existing in selected
-        ):
-            continue
-        refined = refined.split(
-            state_id=split.state_id,
-            boundary_seconds=split.boundary_seconds,
-            tolerance_seconds=tolerance_seconds,
-        )
-        selected.append(split)
-        if len(selected) >= max_splits:
-            break
-    return tuple(selected), refined
 
 
 def _master_diagnostic_kwargs(flow: DddAnonymousFlowResult) -> dict[str, object]:

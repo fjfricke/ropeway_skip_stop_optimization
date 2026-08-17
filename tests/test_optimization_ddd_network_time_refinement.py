@@ -61,9 +61,11 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     build_ddd_universal_resource_row,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.network_refinement import (
-    _build_time_split_batch,
     _build_universal_resource_rows_for_conflicts,
     _has_resource_conflict_refinement,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.lifting_phase import (
+    build_ddd_time_split_batch,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_refinement import (
     DddEventCellInconsistency,
@@ -1057,7 +1059,7 @@ def test_time_split_batch_is_deterministic_deduplicated_and_bounded() -> None:
         _inconsistency("A", 3.0 + 5e-10, selected_cell_id="A-duplicate"),
     )
 
-    splits, refined = _build_time_split_batch(
+    splits, refined = build_ddd_time_split_batch(
         discretization,
         inconsistencies,
         max_splits=2,
