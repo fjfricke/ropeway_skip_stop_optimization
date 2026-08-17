@@ -179,6 +179,20 @@ def test_ean_projection_keeps_one_post_horizon_event_per_cabin_for_interpolation
     assert all(len(events) == 1 for events in events_after_horizon_by_cabin.values())
 
 
+def test_ean_projection_keeps_one_pre_horizon_event_per_started_cabin_for_interpolation() -> None:
+    scenario, artifact, plan = _scenario_artifact_plan()
+
+    replay = project_ean_movement_plan_to_physical_replay(scenario, artifact, plan)
+
+    events_before_horizon_by_cabin: dict[int, list] = {}
+    for event in replay.events:
+        if event.time_seconds < 0:
+            events_before_horizon_by_cabin.setdefault(event.cabin_id, []).append(event)
+
+    assert events_before_horizon_by_cabin
+    assert all(len(events) == 1 for events in events_before_horizon_by_cabin.values())
+
+
 def _scenario_artifact_plan():
     scenario = build_three_station_scenario()
     config = build_three_station_ean_config(scenario)

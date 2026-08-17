@@ -182,18 +182,28 @@ def _with_boundary_context_events(
     events: list[EanPhysicalEvent],
     event_limit_seconds: float,
 ) -> tuple[EanPhysicalEvent, ...]:
-    """Keep visible events plus one post-limit interpolation target per cabin."""
+    """Keep visible events plus one interpolation event beyond each boundary."""
     filtered_events = [
         event
         for event in events
         if 0.0 <= event.time_seconds <= event_limit_seconds
     ]
+    last_before_zero_by_cabin_id: dict[int, EanPhysicalEvent] = {}
     first_after_limit_by_cabin_id: dict[int, EanPhysicalEvent] = {}
     for event in sorted(events, key=_event_sort_key):
+        if event.time_seconds < 0:
+            last_before_zero_by_cabin_id[event.cabin_id] = event
+            continue
         if event.time_seconds <= event_limit_seconds:
             continue
         first_after_limit_by_cabin_id.setdefault(event.cabin_id, event)
-    return tuple((*filtered_events, *first_after_limit_by_cabin_id.values()))
+    return tuple(
+        (
+            *last_before_zero_by_cabin_id.values(),
+            *filtered_events,
+            *first_after_limit_by_cabin_id.values(),
+        )
+    )
 
 
 def _initial_context_events(

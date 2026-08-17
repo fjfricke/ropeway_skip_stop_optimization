@@ -523,6 +523,7 @@ class EanBuildArtifactArtifactBuilder(ArtifactBuilder):
             self._path(context, "ean_build_artifact.json"),
             {
                 **artifact.__dict__,
+                "safety_schema_version": "frontend_replay_safety_v1",
                 "headway_summary": _ean_headway_summary(
                     context.scenario(), artifact
                 ),
@@ -567,11 +568,20 @@ class EanSkipStopMovementPlanArtifactBuilder(ArtifactBuilder):
     label = "EAN skip/stop feasibility plan"
 
     def build(self, context: ExportContext) -> ExportArtifact:
+        result = context.ean_skip_stop_result()
+        if result.movement_plan is None:
+            raise ValueError(
+                "EAN skip/stop optimizer did not produce a movement plan; "
+                f"status={result.metadata.status}"
+            )
         return ExportArtifact(
             self.id,
             self.kind,
             self._path(context, "ean_skip_stop_movement_plan.json"),
-            context.ean_skip_stop_plan(),
+            {
+                **result.movement_plan.__dict__,
+                "fleet_plan": result.fleet_plan,
+            },
             self.label,
         )
 
@@ -643,7 +653,10 @@ class EanPassengerServiceMovementPlanArtifactBuilder(ArtifactBuilder):
             self.id,
             self.kind,
             self._path(context, _passenger_service_filename(self.objective, "movement_plan")),
-            result.movement_plan,
+            {
+                **result.movement_plan.__dict__,
+                "fleet_plan": result.fleet_plan,
+            },
             self.label,
         )
 

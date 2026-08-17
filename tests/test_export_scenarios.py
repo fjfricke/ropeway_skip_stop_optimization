@@ -186,6 +186,8 @@ def test_exports_ean_all_stop_baseline_json(tmp_path: Path) -> None:
 
     timings_by_switch = {timing["switch_id"]: timing for timing in artifact_payload["timings"]}
     assert artifact_payload["scenario_id"] == "three_station_v0"
+    assert artifact_payload["safety_schema_version"] == "frontend_replay_safety_v1"
+    assert artifact_payload["headway_policy"] is not None
     assert len(artifact_payload["cabin_starts"]) == 15
     assert len(timings_by_switch) == 4
     assert timings_by_switch["M_entry_lr"]["skip_allowed"] is True
@@ -203,7 +205,10 @@ def test_exports_ean_all_stop_baseline_json(tmp_path: Path) -> None:
     assert replay_payload["scenario_id"] == "three_station_v0"
     assert replay_payload["events"]
     assert len({event["cabin_id"] for event in replay_payload["events"]}) == 15
-    assert replay_payload["events"][0]["physical_node_id"] in timings_by_switch
+    first_visible_event = next(
+        event for event in replay_payload["events"] if event["time_seconds"] >= 0
+    )
+    assert first_visible_event["physical_node_id"] in timings_by_switch
 
 
 def test_exports_ean_skip_stop_feasibility_json(tmp_path: Path) -> None:
@@ -239,6 +244,7 @@ def test_exports_ean_skip_stop_feasibility_json(tmp_path: Path) -> None:
     }
     assert decisions == {"skip", "stop"}
     assert len(plan_payload["trajectories"]) == 4
+    assert "fleet_plan" in plan_payload
     assert replay_payload["events"]
 
 
