@@ -78,6 +78,45 @@ export interface OperatingParameters {
   min_clearance_m: number;
 }
 
+export type HeadwayEvidenceKind = "literature" | "manufacturer" | "experimental" | "engineering_input";
+
+export interface HeadwayParameterProvenance {
+  parameter_name: string;
+  source_id: string;
+  evidence_kind: HeadwayEvidenceKind;
+  note: string;
+}
+
+export interface HeadwayPhysicalParameters {
+  service_clearance_m: number;
+  rope_clearance_m: number;
+  merge_clearance_m: number;
+  suspension_length_m: number;
+  rope_sway_angle_rad: number;
+  emergency_merge_sway_angle_rad: number;
+  control_delay_seconds: number;
+  emergency_deceleration_m_per_s2: number;
+  provenance: HeadwayParameterProvenance[];
+}
+
+export type StationMechanismDesign =
+  | { manufacturer_vehicle_interval_seconds: number }
+  | { mechanical_service_cycle_seconds: number; service_resource_id: string }
+  | {
+      mechanical_service_cycle_seconds: number;
+      detection_seconds: number;
+      diversion_seconds: number;
+      safety_path_segment_ids: string[];
+      service_resource_id: string;
+    }
+  | { guaranteed_vehicle_interval_seconds: number; service_resource_id: string };
+
+export interface HeadwayDesign {
+  physical: HeadwayPhysicalParameters;
+  station_mechanisms: { exit_switch_id: string; design: StationMechanismDesign }[];
+  provenance: HeadwayParameterProvenance[];
+}
+
 export interface Scenario {
   scenario_id: string;
   service_start_time: string;
@@ -90,6 +129,7 @@ export interface Scenario {
   cabin_initial_states: CabinInitialState[];
   demands: Demand[];
   operating: OperatingParameters;
+  headway_design?: HeadwayDesign | null;
 }
 
 export interface DiscreteNode {
@@ -457,6 +497,7 @@ export interface EanHeadwayCheckpoint {
   applies_to_serve: boolean;
   applies_to_skip: boolean;
   waiting_modes: EanStationWaitingMode[];
+  headway_rule_id?: string | null;
 }
 
 export interface EanHeadwayCandidate {
@@ -476,6 +517,106 @@ export interface EanHeadwayPair {
   headway_seconds: number;
 }
 
+export type HeadwayRouteBehavior = "bypass" | "service";
+export type HeadwayRuleKind = "constant" | "leader_behavior";
+
+export interface ConstantHeadwayRule {
+  id: string;
+  seconds: number;
+  kind: "constant";
+}
+
+export interface LeaderBehaviorHeadwayRule {
+  id: string;
+  bypass_leader_seconds: number;
+  service_leader_seconds: number;
+  kind: "leader_behavior";
+}
+
+export type HeadwayRule = ConstantHeadwayRule | LeaderBehaviorHeadwayRule;
+export type DerivedHeadwayResourceKind = "platform_entry" | "platform_exit" | "exit_switch" | "service_mechanism";
+export type DerivedSpatialRole = "rope" | "service";
+
+export interface DerivedHeadwayResource {
+  id: string;
+  state_id: string;
+  exit_switch_id: string;
+  station_id: string;
+  kind: DerivedHeadwayResourceKind;
+  rule_id: string;
+  applies_to_service: boolean;
+  applies_to_bypass: boolean;
+  physical_resource_id: string | null;
+}
+
+export interface DerivedSpatialSpacing {
+  role: DerivedSpatialRole;
+  spacing_m: number;
+}
+
+export interface DerivedQuantity {
+  id: string;
+  value: number;
+  unit: string;
+  formula: string;
+  evidence_kind: HeadwayEvidenceKind;
+}
+
+export interface DerivedHeadwayPolicy {
+  rules: HeadwayRule[];
+  resource_requirements: DerivedHeadwayResource[];
+  spatial_spacings: DerivedSpatialSpacing[];
+  derived_quantities: DerivedQuantity[];
+  provenance: HeadwayParameterProvenance[];
+  legacy: boolean;
+}
+
+export interface HeadwayResourceDominanceCertificate {
+  dominated_resource_id: string;
+  dominating_resource_id: string;
+  behavior_pairs: [HeadwayRouteBehavior, HeadwayRouteBehavior][];
+  minimum_implied_headway_seconds: number;
+  required_headway_seconds: number;
+  proof_kind: "fixed_offset" | "wait_occupancy_fixed_suffix";
+  retain_at_initial_boundary: boolean;
+}
+
+export interface EffectiveHeadwayPolicy {
+  rules: HeadwayRule[];
+  resource_requirements: DerivedHeadwayResource[];
+  dominance_certificates: HeadwayResourceDominanceCertificate[];
+  component_resource_ids_by_effective_id: Record<string, string[]>;
+  reduction_version: string;
+}
+
+export type EanFleetMode = "fixed_starts" | "optimized_initial_placement";
+export type EanInitialPlacementStateKind =
+  | "entry_switch"
+  | "service_route"
+  | "skip_route"
+  | "platform_wait"
+  | "exit_switch"
+  | "rope";
+
+export interface EanInitialPlacementState {
+  cabin_id: number;
+  kind: EanInitialPlacementStateKind;
+  switch_id: string;
+  visit_index: number;
+  progress: number;
+  previous_event_time_seconds: number;
+  next_event_time_seconds: number;
+  previous_service: boolean | null;
+}
+
+export interface EanFleetPlan {
+  mode: "optimized_initial_placement";
+  available_fleet_count: number;
+  active_cabin_ids: number[];
+  inactive_cabin_ids: number[];
+  initial_states: EanInitialPlacementState[];
+}
+
 export interface EanBuildArtifact {
   scenario_id: string;
   config: EanConfig;
@@ -487,6 +628,11 @@ export interface EanBuildArtifact {
   headway_checkpoints: EanHeadwayCheckpoint[];
   headway_candidates: EanHeadwayCandidate[];
   headway_pairs: EanHeadwayPair[];
+  headway_pair_scope?: "complete" | "sparse";
+  fleet_mode?: EanFleetMode;
+  headway_policy?: DerivedHeadwayPolicy | null;
+  effective_headway_policy?: EffectiveHeadwayPolicy | null;
+  safety_schema_version?: "frontend_replay_safety_v1";
 }
 
 export interface EanVisitPlan {
@@ -513,6 +659,8 @@ export interface EanMovementPlan {
   horizon_seconds: number;
   model_end_seconds: number;
   horizon_formulation: EanHorizonFormulation;
+  fleet_mode?: EanFleetMode;
+  fleet_plan?: EanFleetPlan | null;
   trajectories: EanCabinTrajectory[];
 }
 
@@ -598,6 +746,7 @@ export interface EanSolverProgressSample {
 export interface EanPassengerServiceResult {
   movement_plan: EanMovementPlan | null;
   passenger_plan: EanPassengerServicePlan | null;
+  fleet_plan?: EanFleetPlan | null;
   metadata: EanPassengerServiceMetadata;
 }
 
