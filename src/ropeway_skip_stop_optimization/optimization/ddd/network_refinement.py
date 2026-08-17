@@ -50,6 +50,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.primal_tracking import (
     DddPrimalIncumbentTracker,
     DddPrimalRoundState,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.recovery_phase import (
+    DddRecoveryPhaseSolver,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.passenger_master import (
     DddPassengerMasterProblem,
 )
@@ -95,7 +98,6 @@ from ropeway_skip_stop_optimization.optimization.ddd.support_master import (
 from ropeway_skip_stop_optimization.optimization.ddd.time_refinement import (
     DddCellFreeSupportRecovery,
     DddEventCellInconsistency,
-    DddPrimalRecoveryStatus,
     DddRecoveredSchedule,
     DddStrictTimeCellLifter,
     DddStrictTimeLiftStatus,
@@ -331,6 +333,7 @@ class DddNetworkTimeRefinementSolver:
         path_adapter = DddNetworkPathProblemAdapter()
         cell_lifter = DddStrictTimeCellLifter(tolerance_seconds=self.tolerance_seconds)
         recovery = DddCellFreeSupportRecovery(tolerance_seconds=self.tolerance_seconds)
+        recovery_phase_solver = DddRecoveryPhaseSolver(recovery=recovery)
         cp_sat_oracle = DddCpSatPrimalOracle(
             time_limit_seconds=self.cp_sat_time_limit_seconds,
             num_workers=self.cp_sat_num_workers,
@@ -1228,37 +1231,20 @@ class DddNetworkTimeRefinementSolver:
                 )
                 continue
 
-            recovery_started = perf_counter()
-            recovered_schedules: list[DddRecoveredSchedule] = []
-            recovery_feasible = True
-            for path_problem, path in zip(path_problems, paths, strict=True):
-                recovered = recovery.recover(path_problem, path)
-                if (
-                    recovered.status is not DddPrimalRecoveryStatus.FEASIBLE
-                    or recovered.schedule is None
-                ):
-                    recovery_feasible = False
-                    break
-                recovered_schedules.append(recovered.schedule)
-            recovery_objective: float | None = None
-            recovery_validation = _not_run_validation()
-            if recovery_feasible:
-                recovery_validation = _validate_reference_solution(
+            recovery_phase = recovery_phase_solver.solve(
+                path_problems=path_problems,
+                paths=paths,
+                validate_candidate=lambda schedules: _validate_reference_solution(
                     current,
-                    tuple(recovered_schedules),
+                    schedules,
                     tolerance_seconds=self.tolerance_seconds,
-                )
-                if recovery_validation.solution is None:
-                    recovery_feasible = False
-                else:
-                    recovery_objective = sum(
-                        schedule.objective_value for schedule in recovered_schedules
-                    )
-                    consider_primal_candidate(
-                        tuple(recovered_schedules),
-                        recovery_validation.solution,
-                    )
-            recovery_seconds = perf_counter() - recovery_started
+                ),
+                consume_candidate=consider_primal_candidate,
+            )
+            recovery_feasible = recovery_phase.feasible
+            recovery_objective = recovery_phase.objective_value
+            recovery_validation = recovery_phase.validation
+            recovery_seconds = recovery_phase.seconds
             emit(
                 DddNetworkTimeRefinementProgressStage.RECOVERY_FINISHED,
                 round_index,
