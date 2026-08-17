@@ -46,6 +46,10 @@ from ropeway_skip_stop_optimization.optimization.ddd.primal_evaluation import (
     DddPrimalEvaluationStatus,
     DddPrimalEvaluator,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.primal_tracking import (
+    DddPrimalIncumbentTracker,
+    DddPrimalRoundState,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.passenger_master import (
     DddPassengerMasterProblem,
 )
@@ -55,7 +59,6 @@ from ropeway_skip_stop_optimization.optimization.ddd.prefix_budget import (
 )
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_slot import (
     DddTrajectoryColumnPool,
-    DddTrajectorySlotCandidate,
     DddTrajectorySlotPoolResult,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generation import (
@@ -390,27 +393,15 @@ class DddNetworkTimeRefinementSolver:
         bootstrap_result = None
         bootstrap_objective: float | None = None
         trajectory_column_pool = DddTrajectoryColumnPool()
+        primal_tracker = DddPrimalIncumbentTracker(
+            evaluator=primal_evaluator,
+            trajectory_column_pool=trajectory_column_pool,
+            trajectory_pool_enabled=trajectory_pool_enabled,
+            remember_candidates=self.cp_sat_diversification_interval > 0,
+        )
         last_trajectory_pool_fingerprint: str | None = None
         latest_trajectory_pool_result: DddTrajectorySlotPoolResult | None = None
         latest_trajectory_pool_lp_result: DddTrajectoryPassengerLpResult | None = None
-        primal_candidate_schedules: dict[
-            tuple[tuple[int, tuple[str, ...]], ...],
-            tuple[DddRecoveredSchedule, ...],
-        ] = {}
-
-        def remember_primal_candidate(
-            schedules: tuple[DddRecoveredSchedule, ...],
-        ) -> None:
-            if self.cp_sat_diversification_interval <= 0:
-                return
-            fingerprint = tuple(
-                sorted(
-                    (schedule.cabin_id, schedule.route_option_ids)
-                    for schedule in schedules
-                )
-            )
-            primal_candidate_schedules.setdefault(fingerprint, schedules)
-
         def emit(
             stage: DddNetworkTimeRefinementProgressStage,
             round_index: int,
@@ -510,50 +501,29 @@ class DddNetworkTimeRefinementSolver:
                             timed_flow_cover_cuts=timed_flow_cover_cuts,
                             bootstrap_result=bootstrap_result,
                         )
-                    remember_primal_candidate(candidate_schedules)
-                    evaluation = (
-                        primal_evaluator.evaluate(current, validation.solution)
-                        if primal_evaluator is not None
-                        else None
+                    outcome = primal_tracker.consider_candidate(
+                        current,
+                        candidate_schedules,
+                        validation.solution,
+                        require_movement_plan=False,
                     )
-                    objective_value = (
-                        evaluation.objective_value
-                        if evaluation is not None
-                        and evaluation.status is DddPrimalEvaluationStatus.FEASIBLE
-                        else (
-                            sum(item.objective_value for item in candidate_schedules)
-                            if evaluation is None
-                            else None
-                        )
-                    )
-                    if objective_value is not None and objective_value < upper_bound:
-                        upper_bound = objective_value
-                        bootstrap_objective = objective_value
-                        best_schedules = candidate_schedules
-                        best_reference = validation.solution
-                        best_primal_evaluation = evaluation
-                    if (
-                        trajectory_pool_enabled
-                        and evaluation is not None
-                        and evaluation.movement_plan is not None
-                    ):
-                        trajectory_column_pool.add_candidate(
-                            DddTrajectorySlotCandidate(
-                                schedules=candidate_schedules,
-                                reference_solution=validation.solution,
-                                movement_plan=evaluation.movement_plan,
-                            )
-                        )
+                    upper_bound = primal_tracker.upper_bound
+                    best_schedules = primal_tracker.best_schedules
+                    best_reference = primal_tracker.best_reference
+                    best_primal_evaluation = primal_tracker.best_evaluation
+                    if outcome.improved_incumbent:
+                        bootstrap_objective = outcome.objective_value
             emit(DddNetworkTimeRefinementProgressStage.PRIMAL_BOOTSTRAP_FINISHED, 0)
 
         for round_index in range(1, self.max_iterations + 1):
             round_started = perf_counter()
-            primal_evaluation_status = DddPrimalEvaluationStatus.NOT_RUN
-            primal_evaluation_count = 0
-            primal_evaluation_seconds = 0.0
-            round_primal_objective: float | None = None
-            round_primal_evaluation: DddPrimalEvaluationResult | None = None
-            primal_candidate_summaries: list[DddPrimalEvaluationSummary] = []
+            primal_round_state = DddPrimalRoundState()
+            primal_evaluation_status = primal_round_state.status
+            primal_evaluation_count = primal_round_state.evaluation_count
+            primal_evaluation_seconds = primal_round_state.evaluation_seconds
+            round_primal_objective = primal_round_state.objective_value
+            round_primal_evaluation = primal_round_state.evaluation
+            primal_candidate_summaries = primal_round_state.summaries
             trajectory_pool_result = latest_trajectory_pool_result
             trajectory_pool_lp_result = latest_trajectory_pool_lp_result
             trajectory_pool_added_option_count = 0
@@ -566,10 +536,7 @@ class DddNetworkTimeRefinementSolver:
             trajectory_pricing_signal_fingerprint: str | None = None
             trajectory_pricing_seconds = 0.0
 
-            def consider_primal_candidate(
-                schedules: tuple[DddRecoveredSchedule, ...],
-                solution: DddReferenceSolution,
-            ) -> None:
+            def sync_primal_state() -> None:
                 nonlocal best_primal_evaluation
                 nonlocal best_reference
                 nonlocal best_schedules
@@ -581,65 +548,38 @@ class DddNetworkTimeRefinementSolver:
                 nonlocal trajectory_pool_added_option_count
                 nonlocal upper_bound
 
-                remember_primal_candidate(schedules)
+                upper_bound = primal_tracker.upper_bound
+                best_schedules = primal_tracker.best_schedules
+                best_reference = primal_tracker.best_reference
+                best_primal_evaluation = primal_tracker.best_evaluation
+                primal_evaluation_status = primal_round_state.status
+                primal_evaluation_count = primal_round_state.evaluation_count
+                primal_evaluation_seconds = primal_round_state.evaluation_seconds
+                round_primal_objective = primal_round_state.objective_value
+                round_primal_evaluation = primal_round_state.evaluation
+                trajectory_pool_added_option_count = (
+                    primal_round_state.trajectory_pool_added_option_count
+                )
 
-                evaluation: DddPrimalEvaluationResult | None = None
-                if primal_evaluator is None:
-                    objective_value = sum(
-                        schedule.objective_value for schedule in schedules
-                    )
-                else:
-                    evaluation = primal_evaluator.evaluate(current, solution)
-                    primal_candidate_summaries.append(evaluation.summary)
-                    primal_evaluation_count += 1
-                    primal_evaluation_seconds += evaluation.total_seconds
-                    if evaluation.status is DddPrimalEvaluationStatus.FEASIBLE:
-                        primal_evaluation_status = DddPrimalEvaluationStatus.FEASIBLE
-                    elif primal_evaluation_status is DddPrimalEvaluationStatus.NOT_RUN:
-                        primal_evaluation_status = evaluation.status
-                    objective_value = evaluation.objective_value
-                    emit(
+            def consider_primal_candidate(
+                schedules: tuple[DddRecoveredSchedule, ...],
+                solution: DddReferenceSolution,
+            ) -> None:
+                primal_tracker.consider_candidate(
+                    current,
+                    schedules,
+                    solution,
+                    round_state=primal_round_state,
+                    on_evaluated=lambda state, best_objective: emit(
                         DddNetworkTimeRefinementProgressStage.PRIMAL_EVALUATION_FINISHED,
                         round_index,
-                        candidate_index=primal_evaluation_count,
+                        candidate_index=state.evaluation_count,
                         candidate_limit=cp_sat_candidate_count,
-                        candidate_elapsed_seconds=primal_evaluation_seconds,
-                        primal_best_objective=(
-                            min(upper_bound, objective_value)
-                            if objective_value is not None
-                            else _finite_or_none(upper_bound)
-                        ),
-                    )
-                    if trajectory_pool_enabled and evaluation.movement_plan is not None:
-                        trajectory_pool_added_option_count += (
-                            trajectory_column_pool.add_candidate(
-                                DddTrajectorySlotCandidate(
-                                    schedules=schedules,
-                                    reference_solution=solution,
-                                    movement_plan=evaluation.movement_plan,
-                                )
-                            )
-                        )
-                    if (
-                        evaluation.status is not DddPrimalEvaluationStatus.FEASIBLE
-                        or objective_value is None
-                    ):
-                        return
-                    if evaluation.movement_plan is None:
-                        raise RuntimeError(
-                            "feasible DDD primal evaluation has no movement plan"
-                        )
-                    if (
-                        round_primal_objective is None
-                        or objective_value < round_primal_objective
-                    ):
-                        round_primal_objective = objective_value
-                        round_primal_evaluation = evaluation
-                if objective_value < upper_bound:
-                    upper_bound = objective_value
-                    best_schedules = schedules
-                    best_reference = solution
-                    best_primal_evaluation = evaluation
+                        candidate_elapsed_seconds=state.evaluation_seconds,
+                        primal_best_objective=best_objective,
+                    ),
+                )
+                sync_primal_state()
 
             emit(
                 DddNetworkTimeRefinementProgressStage.ROUND_STARTED,
@@ -965,7 +905,7 @@ class DddNetworkTimeRefinementSolver:
                 ),
                 has_incumbent=best_reference is not None,
                 best_schedules=best_schedules,
-                excluded_schedules=tuple(primal_candidate_schedules.values()),
+                excluded_schedules=primal_tracker.remembered_schedules,
                 primal_oracle=cp_sat_oracle,
                 nearest_support_oracle=nearest_support_oracle,
                 local_resource_analyzer=local_resource_analyzer,
@@ -1542,26 +1482,13 @@ class DddNetworkTimeRefinementSolver:
                 last_trajectory_pool_fingerprint = trajectory_column_pool.fingerprint
                 evaluation = pool_evaluation.evaluation
                 if evaluation is not None:
-                    primal_candidate_summaries.append(evaluation.summary)
-                    primal_evaluation_count += 1
-                    primal_evaluation_seconds += evaluation.total_seconds
-                    if (
-                        evaluation.status is DddPrimalEvaluationStatus.FEASIBLE
-                        and evaluation.objective_value is not None
-                        and trajectory_pool_result.reference_solution is not None
-                    ):
-                        primal_evaluation_status = DddPrimalEvaluationStatus.FEASIBLE
-                        if (
-                            round_primal_objective is None
-                            or evaluation.objective_value < round_primal_objective
-                        ):
-                            round_primal_objective = evaluation.objective_value
-                            round_primal_evaluation = evaluation
-                        if evaluation.objective_value < upper_bound:
-                            upper_bound = evaluation.objective_value
-                            best_schedules = trajectory_pool_result.schedules
-                            best_reference = trajectory_pool_result.reference_solution
-                            best_primal_evaluation = evaluation
+                    primal_tracker.record_external_evaluation(
+                        schedules=trajectory_pool_result.schedules,
+                        solution=trajectory_pool_result.reference_solution,
+                        evaluation=evaluation,
+                        round_state=primal_round_state,
+                    )
+                    sync_primal_state()
                 emit(
                     DddNetworkTimeRefinementProgressStage.TRAJECTORY_POOL_FINISHED,
                     round_index,
@@ -1675,34 +1602,13 @@ class DddNetworkTimeRefinementSolver:
                     )
                     priced_evaluation = priced_pool_evaluation.evaluation
                     if priced_evaluation is not None:
-                        primal_candidate_summaries.append(priced_evaluation.summary)
-                        primal_evaluation_count += 1
-                        primal_evaluation_seconds += priced_evaluation.total_seconds
-                        if (
-                            priced_evaluation.status
-                            is DddPrimalEvaluationStatus.FEASIBLE
-                            and priced_evaluation.objective_value is not None
-                            and trajectory_pool_result.reference_solution is not None
-                        ):
-                            primal_evaluation_status = (
-                                DddPrimalEvaluationStatus.FEASIBLE
-                            )
-                            if (
-                                round_primal_objective is None
-                                or priced_evaluation.objective_value
-                                < round_primal_objective
-                            ):
-                                round_primal_objective = (
-                                    priced_evaluation.objective_value
-                                )
-                                round_primal_evaluation = priced_evaluation
-                            if priced_evaluation.objective_value < upper_bound:
-                                upper_bound = priced_evaluation.objective_value
-                                best_schedules = trajectory_pool_result.schedules
-                                best_reference = (
-                                    trajectory_pool_result.reference_solution
-                                )
-                                best_primal_evaluation = priced_evaluation
+                        primal_tracker.record_external_evaluation(
+                            schedules=trajectory_pool_result.schedules,
+                            solution=trajectory_pool_result.reference_solution,
+                            evaluation=priced_evaluation,
+                            round_state=primal_round_state,
+                        )
+                        sync_primal_state()
                     emit(
                         DddNetworkTimeRefinementProgressStage.TRAJECTORY_POOL_FINISHED,
                         round_index,
