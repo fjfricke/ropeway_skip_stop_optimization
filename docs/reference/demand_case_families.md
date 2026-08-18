@@ -3,7 +3,8 @@
 This document defines a compact case taxonomy for evaluating when skip-stop
 operation improves an urban ropeway system. A **demand family** describes the
 spatial OD and resource-conflict structure. A **demand profile** describes how
-that demand changes over time. Every family can be combined with every profile.
+that demand changes over time. Families and profiles are combined factorially
+unless an explicitly documented route-direction ambiguity prevents it.
 
 ## 1. Demand Families
 
@@ -46,7 +47,7 @@ profiles.
 
 ## 3. Experimental Setups
 
-### Setup 1: Small Artificial Line and Ring
+### Setup 1: Small Artificial Line and Double Ring
 
 Setup 1 uses two six-station topologies. They share all physical and operating
 parameters so that differences can be attributed to the terminal structure
@@ -66,7 +67,7 @@ T0 <-> S1 <-> S2 <-> S3 <-> S4 <-> T5
 The line primarily measures journey-time savings, fleet efficiency, passenger
 capacity allocation, and the limiting effect of mandatory shared terminals.
 
-#### A2: Bidirectional six-station ring
+#### A2: Bidirectional six-station double ring
 
 ```text
         S1 ---- S2
@@ -83,9 +84,241 @@ capacity allocation, and the limiting effect of mandatory shared terminals.
 - passengers may use either direction, subject to the passenger-routing model;
 - no cabin direction change or rope switch is included.
 
-The ring additionally measures whether complementary stop patterns and the two
-directions can increase useful throughput without a mandatory terminal
-bottleneck.
+The double ring is one topology, not two independent experimental cases. It
+additionally measures whether complementary stop patterns and the two
+simultaneous directions can increase useful throughput without a mandatory
+terminal bottleneck. An OD demand is generated once. Passenger assignment may
+choose the clockwise or counter-clockwise circulation; demand is not split
+between the two directions in advance.
+
+#### Artificial OD profiles
+
+Both topologies use the common station index set
+
+$$
+V=\{0,1,2,3,4,5\}.
+$$
+
+On the line, stations 0 and 5 are terminals. On the double ring all six
+stations are ordinary service stations. Let $w_{ij}\ge 0$ be the unnormalised
+weight of the ordered OD pair $i\to j$. The generator normalises the selected
+profile according to
+
+$$
+\bar w_{ij}=\frac{w_{ij}}{\sum_{o\ne d}w_{od}}.
+$$
+
+The following definitions are the executable artificial instances of the
+families in Section 1.
+
+##### F0: diffuse demand
+
+Every ordered OD pair has equal weight:
+
+$$
+w_{ij}=1\qquad i\ne j.
+$$
+
+There are 30 active OD pairs on either topology. This is the neutral reference
+case.
+
+##### F4: local demand
+
+Only adjacent stations exchange passengers. On the line,
+
+$$
+w_{ij}=1\iff |i-j|=1,
+$$
+
+which gives ten ordered OD pairs. On the double ring,
+
+$$
+w_{ij}=1\iff d_{\mathrm{ring}}(i,j)=1,
+$$
+
+which gives twelve ordered OD pairs. This is the negative control case for
+skip-stop operation.
+
+##### F3: long-distance/express demand
+
+The line activates exactly the OD pairs with
+
+$$
+|i-j|\ge 4,
+$$
+
+namely $0\leftrightarrow4$, $0\leftrightarrow5$, and
+$1\leftrightarrow5$. The double ring activates the three pairs of opposite
+stations,
+
+$$
+0\leftrightarrow3,\qquad
+1\leftrightarrow4,\qquad
+2\leftrightarrow5.
+$$
+
+The double-ring pairs have two equally short physical routes. Their direction
+is therefore chosen by passenger assignment rather than fixed by the demand
+generator.
+
+##### F1: common hub
+
+Station 2 is the common hub on both topologies:
+
+$$
+w_{ij}=1\iff (i=2\lor j=2)\land i\ne j.
+$$
+
+This gives ten ordered OD pairs. It deliberately retains one common station
+bottleneck while allowing other stations to be skipped.
+
+##### F2: complementary OD clusters
+
+The two equally strong bidirectional markets are
+
+$$
+1\leftrightarrow3,
+\qquad
+2\leftrightarrow4.
+$$
+
+Their origin/destination station sets are disjoint, although their shortest
+paths share rope infrastructure. This directly tests whether cabin groups can
+specialise on different station resources while continuing to use the same
+line or directional rope.
+
+##### F5: mixed local and express demand
+
+Let $\bar w^{F4}$ and $\bar w^{F3}$ be the already normalised local and express
+matrices for the selected topology. The mixed profile is
+
+$$
+\bar w^{F5}
+=0.5\,\bar w^{F4}+0.5\,\bar w^{F3}.
+$$
+
+Thus exactly half of total demand is assigned to local markets and half to
+long-distance markets, independently of how many OD pairs each component
+contains.
+
+##### F6: downstream starvation
+
+The line uses two mirrored directional clusters:
+
+| Ordered OD pair | Raw weight |
+|---|---:|
+| $1\to4$ | 7 |
+| $2\to5$ | 3 |
+| $4\to1$ | 7 |
+| $3\to0$ | 3 |
+
+In the increasing-index direction, strong demand at station 1 can occupy cabin
+capacity before station 2 is reached. The decreasing-index direction contains
+the reflected case.
+
+The double ring uses an analogous case on both directional ropes:
+
+| Ordered OD pair | Unique shortest direction | Raw weight |
+|---|---|---:|
+| $0\to2$ | clockwise | 7 |
+| $1\to3$ | clockwise | 3 |
+| $3\to1$ | counter-clockwise | 7 |
+| $2\to0$ | counter-clockwise | 3 |
+
+Every OD pair has a unique two-segment shortest route. Consequently this case
+loads both directions symmetrically without preassigning passengers to a rope
+in the input data. A passenger optimiser may still select a longer route if
+its complete journey-time objective justifies doing so.
+
+F6 measures both stop-pattern specialisation and passenger-capacity
+allocation. A sufficiently strong integrated assignment can reserve downstream
+capacity even under all-stop operation, so an improvement in F6 must not be
+attributed to skip-stop alone without inspecting the passenger solution.
+
+#### Artificial temporal profiles
+
+The initial horizon is 60 minutes. Demand is released in nine five-minute
+buckets at
+
+$$
+08{:}00,08{:}05,\ldots,08{:}40,
+$$
+
+and the interval from 08:45 to 09:00 is reserved for serving already released
+demand. Let $p_b$ be an unnormalised temporal weight and
+$\bar p_b=p_b/\sum_kp_k$.
+
+##### P0: stationary
+
+$$
+p=[1,1,1,1,1,1,1,1,1].
+$$
+
+This profile is used for every spatial family in the first experiment stage.
+
+##### P1: single peak
+
+$$
+p=[1,2,3,4,5,4,3,2,1].
+$$
+
+The release rate at 08:20 is five times the rate in the first and final
+buckets, while total demand remains unchanged after normalisation.
+
+##### P2: tidal
+
+For a directional OD pair, the increasing-index/clockwise temporal weights are
+
+$$
+p^+=[5,5,4,3,2,1,1,1,1],
+$$
+
+and the reflected direction uses
+
+$$
+p^-=[1,1,1,1,2,3,4,5,5].
+$$
+
+On the line, the sign follows the OD direction. On the double ring, it follows
+the unique shortest ring direction. Diameter OD pairs with two equally short
+routes cannot receive a directional tidal label from the current demand data;
+they are excluded from P2 until route preference is represented explicitly.
+
+##### P4: batch arrivals
+
+$$
+p=[3,0,0,3,0,0,3,0,0].
+$$
+
+Three equal feeder/event batches arrive at 08:00, 08:15, and 08:30. P3
+(double peak) and P5 (uncertain demand) are deferred until the 60-minute
+baseline cases are understood.
+
+#### Integer demand generation
+
+For a requested total of $N$ passengers, the fractional number assigned to OD
+pair $i\to j$ and bucket $b$ is
+
+$$
+x_{ijb}=N\bar w_{ij}\bar p_b.
+$$
+
+Demand groups must contain integer passenger counts. The generator first sets
+$n_{ijb}=\lfloor x_{ijb}\rfloor$ and then distributes the remaining passengers
+to cells in descending order of fractional remainder. Stable OD and bucket IDs
+break ties. Therefore
+
+$$
+\sum_{i\ne j}\sum_b n_{ijb}=N
+$$
+
+holds exactly and repeated generation is deterministic.
+
+The definition of $N$ is deliberately not fixed here. The next methodological
+decision is whether intensity should be referenced to cabin flow, seat-segment
+capacity, an all-stop passenger optimum, or a combination of these quantities.
+Until that reference-capacity definition is fixed, concrete demand counts are
+experiment inputs rather than topology constants.
 
 #### Common baseline parameters
 
@@ -100,6 +333,9 @@ bottleneck.
 | Braking/acceleration connector | 3 m each | Existing timing abstraction; not an engineering acceleration design. |
 | Cabin capacity | 10 passengers | Representative small urban gondola. |
 | Cabin length | 3.0 m | Existing cabin geometry. |
+| Cabin height | 2.22 m | Manufacturer reference for a ten-passenger cabin. |
+| Attachment point to cabin roof | 2.0 m | Explicit compact urban-system assumption. |
+| Attachment point to lowest envelope | 4.22 m | Derived geometric sway-envelope input. |
 | Minimum compressed station clearance | 0.5 m | Gives 3.5 m cabin pitch inside a station. |
 | Rope line headway | Separate technology scenario | Must not be inferred from the service-platform pitch. |
 | Merge headway | Separate technology scenario | Captures independently moving carriers and attachment into a free line slot. |
@@ -138,10 +374,10 @@ The safety derivation, source provenance, and proposed sensitivity cases are
 documented in
 [`topology_parameter_derivation/main.tex`](topology_parameter_derivation/main.tex).
 
-The current `OperatingParameters.required_cabin_spacing_m` uses one spacing for
-both calculations. Setup 1 therefore requires separate line, merge, and station
-headways before it is used for final experiments; silently reusing one pitch for
-all resources would distort the capacity comparison.
+The A/B/C artificial scenarios use the derived headway policy described in the
+linked derivation. Rope, merge, service-platform, and mechanism requirements
+are represented separately; the legacy common-spacing value is not used for
+their collision or capacity constraints.
 
 The initial evaluation uses a 60-minute service horizon. Demand is released in
 the first 45 minutes and the final 15 minutes allow previously released demand
