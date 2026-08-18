@@ -296,29 +296,148 @@ baseline cases are understood.
 
 #### Integer demand generation
 
-For a requested total of $N$ passengers, the fractional number assigned to OD
-pair $i\to j$ and bucket $b$ is
+Let $c=(i,j,b)$ denote an OD-bucket cell and
 
 $$
-x_{ijb}=N\bar w_{ij}\bar p_b.
+q_c=\bar w_{ij}\bar p_b
 $$
 
-Demand groups must contain integer passenger counts. The generator first sets
-$n_{ijb}=\lfloor x_{ijb}\rfloor$ and then distributes the remaining passengers
-to cells in descending order of fractional remainder. Stable OD and bucket IDs
-break ties. Therefore
+its target share. For a requested total of $N$ passengers, its fractional
+target is
 
 $$
-\sum_{i\ne j}\sum_b n_{ijb}=N
+x_c=Nq_c.
 $$
 
-holds exactly and repeated generation is deterministic.
+Demand groups must contain integer passenger counts and capacity search
+requires nested instances: increasing $N$ must only add passengers, never move
+existing passengers to another OD pair or release bucket. The generator
+therefore constructs one deterministic infinite allocation sequence. Starting
+with $n_c(0)=0$, passenger $m$ is assigned to
 
-The definition of $N$ is deliberately not fixed here. The next methodological
-decision is whether intensity should be referenced to cabin flow, seat-segment
-capacity, an all-stop passenger optimum, or a combination of these quantities.
-Until that reference-capacity definition is fixed, concrete demand counts are
-experiment inputs rather than topology constants.
+$$
+c_m
+=
+\arg\max_c\left\{m q_c-n_c(m-1)\right\},
+$$
+
+with stable OD and bucket IDs breaking ties. Counts are updated only for the
+selected cell. The demand instance of size $N$ is the prefix
+$(c_1,\ldots,c_N)$. Consequently
+
+$$
+\sum_c n_c(N)=N,
+\qquad
+n_c(N+1)\ge n_c(N)
+$$
+
+holds exactly for every cell. Repeated generation is deterministic, the
+empirical shares track $q_c$, and every feasible solution for size $N+1$
+induces a feasible solution for size $N$ by removing its additional passenger.
+This monotonicity is what makes certified capacity bracketing and integer
+bisection valid. Independent largest-remainder apportionment is not used,
+because its allocations need not be nested as $N$ changes.
+
+#### Reference capacity and demand intensity
+
+Demand intensity is normalised by a passenger-capacity reference, not by a
+fixed arbitrary passenger count or departure interval. For topology
+$\mathcal T$, spatial family $F$, operating mode $m$, and exact active fleet
+size $K$, define the capacity row
+
+$$
+\kappa_m^{=}(\mathcal T,F,K)
+=
+\max\left\{
+N\in\mathbb Z_{\ge 0}:
+D(F,P0,N)\text{ is completely delivered by }09{:}00
+\text{ by an executable mode-}m\text{ timetable with exactly }K\text{ cabins}
+\right\}.
+$$
+
+Here, $D(F,P0,N)$ is the deterministic integer demand generated above. The
+horizon, initial-state policy, cabin capacity, and exact fleet size are fixed
+within a row. Unlike a raw cabin-flow or seat-segment value, this passenger
+capacity accounts for the OD pattern, seat reuse along a route, release times,
+and the requirement that all passengers reach their destination by the end of
+the horizon.
+
+For the line, all $K$ cabins operate on the complete terminal-to-terminal
+circulation. For the double ring, the baseline uses an even $K$ and assigns
+$K/2$ cabins to each direction. Demand itself is not preassigned to a
+direction; passenger assignment chooses clockwise or counter-clockwise travel,
+including either direction for diametrically opposite OD pairs.
+
+Exact-$K$ capacity need not be monotone in $K$. The available-fleet frontier
+and absolute capacity are therefore
+
+$$
+\kappa_m^{\le}(K)
+=
+\max_{k\le K}\kappa_m^{=}(k),
+\qquad
+\kappa_m^\star
+=
+\max_{K\in\mathcal K_m}\kappa_m^{=}(K),
+$$
+
+where $\mathcal K_m$ is the safely bounded physical fleet domain. The first
+function is monotone and answers how much demand can be served with at most
+$K$ available cabins. The second is the largest passenger capacity anywhere
+in the admissible fleet domain; it is not the same quantity as the maximum
+number of cabins that can physically be packed into the network.
+
+The A/B/C technology variants use the same declared All-Stop reference policy,
+initial-state construction, and absolute demand sequence. Its feasible fleet
+domain is common to the compared variants. This prevents a technology with a
+different headway from silently receiving an easier demand instance.
+
+The dimensionless load factor is
+
+$$
+\rho=\frac{N}{\kappa_{\mathrm{AS}}^\star(\mathcal T,F)}.
+$$
+
+Thus $\rho=1$ is the largest stationary demand completely served anywhere on
+the All-Stop fleet-capacity frontier. Values above one are intentional: they
+test whether Skip-Stop can serve demand that All-Stop cannot. In particular,
+$\rho=1.1$ is only a useful near-threshold pilot point and is **not** an upper
+limit. A complementary profile can in principle obtain substantially more than
+a twofold improvement, so the tested range must be determined by the case
+rather than assumed in advance.
+
+For every mode and $K$, a cheap relaxed passenger-flow model supplies a row
+upper bound $U_{m,K}^{\mathrm{flow}}$. It retains physical rope, station,
+terminal, fleet-time, and seat-flow capacities but relaxes cabin integrality,
+exact event synchronisation, and detailed merge ordering. Since every
+executable timetable induces a feasible flow in this relaxation,
+
+$$
+\kappa_m^{=}(K)
+\le U_{m,K}^{\mathrm{flow}}.
+$$
+
+The relaxation is used only as a valid search ceiling, not as an attainable
+capacity claim. Within each $K$ row, actual load levels are explored by
+geometric growth followed by integer bisection. A feasible timetable supplies
+a lower bound; only an infeasibility proof or a valid relaxation supplies an
+upper bound. A solver timeout changes neither bound.
+
+The principal global capacity result is reported as
+
+$$
+G_{\mathrm{capacity}}
+=
+\frac{\kappa_{\mathrm{SS}}^\star}{\kappa_{\mathrm{AS}}^\star},
+$$
+
+preferably as a certified interval when either frontier remains open. Also
+report capacity gain at common $K$, the minimum fleet for selected $N$, and
+passenger-quality load curves. For P1, P2, and P4, the absolute total $N$
+derived from the P0 reference is retained. Their different temporal
+concentration therefore remains an experimental effect rather than being
+normalised away. The proof-aware search and output contract are specified in
+[`../plans/artificial_case_capacity_experiments.md`](../plans/artificial_case_capacity_experiments.md).
 
 #### Common baseline parameters
 

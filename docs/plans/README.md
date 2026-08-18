@@ -13,6 +13,10 @@ Each plan must:
 
 Current plans:
 
+- `artificial_case_capacity_experiments.md`: versioned artificial line and
+  double-ring cases, nested demand generation, certified exact-$K$ and
+  available-fleet capacity frontiers, valid flow ceilings, and adaptive
+  $K$--$N$ experiments.
 - `ean_root_bound_improvement.md`: immediate root-relaxation diagnosis and the
   evidence-driven sequence for strengthening the integrated passenger model.
 - `ean_formulation_and_search.md`: immediate baseline validation, bottleneck
