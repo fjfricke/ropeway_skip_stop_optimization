@@ -374,7 +374,8 @@ def _physical_parameters() -> HeadwayPhysicalParameters:
         service_clearance_m=0.5,
         rope_clearance_m=0.5,
         merge_clearance_m=0.5,
-        suspension_length_m=3.0,
+        cabin_height_m=2.22,
+        attachment_to_cabin_roof_m=2.0,
         rope_sway_angle_rad=0.34,
         emergency_merge_sway_angle_rad=0.34,
         control_delay_seconds=0.5,
@@ -394,7 +395,12 @@ def _physical_parameters() -> HeadwayPhysicalParameters:
                 HeadwayEvidenceKind.EXPERIMENTAL,
             ),
             _provenance(
-                "suspension_length_m",
+                "cabin_height_m",
+                "doppelmayr_d_line",
+                HeadwayEvidenceKind.MANUFACTURER,
+            ),
+            _provenance(
+                "attachment_to_cabin_roof_m",
                 "artificial_case_v0",
                 HeadwayEvidenceKind.EXPERIMENTAL,
             ),

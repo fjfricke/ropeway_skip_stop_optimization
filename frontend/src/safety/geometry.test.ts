@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { DerivedHeadwayPolicy, EanMovementPlan, EanPhysicalReplay, Scenario } from "../types";
+import { validateSpatialPolicyAgainstScenario } from "./decodeSafetyInputs";
 import { checkContinuousSpacing } from "./geometry";
 
 describe("continuous physical spacing", () => {
@@ -34,6 +35,71 @@ describe("continuous physical spacing", () => {
     expect(result.totalViolationCount).toBe(1);
     expect(result.violations[0].timeSeconds).toBeCloseTo(Math.sqrt(50), 6);
     expect(result.violations[0].actualSeparation).toBeCloseTo(0, 6);
+  });
+
+  it("uses the exported physical rope envelope instead of legacy operating spacing", () => {
+    const physicalRopeSpacingM = 3 + 2 * 4.22 * Math.sin(0.34) + 0.5;
+    const shiftedReplay: EanPhysicalReplay = {
+      ...replay(),
+      events: [
+        event(0, 0, "A", []),
+        event(0, 10, "B", ["rope"]),
+        event(1, -5.6, "A", []),
+        event(1, 4.4, "B", ["rope"]),
+      ],
+    };
+    const physicalPolicy = policy();
+    physicalPolicy.spatial_spacings[0].spacing_m = physicalRopeSpacingM;
+
+    const physicalResult = checkContinuousSpacing({
+      scenario: scenario(),
+      policy: physicalPolicy,
+      movementPlan: movementPlan(),
+      replay: shiftedReplay,
+    });
+    expect(physicalResult.totalViolationCount).toBe(1);
+    expect(physicalResult.violations[0].actualSeparation).toBeCloseTo(5.6);
+    expect(physicalResult.violations[0].requiredSeparation).toBeCloseTo(6.314631);
+
+    const legacyResult = checkContinuousSpacing({
+      scenario: scenario(),
+      policy: policy(),
+      movementPlan: movementPlan(),
+      replay: shiftedReplay,
+    });
+    expect(legacyResult.totalViolationCount).toBe(0);
+  });
+
+  it("rejects a stale spatial policy after the carrier geometry changes", () => {
+    const physicalScenario = scenario();
+    physicalScenario.operating.cabin_length_m = 3;
+    physicalScenario.headway_design = {
+      physical: {
+        service_clearance_m: 0.5,
+        rope_clearance_m: 0.5,
+        merge_clearance_m: 0.5,
+        cabin_height_m: 2.22,
+        attachment_to_cabin_roof_m: 2,
+        rope_sway_angle_rad: 0.34,
+        emergency_merge_sway_angle_rad: 0.34,
+        control_delay_seconds: 0.5,
+        emergency_deceleration_m_per_s2: 1.75,
+        provenance: [],
+      },
+      station_mechanisms: [],
+      provenance: [],
+    };
+    const currentPolicy = policy();
+    currentPolicy.spatial_spacings = [
+      { role: "rope", spacing_m: 3 + 2 * 4.22 * Math.sin(0.34) + 0.5 },
+      { role: "service", spacing_m: 3.5 },
+    ];
+    expect(validateSpatialPolicyAgainstScenario(physicalScenario, currentPolicy)).toEqual([]);
+
+    currentPolicy.spatial_spacings[0].spacing_m = 5.500922552844886;
+    expect(validateSpatialPolicyAgainstScenario(physicalScenario, currentPolicy)).toEqual([
+      "rope spatial spacing 5.500922552844886 m is inconsistent with scenario geometry 6.314631057668474 m",
+    ]);
   });
 });
 

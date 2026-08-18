@@ -77,7 +77,7 @@ export function checkContinuousSpacing({
 }): ContinuousSpacingCheckResult {
   const built = buildMotionIntervals(scenario, movementPlan, replay);
   const spacingByRole = new Map<DerivedSpatialRole, number>();
-  for (const spacing of policy.spatial_spacings) {
+  for (const spacing of policy.spatial_spacings ?? []) {
     if (spacingByRole.has(spacing.role)) built.diagnostics.push(`Duplicate ${spacing.role} spatial spacing`);
     spacingByRole.set(spacing.role, spacing.spacing_m);
   }

@@ -162,6 +162,10 @@ factor.
 
 The baseline capacity is ten passengers, supported both by the French system
 description and by the Regensburg study \cite{strmtgGondola,haimerl2022}.
+Doppelmayr reports a general cabin height of 2.22~m and a cabin length of
+2.656~m for its ten-passenger OMEGA IV-10 SI D cabin \cite{doppelmayrDLine}.
+The artificial case uses that published height and rounds the longitudinal
+length conservatively to 3.0~m.
 Te\v{z}ak et al. use a 3.0~m vehicle length and a 0.5~m minimum in-station
 clearance to derive a 3.5~m station pitch \cite{tezak2016}.  We adopt this
 published calculation as the service-channel reference.  The remaining route
@@ -174,6 +178,7 @@ Quantity & Baseline & Evidence class \\
 \midrule
 Cabin capacity & 10 passengers & empirical reference \\
 Cabin length $L_C$ & 3.0 m & published model reference \\
+Cabin height $H_C$ & 2.22 m & manufacturer reference \\
 Service platform length & 10 m & experimental abstraction \\
 Bypass path length & 20 m & experimental abstraction \\
 Fast approach/departure connector & 5 m each & experimental abstraction \\
@@ -227,13 +232,31 @@ least
 \theta_R=0.34\ \mathrm{rad}
 \]
 on the line and in stations unless a justified reduction applies
-\cite[Sec.~6.3.5]{en12929,strmtgRM2}.  Let $\ell_H$ denote the vertical distance
-from the attachment point to the cabin reference point and let $c_R$ be the
-free distance that remains between two worst-case longitudinal movement
-envelopes.  A simplified symmetric-envelope approximation gives
+\cite[Sec.~6.3.5]{en12929,strmtgRM2}.  Collision geometry must not use the
+reduced pendulum length of a dynamics model.  Such a reduced length depends on
+mass, centre of gravity, and moment of inertia \cite{wenin2019}; it is not the
+distance to the outer cabin envelope.
+
+Let $g_{\mathrm{roof}}$ denote the vertical distance from the attachment point
+to the cabin roof and let $H_C$ be the cabin height.  The relevant geometric
+drop to the lowest point of the upright cabin envelope is
+\begin{equation}
+z_{\mathrm{env}}=g_{\mathrm{roof}}+H_C.
+\label{eq:envelope-drop}
+\end{equation}
+For a rectangular longitudinal section, exact rigid-body projection at sway
+angle $\theta_R$ gives
+\begin{equation}
+d_{\mathrm R}^{\mathrm{rect}}
+ =L_C\cos(\theta_R)+2z_{\mathrm{env}}\sin(\theta_R)+c_R.
+\label{eq:rect-swing-spacing}
+\end{equation}
+Until a carrier CAD envelope is available, the artificial case replaces
+$L_C\cos(\theta_R)$ by the larger $L_C$.  Its deliberately conservative
+symmetric-envelope approximation is therefore
 \begin{equation}
 d_{\mathrm R}^{\mathrm{swing}}
-  \ge L_C+2\ell_H\sin(\theta_R)+c_R.
+  = L_C+2z_{\mathrm{env}}\sin(\theta_R)+c_R.
 \label{eq:swing-spacing}
 \end{equation}
 The corresponding headway is
@@ -242,23 +265,26 @@ The corresponding headway is
   =\frac{d_{\mathrm R}^{\mathrm{swing}}}{\vlinehaul}.
 \label{eq:swing-headway}
 \end{equation}
-The standard fixes neither $\ell_H$ nor $c_R$: $\ell_H$ is carrier-specific and
-$c_R$ is a design safety allowance.  The French guidance uses an additional
+The standard fixes neither $g_{\mathrm{roof}}$ nor $c_R$:
+$g_{\mathrm{roof}}$ is carrier-specific and $c_R$ is a design safety allowance.
+The French guidance uses an additional
 0.3~m envelope margin in specified clearance cases \cite{strmtgRM2}; this is
 not a general adjacent-carrier requirement.  The initial reference case uses
-$c_R=0.5$~m as an explicit experimental assumption and requires a manufacturer
-value for $\ell_H$ before any engineering interpretation.  For illustration,
-$L_C=3$~m, $\ell_H=3$~m, $c_R=0.5$~m, and
-$\vlinehaul=6$~m/s yield
+$c_R=0.5$~m and $g_{\mathrm{roof}}=2.0$~m as explicit experimental
+assumptions.  With the manufacturer-reported $H_C=2.22$~m this gives
+$z_{\mathrm{env}}=4.22$~m.  For $L_C=3$~m and
+$\vlinehaul=6$~m/s, Eq.~\eqref{eq:swing-spacing} yields
 \[
-d_{\mathrm R}^{\mathrm{swing}}\approx5.5\ \mathrm m,
+d_{\mathrm R}^{\mathrm{swing}}\approx6.31\ \mathrm m,
 \qquad
-\hlinehaul^{\mathrm{swing}}\approx0.92\ \mathrm s.
+\hlinehaul^{\mathrm{swing}}\approx1.05\ \mathrm s.
 \]
-Neither the illustrative 3~m suspension length nor the resulting 0.92~s is a
-literature-backed operating value.  The calculation demonstrates only that the
-familiar 60~m pitch cannot be justified by adjacent-cabin sway alone.  Exact
-carrier CAD envelopes may replace Eq.~\eqref{eq:swing-spacing} by
+The exact rectangular expression in Eq.~\eqref{eq:rect-swing-spacing} would
+give approximately 1.02~s.  Neither the illustrative 2~m roof offset nor the
+resulting 1.05~s is a literature-backed operating value.  The calculation
+demonstrates only that the familiar 60~m pitch cannot be justified by
+adjacent-cabin sway alone.  Exact carrier CAD envelopes may replace
+Eq.~\eqref{eq:swing-spacing} by
 \[
 d_{\mathrm R}^{\mathrm{swing}}=e_R^-+e_R^++c_R,
 \]
@@ -273,8 +299,8 @@ h_R^{\mathrm{grip}},h_R^{\mathrm{loading}},h_R^{\mathrm{control}},\ldots\}.
 \end{equation}
 The artificial short-headway case makes the explicit experimental hypothesis
 that the installation is dimensioned so that the geometric term dominates.
-Thus it sets $h_R=h_R^{\mathrm{swing}}=0.92$~s conditionally; it does not claim
-that 0.92~s is certified for a present installation.
+Thus it sets $h_R=h_R^{\mathrm{swing}}=1.05$~s conditionally; it does not claim
+that 1.05~s is certified for a present installation.
 
 Grip failure is a separate safety function.  A larger ordinary headway cannot
 make complete loss of attachment safe.  Standards instead require monitoring
@@ -304,12 +330,12 @@ installation-specific \cite[Sec.~9.3.2]{en12929}.
 The carriers must additionally remain geometrically separated while they may
 swing.  For a tangential service/bypass merge, let $v_M$ be the upper speed at
 the common conflict location, $\theta_M^{\mathrm{emergency}}$ the emergency
-longitudinal sway angle, $\ell_H$ the suspension length, and $c_M$ an additional
-clearance.  The conservative swept-envelope distance and its time equivalent
-are
+longitudinal sway angle and $c_M$ an additional clearance.  The same geometric
+drop $z_{\mathrm{env}}$ is used for the conservative swept-envelope distance
+and its time equivalent:
 \begin{equation}
 d_M^{\mathrm{env}}
- =L_C+2\ell_H\sin(\theta_M^{\mathrm{emergency}})+c_M,
+ =L_C+2z_{\mathrm{env}}\sin(\theta_M^{\mathrm{emergency}})+c_M,
 \qquad
 h_M^{\mathrm{env}}=\frac{d_M^{\mathrm{env}}}{v_M}.
 \label{eq:merge-envelope-headway}
@@ -542,7 +568,9 @@ The common safety and geometry inputs are reported separately:
 Input & Proposed treatment & Literature status \\
 \midrule
 $\theta_R,\theta_M^{\mathrm{emergency}}$ & 0.34 rad & conservative EN/RM2 sway case \\
-$\ell_H$ & 3.0 m & experimental placeholder; manufacturer input required \\
+$H_C$ & 2.22 m & manufacturer cabin geometry \\
+$g_{\mathrm{roof}}$ & 2.0 m & experimental compact urban hanger geometry \\
+$z_{\mathrm{env}}$ & 4.22 m & derived from $g_{\mathrm{roof}}+H_C$ \\
 $c_R$ & 0.5 m & experimental clearance \\
 $c_M$ & 0.5 m & experimental; exact merge envelope required \\
 $v_M$ & 6.0 m/s & merge placed after acceleration in the artificial design \\
@@ -579,11 +607,11 @@ for comparison, not literature-derived certificates.  The ring directions use
 separate physical networks and resource identifiers in this first experiment.
 
 For transparency, one fully numerical but non-certified illustration uses
-$L_C=3$~m, $\ell_H=3$~m, $\theta_R=
+$L_C=3$~m, $H_C=2.22$~m, $g_{\mathrm{roof}}=2.0$~m, $\theta_R=
 \theta_M^{\mathrm{emergency}}=0.34$~rad, $c_R=c_M=0.5$~m, and
 $v_R=v_M=6$~m/s.  It gives
 \[
-h_R=h_M^{\mathrm{env}}\simeq0.92\ \mathrm{s}.
+h_R=h_M^{\mathrm{env}}\simeq1.05\ \mathrm{s}.
 \]
 With the explicitly experimental reference values
 $\tau_M^{\mathrm{control}}=0.5$~s and $a_M=1.75$~m/s$^2$,
@@ -593,12 +621,12 @@ therefore
 \begin{align*}
 \text{A:}\quad&H_{r,r'}=9.00\ \mathrm{s}
   &&\forall r,r',\\
-\text{B:}\quad&H_{B,B}=H_{B,S}=0.92\ \mathrm{s},\\
-&H_{S,B}=H_{S,S}=4.85\ \mathrm{s},
-  &&g_B=5.77\ \mathrm{s}.
+\text{B:}\quad&H_{B,B}=H_{B,S}=1.05\ \mathrm{s},\\
+&H_{S,B}=H_{S,S}=4.98\ \mathrm{s},
+  &&g_B=6.03\ \mathrm{s}.
 \\[-0.25em]
-\text{C:}\quad&H_{r,r'}=0.92\ \mathrm{s}
-  &&\forall r,r',\qquad g_C=1.84\ \mathrm{s}.
+\text{C:}\quad&H_{r,r'}=1.05\ \mathrm{s}
+  &&\forall r,r',\qquad g_C=2.10\ \mathrm{s}.
 \end{align*}
 These are main-rope collision values.  B additionally requires successive
 service insertions to be separated by $h_M^{\mathrm{mechanical}}$; C requires
@@ -630,7 +658,7 @@ The scenario contains only elementary geometry, operating values, and
 externally guaranteed equipment capabilities.  A common immutable
 \texttt{HeadwayPhysicalParameters} value contains:
 \begin{itemize}[leftmargin=*]
-  \item $c_S$, $c_R$, $c_M$, and $\ell_H$;
+  \item $c_S$, $c_R$, $c_M$, $H_C$, and $g_{\mathrm{roof}}$;
   \item $\theta_R$ and $\theta_M^{\mathrm{emergency}}$;
   \item $\tau_M^{\mathrm{control}}$ and $a_M$; and
   \item provenance metadata for every input.
@@ -663,9 +691,10 @@ A solver-independent \texttt{PhysicalHeadwayPolicyBuilder} computes, under the
 artificial short-headway hypothesis,
 \begin{align*}
 \hservice &= \frac{L_C+c_S}{\vstation},\\
-\hlinehaul &= \frac{L_C+2\ell_H\sin(\theta_R)+c_R}{\vlinehaul},\\
+z_{\mathrm{env}} &= g_{\mathrm{roof}}+H_C,\\
+\hlinehaul &= \frac{L_C+2z_{\mathrm{env}}\sin(\theta_R)+c_R}{\vlinehaul},\\
  h_M^{\mathrm{env}}
- &=\frac{L_C+2\ell_H\sin(\theta_M^{\mathrm{emergency}})+c_M}{v_M},\\
+ &=\frac{L_C+2z_{\mathrm{env}}\sin(\theta_M^{\mathrm{emergency}})+c_M}{v_M},\\
 \tau_M^{\mathrm{stop}}
  &=\tau_M^{\mathrm{control}}+\frac{v_M}{a_M}.
 \end{align*}
@@ -724,6 +753,16 @@ order or conservatively applying $h_M^{\mathrm{stop}}$ to every rope start.
 The older physical-to-discrete model has only one symmetric spacing parameter
 and therefore explicitly rejects scenarios with an A/B/C design.  It is not
 silently reused with incorrect physics.
+
+The frontend likewise does not reconstruct collision clearance from the legacy
+quantity $L_C+c_{\mathrm{legacy}}$.  The complete exported policy carries the
+derived spatial values $d_R^{\mathrm{swing}}$ and $d_S=L_C+c_S$.  Its continuous
+replay checker applies the value belonging to each rope, bypass, or service
+motion interval and minimizes separation over the complete interval, not only
+at rendered frames.  As an independent consistency guard, it recalculates these
+two spatial values from the exported base geometry and reports an indeterminate
+result if scenario and policy disagree.  This prevents a stale artifact from
+silently certifying a replay after $H_C$ or $g_{\mathrm{roof}}$ changes.
 
 \subsection{Exact resource dominance}
 
@@ -787,9 +826,10 @@ pairs.
 
 Unit tests must verify each equation independently, reject non-positive base
 parameters, and prove that no caller can override a derived value.  Golden
-tests for the common reference inputs must obtain $h_R=0.92$~s,
+tests for the common reference inputs must obtain
+$z_{\mathrm{env}}=4.22$~m, $h_R=1.05$~s,
 $h_S=11.67$~s, architecture-A entries of 9~s, the architecture-B matrix and
-5.77~s slot, and architecture-C main-rope entries of 0.92~s.  Synthetic C
+6.03~s slot, and architecture-C main-rope entries of 1.05~s.  Synthetic C
 tests verify the derived clearing time and
 $h_C^{\mathrm{service}}=\max\{h_M^{\mathrm{mechanical}},h_C^{\mathrm{clear}}\}$.
 
@@ -812,7 +852,7 @@ pricing duals can select different columns, so equality of intermediate lower
 bounds is neither required nor expected.
 
 Before interpreting any short-headway case as buildable, engineering work must
-provide the exact carrier envelope and suspension length, permissible sway,
+provide the exact carrier envelope and attachment geometry, permissible sway,
 grip and tower-passage constraints, switching or clearing capabilities,
 guaranteed braking performance, and a failure-mode assessment.
 The optimization can then evaluate the operational consequence of those inputs;

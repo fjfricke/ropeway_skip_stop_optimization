@@ -52,12 +52,31 @@ def test_architecture_a_derives_manufacturer_headway() -> None:
 
     policy = PhysicalHeadwayPolicyBuilder().build(scenario, network, timings, pattern)
 
-    assert _quantity(policy, "rope_headway_seconds") == pytest.approx(0.916821)
+    assert _quantity(
+        policy, "attachment_to_lowest_envelope_m"
+    ) == pytest.approx(4.22)
+    assert _quantity(policy, "rope_headway_seconds") == pytest.approx(1.052439)
     assert _quantity(policy, "service_headway_seconds") == pytest.approx(11.666667)
     for state_id in pattern.state_ids:
         rule = policy.rule(f"headway_rule::exit_switch::{state_id}")
         assert rule.minimum_seconds == pytest.approx(9.0)
         assert rule.maximum_seconds == pytest.approx(9.0)
+
+
+@pytest.mark.parametrize(
+    "field_name",
+    ("cabin_height_m", "attachment_to_cabin_roof_m"),
+)
+def test_carrier_envelope_geometry_must_be_positive(field_name: str) -> None:
+    scenario, _, _, _ = _case(
+        lambda station: ConventionalQuickSwitchDesign(9.0)
+    )
+    assert scenario.headway_design is not None
+    physical = scenario.headway_design.physical
+
+    assert physical.attachment_to_lowest_envelope_m == pytest.approx(4.22)
+    with pytest.raises(ValueError, match=field_name):
+        replace(physical, **{field_name: 0.0}).validate()
 
 
 def test_architecture_b_derives_directed_leader_rule_and_service_resource() -> None:
@@ -74,13 +93,13 @@ def test_architecture_b_derives_directed_leader_rule_and_service_resource() -> N
     assert isinstance(rule, LeaderBehaviorHeadwayRule)
     bypass = HeadwayRouteBehavior.BYPASS
     service = HeadwayRouteBehavior.SERVICE
-    assert rule.required_seconds(bypass, bypass) == pytest.approx(0.916821)
-    assert rule.required_seconds(bypass, service) == pytest.approx(0.916821)
-    assert rule.required_seconds(service, bypass) == pytest.approx(4.845393)
-    assert rule.required_seconds(service, service) == pytest.approx(4.845393)
+    assert rule.required_seconds(bypass, bypass) == pytest.approx(1.052439)
+    assert rule.required_seconds(bypass, service) == pytest.approx(1.052439)
+    assert rule.required_seconds(service, bypass) == pytest.approx(4.981010)
+    assert rule.required_seconds(service, service) == pytest.approx(4.981010)
     assert (
         rule.required_seconds(bypass, service) + rule.required_seconds(service, bypass)
-    ) == pytest.approx(5.762214)
+    ) == pytest.approx(6.033448)
     service_rule = policy.rule(
         f"headway_rule::service_mechanism::{pattern.state_ids[0]}"
     )
@@ -105,7 +124,7 @@ def test_architecture_c_derives_recovery_from_connected_safety_path() -> None:
 
     state_id = pattern.state_ids[0]
     exit_rule = policy.rule(f"headway_rule::exit_switch::{state_id}")
-    assert exit_rule.minimum_seconds == pytest.approx(0.916821)
+    assert exit_rule.minimum_seconds == pytest.approx(1.052439)
     path_seconds = 5.0 / 6.0 + 3.0 / ((6.0 + 0.3) / 2.0)
     assert _quantity(policy, f"safety_path_seconds::{state_id}") == pytest.approx(
         path_seconds
@@ -171,10 +190,10 @@ def test_ddd_adapter_preserves_architecture_b_directed_usage_headways() -> None:
         if usage.resource_id == exit_resource.id
     )
 
-    assert exit_resource.minimum_headway_seconds == pytest.approx(0.916821)
-    assert exit_resource.maximum_headway_seconds == pytest.approx(4.845393)
-    assert stop_usage.separation_after_seconds == pytest.approx(4.845393)
-    assert skip_usage.separation_after_seconds == pytest.approx(0.916821)
+    assert exit_resource.minimum_headway_seconds == pytest.approx(1.052439)
+    assert exit_resource.maximum_headway_seconds == pytest.approx(4.981010)
+    assert stop_usage.separation_after_seconds == pytest.approx(4.981010)
+    assert skip_usage.separation_after_seconds == pytest.approx(1.052439)
 
 
 class _OneCabinStartBuilder(EanCabinStartBuilder):
@@ -209,7 +228,8 @@ def _case(mechanism_factory):
         service_clearance_m=0.5,
         rope_clearance_m=0.5,
         merge_clearance_m=0.5,
-        suspension_length_m=3.0,
+        cabin_height_m=2.22,
+        attachment_to_cabin_roof_m=2.0,
         rope_sway_angle_rad=0.34,
         emergency_merge_sway_angle_rad=0.34,
         control_delay_seconds=0.5,

@@ -91,7 +91,8 @@ export interface HeadwayPhysicalParameters {
   service_clearance_m: number;
   rope_clearance_m: number;
   merge_clearance_m: number;
-  suspension_length_m: number;
+  cabin_height_m: number;
+  attachment_to_cabin_roof_m: number;
   rope_sway_angle_rad: number;
   emergency_merge_sway_angle_rad: number;
   control_delay_seconds: number;

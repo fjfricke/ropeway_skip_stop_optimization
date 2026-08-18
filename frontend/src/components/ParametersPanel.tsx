@@ -7,6 +7,7 @@ interface ParametersPanelProps {
 
 export function ParametersPanel({ scenario }: ParametersPanelProps) {
   const spacing = scenario.operating.cabin_length_m + scenario.operating.min_clearance_m;
+  const spacingLabel = scenario.headway_design ? "station pitch" : "spacing";
   return (
     <section className="panel">
       <header className="panel__header">
@@ -17,7 +18,7 @@ export function ParametersPanel({ scenario }: ParametersPanelProps) {
         <Metric label="rope speed" value={`${scenario.operating.rope_speed_m_per_s} m/s`} />
         <Metric label="station speed" value={`${scenario.operating.station_speed_m_per_s} m/s`} />
         <Metric label="capacity" value={`${scenario.operating.cabin_capacity} pax`} />
-        <Metric label="spacing" value={`${spacing.toFixed(1)} m`} />
+        <Metric label={spacingLabel} value={`${spacing.toFixed(1)} m`} />
       </div>
     </section>
   );

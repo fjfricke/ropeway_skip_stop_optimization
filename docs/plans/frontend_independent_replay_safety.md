@@ -259,7 +259,7 @@ Acceptance gates:
 - A/B/C and waiting fixtures agree with the Python validator;
 - the verdict is invariant under 1, 10, 30, and 60 fps rendering;
 - the Five-Station-B case uses the derived rope spacing (currently about
-  \(5.501\,\mathrm m\)), not the legacy \(3.5\,\mathrm m\);
+  \(6.315\,\mathrm m\)), not the legacy \(3.5\,\mathrm m\);
 - no backend validation result or violation annotation is loaded by the
   frontend safety engine;
 - frontend build and Vitest suite are green;
@@ -284,7 +284,7 @@ swept motion intervals         5,090
 swept geometric comparisons    15,201
 ```
 
-The policy used a rope spacing of `5.5009226 m`, rather than the legacy
+The policy used a rope spacing of `6.3146311 m`, rather than the legacy
 `cabin_length_m + min_clearance_m = 3.5 m`. The artifact contained 20 complete
 physical resources and 15 effective solver resources with five dominance
 certificates; the frontend verdict deliberately checked the 20-resource

@@ -1,4 +1,5 @@
 import type {
+  DerivedHeadwayPolicy,
   EanBuildArtifact,
   EanFleetPlan,
   EanMovementPlan,
@@ -29,6 +30,7 @@ export function validateSafetyInputs({
   }
   const nodeIds = uniqueIds(scenario.physical_nodes, "physical node", diagnostics);
   const segmentIds = uniqueIds(scenario.track_segments, "track segment", diagnostics);
+  validateHeadwayPhysicalParameters(scenario, diagnostics);
   const replaySegmentIds = new Set(
     (replay.events ?? []).flatMap((event) => event.source_segment_ids ?? []),
   );
@@ -81,7 +83,12 @@ export function validateSafetyInputs({
   }
 
   const policy = artifact.headway_policy;
-  if (!policy || !Array.isArray(policy.rules) || !Array.isArray(policy.resource_requirements)) {
+  if (
+    !policy
+    || !Array.isArray(policy.rules)
+    || !Array.isArray(policy.resource_requirements)
+    || !Array.isArray(policy.spatial_spacings)
+  ) {
     diagnostics.push("Complete physical headway policy is malformed");
   } else {
     const ruleIds = uniqueIds(policy.rules, "headway rule", diagnostics);
@@ -100,6 +107,23 @@ export function validateSafetyInputs({
       if (!ruleIds.has(resource.rule_id)) diagnostics.push(`Headway resource ${resource.id} references missing rule ${resource.rule_id}`);
       if (!nodeIds.has(resource.exit_switch_id)) diagnostics.push(`Headway resource ${resource.id} references missing exit switch ${resource.exit_switch_id}`);
     }
+    const spacingRoles = new Set<string>();
+    for (const spacing of policy.spatial_spacings) {
+      if (spacing.role !== "rope" && spacing.role !== "service") {
+        diagnostics.push(`Unsupported spatial spacing role ${String(spacing.role)}`);
+      }
+      if (spacingRoles.has(spacing.role)) {
+        diagnostics.push(`Duplicate ${spacing.role} spatial spacing`);
+      }
+      spacingRoles.add(spacing.role);
+      if (!positiveFinite(spacing.spacing_m)) {
+        diagnostics.push(`Invalid ${spacing.role} spatial spacing`);
+      }
+    }
+    for (const role of ["rope", "service"]) {
+      if (!spacingRoles.has(role)) diagnostics.push(`Missing positive ${role} spatial spacing`);
+    }
+    diagnostics.push(...validateSpatialPolicyAgainstScenario(scenario, policy));
   }
 
   if ((artifact.fleet_mode ?? "fixed_starts") === "optimized_initial_placement") {
@@ -107,6 +131,71 @@ export function validateSafetyInputs({
     if (fleetPlan?.mode !== "optimized_initial_placement") diagnostics.push("OIP fleet plan has an incompatible mode");
   }
   return unique(diagnostics);
+}
+
+export function validateSpatialPolicyAgainstScenario(
+  scenario: Scenario,
+  policy: DerivedHeadwayPolicy,
+): string[] {
+  const spacingByRole = new Map(
+    (policy.spatial_spacings ?? []).map((spacing) => [spacing.role, spacing.spacing_m]),
+  );
+  const physical = scenario.headway_design?.physical;
+  const expected = policy.legacy || !physical
+    ? {
+        rope: scenario.operating.cabin_length_m + scenario.operating.min_clearance_m,
+        service: scenario.operating.cabin_length_m + scenario.operating.min_clearance_m,
+      }
+    : {
+        rope: scenario.operating.cabin_length_m
+          + 2
+            * (physical.attachment_to_cabin_roof_m + physical.cabin_height_m)
+            * Math.sin(physical.rope_sway_angle_rad)
+          + physical.rope_clearance_m,
+        service: scenario.operating.cabin_length_m + physical.service_clearance_m,
+      };
+  const diagnostics: string[] = [];
+  for (const role of ["rope", "service"] as const) {
+    const actual = spacingByRole.get(role);
+    if (
+      positiveFinite(expected[role])
+      && positiveFinite(actual)
+      && !approximatelyEqual(actual, expected[role])
+    ) {
+      diagnostics.push(
+        `${role} spatial spacing ${actual} m is inconsistent with scenario geometry ${expected[role]} m`,
+      );
+    }
+  }
+  return diagnostics;
+}
+
+function validateHeadwayPhysicalParameters(scenario: Scenario, diagnostics: string[]) {
+  const physical = scenario.headway_design?.physical;
+  if (!physical) return;
+  for (const [name, value] of Object.entries({
+    cabin_height_m: physical.cabin_height_m,
+    attachment_to_cabin_roof_m: physical.attachment_to_cabin_roof_m,
+    emergency_deceleration_m_per_s2: physical.emergency_deceleration_m_per_s2,
+  })) {
+    if (!positiveFinite(value)) diagnostics.push(`Headway physical parameter ${name} must be positive`);
+  }
+  for (const [name, value] of Object.entries({
+    service_clearance_m: physical.service_clearance_m,
+    rope_clearance_m: physical.rope_clearance_m,
+    merge_clearance_m: physical.merge_clearance_m,
+    control_delay_seconds: physical.control_delay_seconds,
+  })) {
+    if (!nonnegativeFinite(value)) diagnostics.push(`Headway physical parameter ${name} must be nonnegative`);
+  }
+  for (const [name, value] of Object.entries({
+    rope_sway_angle_rad: physical.rope_sway_angle_rad,
+    emergency_merge_sway_angle_rad: physical.emergency_merge_sway_angle_rad,
+  })) {
+    if (!nonnegativeFinite(value) || value >= Math.PI / 2) {
+      diagnostics.push(`Headway physical parameter ${name} must lie in [0, pi/2)`);
+    }
+  }
 }
 
 function uniqueIds<T extends { id: string }>(values: T[], label: string, diagnostics: string[]): Set<string> {
@@ -126,6 +215,10 @@ function positiveFinite(value: unknown): value is number {
 
 function nonnegativeFinite(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
+}
+
+function approximatelyEqual(left: number, right: number) {
+  return Math.abs(left - right) <= 1e-9 * Math.max(1, Math.abs(left), Math.abs(right));
 }
 
 function unique(values: string[]) {

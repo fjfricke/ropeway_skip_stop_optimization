@@ -360,6 +360,7 @@ export function ScenarioViewer({
             <>
               <EanReplayView
                 scenario={scenario}
+                headwayPolicy={eanInput?.headway_policy ?? null}
                 eanReplay={eanReplay}
                 eanPassengerService={eanPassengerService}
                 eanReplayWarning={eanReplayWarning}

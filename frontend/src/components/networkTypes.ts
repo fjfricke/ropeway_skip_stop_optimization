@@ -24,7 +24,7 @@ export interface ReplayCollisionMarker {
   y: number;
   cabinIds: number[];
   distanceM: number;
-  violationKind?: "resource_headway" | "initial_boundary" | "geometric_spacing" | "legacy_geometric_preview";
+  violationKind?: "resource_headway" | "initial_boundary" | "geometric_spacing" | "policy_geometric_preview";
   actualSeparation?: number;
   requiredSeparation?: number;
   unit?: "s" | "m";

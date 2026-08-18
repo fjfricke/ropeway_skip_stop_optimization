@@ -107,7 +107,7 @@ class PhysicalHeadwayPolicyBuilder:
         rope_spacing = (
             scenario.operating.cabin_length_m
             + 2.0
-            * physical.suspension_length_m
+            * physical.attachment_to_lowest_envelope_m
             * math.sin(physical.rope_sway_angle_rad)
             + physical.rope_clearance_m
         )
@@ -121,10 +121,16 @@ class PhysicalHeadwayPolicyBuilder:
         resources: list[DerivedHeadwayResource] = []
         quantities: list[DerivedQuantity] = [
             _quantity(
+                "attachment_to_lowest_envelope_m",
+                physical.attachment_to_lowest_envelope_m,
+                "m",
+                "g_roof + H_C",
+            ),
+            _quantity(
                 "rope_spacing_m",
                 rope_spacing,
                 "m",
-                "L_C + 2*l_H*sin(theta_R) + c_R",
+                "L_C + 2*(g_roof + H_C)*sin(theta_R) + c_R",
             ),
             _quantity(
                 "service_spacing_m",
@@ -479,7 +485,7 @@ def _stop_headway(
     merge_spacing = (
         scenario.operating.cabin_length_m
         + 2.0
-        * physical.suspension_length_m
+        * physical.attachment_to_lowest_envelope_m
         * math.sin(physical.emergency_merge_sway_angle_rad)
         + physical.merge_clearance_m
     )
@@ -490,7 +496,9 @@ def _stop_headway(
     )
     rope_headway = (
         scenario.operating.cabin_length_m
-        + 2.0 * physical.suspension_length_m * math.sin(physical.rope_sway_angle_rad)
+        + 2.0
+        * physical.attachment_to_lowest_envelope_m
+        * math.sin(physical.rope_sway_angle_rad)
         + physical.rope_clearance_m
     ) / scenario.operating.rope_speed_m_per_s
     return envelope, stop_time, max(rope_headway, envelope + stop_time)

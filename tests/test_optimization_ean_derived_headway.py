@@ -45,10 +45,10 @@ from ropeway_skip_stop_optimization.optimization.headway_resource_reduction impo
 @pytest.mark.parametrize(
     ("first_service", "second_service", "forward_required", "reverse_required"),
     (
-        (False, False, 0.916821, 0.916821),
-        (False, True, 0.916821, 4.845393),
-        (True, False, 4.845393, 0.916821),
-        (True, True, 4.845393, 4.845393),
+        (False, False, 1.052439, 1.052439),
+        (False, True, 1.052439, 4.981010),
+        (True, False, 4.981010, 1.052439),
+        (True, True, 4.981010, 4.981010),
     ),
 )
 def test_architecture_b_evaluates_all_directed_route_combinations(

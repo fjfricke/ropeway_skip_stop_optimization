@@ -31,7 +31,8 @@ class HeadwayPhysicalParameters:
     service_clearance_m: float
     rope_clearance_m: float
     merge_clearance_m: float
-    suspension_length_m: float
+    cabin_height_m: float
+    attachment_to_cabin_roof_m: float
     rope_sway_angle_rad: float
     emergency_merge_sway_angle_rad: float
     control_delay_seconds: float
@@ -47,7 +48,8 @@ class HeadwayPhysicalParameters:
         ):
             _require_finite_nonnegative(name, getattr(self, name))
         for name in (
-            "suspension_length_m",
+            "cabin_height_m",
+            "attachment_to_cabin_roof_m",
             "emergency_deceleration_m_per_s2",
         ):
             _require_finite_positive(name, getattr(self, name))
@@ -59,6 +61,16 @@ class HeadwayPhysicalParameters:
             if not math.isfinite(value) or not 0 <= value < math.pi / 2:
                 raise ValueError(f"{name} must lie in [0, pi/2)")
         _validate_provenance(self.provenance)
+
+    @property
+    def attachment_to_lowest_envelope_m(self) -> float:
+        """Vertical attachment-point distance used by the sway envelope.
+
+        This geometric distance is deliberately distinct from the reduced
+        pendulum length used by a carrier-dynamics model.
+        """
+
+        return self.attachment_to_cabin_roof_m + self.cabin_height_m
 
 
 @dataclass(frozen=True)

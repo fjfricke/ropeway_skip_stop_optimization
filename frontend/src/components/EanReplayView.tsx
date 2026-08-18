@@ -4,6 +4,7 @@ import type { CSSProperties } from "react";
 import { layoutForScenario } from "../scenarioLayout";
 import type { LayoutPoint, ScenarioLayout } from "../scenarioLayout";
 import type {
+  DerivedHeadwayPolicy,
   EanPassengerServicePlan,
   EanPassengerServiceResult,
   EanPhysicalEvent,
@@ -25,6 +26,7 @@ import type { ReplaySafetyReport, ReplaySafetyViolationKind } from "../safety";
 
 interface EanReplayViewProps {
   scenario: Scenario;
+  headwayPolicy: DerivedHeadwayPolicy | null;
   eanReplay: EanPhysicalReplay | null;
   eanPassengerService: EanPassengerServiceResult | null;
   eanReplayWarning: string | null;
@@ -91,6 +93,7 @@ const ALL_SAFETY_KINDS: ReplaySafetyViolationKind[] = [
 
 export function EanReplayView({
   scenario,
+  headwayPolicy,
   eanReplay,
   eanPassengerService,
   eanReplayWarning,
@@ -128,12 +131,12 @@ export function EanReplayView({
   const collisionMarkers = useMemo(
     () => safetyReport
       ? replaySafetyMarkersAtTime(safetyReport, markers, layout, timeSeconds, visibleSafetyKinds)
-      : eanReplayCollisionMarkers(scenario, markers).map((marker) => ({
+      : eanReplayCollisionMarkers(scenario, markers, headwayPolicy).map((marker) => ({
           ...marker,
-          violationKind: "legacy_geometric_preview" as const,
-          message: "Legacy geometric preview; final frontend certification is unavailable",
+          violationKind: "policy_geometric_preview" as const,
+          message: "Policy-based sampled preview; full-horizon frontend certification is pending",
         })),
-    [layout, markers, safetyReport, scenario, timeSeconds, visibleSafetyKinds],
+    [headwayPolicy, layout, markers, safetyReport, scenario, timeSeconds, visibleSafetyKinds],
   );
   const selectedMarker = markers.find((marker) => marker.cabinId === selectedCabinId) ?? markers[0] ?? null;
   const selectedEvent = selectedMarker ? latestEventAtOrBefore(eventsByCabin.get(selectedMarker.cabinId) ?? [], timeSeconds) : null;
@@ -554,9 +557,16 @@ export function eanCabinMarkersAtTime(
   });
 }
 
-export function eanReplayCollisionMarkers(scenario: Scenario, markers: ReplayCabinMarker[]): ReplayCollisionMarker[] {
-  const requiredSpacingM = scenario.operating.cabin_length_m + scenario.operating.min_clearance_m;
-  if (requiredSpacingM <= 0) return [];
+export function eanReplayCollisionMarkers(
+  scenario: Scenario,
+  markers: ReplayCabinMarker[],
+  policy: DerivedHeadwayPolicy | null = null,
+): ReplayCollisionMarker[] {
+  const spacingByRole = new Map<string, number>(
+    policy?.spatial_spacings.map((spacing) => [spacing.role, spacing.spacing_m]) ?? [],
+  );
+  const fallbackSpacingM = scenario.operating.cabin_length_m + scenario.operating.min_clearance_m;
+  const maximumPolicySpacingM = Math.max(0, ...spacingByRole.values());
   const collisions: ReplayCollisionMarker[] = [];
 
   for (let leftIndex = 0; leftIndex < markers.length; leftIndex += 1) {
@@ -566,7 +576,11 @@ export function eanReplayCollisionMarkers(scenario: Scenario, markers: ReplayCab
       const right = markers[rightIndex];
       if (right.x === undefined || right.y === undefined) continue;
       const distanceM = cabinSpacingDistanceM(left, right);
-      if (distanceM === null || distanceM >= requiredSpacingM - HEADWAY_WARNING_EPSILON_M) continue;
+      const requiredSpacingM = Math.max(
+        markerSpacingM(left, scenario, spacingByRole, maximumPolicySpacingM, fallbackSpacingM),
+        markerSpacingM(right, scenario, spacingByRole, maximumPolicySpacingM, fallbackSpacingM),
+      );
+      if (requiredSpacingM <= 0 || distanceM === null || distanceM >= requiredSpacingM - HEADWAY_WARNING_EPSILON_M) continue;
       addCollisionMarker(collisions, {
         id: `collision-${left.cabinId}-${right.cabinId}`,
         x: (left.x + right.x) / 2,
@@ -578,6 +592,25 @@ export function eanReplayCollisionMarkers(scenario: Scenario, markers: ReplayCab
   }
 
   return collisions;
+}
+
+function markerSpacingM(
+  marker: ReplayCabinMarker,
+  scenario: Scenario,
+  spacingByRole: ReadonlyMap<string, number>,
+  maximumPolicySpacingM: number,
+  fallbackSpacingM: number,
+) {
+  const segment = marker.segmentId
+    ? scenario.track_segments.find((candidate) => candidate.id === marker.segmentId)
+    : null;
+  const role = segment?.kind === "rope" || segment?.kind === "skip"
+    ? "rope"
+    : segment?.kind === "station"
+      ? "service"
+      : null;
+  if (role) return spacingByRole.get(role) ?? fallbackSpacingM;
+  return maximumPolicySpacingM > 0 ? maximumPolicySpacingM : fallbackSpacingM;
 }
 
 function cabinSpacingDistanceM(left: ReplayCabinMarker, right: ReplayCabinMarker) {
