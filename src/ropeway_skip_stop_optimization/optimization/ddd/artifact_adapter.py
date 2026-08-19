@@ -5,6 +5,7 @@ import math
 
 from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddFixedStart,
+    DddMovementCore,
     DddMovementProblem,
     DddMovementState,
     DddResource,
@@ -12,10 +13,20 @@ from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddRouteDecision,
     DddRouteOption,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_problem import (
+    DddFixedTrajectoryStartDomain,
+    DddOptimizedInitialPlacementDomain,
+    DddTrajectoryProblem,
+    DddTrajectoryWaitingPolicy,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generation import (
+    DddTrajectoryWaitingDomain,
+)
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanCabinStartKind,
     EanFleetMode,
+    EanFleetCardinalityMode,
     HeadwayCheckpointDefinition,
     HeadwayCheckpointKind,
     SkipStopTiming,
@@ -32,13 +43,40 @@ from ropeway_skip_stop_optimization.models import HeadwayRouteBehavior
 @dataclass(frozen=True)
 class EanArtifactToDddMovementProblemAdapter:
     tolerance_seconds: float = 1e-9
+    waiting_step_seconds: float = 1.0
 
     def build(self, artifact: EanBuildArtifact) -> DddMovementProblem:
+        trajectory_problem = self.build_trajectory_problem(artifact)
+        if (
+            trajectory_problem.waiting_policy.domain
+            is DddTrajectoryWaitingDomain.BOUNDED_WAIT
+        ):
+            raise ValueError(
+                "DDD bounded waiting requires build_trajectory_problem(); the "
+                "legacy fixed movement problem cannot carry its waiting policy"
+            )
+        if not isinstance(
+            trajectory_problem.start_domain, DddFixedTrajectoryStartDomain
+        ):
+            raise ValueError(
+                "DDD fixed movement adapter received optimized initial placement; "
+                "use build_trajectory_problem()"
+            )
+        problem = trajectory_problem.fixed_movement_problem
+        problem.validate()
+        return problem
+
+    def build_trajectory_problem(self, artifact: EanBuildArtifact) -> DddTrajectoryProblem:
+        """Adapt fixed starts or the exact-K continuous OIP trajectory domain."""
+
         artifact.validate()
         if self.tolerance_seconds < 0:
             raise ValueError("DDD adapter tolerance_seconds must be nonnegative")
-        if artifact.fleet_mode is not EanFleetMode.FIXED_STARTS:
-            raise ValueError("DDD reference oracle supports fixed starts only")
+        if (
+            not math.isfinite(self.waiting_step_seconds)
+            or self.waiting_step_seconds <= 0
+        ):
+            raise ValueError("DDD waiting_step_seconds must be positive and finite")
         if artifact.movement_network is None:
             raise ValueError("DDD reference oracle requires movement-network provenance")
         if len(artifact.circulation_pattern_ids) != 1:
@@ -46,7 +84,7 @@ class EanArtifactToDddMovementProblemAdapter:
         unsupported_waiting = tuple(
             station
             for station in artifact.config.station_configs
-            if station.waiting_mode is not StationWaitingMode.NO_WAITING
+            if station.waiting_mode is StationWaitingMode.STATION_FIFO_BUFFER
         )
         if unsupported_waiting:
             details = ", ".join(
@@ -54,16 +92,121 @@ class EanArtifactToDddMovementProblemAdapter:
                 for station in unsupported_waiting
             )
             raise ValueError(
-                "DDD reference oracle does not yet support station waiting: "
+                "DDD trajectory pricing does not support station FIFO waiting: "
                 f"{details}"
             )
-        if any(start.kind is not EanCabinStartKind.FIXED for start in artifact.cabin_starts):
-            raise ValueError("DDD reference oracle requires exact fixed start times")
+        core = self.build_movement_core(artifact)
+        waiting_policy = self.build_waiting_policy(artifact, core=core)
+        if artifact.fleet_mode is EanFleetMode.FIXED_STARTS:
+            if any(
+                start.kind is not EanCabinStartKind.FIXED
+                for start in artifact.cabin_starts
+            ):
+                raise ValueError("DDD reference oracle requires exact fixed start times")
+            visit_count_by_cabin_id: dict[int, int] = {}
+            for visit in artifact.switch_visits:
+                visit_count_by_cabin_id[visit.cabin_id] = (
+                    visit_count_by_cabin_id.get(visit.cabin_id, 0) + 1
+                )
+            domain = DddFixedTrajectoryStartDomain(
+                starts=tuple(
+                    DddFixedStart(
+                        cabin_id=start.cabin_id,
+                        state_id=start.first_switch_id,
+                        time_seconds=start.time_seconds,
+                        max_visit_count=visit_count_by_cabin_id[start.cabin_id],
+                    )
+                    for start in sorted(
+                        artifact.cabin_starts, key=lambda item: item.cabin_id
+                    )
+                )
+            )
+        elif artifact.fleet_mode is EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT:
+            if artifact.fleet_cardinality_mode is not EanFleetCardinalityMode.EXACT:
+                raise ValueError("DDD OIP trajectory pricing requires exact cardinality")
+            parameters = artifact.initial_placement_parameters
+            if parameters is None:
+                raise ValueError("DDD OIP trajectory pricing requires placement parameters")
+            visit_counts = {
+                cabin_id: sum(
+                    visit.cabin_id == cabin_id for visit in artifact.switch_visits
+                )
+                for cabin_id in range(parameters.available_fleet_count)
+            }
+            if len(set(visit_counts.values())) != 1:
+                raise ValueError("DDD OIP cabins must have identical visit domains")
+            domain = DddOptimizedInitialPlacementDomain(
+                cabin_ids=tuple(range(parameters.available_fleet_count)),
+                pattern_id=artifact.circulation_pattern_ids[0],
+                phase_state_ids=artifact.circulation_state_ids,
+                maximum_visit_count=next(iter(visit_counts.values())),
+            )
+        else:
+            raise ValueError(f"unsupported DDD fleet mode: {artifact.fleet_mode}")
+        result = DddTrajectoryProblem(
+            movement_core=core,
+            start_domain=domain,
+            waiting_policy=waiting_policy,
+        )
+        result.validate()
+        return result
 
+    def build_waiting_policy(
+        self,
+        artifact: EanBuildArtifact,
+        *,
+        core: DddMovementCore | None = None,
+    ) -> DddTrajectoryWaitingPolicy:
+        artifact.validate()
+        waiting_stations = tuple(
+            sorted(
+                (
+                    station.station_id,
+                    station.max_wait_seconds,
+                )
+                for station in artifact.config.station_configs
+                if station.waiting_mode is StationWaitingMode.END_OF_PLATFORM_WAIT
+            )
+        )
+        if not waiting_stations:
+            return DddTrajectoryWaitingPolicy()
+        missing = tuple(
+            station_id
+            for station_id, maximum in waiting_stations
+            if maximum is None
+        )
+        if missing:
+            raise ValueError(
+                "DDD bounded waiting requires explicit max_wait_seconds for "
+                f"every waiting station: {missing}"
+            )
+        policy = DddTrajectoryWaitingPolicy(
+            domain=DddTrajectoryWaitingDomain.BOUNDED_WAIT,
+            step_seconds=self.waiting_step_seconds,
+            maximum_wait_seconds_by_station_id=tuple(
+                (station_id, float(maximum))
+                for station_id, maximum in waiting_stations
+                if maximum is not None
+            ),
+            earliest_wait_time_seconds=0.0,
+        )
+        policy.validate(core or self.build_movement_core(artifact))
+        return policy
+
+    def build_movement_core(self, artifact: EanBuildArtifact) -> DddMovementCore:
+        """Build the start-independent physical domain for DDD fleet modes."""
+
+        artifact.validate()
         network = artifact.movement_network
+        assert network is not None
         pattern = network.pattern(artifact.circulation_pattern_ids[0])
         station_config_by_id = {
             station.station_id: station for station in artifact.config.station_configs
+        }
+        waiting_station_ids = {
+            station_id
+            for station_id, config in station_config_by_id.items()
+            if config.waiting_mode is StationWaitingMode.END_OF_PLATFORM_WAIT
         }
         options_by_id = {option.id: option for option in network.route_options}
         timing_by_state_id = {timing.switch_id: timing for timing in artifact.timings}
@@ -88,6 +231,7 @@ class EanArtifactToDddMovementProblemAdapter:
                 timing_by_state_id,
                 checkpoints_by_state_id,
                 artifact,
+                waiting_station_ids,
             )
             for option_id in sorted(allowed_option_ids)
         )
@@ -99,7 +243,9 @@ class EanArtifactToDddMovementProblemAdapter:
         checkpoint_by_id = {
             checkpoint.id: checkpoint for checkpoint in artifact.headway_checkpoints
         }
-        resources = tuple(
+        resources_by_id = {
+            resource.id: resource
+            for resource in (
             DddResource(
                 id=resource_id,
                 headway_seconds=artifact.headway_rule_for_checkpoint(
@@ -110,32 +256,30 @@ class EanArtifactToDddMovementProblemAdapter:
                 ).maximum_seconds,
             )
             for resource_id in sorted(resource_ids)
-        )
-        visit_count_by_cabin_id: dict[int, int] = {}
-        for visit in artifact.switch_visits:
-            visit_count_by_cabin_id[visit.cabin_id] = (
-                visit_count_by_cabin_id.get(visit.cabin_id, 0) + 1
             )
-        starts = tuple(
-            DddFixedStart(
-                cabin_id=start.cabin_id,
-                state_id=start.first_switch_id,
-                time_seconds=start.time_seconds,
-                max_visit_count=visit_count_by_cabin_id[start.cabin_id],
-            )
-            for start in sorted(artifact.cabin_starts, key=lambda item: item.cabin_id)
-        )
-        problem = DddMovementProblem(
+        }
+        if artifact.fleet_mode is EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT:
+            for switch_id in artifact.circulation_state_ids:
+                boundary = artifact.initial_boundary_service_resource(switch_id)
+                if boundary is None or boundary.id in resources_by_id:
+                    continue
+                rule = artifact.headway_rule_for_full_resource(boundary)
+                resources_by_id[boundary.id] = DddResource(
+                    id=boundary.id,
+                    headway_seconds=rule.minimum_seconds,
+                    maximum_headway_seconds=rule.maximum_seconds,
+                )
+        resources = tuple(resources_by_id[key] for key in sorted(resources_by_id))
+        core = DddMovementCore(
             scenario_id=artifact.scenario_id,
             passenger_service_end_seconds=artifact.config.passenger_service_end_seconds,
             operational_end_seconds=artifact.config.operational_end_seconds,
             states=tuple(DddMovementState(state.id) for state in network.states),
-            starts=starts,
             route_options=route_options,
             resources=resources,
         )
-        problem.validate()
-        return problem
+        core.validate()
+        return core
 
     def _route_option(
         self,
@@ -143,6 +287,7 @@ class EanArtifactToDddMovementProblemAdapter:
         timing_by_state_id: dict[str, SkipStopTiming],
         checkpoints_by_state_id: dict[str, list[HeadwayCheckpointDefinition]],
         artifact: EanBuildArtifact,
+        waiting_station_ids: set[str],
     ) -> DddRouteOption:
         if option.movement_effect is not EanMovementEffect.CONTINUE:
             raise ValueError(
@@ -224,6 +369,29 @@ class EanArtifactToDddMovementProblemAdapter:
                             _headway_behavior(decision),
                             _headway_behavior(decision),
                         )
+                    ),
+                    leader_clear_wait_coefficient=(
+                        1
+                        if decision is DddRouteDecision.STOP
+                        and option.station_id in waiting_station_ids
+                        and checkpoint.kind
+                        in {
+                            HeadwayCheckpointKind.PLATFORM_EXIT,
+                            HeadwayCheckpointKind.EXIT_SWITCH,
+                            HeadwayCheckpointKind.SERVICE_MECHANISM,
+                        }
+                        else 0
+                    ),
+                    follower_enter_wait_coefficient=(
+                        1
+                        if decision is DddRouteDecision.STOP
+                        and option.station_id in waiting_station_ids
+                        and checkpoint.kind
+                        in {
+                            HeadwayCheckpointKind.EXIT_SWITCH,
+                            HeadwayCheckpointKind.SERVICE_MECHANISM,
+                        }
+                        else 0
                     ),
                 )
             )

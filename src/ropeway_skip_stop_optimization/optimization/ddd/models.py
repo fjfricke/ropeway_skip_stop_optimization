@@ -110,6 +110,8 @@ class DddResourceUsage:
     leader_clear_offset_seconds: float
     follower_enter_offset_seconds: float
     separation_after_seconds: float | None = None
+    leader_clear_wait_coefficient: int = 0
+    follower_enter_wait_coefficient: int = 0
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -144,6 +146,16 @@ class DddResourceUsage:
             return fallback_headway_tick
         return ddd_headway_seconds_to_tick(self.separation_after_seconds)
 
+    def leader_clear_offset_with_wait(self, wait_seconds: float) -> float:
+        return self.leader_clear_offset_seconds + (
+            self.leader_clear_wait_coefficient * wait_seconds
+        )
+
+    def follower_enter_offset_with_wait(self, wait_seconds: float) -> float:
+        return self.follower_enter_offset_seconds + (
+            self.follower_enter_wait_coefficient * wait_seconds
+        )
+
     def validate(self) -> None:
         _require_id("DDD resource usage resource_id", self.resource_id)
         _require_finite_nonnegative(
@@ -159,6 +171,10 @@ class DddResourceUsage:
                 "DDD resource usage separation_after_seconds",
                 self.separation_after_seconds,
             )
+        if self.leader_clear_wait_coefficient not in (0, 1):
+            raise ValueError("DDD leader-clear wait coefficient must be zero or one")
+        if self.follower_enter_wait_coefficient not in (0, 1):
+            raise ValueError("DDD follower-enter wait coefficient must be zero or one")
 
 
 @dataclass(frozen=True)
@@ -251,12 +267,13 @@ class DddRouteOption:
 
 
 @dataclass(frozen=True)
-class DddMovementProblem:
+class DddMovementCore:
+    """Start-independent physical movement domain shared by DDD formulations."""
+
     scenario_id: str
     passenger_service_end_seconds: float
     operational_end_seconds: float
     states: tuple[DddMovementState, ...]
-    starts: tuple[DddFixedStart, ...]
     route_options: tuple[DddRouteOption, ...]
     resources: tuple[DddResource, ...]
 
@@ -294,28 +311,18 @@ class DddMovementProblem:
             raise ValueError("DDD horizons must occupy at least one time tick")
         if self.operational_end_tick < self.passenger_service_end_tick:
             raise ValueError("DDD operational horizon must include passenger service")
-        if not self.states or not self.starts or not self.route_options:
-            raise ValueError("DDD movement problem needs states, starts, and route options")
+        if not self.states or not self.route_options:
+            raise ValueError("DDD movement core needs states and route options")
 
         state_ids = _validate_unique_ids("DDD movement state", self.states)
         resource_ids = _validate_unique_ids("DDD resource", self.resources)
         option_ids = _validate_unique_ids("DDD route option", self.route_options)
         if not option_ids:
             raise ValueError("DDD movement problem needs route options")
-        cabin_ids: set[int] = set()
         for state in self.states:
             state.validate()
         for resource in self.resources:
             resource.validate()
-        for start in self.starts:
-            start.validate()
-            if start.cabin_id in cabin_ids:
-                raise ValueError(f"duplicate DDD cabin start id: {start.cabin_id}")
-            cabin_ids.add(start.cabin_id)
-            if start.state_id not in state_ids:
-                raise ValueError("DDD fixed start references an unknown state")
-            if start.time_tick > self.operational_end_tick:
-                raise ValueError("DDD fixed start lies after the operational horizon")
         outgoing_state_ids: set[str] = set()
         for option in self.route_options:
             option.validate()
@@ -342,9 +349,6 @@ class DddMovementProblem:
                         f"envelope: option={option.id!r}, resource={resource.id!r}"
                     )
             outgoing_state_ids.add(option.from_state_id)
-        reachable_start_states = {start.state_id for start in self.starts}
-        if reachable_start_states - outgoing_state_ids:
-            raise ValueError("DDD fixed start state has no outgoing route option")
 
     @property
     def route_options_by_state_id(self) -> dict[str, tuple[DddRouteOption, ...]]:
@@ -359,6 +363,74 @@ class DddMovementProblem:
     @property
     def resources_by_id(self) -> dict[str, DddResource]:
         return {resource.id: resource for resource in self.resources}
+
+
+@dataclass(frozen=True)
+class DddMovementProblem:
+    """Compatibility wrapper for the original fixed-start DDD interface."""
+
+    scenario_id: str
+    passenger_service_end_seconds: float
+    operational_end_seconds: float
+    states: tuple[DddMovementState, ...]
+    starts: tuple[DddFixedStart, ...]
+    route_options: tuple[DddRouteOption, ...]
+    resources: tuple[DddResource, ...]
+
+    def __post_init__(self) -> None:
+        core = self.core
+        object.__setattr__(
+            self, "passenger_service_end_seconds", core.passenger_service_end_seconds
+        )
+        object.__setattr__(
+            self, "operational_end_seconds", core.operational_end_seconds
+        )
+
+    @property
+    def core(self) -> DddMovementCore:
+        return DddMovementCore(
+            scenario_id=self.scenario_id,
+            passenger_service_end_seconds=self.passenger_service_end_seconds,
+            operational_end_seconds=self.operational_end_seconds,
+            states=self.states,
+            route_options=self.route_options,
+            resources=self.resources,
+        )
+
+    @property
+    def passenger_service_end_tick(self) -> DddTimeTick:
+        return self.core.passenger_service_end_tick
+
+    @property
+    def operational_end_tick(self) -> DddTimeTick:
+        return self.core.operational_end_tick
+
+    def validate(self) -> None:
+        self.core.validate()
+        if not self.starts:
+            raise ValueError("DDD movement problem needs fixed starts")
+        state_ids = {state.id for state in self.states}
+        outgoing_state_ids = {option.from_state_id for option in self.route_options}
+        cabin_ids: set[int] = set()
+        for start in self.starts:
+            start.validate()
+            if start.cabin_id in cabin_ids:
+                raise ValueError(f"duplicate DDD cabin start id: {start.cabin_id}")
+            cabin_ids.add(start.cabin_id)
+            if start.state_id not in state_ids:
+                raise ValueError("DDD fixed start references an unknown state")
+            if start.time_tick > self.operational_end_tick:
+                raise ValueError("DDD fixed start lies after the operational horizon")
+        if {start.state_id for start in self.starts} - outgoing_state_ids:
+            raise ValueError("DDD fixed start state has no outgoing route option")
+
+    @property
+    def route_options_by_state_id(self) -> dict[str, tuple[DddRouteOption, ...]]:
+        return self.core.route_options_by_state_id
+
+    @property
+    def resources_by_id(self) -> dict[str, DddResource]:
+        return self.core.resources_by_id
 
 
 def _validate_unique_ids(label: str, values: tuple[object, ...]) -> set[str]:

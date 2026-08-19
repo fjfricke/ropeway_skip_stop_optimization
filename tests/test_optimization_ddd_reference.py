@@ -213,10 +213,10 @@ def test_ean_adapter_builds_pair_independent_no_wait_problem() -> None:
     assert all(start.max_visit_count > 0 for start in problem.starts)
 
 
-def test_ean_adapter_rejects_waiting_before_enumeration() -> None:
+def test_ean_adapter_rejects_waiting_without_explicit_limit() -> None:
     artifact = _registered_sparse_artifact("three_station_v0")
 
-    with pytest.raises(ValueError, match="does not yet support station waiting"):
+    with pytest.raises(ValueError, match="explicit max_wait_seconds"):
         EanArtifactToDddMovementProblemAdapter().build(artifact)
 
 

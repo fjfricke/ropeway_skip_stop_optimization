@@ -12,6 +12,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.reference import (
     validate_ddd_reference_trajectory,
     validate_ddd_reference_solution,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_problem import (
+    DddTrajectoryWaitingPolicy,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
     ddd_seconds_to_tick,
     ddd_tick_to_seconds,
@@ -32,6 +35,7 @@ from ropeway_skip_stop_optimization.optimization.ean.plan import (
 @dataclass(frozen=True)
 class DddReferenceToEanMovementPlanAdapter:
     tolerance_seconds: float = 1e-9
+    waiting_policy: DddTrajectoryWaitingPolicy = DddTrajectoryWaitingPolicy()
 
     def build(
         self,
@@ -59,6 +63,7 @@ class DddReferenceToEanMovementPlanAdapter:
             problem,
             solution,
             tolerance_seconds=self.tolerance_seconds,
+            waiting_policy=self.waiting_policy,
         )
         trajectories = tuple(
             self.build_trajectory(problem=problem, trajectory=trajectory)
@@ -90,6 +95,7 @@ class DddReferenceToEanMovementPlanAdapter:
             problem,
             trajectory,
             tolerance_seconds=self.tolerance_seconds,
+            waiting_policy=self.waiting_policy,
         )
         options_by_id = {option.id: option for option in problem.route_options}
         visits: list[EanCabinVisit] = []
@@ -122,6 +128,7 @@ class DddReferenceToEanMovementPlanAdapter:
                             + ddd_seconds_to_tick(
                                 option.platform_exit_offset_seconds
                             )
+                            + ddd_seconds_to_tick(reference_visit.wait_seconds)
                         )
                         if option.platform_exit_offset_seconds is not None
                         else None
@@ -129,9 +136,10 @@ class DddReferenceToEanMovementPlanAdapter:
                     exit_switch_time_seconds=ddd_tick_to_seconds(
                         ddd_seconds_to_tick(reference_visit.switch_time_seconds)
                         + option.exit_switch_offset_tick
+                        + ddd_seconds_to_tick(reference_visit.wait_seconds)
                     ),
                     next_switch_time_seconds=reference_visit.next_switch_time_seconds,
-                    wait_seconds=0.0,
+                    wait_seconds=reference_visit.wait_seconds,
                 )
             )
         result = EanCabinTrajectory(

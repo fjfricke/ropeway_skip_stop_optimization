@@ -1,4 +1,5 @@
 from dataclasses import replace
+import json
 from random import Random
 
 import pytest
@@ -537,6 +538,40 @@ def test_exact_root_column_generation_checkpoint_roundtrip_and_resume(
     )
     assert terminal_resume.status is DddTrajectoryRootCgStatus.OPTIMAL_ROOT_LP
     assert terminal_resume.iterations == resumed.iterations
+
+    final_iteration = resumed_states[-1].iterations[-1]
+    corrupt_certified_state = replace(
+        resumed_states[-1],
+        iterations=(
+            *resumed_states[-1].iterations[:-1],
+            replace(
+                final_iteration,
+                exact_pricing_cabin_count=(
+                    final_iteration.exact_pricing_cabin_count - 1
+                ),
+            ),
+        ),
+    )
+    with pytest.raises(ValueError, match="root certificate is inconsistent"):
+        DddTrajectoryExactRootColumnGenerationSolver(max_iterations=20).solve(
+            problem=problem,
+            artifact=artifact,
+            passenger_build=passenger_build,
+            objective=EanPassengerObjective.JOURNEY_TIME,
+            resume_state=corrupt_certified_state,
+        )
+
+    legacy_path = tmp_path / "legacy-incomplete-pricing.checkpoint.json"
+    write_ddd_trajectory_root_cg_checkpoint(legacy_path, resumed_states[-1])
+    legacy_payload = json.loads(legacy_path.read_text(encoding="utf-8"))
+    legacy_payload["schema_version"] = 1
+    legacy_payload["state"].pop("root_lp_certified")
+    legacy_payload["state"]["iterations"][-1]["exact_pricing_cabin_count"] -= 1
+    legacy_path.write_text(json.dumps(legacy_payload), encoding="utf-8")
+
+    assert not read_ddd_trajectory_root_cg_checkpoint(
+        legacy_path
+    ).root_lp_certified
 
 
 def test_resource_window_root_mode_retains_exact_pair_fallback() -> None:

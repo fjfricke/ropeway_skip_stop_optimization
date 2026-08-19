@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import InitVar, dataclass
 from enum import StrEnum
 from itertools import combinations
 
@@ -18,6 +18,13 @@ from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
     ddd_quantize_time_seconds,
     ddd_seconds_to_tick,
     ddd_tick_to_seconds,
+)
+from ropeway_skip_stop_optimization.optimization.ean.fleet import (
+    EanInitialPlacementState,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_problem import (
+    DddReservoirTrajectoryState,
+    DddTrajectoryWaitingPolicy,
 )
 
 
@@ -46,18 +53,22 @@ class DddReferenceResourceOccurrence:
     leader_clear_time_seconds: float
     follower_enter_time_seconds: float
     separation_after_seconds: float | None = None
+    boundary_only: bool = False
+    boundary_origin: bool = False
+    quantize_times: InitVar[bool] = True
 
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "leader_clear_time_seconds",
-            ddd_quantize_time_seconds(self.leader_clear_time_seconds),
-        )
-        object.__setattr__(
-            self,
-            "follower_enter_time_seconds",
-            ddd_quantize_time_seconds(self.follower_enter_time_seconds),
-        )
+    def __post_init__(self, quantize_times: bool) -> None:
+        if quantize_times:
+            object.__setattr__(
+                self,
+                "leader_clear_time_seconds",
+                ddd_quantize_time_seconds(self.leader_clear_time_seconds),
+            )
+            object.__setattr__(
+                self,
+                "follower_enter_time_seconds",
+                ddd_quantize_time_seconds(self.follower_enter_time_seconds),
+            )
         if self.separation_after_seconds is not None:
             object.__setattr__(
                 self,
@@ -81,36 +92,54 @@ class DddReferenceVisit:
     switch_time_seconds: float
     next_switch_time_seconds: float
     resource_occurrences: tuple[DddReferenceResourceOccurrence, ...]
+    wait_seconds: float = 0.0
+    quantize_times: InitVar[bool] = True
 
-    def __post_init__(self) -> None:
-        object.__setattr__(
-            self,
-            "switch_time_seconds",
-            ddd_quantize_time_seconds(self.switch_time_seconds),
-        )
-        object.__setattr__(
-            self,
-            "next_switch_time_seconds",
-            ddd_quantize_time_seconds(self.next_switch_time_seconds),
-        )
+    def __post_init__(self, quantize_times: bool) -> None:
+        if quantize_times:
+            object.__setattr__(
+                self,
+                "switch_time_seconds",
+                ddd_quantize_time_seconds(self.switch_time_seconds),
+            )
+            object.__setattr__(
+                self,
+                "next_switch_time_seconds",
+                ddd_quantize_time_seconds(self.next_switch_time_seconds),
+            )
+            object.__setattr__(
+                self,
+                "wait_seconds",
+                ddd_quantize_time_seconds(self.wait_seconds),
+            )
 
 
 @dataclass(frozen=True)
 class DddReferenceTrajectory:
     cabin_id: int
     visits: tuple[DddReferenceVisit, ...]
+    initial_state: EanInitialPlacementState | None = None
+    boundary_resource_occurrences: tuple[DddReferenceResourceOccurrence, ...] = ()
+    reservoir_state: DddReservoirTrajectoryState | None = None
 
     @property
     def support_signature(self) -> tuple[str, ...]:
         return tuple(visit.route_option_id for visit in self.visits)
 
     @property
-    def resource_occurrences(self) -> tuple[DddReferenceResourceOccurrence, ...]:
+    def timed_support_signature(self) -> tuple[tuple[str, float], ...]:
         return tuple(
+            (visit.route_option_id, round(visit.wait_seconds, 9))
+            for visit in self.visits
+        )
+
+    @property
+    def resource_occurrences(self) -> tuple[DddReferenceResourceOccurrence, ...]:
+        return (*self.boundary_resource_occurrences, *tuple(
             occurrence
             for visit in self.visits
             for occurrence in visit.resource_occurrences
-        )
+        ))
 
 
 @dataclass(frozen=True)
@@ -380,6 +409,7 @@ def validate_ddd_reference_solution(
     solution: DddReferenceSolution,
     *,
     tolerance_seconds: float = 1e-9,
+    waiting_policy: DddTrajectoryWaitingPolicy | None = None,
 ) -> None:
     problem.validate()
     if tolerance_seconds < 0:
@@ -399,6 +429,7 @@ def validate_ddd_reference_solution(
             problem,
             trajectory,
             tolerance_seconds=tolerance_seconds,
+            waiting_policy=waiting_policy,
         )
         all_occurrences.extend(trajectory.resource_occurrences)
     conflicts = find_ddd_reference_conflicts(
@@ -417,10 +448,13 @@ def validate_ddd_reference_trajectory(
     trajectory: DddReferenceTrajectory,
     *,
     tolerance_seconds: float = 1e-9,
+    waiting_policy: DddTrajectoryWaitingPolicy | None = None,
 ) -> None:
-    """Validate one locally feasible no-wait trajectory without other cabins."""
+    """Validate one locally feasible trajectory without other cabins."""
 
     problem.validate()
+    waiting_policy = waiting_policy or DddTrajectoryWaitingPolicy()
+    waiting_policy.validate(problem.core)
     if tolerance_seconds < 0:
         raise ValueError("DDD validation tolerance_seconds must be nonnegative")
     starts_by_cabin_id = {start.cabin_id: start for start in problem.starts}
@@ -451,6 +485,29 @@ def validate_ddd_reference_trajectory(
             raise ValueError("DDD trajectory references an unknown route option")
         if option.from_state_id != reference_visit.state_id:
             raise ValueError("DDD visit uses a route from another state")
+        allowed_waits = waiting_policy.wait_values_seconds(option.station_id)
+        if not any(
+            abs(reference_visit.wait_seconds - value) <= tolerance_seconds
+            for value in allowed_waits
+        ):
+            raise ValueError("DDD visit wait lies outside the configured domain")
+        if (
+            option.decision is DddRouteDecision.SKIP
+            and reference_visit.wait_seconds > tolerance_seconds
+        ):
+            raise ValueError("DDD SKIP visit cannot wait")
+        if reference_visit.wait_seconds > tolerance_seconds:
+            if option.platform_exit_offset_seconds is None:
+                raise ValueError("DDD waiting visit lacks a platform exit")
+            minimum_exit = (
+                reference_visit.switch_time_seconds
+                + option.platform_exit_offset_seconds
+            )
+            if (
+                minimum_exit
+                < waiting_policy.earliest_wait_time_seconds - tolerance_seconds
+            ):
+                raise ValueError("DDD visit waits before the permitted boundary")
         rebuilt = build_ddd_reference_visit(
             start=start,
             visit_index=visit_index,
@@ -458,6 +515,7 @@ def validate_ddd_reference_trajectory(
             option=option,
             operational_end_seconds=problem.operational_end_seconds,
             tolerance_seconds=tolerance_seconds,
+            wait_seconds=reference_visit.wait_seconds,
         )
         if rebuilt != reference_visit:
             raise ValueError("DDD visit timing or resource occurrences are inconsistent")
@@ -491,17 +549,37 @@ def find_ddd_reference_conflicts(
     for first, second in combinations(occurrences, 2):
         if first.resource_id != second.resource_id:
             continue
+        if (first.boundary_only or second.boundary_only) and not (
+            first.boundary_origin or second.boundary_origin
+        ):
+            # A retained dominated resource only connects a pre-boundary
+            # occurrence to its regular witnesses.  Regular/regular conflicts
+            # are already implied by the effective policy.
+            continue
         resource = resources_by_id[first.resource_id]
-        forward = ddd_seconds_to_tick(
+        forward = (
             second.follower_enter_time_seconds
-        ) - ddd_seconds_to_tick(first.leader_clear_time_seconds)
-        reverse = ddd_seconds_to_tick(
+            - first.leader_clear_time_seconds
+        )
+        reverse = (
             first.follower_enter_time_seconds
-        ) - ddd_seconds_to_tick(second.leader_clear_time_seconds)
-        forward_violation = first.separation_after_tick(resource) - forward
-        reverse_violation = second.separation_after_tick(resource) - reverse
-        violation_tick = min(forward_violation, reverse_violation)
-        if violation_tick > ddd_seconds_to_tick(tolerance_seconds):
+            - second.leader_clear_time_seconds
+        )
+        first_separation = (
+            first.separation_after_seconds
+            if first.separation_after_seconds is not None
+            else resource.minimum_headway_seconds
+        )
+        second_separation = (
+            second.separation_after_seconds
+            if second.separation_after_seconds is not None
+            else resource.minimum_headway_seconds
+        )
+        violation_seconds = min(
+            first_separation - forward,
+            second_separation - reverse,
+        )
+        if violation_seconds > tolerance_seconds:
             result.append(
                 DddReferenceConflict(
                     resource_id=resource.id,
@@ -509,7 +587,7 @@ def find_ddd_reference_conflicts(
                     first_visit_index=first.visit_index,
                     second_cabin_id=second.cabin_id,
                     second_visit_index=second.visit_index,
-                    violation_seconds=ddd_tick_to_seconds(violation_tick),
+                    violation_seconds=violation_seconds,
                 )
             )
     return tuple(
@@ -535,9 +613,11 @@ def build_ddd_reference_visit(
     option: DddRouteOption,
     operational_end_seconds: float,
     tolerance_seconds: float,
+    wait_seconds: float = 0.0,
 ) -> DddReferenceVisit:
     switch_tick = ddd_seconds_to_tick(switch_time_seconds)
-    next_switch_tick = switch_tick + option.duration_tick
+    wait_tick = ddd_seconds_to_tick(wait_seconds)
+    next_switch_tick = switch_tick + option.duration_tick + wait_tick
     next_switch_time_seconds = ddd_tick_to_seconds(next_switch_tick)
     occurrences = tuple(
         occurrence
@@ -549,6 +629,7 @@ def build_ddd_reference_visit(
                     visit_index=visit_index,
                     switch_time_seconds=switch_time_seconds,
                     usage=usage,
+                    wait_seconds=wait_seconds,
                 )
             ).follower_enter_time_seconds
         )
@@ -563,6 +644,7 @@ def build_ddd_reference_visit(
         switch_time_seconds=ddd_tick_to_seconds(switch_tick),
         next_switch_time_seconds=next_switch_time_seconds,
         resource_occurrences=occurrences,
+        wait_seconds=wait_seconds,
     )
 
 
@@ -572,6 +654,7 @@ def _resource_occurrence(
     visit_index: int,
     switch_time_seconds: float,
     usage: DddResourceUsage,
+    wait_seconds: float = 0.0,
 ) -> DddReferenceResourceOccurrence:
     switch_tick = ddd_seconds_to_tick(switch_time_seconds)
     return DddReferenceResourceOccurrence(
@@ -579,10 +662,16 @@ def _resource_occurrence(
         cabin_id=start.cabin_id,
         visit_index=visit_index,
         leader_clear_time_seconds=ddd_tick_to_seconds(
-            switch_tick + usage.leader_clear_offset_tick
+            switch_tick
+            + ddd_seconds_to_tick(
+                usage.leader_clear_offset_with_wait(wait_seconds)
+            )
         ),
         follower_enter_time_seconds=ddd_tick_to_seconds(
-            switch_tick + usage.follower_enter_offset_tick
+            switch_tick
+            + ddd_seconds_to_tick(
+                usage.follower_enter_offset_with_wait(wait_seconds)
+            )
         ),
         separation_after_seconds=usage.separation_after_seconds,
     )

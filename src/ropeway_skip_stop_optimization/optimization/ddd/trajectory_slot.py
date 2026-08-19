@@ -1109,7 +1109,97 @@ def _complete_trajectory_incompatibility_pairs(
 def ddd_trajectory_column_signature(
     trajectory: DddReferenceTrajectory,
 ) -> tuple[tuple[object, ...], ...]:
-    """Return the complete integer-tick signature of one physical trajectory."""
+    """Return a stable physical signature, continuous for OIP and ticked for fixed starts."""
+
+    if trajectory.reservoir_state is not None:
+        state = trajectory.reservoir_state
+        return (
+            (
+                "reservoir_state",
+                state.kind.value,
+                state.interface_id,
+                (
+                    None
+                    if state.dispatch_time_seconds is None
+                    else round(state.dispatch_time_seconds, 9)
+                ),
+            ),
+            *tuple(
+                (
+                    visit.visit_index,
+                    visit.state_id,
+                    visit.route_option_id,
+                    visit.decision.value,
+                    round(visit.wait_seconds, 9),
+                    round(visit.switch_time_seconds, 9),
+                    round(visit.next_switch_time_seconds, 9),
+                    tuple(
+                        sorted(
+                            (
+                                occurrence.resource_id,
+                                occurrence.cabin_id,
+                                occurrence.visit_index,
+                                round(occurrence.leader_clear_time_seconds, 9),
+                                round(occurrence.follower_enter_time_seconds, 9),
+                            )
+                            for occurrence in visit.resource_occurrences
+                        )
+                    ),
+                )
+                for visit in trajectory.visits
+            ),
+        )
+
+    if trajectory.initial_state is not None:
+        state = trajectory.initial_state
+        return (
+            (
+                "initial_state",
+                state.kind.value,
+                state.switch_id,
+                state.visit_index,
+                round(state.progress, 9),
+                round(state.previous_event_time_seconds, 9),
+                round(state.next_event_time_seconds, 9),
+                state.previous_service,
+                tuple(
+                    sorted(
+                        (
+                            occurrence.resource_id,
+                            occurrence.visit_index,
+                            round(occurrence.leader_clear_time_seconds, 9),
+                            round(occurrence.follower_enter_time_seconds, 9),
+                            occurrence.separation_after_seconds,
+                        )
+                        for occurrence in trajectory.boundary_resource_occurrences
+                    )
+                ),
+            ),
+            *tuple(
+                (
+                    visit.visit_index,
+                    visit.state_id,
+                    visit.route_option_id,
+                    visit.decision.value,
+                    round(visit.wait_seconds, 9),
+                    round(visit.switch_time_seconds, 9),
+                    round(visit.next_switch_time_seconds, 9),
+                    tuple(
+                        sorted(
+                            (
+                                occurrence.resource_id,
+                                occurrence.cabin_id,
+                                occurrence.visit_index,
+                                round(occurrence.leader_clear_time_seconds, 9),
+                                round(occurrence.follower_enter_time_seconds, 9),
+                            )
+                            for occurrence in visit.resource_occurrences
+                        )
+                    ),
+                )
+                for visit in trajectory.visits
+            ),
+        )
 
     return tuple(
         (
@@ -1117,6 +1207,7 @@ def ddd_trajectory_column_signature(
             visit.state_id,
             visit.route_option_id,
             visit.decision.value,
+            ddd_seconds_to_tick(visit.wait_seconds),
             ddd_seconds_to_tick(visit.switch_time_seconds),
             ddd_seconds_to_tick(visit.next_switch_time_seconds),
             tuple(

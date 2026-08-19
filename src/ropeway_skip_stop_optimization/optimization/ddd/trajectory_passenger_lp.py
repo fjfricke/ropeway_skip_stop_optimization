@@ -61,6 +61,7 @@ class DddTrajectoryPassengerOption:
     id: str
     cabin_id: int
     rides: tuple[DddTrajectoryPassengerRide, ...]
+    is_stored: bool = False
 
     def validate(self) -> None:
         if not self.id:
@@ -72,6 +73,8 @@ class DddTrajectoryPassengerOption:
             raise ValueError("trajectory Passenger rides must have sorted unique IDs")
         for ride in self.rides:
             ride.validate()
+        if self.is_stored and self.rides:
+            raise ValueError("stored trajectory option cannot carry passengers")
 
 
 @dataclass(frozen=True)
@@ -176,6 +179,7 @@ class DddTrajectoryPassengerMasterProblem:
                 {
                     "id": option.id,
                     "cabin_id": option.cabin_id,
+                    "is_stored": option.is_stored,
                     "rides": [
                         {
                             "id": ride.id,
@@ -422,6 +426,33 @@ class DddTrajectoryFactorizedMipReferenceOptimizer:
                 )
                 == 1.0,
                 name=f"choose_cabin[{cabin_id}]",
+            )
+        # Integer-only dispatch-prefix symmetry breaking.  It is deliberately
+        # absent from the root LP, so pricing needs no extra dual terms.
+        for first_cabin_id, second_cabin_id in zip(
+            problem.cabin_ids,
+            problem.cabin_ids[1:],
+            strict=False,
+        ):
+            pair_options = tuple(
+                option
+                for option in problem.options
+                if option.cabin_id in {first_cabin_id, second_cabin_id}
+            )
+            if not any(option.is_stored for option in pair_options):
+                continue
+            model.addConstr(
+                gp.quicksum(
+                    select[option.id]
+                    for option in pair_options
+                    if option.cabin_id == second_cabin_id and not option.is_stored
+                )
+                <= gp.quicksum(
+                    select[option.id]
+                    for option in pair_options
+                    if option.cabin_id == first_cabin_id and not option.is_stored
+                ),
+                name=f"dispatch_prefix[{first_cabin_id}]",
             )
         for index, (group_id, count) in enumerate(
             sorted(problem.demand_by_group_id.items())

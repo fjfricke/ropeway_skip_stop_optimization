@@ -358,6 +358,11 @@ def _fixed_movement_ride(
         return None
     board_time = board_visit.platform_exit_time_seconds
     alight_time = alight_visit.platform_entry_time_seconds
+    if board_time < 0.0:
+        # OIP may legitimately start with a station occupation crossing t=0.
+        # Its pre-horizon boarding event is movement history, not a Passenger
+        # service opportunity in the modeled horizon.
+        return None
     if board_time + ASSIGNMENT_TOLERANCE < group.release_time_seconds:
         return None
     if (
