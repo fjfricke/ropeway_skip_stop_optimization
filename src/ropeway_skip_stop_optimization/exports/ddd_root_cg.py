@@ -22,8 +22,8 @@ from ropeway_skip_stop_optimization.optimization.ddd.artifact_adapter import (
 from ropeway_skip_stop_optimization.optimization.ddd.reference import (
     DddReferenceSolution,
 )
-from ropeway_skip_stop_optimization.optimization.ddd.trajectory_exhaustive_reference import (
-    ddd_trajectory_instance_fingerprint,
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_root_column_generation import (
+    ddd_trajectory_problem_instance_fingerprint,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_root_checkpoint import (
     read_ddd_trajectory_root_cg_checkpoint,
@@ -31,6 +31,19 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_root_checkpoint 
 )
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_slot import (
     ddd_trajectory_column,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_problem import (
+    DddFixedTrajectoryStartDomain,
+    DddReservoirTrajectoryStartDomain,
+    DddTrajectoryFleetMode,
+    DddTrajectoryProblem,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_reservoir import (
+    build_ddd_reservoir_passenger_candidates,
+    validate_ddd_reservoir_plan_against_artifact,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_oip import (
+    build_ean_oip_plan_and_fleet,
 )
 from ropeway_skip_stop_optimization.optimization.ean.builders.network_artifact_builder import (
     NetworkEanBuildArtifactBuilder,
@@ -64,6 +77,10 @@ from ropeway_skip_stop_optimization.optimization.ean.passenger_plan import (
 from ropeway_skip_stop_optimization.optimization.ean.plan import EanRouteDecision
 from ropeway_skip_stop_optimization.optimization.ean.projection import (
     project_ean_movement_plan_to_physical_replay,
+)
+from ropeway_skip_stop_optimization.optimization.ean.models import (
+    EanFleetCardinalityMode,
+    EanFleetMode,
 )
 
 
@@ -100,13 +117,48 @@ def export_ddd_root_cg_checkpoint_to_frontend(
     base_builder = example.build_ean_artifact_builder(scenario, config)
     if not isinstance(base_builder, NetworkEanBuildArtifactBuilder):
         raise ValueError("DDD frontend export requires the network EAN builder")
+    state = read_ddd_trajectory_root_cg_checkpoint(checkpoint_path)
+    if state.fleet_mode is DddTrajectoryFleetMode.OPTIMIZED_INITIAL_PLACEMENT:
+        cabin_ids = {item.cabin_id for item in state.trajectories}
+        if not cabin_ids or cabin_ids != set(range(len(cabin_ids))):
+            raise ValueError("DDD OIP checkpoint cabin IDs are not an exact-K prefix")
+        base_builder = replace(
+            base_builder,
+            fleet_config=replace(
+                base_builder.fleet_config,
+                mode=EanFleetMode.OPTIMIZED_INITIAL_PLACEMENT,
+                available_fleet_count=len(cabin_ids),
+                cardinality_mode=EanFleetCardinalityMode.EXACT,
+            ),
+        )
     artifact = replace(
         base_builder,
         headway_pair_builder=SparseHeadwayPairBuilder(),
     ).build(scenario, config)
-    movement_problem = EanArtifactToDddMovementProblemAdapter().build(artifact)
-    state = read_ddd_trajectory_root_cg_checkpoint(checkpoint_path)
-    if state.instance_fingerprint != ddd_trajectory_instance_fingerprint(artifact):
+    adapter = EanArtifactToDddMovementProblemAdapter()
+    if state.fleet_mode is DddTrajectoryFleetMode.RESERVOIR_DISPATCH:
+        if state.reservoir_start_domain is None:
+            raise ValueError("DDD reservoir checkpoint is missing its start domain")
+        core = adapter.build_movement_core(artifact)
+        trajectory_problem = DddTrajectoryProblem(
+            movement_core=core,
+            start_domain=state.reservoir_start_domain,
+            waiting_policy=state.waiting_policy,
+        )
+        expected_fingerprint = ddd_trajectory_problem_instance_fingerprint(
+            artifact,
+            trajectory_problem,
+        )
+    else:
+        trajectory_problem = replace(
+            adapter.build_trajectory_problem(artifact),
+            waiting_policy=state.waiting_policy,
+        )
+        expected_fingerprint = ddd_trajectory_problem_instance_fingerprint(
+            artifact,
+            trajectory_problem,
+        )
+    if state.instance_fingerprint != expected_fingerprint:
         raise ValueError("DDD frontend checkpoint belongs to a different instance")
     if state.best_upper_bound is None or not state.incumbent_option_ids:
         raise ValueError("DDD frontend checkpoint has no feasible incumbent")
@@ -124,15 +176,47 @@ def export_ddd_root_cg_checkpoint_to_frontend(
     selected = tuple(
         trajectory_by_option_id[option_id] for option_id in state.incumbent_option_ids
     )
-    solution = DddReferenceSolution(
-        trajectories=tuple(sorted(selected, key=lambda item: item.cabin_id))
-    )
-    movement_plan = DddReferenceToEanMovementPlanAdapter().build(
-        problem=movement_problem,
-        solution=solution,
-        artifact=artifact,
-    )
-    passenger_build = EanPassengerCandidateBuilder().build(scenario, artifact)
+    selected = tuple(sorted(selected, key=lambda item: item.cabin_id))
+    reservoir_fleet_plan = None
+    if isinstance(
+        trajectory_problem.start_domain, DddFixedTrajectoryStartDomain
+    ):
+        movement_plan = DddReferenceToEanMovementPlanAdapter(
+            waiting_policy=state.waiting_policy,
+        ).build(
+            problem=trajectory_problem.fixed_movement_problem,
+            solution=DddReferenceSolution(trajectories=selected),
+            artifact=artifact,
+        )
+        fleet_plan = None
+    elif isinstance(
+        trajectory_problem.start_domain,
+        DddReservoirTrajectoryStartDomain,
+    ):
+        movement_plan, reservoir_fleet_plan = (
+            validate_ddd_reservoir_plan_against_artifact(
+                problem=trajectory_problem,
+                artifact=artifact,
+                trajectories=selected,
+            )
+        )
+        fleet_plan = None
+    else:
+        movement_plan, fleet_plan = build_ean_oip_plan_and_fleet(
+            problem=trajectory_problem,
+            artifact=artifact,
+            trajectories=selected,
+        )
+    if isinstance(
+        trajectory_problem.start_domain,
+        DddReservoirTrajectoryStartDomain,
+    ):
+        passenger_build = build_ddd_reservoir_passenger_candidates(
+            scenario=scenario,
+            problem=trajectory_problem,
+        )
+    else:
+        passenger_build = EanPassengerCandidateBuilder().build(scenario, artifact)
     recovered = not state.incumbent_ride_values_by_id
     solver_metadata = None
     if recovered:
@@ -252,7 +336,8 @@ def export_ddd_root_cg_checkpoint_to_frontend(
             payload={
                 "movement_plan": movement_plan,
                 "passenger_plan": passenger_plan,
-                "fleet_plan": None,
+                "fleet_plan": fleet_plan,
+                "reservoir_fleet_plan": reservoir_fleet_plan,
                 "metadata": metadata,
             },
             label="DDD root-CG journey-time result",
@@ -382,6 +467,12 @@ def _frontend_metadata(
         for visit in trajectory.visits
         if visit.decision is EanRouteDecision.SKIP
     )
+    positive_waits = tuple(
+        visit.wait_seconds
+        for trajectory in movement_plan.trajectories
+        for visit in trajectory.visits
+        if visit.wait_seconds > 1e-9
+    )
     cumulative_seconds = 0.0
     progress_samples = []
     for iteration in state.iterations:
@@ -439,6 +530,14 @@ def _frontend_metadata(
             visit.switch_time_seconds <= movement_plan.horizon_seconds
             for visit in skipped
         ),
+        "waiting_domain": state.waiting_policy.domain.value,
+        "waiting_step_seconds": state.waiting_policy.step_seconds,
+        "maximum_wait_seconds_by_station_id": dict(
+            state.waiting_policy.maximum_wait_seconds_by_station_id
+        ),
+        "positive_wait_visit_count": len(positive_waits),
+        "total_wait_seconds": sum(positive_waits),
+        "maximum_selected_wait_seconds": max(positive_waits, default=0.0),
         "progress_samples": progress_samples,
         "ddd_root_cg": {
             "round_count": state.completed_rounds,

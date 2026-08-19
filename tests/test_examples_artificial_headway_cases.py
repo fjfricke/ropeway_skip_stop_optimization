@@ -3,6 +3,7 @@ from __future__ import annotations
 from ropeway_skip_stop_optimization.examples.artificial_headway_cases import (
     ArtificialHeadwayArchitecture,
     FiveStationCircleCwFullSkipNoWaitHeadwayBExample,
+    FiveStationCircleCwFullSkipWaitHeadwayBExample,
     artificial_physical_headway_examples,
     build_six_station_line_headway_scenario,
     build_six_station_ring_headway_scenario,
@@ -22,6 +23,7 @@ from ropeway_skip_stop_optimization.models import (
 from ropeway_skip_stop_optimization.optimization.ean.builders.network_timing_builder import (
     NetworkSkipStopTimingBuilder,
 )
+from ropeway_skip_stop_optimization.optimization.ean import StationWaitingMode
 from ropeway_skip_stop_optimization.optimization.ean.builders.physical_network_builder import (
     PhysicalMovementNetworkBuilder,
 )
@@ -50,6 +52,19 @@ def test_five_station_full_skip_headway_b_reuses_reference_case() -> None:
     assert len(artifact.cabin_starts) == 38
     assert artifact.headway_policy is not None
     assert artifact.headway_policy.has_leader_behavior_rules
+
+
+def test_five_station_headway_b_waiting_case_has_explicit_ten_second_limit() -> None:
+    example = FiveStationCircleCwFullSkipWaitHeadwayBExample()
+    scenario = example.build_scenario()
+    config = example.build_ean_config(scenario)
+
+    assert all(
+        station.waiting_mode is StationWaitingMode.END_OF_PLATFORM_WAIT
+        and station.max_wait_seconds == 10.0
+        for station in config.station_configs
+    )
+    assert example.metadata.id in EXAMPLES
 
 
 def test_line_terminals_remain_identical_across_architectures() -> None:

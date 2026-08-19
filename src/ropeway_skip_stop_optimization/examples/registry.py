@@ -3,6 +3,7 @@ from __future__ import annotations
 from ropeway_skip_stop_optimization.examples.base import ScenarioExample
 from ropeway_skip_stop_optimization.examples.artificial_headway_cases import (
     FiveStationCircleCwFullSkipNoWaitHeadwayBExample,
+    FiveStationCircleCwFullSkipWaitHeadwayBExample,
     artificial_physical_headway_examples,
 )
 from ropeway_skip_stop_optimization.examples.circular_skip_stop import (
@@ -40,6 +41,7 @@ EXAMPLES: dict[str, ScenarioExample] = {
     FiveStationCircleCwFullNoSkipNoWaitExample.metadata.id: FiveStationCircleCwFullNoSkipNoWaitExample(),
     FiveStationCircleCwFullSkipNoWaitExample.metadata.id: FiveStationCircleCwFullSkipNoWaitExample(),
     FiveStationCircleCwFullSkipNoWaitHeadwayBExample.metadata.id: FiveStationCircleCwFullSkipNoWaitHeadwayBExample(),
+    FiveStationCircleCwFullSkipWaitHeadwayBExample.metadata.id: FiveStationCircleCwFullSkipWaitHeadwayBExample(),
     FiveStationCircleCwHalfNoSkipNoWaitExample.metadata.id: FiveStationCircleCwHalfNoSkipNoWaitExample(),
     FiveStationCircleCwHalfSkipNoWaitExample.metadata.id: FiveStationCircleCwHalfSkipNoWaitExample(),
     FiveStationCircleCwHalfSkipWaitExample.metadata.id: FiveStationCircleCwHalfSkipWaitExample(),

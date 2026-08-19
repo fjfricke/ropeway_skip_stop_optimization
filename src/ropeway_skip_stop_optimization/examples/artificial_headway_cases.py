@@ -112,6 +112,53 @@ class FiveStationCircleCwFullSkipNoWaitHeadwayBExample(
         )
 
 
+class FiveStationCircleCwFullSkipWaitHeadwayBExample(
+    FiveStationCircleCwFullSkipNoWaitHeadwayBExample
+):
+    """Architecture-B reference case with bounded end-of-platform waiting."""
+
+    metadata = ScenarioExampleMetadata(
+        id="five_station_circle_cw_full_skip_wait_headway_b_v0",
+        label="Five station circle cw full cabins skip+wait, headway B",
+        description=(
+            "Clockwise five-station full-cabin reference case with skip enabled, "
+            "one-second waiting steps up to ten seconds, and physically derived "
+            "architecture-B headways."
+        ),
+        tags=(
+            "circle",
+            "cw",
+            "skip-stop",
+            "scaling-demo",
+            "full-cabins",
+            "bounded-waiting",
+            "physical-headway",
+            "architecture-b",
+        ),
+        family_id="five_station_circle",
+        family_label="Five station circle",
+        variant_id="full_skip_wait_headway_b",
+        variant_label="Full cabins skip+wait, headway B",
+    )
+
+    def build_scenario(self) -> Scenario:
+        return replace(super().build_scenario(), id=self.metadata.id)
+
+    def build_ean_config(self, scenario: Scenario) -> EanConfig:
+        config = super().build_ean_config(scenario)
+        return replace(
+            config,
+            station_configs=tuple(
+                replace(
+                    station,
+                    waiting_mode=StationWaitingMode.END_OF_PLATFORM_WAIT,
+                    max_wait_seconds=10.0,
+                )
+                for station in config.station_configs
+            ),
+        )
+
+
 def build_six_station_ring_headway_scenario(
     architecture: ArtificialHeadwayArchitecture,
     *,
