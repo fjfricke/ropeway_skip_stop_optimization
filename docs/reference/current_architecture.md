@@ -194,18 +194,19 @@ combines a network-derived anonymous-flow relaxation, adaptive time
 discretization, delayed labelled prefixes, exact lifting and resource
 validation, CP-SAT primal support oracles, and optional passenger-aware
 trajectory optimization. A separate exact root column-generation path derives
-certified passenger-objective lower bounds from exact no-wait trajectory
+certified passenger-objective lower bounds from exact finite-domain trajectory
 pricing. These algorithms share domain models and validation contracts but
 remain distinct solver strategies.
 
 `EanArtifactToDddMovementProblemAdapter` projects a sparse, network-backed EAN
 artifact into domain types that import neither Gurobi nor EAN model classes. The
-currently certified DDD domain accepts fixed starts, one deterministic
-circulation pattern, exact Stop/Skip durations, and no station waiting. OIP,
-Waiting, dynamic movement effects, and inconsistent route or horizon semantics
-fail explicitly at the relevant solver boundary. Supporting code contains
-waiting-aware contracts for later extensions; this does not make the current
-exact no-wait certificates valid for waiting-enabled instances.
+currently certified trajectory DDD domain accepts fixed starts, continuous
+fixed-$K$ OIP, or a single dispatch-only ideal reservoir on one deterministic
+circulation pattern. Fixed starts and reservoir dispatch support exact bounded
+end-of-platform Waiting with explicit station maxima and a finite control step;
+continuous OIP remains No-Wait. FIFO/continuous Waiting, dynamic movement
+effects, removals, redispatch, and inconsistent route or horizon semantics fail
+explicitly at the relevant solver boundary.
 
 `DddReferenceSolver` enumerates every exact individual trajectory within the
 certified visit bound, prunes same-cabin resource conflicts, and combines one
@@ -330,12 +331,16 @@ performance.
 ### Exact trajectory root column generation
 
 `DddTrajectoryExactRootColumnGenerationSolver` is the current certified
-passenger-objective root-bound path for fixed starts without waiting. Its
+passenger-objective root-bound path for fixed starts, continuous fixed-$K$ OIP,
+and dispatch-only reservoir starts. Fixed starts use complete time-expanded
+pricing for No-Wait or finite bounded Waiting. Reservoir proof pricing keeps
+dispatch continuous and models bounded waits as integer choices in the compact
+MILP. Continuous OIP remains No-Wait. Its
 restricted master contains a finite pool of exact individual cabin
 trajectories, passenger rides, incompatibility rows, and optionally separated
 resource-window rows. Solving the restricted LP provides dual values for one
 exact pricing problem per cabin. The pricing oracle searches the complete
-no-wait trajectory domain and either returns a negative-reduced-cost trajectory
+declared trajectory domain and either returns a negative-reduced-cost trajectory
 or a certified reduced-cost lower bound.
 
 The sum of the negative certified pricing bounds corrects the restricted-master
@@ -346,6 +351,19 @@ row separation is complete and every cabin pricing problem proves that no
 negative-reduced-cost column remains. Pricing time limits without such a proof
 can still improve the primal pool but produce `UNKNOWN`, never a false lower
 bound certificate.
+
+The reservoir domain gives each available cabin either one resource-free
+stored column or one continuous dispatch time in `[-W, 0)`. Warm-up visits are
+all-stop; after dispatch, cabins remain on the physical network through the
+operational tail and cannot be removed or redispatched. Optional dispatch uses
+an integer-only cabin-prefix symmetry, while exact-dispatch mode omits stored
+columns. A finite absolute time-expanded anchor sweep supplies fast primal
+columns only. Its bounds are never mixed into the continuous certificate; the
+complete compact continuous pricer alone supplies reservoir reduced-cost lower
+bounds. With bounded Waiting the absolute anchor sweep and resource-window rows
+are rejected; concrete pair separation remains exact. Checkpoint schema v5
+persists the full reservoir boundary, fleet domain, Waiting policy and grid so
+resume and frontend reconstruction cannot silently change them.
 
 The root-CG state records its trajectory pool, row pool, incumbent, certified
 bounds, iteration history, fingerprints, and elapsed time. Checkpoint resume

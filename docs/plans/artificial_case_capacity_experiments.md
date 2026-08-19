@@ -317,23 +317,134 @@ Validation:
 
 ## Step 5: Implement the proof-aware adaptive frontier runner
 
-The central operation is
+### Probe objective and bound extraction
+
+The capacity phase never mixes passenger quality or fleet cost into its
+objective. At fixed $(m,K,N)$ it solves only
+
+$$
+u_{m,K}^\star(N)
+=
+\min\sum_g u_g,
+$$
+
+where $u_g$ is the integer number of unserved passengers in demand group $g$.
+Journey Time is optimized later, after complete service has been fixed. This
+keeps every incumbent and solver bound interpretable in passenger-count units.
+
+Suppose an interrupted minimization returns incumbent value
+$\overline u_{m,K}(N)$ and global solver bound
+$\underline u_{m,K}(N)$. An incumbent with
+$\overline u_{m,K}(N)=0$ proves that $N$ is feasible. A positive integer lower
+bound proves more than infeasibility at $N$. With numerical tolerance
+$\epsilon_u$ define
+
+$$
+r
+=
+\left\lceil
+\underline u_{m,K}(N)-\epsilon_u
+\right\rceil.
+$$
+
+Nested demand implies
+
+$$
+u_{m,K}^\star(N-1)
+\ge
+u_{m,K}^\star(N)-1.
+$$
+
+Therefore $r\ge1$ yields the valid capacity update
+
+$$
+U_{m,K}
+\leftarrow
+\min\{U_{m,K},N-r\}.
+$$
+
+An incumbent with positive unserved demand may still improve the lower bound,
+but $N-\overline u$ is not automatically a feasible nested prefix. Let $s_c$
+be the incumbent's served count in OD-bucket cell $c$. Compute
+
+$$
+q
+=
+\max\{n:n_c(n)\le s_c\ \forall c\}.
+$$
+
+Restrict the incumbent assignment to $D(q)$ and independently validate the
+resulting movement and passenger plans. Only then update
+
+$$
+L_{m,K}
+\leftarrow
+\max\{L_{m,K},q\}.
+$$
+
+Thus a solve with an open MIP gap can improve both sides of the capacity
+interval. The central operation remains
 
 ```text
 PROBE(mode, K, N)
 ```
 
-and has exactly three admissible outcomes:
+but records the more informative outcomes:
 
-- `FEASIBLE`: a complete independently validated plan updates
-  $L_{m,K}\leftarrow\max\{L_{m,K},N\}$;
-- `INFEASIBLE`: a global proof for the identical instance updates
-  $U_{m,K}\leftarrow\min\{U_{m,K},N-1\}$;
-- `UNKNOWN`: neither bound changes.
+- `FULLY_SERVED`: a validated incumbent has zero unserved passengers;
+- `PROVED_NOT_FULLY_SERVICEABLE`: the global unserved bound is at least one;
+- `BOUND_PROGRESS`: at least one capacity bound improved while the probe gap
+  remains open;
+- `NO_PROGRESS`: neither capacity bound improved;
+- `INVALID_INTERNAL`: incumbent validation or bound consistency failed.
 
 The nested demand construction makes each fixed-$K$ row monotone in $N$.
 Consequently a feasible result covers every smaller prefix and an infeasible
-result covers every larger prefix.
+result covers every larger prefix. `NO_PROGRESS` and a solver timeout never
+change either capacity bound.
+
+The probe result records at least:
+
+```text
+CapacityProbeResult
+  mode
+  cabin_count
+  requested_passenger_count
+  incumbent_unserved_count
+  best_bound_unserved_count
+  validated_prefix_passenger_count
+  implied_capacity_upper_bound
+  capacity_lower_bound_before/after
+  capacity_upper_bound_before/after
+  solver_status
+  solver_mip_gap
+  checkpoint
+  movement_and_passenger_validation
+```
+
+### Warm-start policy
+
+Warm starts are applied only across fingerprint-compatible problems:
+
+1. At the same $K$, a plan for $D(N)$ starts a larger nested instance by
+   retaining movement and served rides and initially marking new passengers
+   unserved.
+2. A larger-demand plan starts a smaller instance after trimming its passenger
+   assignment to the requested prefix.
+3. A validated All-Stop plan starts Skip-Stop at the same $(K,N)$ because
+   $\mathcal F_{\mathrm{AS}}\subseteq\mathcal F_{\mathrm{SS}}$.
+4. A checkpoint resumes the identical $(m,K,N)$ model whenever available.
+5. A full-service capacity incumbent starts the later Journey-Time solve in
+   the identical cell.
+6. A plan from $K$ to exact $K+1$ is at most a partial MIP start: the old
+   trajectories may be retained while the new cabin and affected order
+   variables remain unset. It is never treated as a feasible incumbent.
+
+Passenger warm starts are not transferred between demand families, temporal
+profiles, waiting domains, or incompatible A/B/C policies. A movement-only
+start may cross such a boundary only when independent validation proves that
+it satisfies the target physical policy. Fixed-start and optimized-placement
+certificates are never mixed.
 
 ### Inner search over $N$
 
@@ -366,8 +477,10 @@ N_{\mathrm{next}}
 \right\rfloor.
 $$
 
-A timeout leaves the row interval open. It may be retried with a larger budget
-or bypassed temporarily while another row is refined. Every probe is
+Near the boundary, a difficult midpoint need not monopolize the budget. A
+lower $N$ is useful for finding a full-service incumbent; a higher $N$ is often
+useful for proving a positive unserved bound. The scheduler may therefore work
+from both sides before resuming the hard boundary probe. Every probe is
 checkpointed.
 
 ### Outer scheduling over $K$
@@ -405,6 +518,51 @@ To certify the minimum fleet for a target demand $N$, find the first $K$ with
 $L_{m,K}\ge N$ and prove $U_{m,k}<N$ for every smaller $k$. No monotonicity of
 the exact-$K$ rows is assumed.
 
+With open intervals, minimum fleet size is itself reported as
+
+$$
+\min\{K:U_{m,K}\ge N\}
+\le
+K_m^{\min}(N)
+\le
+\min\{K:L_{m,K}\ge N\}.
+$$
+
+### Capacity and solver stopping rules
+
+The normal relative Gurobi MIP gap is not the experiment's stopping metric:
+the optimal unserved objective can be zero. Capacity probes therefore request
+exact optimization (`MIPGap = 0`) but are interrupted by a fixed wall-clock
+budget or a callback once their capacity purpose has been achieved. In
+particular, a zero-unserved incumbent may stop immediately. Otherwise a probe
+may stop once its derived row/global capacity interval meets the configured
+target.
+
+After $\kappa_{\mathrm{AS}}^\star$ has been certified, define
+
+$$
+g_{m,K}^{\mathrm{rel}}
+=
+\frac{U_{m,K}-L_{m,K}}
+     {\kappa_{\mathrm{AS}}^\star},
+\qquad
+g_m^{\star,\mathrm{rel}}
+=
+\frac{\max_K U_{m,K}-\max_K L_{m,K}}
+     {\kappa_{\mathrm{AS}}^\star}.
+$$
+
+The experiment protocol fixes these quality levels before results are known:
+
+- screening: global capacity gap at most 5%;
+- regularly reported capacity frontiers: at most 2%;
+- headline F1/F2/F4 and A/B/C comparisons: at most 1%.
+
+Selected fleet-saving claims require the minimum-fleet interval to collapse to
+one integer $K$, irrespective of the percentage capacity target. If a
+predeclared wall-clock budget expires first, report the open interval; never
+relax the target retrospectively to obtain a preferred conclusion.
+
 The runner should consume the existing Fixed-$K$ certificate interface where
 possible rather than defining another meaning for feasibility or optimality.
 The relevant contract is described in
@@ -422,6 +580,8 @@ CapacityFrontierResult
   best_validated_plans
   probe_history
   pruning_provenance
+  configured_capacity_gap_level
+  achieved_row_and_global_capacity_gaps
   timing_and_model_metrics
 ```
 
@@ -453,6 +613,17 @@ At each load, compare Journey Time with a common fleet
 $K=K_{\mathrm{AS}}^{\min}(N)$ and separately report the minimum fleet required
 by each mode. Feasible points above the All-Stop capacity are capacity results,
 not same-demand Journey-Time comparisons.
+
+For a Journey-Time solve, fix complete service explicitly,
+
+$$
+u_g=0\qquad\forall g,
+$$
+
+and minimize total release-to-arrival time. The validated capacity plan is the
+initial incumbent. Journey-Time gaps are reported in both passenger-hours and
+relative terms, with the same predeclared 5% screening, 2% regular, and 1%
+headline levels. These objective gaps never alter a capacity certificate.
 
 Record:
 
@@ -528,5 +699,9 @@ The first implementation tranche is complete when:
   available-fleet frontiers plus selected load-curve records;
 - every lower bound comes from a validated executable timetable;
 - every upper bound has explicit infeasibility or relaxation provenance;
+- open solver gaps contribute only through certified unserved and validated
+  nested-prefix bounds;
+- warm starts cross only explicitly compatible fingerprints;
+- screening, regular, and headline gap targets are configured before a run;
 - no result interprets a timeout as infeasibility or $\rho=1.1$ as a physical
   maximum.

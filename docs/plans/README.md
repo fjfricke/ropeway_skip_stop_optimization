@@ -47,6 +47,9 @@ Current plans:
 - `ddd_trajectory_column_generation.md`: DDD-guided whole-horizon cabin
   trajectory master, joint route-and-load pricing, delayed resource-conflict
   rows, and the exact-pricing gate for a second certified fixed-$K$ lower bound.
+- `ddd_reservoir_fleet_planning.md`: an ideal warm-up entry reservoir,
+  optional one-way cabin dispatch, continuous compact proof pricing,
+  fixed-available-fleet bound curves, and exact finite bounded Waiting.
 - `demand_driven_network_operations.md`: recommended finite-horizon
   passenger-guided planner using continuous-time resource reservations,
   bounded conflict repair, exact fixed-movement passenger evaluation, and

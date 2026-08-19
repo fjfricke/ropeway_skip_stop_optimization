@@ -1,15 +1,18 @@
 # DDD-Guided Whole-Horizon Trajectory Column Generation
 
-Status: **exact no-wait root prototype implemented; scalable pricing and
-compatible-column generation remain experimental**
+Status: **exact root prototype implemented for fixed starts, fixed-$K$
+optimized initial placement, and single-interface reservoir dispatch; scalable
+pricing and topology campaigns remain experimental**
 
-Implementation checkpoint (2026-08-16): in addition to the Phase-1
+Implementation checkpoint (2026-08-19): in addition to the Phase-1
 `restricted_primal` kernel, a guarded exhaustive tiny-instance oracle, an exact
-single-cabin no-wait route--load pricing MILP, and a standalone root
-row-and-column prototype are available. Randomized-dual tests compare pricing
-against complete enumeration. Solver dual bounds from interrupted pricing are
-used conservatively in the reduced-cost correction; only exact pricing may
-claim convergence. The scalable Five-Station experiment remains open because
+single-cabin route--load pricing MILP, and a standalone root row-and-column
+prototype are available. Fixed starts and reservoir dispatch support exact
+finite bounded Waiting; continuous OIP remains No-Wait. Randomized-dual tests
+compare pricing against complete enumeration. Solver dual bounds from
+interrupted pricing are used conservatively in the reduced-cost correction;
+only exact pricing may claim convergence. The scalable Five-Station experiment
+remains open because
 short pricing calls generate improving but mutually incompatible columns and
 their corrected bound is weaker than the independent DDD bound. The proof
 channel now records each pricing MILP's incumbent, certified reduced-cost
@@ -34,16 +37,18 @@ predicate.
 
 ## Decision Summary
 
-Add a separate fixed-$K$ optimizer that selects complete, cabin-specific,
-whole-horizon trajectories together with passenger flow. Integrate it with the
-current DDD bound engine, CP-SAT movement oracle, exact Passenger Assignment,
-and complete movement validator through a small hybrid coordinator.
+Use a separate optimizer that selects complete, cabin-specific, whole-horizon
+trajectories together with passenger flow. It supports fixed starts,
+continuous fixed-$K$ optimized initial placement, and optional or exact
+single-interface reservoir dispatch. Integrate it with the current DDD bound
+engine, exact Passenger Assignment, and complete movement validator through a
+small hybrid coordinator.
 
 The new optimizer is not another refinement rule inside the current anonymous
 DDD master. Its modeled unit is different:
 
 - the anonymous DDD master chooses aggregate movement-arc multiplicities;
-- the trajectory master chooses one complete path for every fixed-start cabin;
+- the trajectory master chooses one complete path for every exact-$K$ cabin;
 - CP-SAT checks or repairs concrete selections rather than reconstructing
   identities from an anonymous support;
 - exact Passenger Assignment evaluates every accepted physical timetable.
@@ -107,24 +112,296 @@ can search the missing whole-horizon trajectories without enumerating them.
 
 ## Scope
 
-The first exactness target is deliberately narrow:
+The implemented exactness target is deliberately narrow:
 
 - exact fixed fleet cardinality $K$;
-- fixed initial cabin placement and start times;
+- either fixed initial cabin placement and start times or continuous optimized
+  initial placement on one deterministic ring pattern;
 - one deterministic circulation pattern in the current movement network;
 - Stop/Skip decisions at every supported visit;
 - finite current horizon and existing tail semantics;
-- no additional Waiting;
+- either no Waiting or explicitly bounded end-of-platform Waiting on a
+  one-second (configurable) finite control grid for fixed starts and reservoir
+  dispatch;
 - the canonical scalar Passenger Waiting-Time or Journey-Time objective;
 - current aggregate demand groups with integer Passenger quantities that may
   split across compatible direct rides;
 - current direct-ride Passenger Assignment semantics;
-- integer canonical time ticks and independently validated headways.
+- integer canonical relative route durations and, for OIP, one unrestricted
+  continuous time origin per cabin; independently validated headways.
 
-The first tranche does not include optimized initial placement, continuous
-arbitrary Waiting, dynamic turnbacks, rope changes, passenger transfers, fleet
-size selection inside one master, or a claim of integer optimality through
-branch-and-price.
+The implemented Waiting tranche does not include continuous or FIFO Waiting,
+OIP with Waiting, dynamic turnbacks, rope
+changes, passenger transfers, fleet-size selection inside one master, or a
+claim of integer optimality through branch-and-price.
+
+## Exact fixed-$K$ optimized initial placement
+
+For OIP, the column universe is enlarged from a fixed start to
+
+$$
+P_c^{\mathrm{OIP}}
+=
+\bigcup_{p\in\mathcal P}
+\left(P_{cp}^{\mathrm{station}}\cup P_{cp}^{\mathrm{rope}}\right).
+$$
+
+A station-start column selects phase $p$, route behavior, and a continuous
+entry time $\theta_c$ satisfying
+
+$$
+\theta_c\le 0,
+\qquad
+\theta_c+\tau^{\mathrm{exit}}_{r_0}\ge 0.
+$$
+
+A rope-start column selects the next phase entry and the behavior at the
+preceding merge:
+
+$$
+0<\theta_c<\tau^{\mathrm{rope}}_{p-1},
+\qquad
+t_c^{\mathrm{previousExit}}
+=\theta_c-\tau^{\mathrm{rope}}_{p-1}.
+$$
+
+All later event times are affine in the same continuous origin,
+
+$$
+t_{c,v+1}=t_{c,v}+\tau_{r_{cv}},
+$$
+
+so route durations retain exact integer-tick coefficients without forcing
+$\theta_c$ onto the tick lattice. The implementation solves the finite
+phase/kind union as separate compact convex-hull MILPs and takes the minimum
+of their incumbents and objective bounds. This is mathematically equivalent
+to one disjunctive phase-selection MILP; importantly, a certified cabin bound
+exists only when every phase/kind subdomain either supplies an objective bound
+or is proved infeasible.
+
+Each OIP column stores its `EanInitialPlacementState`. Rope columns additionally
+store the pre-boundary exit occurrence and `previous_service`. A retained
+dominated service resource is represented by boundary-only witness
+occurrences: it constrains a negative pre-boundary service occurrence against
+regular service events but deliberately does not recreate redundant
+regular/regular constraints.
+
+The master still enforces
+
+$$
+\sum_{p\in P_c^{\mathrm{OIP}}}\lambda_{cp}=1
+\qquad\forall c=0,\ldots,K-1.
+$$
+
+Cabin labels are canonically ordered only at $t=0$: category $2p$ denotes a
+station start and $2p+1$ a rope start. Equal categories are ordered by station
+entry or preceding exit time. This removes label symmetry but imposes no order
+on later trajectories and therefore permits subsequent overtaking.
+
+The reduced-cost correction is unchanged:
+
+$$
+LB_{\mathrm{OIP}}
+=z_{\mathrm{RMP}}
++\sum_c\min\{0,\underline\rho_c^{\mathrm{OIP}}\}.
+$$
+
+A finite start-slot pool or an OIP seed is only a primal restriction and can
+update the upper bound. It never creates a global OIP lower bound. The latter
+is exported only after pricing has covered station and rope starts, every
+phase, both required previous behaviors, and the continuous origin.
+
+The first continuous-OIP release uses exact pair rows. Tick-indexed anonymous
+resource-window rows are deliberately rejected for OIP until their interval
+index is generalized to continuous origins; silently rounding OIP occurrences
+there would compromise the certificate.
+
+### Fair and shared OIP pricing
+
+The compact OIP oracle solves one subproblem per phase, start kind, and
+required previous behavior. A total pricing limit is divided fairly over the
+remaining start classes. Giving the first class the complete budget would
+starve later rope and station classes and would make the reported OIP bound
+incomplete even when those later subproblems are easy.
+
+Cabins whose normalized Passenger ride domains are identical share one proof
+pricing solve. Apart from the convexity dual, their pricing objective is the
+same. Writing that shared part as $\widetilde\rho_s$ gives
+
+$$
+\rho_{cs}=\widetilde\rho_s-\alpha_c.
+$$
+
+Consequently an incumbent and a certified bound computed for representative
+cabin $c$ are transferred exactly to equivalent cabin $d$ by adding
+$\alpha_c-\alpha_d$. The implementation still exports one diagnostic and one
+bound contribution per cabin. Cabins are grouped only when their complete
+normalized ride candidate sets agree; otherwise they are priced separately.
+
+Proof pricing and primal column generation are distinct channels. The minimum
+class bound certifies the lower bound, while every class incumbent is retained
+as a possible new column. Negative secondary incumbents are reused at no extra
+solve cost. Optional per-class primal intensification may re-solve selected
+classes with more time, but is disabled by default because it cannot improve
+the certificate and did not provide a reliable gain in the first $K=19$
+experiment.
+
+For Five-Station architecture B, $K=19$, Pair-only, and a five-second total
+pricing limit, fair shared pricing reduced one round from about 95.5 seconds
+for 19 repeated cabin solves to about 2.2 seconds for one representative
+solve. All 285 cabin/start-class combinations received bounds. After eight
+rounds the run reached $LB=1{,}475{,}269.50$, $UB=3{,}072{,}000$, and a
+51.98% certified gap in 28.5 seconds. Retaining secondary class incumbents
+created no additional useful columns in that run, and no new rope-start
+columns entered the pool. The next algorithmic bottleneck is therefore primal
+OIP column quality and conflict-aware diversification, not repeated proof
+pricing.
+
+### Relative time-expanded OIP pricing
+
+`RELATIVE_TIME_EXPANDED_OIP` is implemented as an opt-in exact No-Wait OIP
+pricer. For each start class it constructs a deterministic DAG of reachable
+relative tick states `(visit, movement_state, elapsed_tick)`. A single
+continuous origin `theta` translates the selected relative path into absolute
+time. Passenger quantities remain binary-decomposed integers. The production
+formulation uses one ride interval per demand group and boarding/alighting
+visit pair: every quantity bit is linked directly to both STOP decisions and
+occupies all visit intervals in between. The selected relative path already
+fixes the event time at either endpoint, so only `event_time * passenger_bit`
+needs the standard four-row convex hull. This is integer-exact for the current
+single deterministic circulation pattern and avoids copying a Passenger flow
+onto every relative arc.
+
+`RELATIVE_TIME_EXPANDED_OIP_FLOW` retains the original full binary Passenger
+flow as an explicit reference formulation. Tiny exhaustive tests require
+Compact, ride intervals, and full flow to return the same exact reduced cost
+and pricing bound. The interval model may have a weaker LP relaxation than
+full flow; this affects the speed at which a time-limited pricing bound
+improves, not the validity of the returned Gurobi objective bound.
+
+Compact, Relative, and the OIP validator now share the same closed horizon
+tail boundary `H + epsilon_H`; Relative remains Pair-only. The runner reports
+relative node/arc counts, origin-product counts, and model-build time. Graph
+templates are cached by start class within a root-CG run.
+
+The original full-flow rollout gate on Five-Station architecture B, `K=19`,
+one round, and a five-second proof-pricing budget failed the performance
+criterion:
+
+| Formulation | Complete class bounds | Pricing | Model build | Root LB |
+| --- | ---: | ---: | ---: | ---: |
+| Compact convex hull | 285 / 285 | 5.24 s | 0.38 s | 695,581.29 |
+| Relative full flow | 0 / 285 | 5.89 s | 5.84 s | 0.00 |
+
+At 180 seconds the same full-flow model bounded only 38 of 285 remapped
+classes. Its representative pricing model had 527,589 variables, 805,976
+linear rows, and 241,685 general constraints.
+
+Ride intervals remove that bottleneck. In the same five-second gate they bound
+all 285 classes, add 38 columns, and reduce the representative aggregate model
+to 30,325 variables, 69,045 linear rows, and 41,965 general constraints. Model
+build time is about 0.96 seconds. The certified root bound is nevertheless
+only 288,772.87 after five seconds and 486,101.02 after thirty seconds, versus
+695,581.29 for Compact after five seconds. The relative path itself still
+uses many indicator constraints, and the interval endpoint coupling has a
+weaker time-limited relaxation than Compact on this instance. Therefore the
+new formulation is a successful exact size reduction and research reference,
+but it does not pass the default-switch bound-performance gate. Compact
+remains the automatic OIP default.
+
+The cross-formulation Tiny test also exposed and fixed a Compact-OIP domain
+bug: after a trajectory crossed the horizon, later inactive event variables
+retained cumulative earliest-time lower bounds. This incorrectly removed
+otherwise valid early start classes. Continuous compact bounds now cap their
+inactive lower value at the shared horizon tail. Compact and Relative then
+produce the same exact Tiny pricing optimum.
+
+## Dispatch-only reservoir start domain
+
+The reservoir extension replaces an arbitrary state at time zero by a physical
+setup interval. For each available cabin $c$, the column universe is
+
+$$
+P_c=P_c^{\mathrm{stored}}\cup P_c^{\mathrm{dispatch}}.
+$$
+
+The stored column contains no visit, Passenger ride, or physical resource
+occurrence. A dispatch column chooses one continuous source time
+
+$$
+-W\le\theta_c<0
+$$
+
+and then follows the same exact No-Wait route recurrence
+
+$$
+t_{c,0}=\theta_c,
+\qquad
+t_{c,v+1}=t_{c,v}+\tau_{r_{cv}}.
+$$
+
+All visits whose source event lies before zero use the declared common
+all-stop warm-up policy. Passengers may board only after their release and
+must alight by the Passenger horizon $H$. The trajectory continues to the
+operational end $D=H+T$ solely for physical clearance. Dispatch is one-way:
+there is no sink, removal, or redispatch arc.
+
+With $s_c=1$ for the stored column and $d_c=1-s_c$, the restricted master
+retains
+
+$$
+\sum_{p\in P_c}\lambda_{cp}=1,
+\qquad
+d_{c+1}\le d_c.
+$$
+
+For optional dispatch, $K_{\mathrm{dispatched}}=\sum_c d_c\le
+K_{\mathrm{available}}$; exact-dispatch experiments omit the stored columns.
+Among two dispatched adjacent canonical IDs, the smaller ID is assigned the
+earlier source time. Both rules are pure label-symmetry reductions and impose
+no downstream order.
+
+Pricing is deliberately hybrid. The complete proof oracle keeps $\theta$
+continuous, covers both the stored alternative and every dispatch time, and
+returns $\underline\rho_c$. Equivalent cabin subproblems share one solve and
+remap both its incumbent and bound. This sharing is exact for the bound but
+usually produces time-identical, mutually conflicting primal incumbents.
+
+A separate primal oracle therefore solves a rotating subset of cabin-specific
+dispatch windows $[l_c,u_c]\subset[-W,0)$ around a canonical dispatch train.
+Alternatively, a fixed anchor
+$\theta\in\Theta'\subset[-W,0)$ may enter the absolute
+`TIME_EXPANDED_PATH` graph. Both restricted domains produce valid physical
+columns, but neither has authority to bound a dispatch time outside its own
+domain. Therefore the only continuous-reservoir correction is
+
+$$
+LB_{\mathrm{reservoir}}
+=z_{\mathrm{RMP}}
++\sum_c\min\{0,\underline\rho_c\}.
+$$
+
+Restricted-window and anchor incumbents may lower the upper bound but are
+excluded from this sum. A restricted primal column may be retained even with
+nonnegative reduced cost: it can still combine with other conflict-compatible
+columns to improve the integer master. This does not affect the certificate.
+The current continuous proof and window oracle use compact convex-hull
+pricing; adaptive dispatch-time DDD cells are reserved for a later performance
+tranche.
+
+The reservoir boundary has an explicit mode. `IDEAL_NON_LIMITING` creates no
+extra dispatch occurrence; the first route still consumes all normal physical
+resources. `PHYSICAL_RESOURCE` adds every configured directed resource usage
+at $\theta_c$ plus its declared leader-clear and follower-entry offsets. Thus
+source throughput is either explicitly idealized or explicitly constrained,
+never inferred from a station name or route-list order.
+
+Cross-column resource conflicts include the configured physical dispatch
+resource, if any, and every later physical occurrence. A stored cabin is
+compatible with all columns. Every accepted integer incumbent is checked
+against a movement core rebuilt from the EAN artifact, the canonical dispatch
+prefix, continuous path timing, all-stop warm-up, complete horizon coverage,
+and the full directed DDD resource policy before it becomes an upper bound.
 
 ## Bound Contract
 
@@ -237,8 +514,10 @@ source provenance
 validation status
 ```
 
-The column starts at the exact fixed placement of cabin $c$ and covers the
-complete modeled horizon. It is individually movement-feasible. Joint
+For fixed starts the column begins at the declared placement. For OIP it also
+contains phase, station/rope state, continuous origin, and boundary
+provenance. It covers the complete modeled horizon and is individually
+movement-feasible. Joint
 cross-cabin headways are master conflicts rather than internal column
 conditions.
 
@@ -589,32 +868,107 @@ the next budget slice to the component with the best recent bound or incumbent
 gain per second. The first version uses a deterministic fixed schedule so the
 algorithm remains reproducible.
 
-## Waiting Extension
+## Exact bounded-Waiting extension
 
-Waiting is added in two explicitly different stages.
-
-### Primal waiting repair
-
-Given selected no-wait route sequences, CP-SAT or the exact timing model may
-insert bounded Waiting at legal holding locations. Every repaired result is
-re-evaluated with exact Passenger Assignment and may update $UB$. Repaired
-whole-horizon trajectories return to the pool as distinct columns.
-
-This stage gives no waiting-enabled trajectory lower bound.
-
-### Exact waiting pricing
-
-For a waiting domain $w\in\{0,\ldots,W_v\}$, pricing later adds holding arcs
+The implemented finite Waiting domain is part of the priced column universe,
+not a post-processing repair. For each service visit $v$ at station $s(v)$,
 
 $$
-(k,s,t)\longrightarrow(k,s,t+w).
+w_v=m_v\Delta,
+\qquad
+m_v\in\{0,\ldots,\lfloor W_{s(v)}/\Delta\rfloor\}.
 $$
 
-Enumerating every tick globally is avoided through DDD-refined candidate
-times, interval labels, or exact dominance. A waiting-enabled lower bound is
-reported only if the pricing oracle proves coverage of every allowed waiting
-choice. If it searches only selected DDD points, its result remains
-`PRIMAL_POOL_ONLY`.
+Version 1 uses $\Delta=1\,\mathrm{s}$ and requires every waiting-enabled
+station to declare $W_s$ explicitly (the reference case uses $W_s=10$ s).
+Skip arcs have $m_v=0$. Waiting is permitted only if the minimum platform-exit
+time of the Stop visit is at least zero. Thus the reservoir setup interval
+remains all-stop and passenger-free, but a cabin may wait during a visit that
+started before zero once it has actually reached the platform exit after zero.
+
+For selected route option $o_v$, event propagation is
+
+$$
+t_{v+1}=t_v+\tau_{o_v}+w_v.
+$$
+
+A resource usage $u$ stores two binary coefficients
+$\alpha_u,\beta_u\in\{0,1\}$. Its directed leader-clear and follower-enter
+times are
+
+$$
+L_{vu}=t_v+\ell_u+\alpha_u w_v,
+\qquad
+F_{vu}=t_v+f_u+\beta_u w_v.
+$$
+
+At a waiting platform-exit occupancy resource $(\alpha_u,\beta_u)=(1,0)$:
+the leader clears at its actual delayed exit, while the following cabin's
+entry threshold remains its minimum exit event. Downstream exit-switch and
+service-mechanism resources use $(1,1)$ because both event expressions move
+with the wait. The ordinary directed disjunction remains
+
+$$
+F_{ju}-L_{iu}\ge h_u(i,j)
+\quad\lor\quad
+F_{iu}-L_{ju}\ge h_u(j,i).
+$$
+
+This representation is also valid for architecture-B leader-dependent
+headways because the separation value remains attached to the leading route
+behavior; Waiting changes event times, not the physical rule.
+
+### Fixed-start complete pricing
+
+Fixed-start proof pricing uses the complete time-expanded DAG. A route--wait
+arc is
+
+$$
+(v,q,t)\longrightarrow
+(v+1,q(o),t+\tau_o+m\Delta).
+$$
+
+Every integer $m$ in the declared station domain is enumerated, subject to the
+Stop and boundary rules. Therefore pricing covers every fixed-start
+Stop/Skip/Wait trajectory in the declared finite domain. Passenger boarding
+occurs at the actual platform exit and hence includes the current $w_v$;
+alighting contains all earlier propagated waits. Complete pricing bounds may
+therefore enter the usual reduced-cost correction and certify the
+Waiting-enabled root lower bound.
+
+### Continuous reservoir dispatch
+
+Reservoir proof pricing keeps the dispatch origin $\theta\in[-W,0)$
+continuous and the wait counts $m_v$ integral in the compact convex-hull MILP:
+
+$$
+t_0=\theta,
+\qquad
+t_{v+1}=t_v+\tau_{o_v}+m_v\Delta.
+$$
+
+Only binary Passenger-quantity products with the continuous event origin need
+the existing convex-hull linearization. The complete compact solve supplies
+the reduced-cost lower bound. Restricted continuous dispatch windows may add
+primal columns; absolute time-expanded dispatch anchors are rejected for this
+Waiting domain because they are not a complete continuous-origin proof.
+
+### Certificate boundary
+
+Bounded Waiting currently uses exact pair conflicts only. Tick-indexed
+resource-window rows are rejected because their overlap coefficient does not
+yet include the wait-dependent endpoints above. No-Wait columns remain valid
+warm starts and upper-bound candidates, but a No-Wait pricing bound is never
+reported as a Waiting-domain lower bound. Policy, grid, station maxima and
+earliest legal wait time are included in column fingerprints and checkpoint
+schema v5.
+
+When pair rows give an already generated column a negative reduced cost, proof
+pricing excludes that exact current-pool column by its complete Route/Wait
+signature. Excluding only its Stop/Skip sequence would be invalid because the
+same route with another wait vector is a different member of the complete
+domain. After exact current-pool exclusions, pricing searches the full
+complement and therefore retains the standard column-generation certificate.
 
 ## Public API and Result Schema
 
@@ -1235,17 +1589,17 @@ Exit criterion: an interrupted run reloads without losing any completed bound
 or incumbent update, and disabling the trajectory backend reproduces the
 current DDD result.
 
-### Phase 7: Waiting-enabled primal extension
+### Phase 7: Exact finite bounded Waiting (implemented)
 
-- repair selected route sequences with bounded legal Waiting;
-- return repaired columns to the pool;
-- recompute all resource intervals and Passenger costs;
-- compare No-Wait and Wait-enabled upper-bound improvement;
-- keep $LB_{\mathrm{traj}}$ scoped to No-Wait until exact waiting pricing is
-  independently completed.
+- fixed-start complete time-expanded Stop/Skip/Wait pricing;
+- continuous-dispatch compact reservoir proof pricing with integral waits;
+- wait-aware resource occurrences, Passenger costs, fingerprints, checkpoints,
+  exports and complete validation;
+- explicit rejection of OIP Waiting, FIFO/continuous Waiting, resource-window
+  rows and absolute reservoir anchors outside their proved domains.
 
-Exit criterion: every waiting-enabled incumbent passes complete validation and
-is labelled with the correct bound domain.
+The remaining experimental gate is the matched Five-Station architecture-B
+comparison of No-Wait and bounded-Wait bound/incumbent traces.
 
 ### Phase 8: Conditional exact and general extensions
 
@@ -1256,7 +1610,8 @@ Only after the root method passes its performance gates, consider:
 - multiple circulation patterns and dynamic turnbacks;
 - transfer-capable Passenger flow;
 - outer fleet-size search over independently certified fixed-$K$ intervals;
-- exact waiting pricing.
+- continuous/FIFO Waiting and adaptive wait grids beyond the declared finite
+  domain.
 
 ## Tests
 
@@ -1356,7 +1711,7 @@ Measure at equal total wall-clock budgets:
 | Three-Station fixed-$K$ No-Wait | regression and overhead |
 | Five-Station circle, $K=19$, Skip/No-Wait | primary identity-gap case |
 | Five-Station circle at lower and higher feasible $K$ | density sensitivity |
-| bounded-Wait variant | primal repair only, separate bound domain |
+| bounded-Wait variant | exact finite-domain pricing and separate certificate |
 
 Report:
 
