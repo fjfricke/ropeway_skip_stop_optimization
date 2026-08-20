@@ -9,11 +9,14 @@ from typing import TYPE_CHECKING
 from ropeway_skip_stop_optimization.mapping.physical_to_discrete import travel_seconds_for_segment
 from ropeway_skip_stop_optimization.models import (
     DerivedHeadwayPolicy,
+    DerivedSpatialRole,
     HeadwayRouteBehavior,
     PhysicalNode,
     PhysicalNodeKind,
     Scenario,
     TrackSegment,
+    TrackSegmentKind,
+    SpeedProfileKind,
 )
 from ropeway_skip_stop_optimization.optimization.ean.models import (
     EanCabinStart,
@@ -130,6 +133,198 @@ class EvenlySpacedAllStopCabinStartBuilder(EanCabinStartBuilder):
             cabin_count=self.cabin_count,
             cycle_seconds=cycle_seconds,
             cycle_boundaries=cycle_boundaries,
+        )
+
+
+@dataclass(frozen=True)
+class EanCanonicalRopeStartSlot:
+    """One physically packed cabin position on a common interstation rope."""
+
+    pattern_position: int
+    segment_id: str
+    first_switch_id: str
+    remaining_seconds: float
+
+
+@dataclass(frozen=True)
+class CanonicalFixedKRopeCabinStartBuilder(EanCabinStartBuilder):
+    """Build mode-independent Fixed-K starts on common rope continuations.
+
+    The construction is deliberately conservative: cabins are placed only on
+    physical rope segments traversed by every option at a pattern position.
+    It therefore does not rely on an executable all-stop circulation and can
+    define the same initial state above the all-stop capacity.
+    """
+
+    cabin_count: int
+
+    def build(
+        self,
+        scenario: Scenario,
+        config: EanConfig,
+        network: EanMovementNetwork,
+        pattern: EanCirculationPattern,
+        headway_policy: DerivedHeadwayPolicy | None = None,
+    ) -> tuple[EanCabinStart, ...]:
+        del config
+        if self.cabin_count <= 0:
+            raise ValueError("canonical fixed-K cabin_count must be positive")
+        if headway_policy is None:
+            raise ValueError("canonical fixed-K starts require a headway policy")
+        slots = self.slots(
+            scenario=scenario,
+            network=network,
+            pattern=pattern,
+            headway_policy=headway_policy,
+        )
+        if self.cabin_count > len(slots):
+            raise ValueError(
+                "canonical fixed-K cabin_count exceeds conservative rope-slot "
+                f"capacity: {self.cabin_count} > {len(slots)}"
+            )
+        selected = tuple(
+            slots[(index * len(slots)) // self.cabin_count]
+            for index in range(self.cabin_count)
+        )
+        starts = tuple(
+            EanCabinStart(
+                cabin_id=cabin_id,
+                first_switch_id=slot.first_switch_id,
+                kind=EanCabinStartKind.FIXED,
+                time_seconds=slot.remaining_seconds,
+            )
+            for cabin_id, slot in enumerate(selected)
+        )
+        for start in starts:
+            start.validate()
+        return starts
+
+    @classmethod
+    def canonical_start_slot_capacity(
+        cls,
+        *,
+        scenario: Scenario,
+        network: EanMovementNetwork,
+        pattern: EanCirculationPattern,
+        headway_policy: DerivedHeadwayPolicy,
+    ) -> int:
+        """Return this constructor's conservative capacity, not a global bound."""
+
+        return len(
+            cls.slots(
+                scenario=scenario,
+                network=network,
+                pattern=pattern,
+                headway_policy=headway_policy,
+            )
+        )
+
+    @staticmethod
+    def slots(
+        *,
+        scenario: Scenario,
+        network: EanMovementNetwork,
+        pattern: EanCirculationPattern,
+        headway_policy: DerivedHeadwayPolicy,
+    ) -> tuple[EanCanonicalRopeStartSlot, ...]:
+        scenario.validate()
+        network.validate()
+        pattern.validate()
+        headway_policy.validate()
+        segments_by_id = {segment.id: segment for segment in scenario.track_segments}
+        options_by_id = {option.id: option for option in network.route_options}
+        state_by_physical_node_id = {
+            state.physical_node_id: state.id for state in network.states
+        }
+        incoming_count_by_state_id: dict[str, int] = {}
+        for segment in scenario.track_segments:
+            state_id = state_by_physical_node_id.get(segment.to_node_id)
+            if segment.kind is TrackSegmentKind.ROPE and state_id is not None:
+                incoming_count_by_state_id[state_id] = (
+                    incoming_count_by_state_id.get(state_id, 0) + 1
+                )
+        ambiguous = tuple(
+            sorted(
+                state_id
+                for state_id in pattern.state_ids
+                if incoming_count_by_state_id.get(state_id, 0) != 1
+            )
+        )
+        if ambiguous:
+            raise ValueError(
+                "canonical fixed-K rope starts do not yet support movement states "
+                f"with non-unique incoming ropes: {ambiguous}"
+            )
+
+        spacing_m = headway_policy.spatial_spacing(DerivedSpatialRole.ROPE)
+        slots: list[EanCanonicalRopeStartSlot] = []
+        for position, option_ids in enumerate(pattern.route_option_ids_by_position):
+            continuation_paths = tuple(
+                options_by_id[option_id].continuation_segment_ids
+                for option_id in option_ids
+            )
+            if any(path != continuation_paths[0] for path in continuation_paths[1:]):
+                raise ValueError(
+                    "canonical fixed-K starts require identical continuation paths "
+                    f"at pattern position {position}"
+                )
+            path = continuation_paths[0]
+            downstream_seconds = 0.0
+            target_state_id = pattern.state_ids[(position + 1) % len(pattern.state_ids)]
+            segment_slots: list[EanCanonicalRopeStartSlot] = []
+            for segment_id in reversed(path):
+                segment = segments_by_id[segment_id]
+                if segment.kind is not TrackSegmentKind.ROPE:
+                    downstream_seconds += travel_seconds_for_segment(segment)
+                    continue
+                profile = segment.speed_profile
+                if (
+                    profile is None
+                    or profile.kind is not SpeedProfileKind.CONSTANT
+                    or profile.speed_m_per_s is None
+                ):
+                    raise ValueError(
+                        "canonical fixed-K rope starts currently require constant "
+                        f"rope speed: {segment.id!r}"
+                    )
+                capacity = math.floor(
+                    (segment.length_m + scenario.operating.min_clearance_m)
+                    / spacing_m
+                    + 1e-12
+                )
+                for slot_index in range(capacity):
+                    center_distance_m = (
+                        0.5 * scenario.operating.cabin_length_m
+                        + slot_index * spacing_m
+                    )
+                    if center_distance_m > (
+                        segment.length_m
+                        - 0.5 * scenario.operating.cabin_length_m
+                        + 1e-9
+                    ):
+                        continue
+                    segment_slots.append(
+                        EanCanonicalRopeStartSlot(
+                            pattern_position=position,
+                            segment_id=segment.id,
+                            first_switch_id=target_state_id,
+                            remaining_seconds=(
+                                downstream_seconds
+                                + center_distance_m / profile.speed_m_per_s
+                            ),
+                        )
+                    )
+                downstream_seconds += travel_seconds_for_segment(segment)
+            slots.extend(reversed(segment_slots))
+        return tuple(
+            sorted(
+                slots,
+                key=lambda item: (
+                    item.pattern_position,
+                    -item.remaining_seconds,
+                    item.segment_id,
+                ),
+            )
         )
 
 

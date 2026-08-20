@@ -91,3 +91,8 @@ Current plans:
   occupancy, and OIP boundary safety from raw exported plans and policies.
 
 Git history preserves superseded implementation plans.
+
+Implemented certified Fixed-$K$ trajectory Root-CG behavior and the campaign
+command are maintained in
+[`../reference/ddd_fixed_k_root_cg.md`](../reference/ddd_fixed_k_root_cg.md),
+not duplicated as future work here.

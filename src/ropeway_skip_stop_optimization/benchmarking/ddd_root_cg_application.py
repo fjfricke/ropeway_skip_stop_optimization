@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 import json
 import math
 from pathlib import Path
+from time import perf_counter
 from typing import Callable
 
 from ropeway_skip_stop_optimization.benchmarking.ddd_cases import (
@@ -20,12 +21,20 @@ from ropeway_skip_stop_optimization.examples.three_station import (
     build_three_station_scenario,
 )
 from ropeway_skip_stop_optimization.optimization.ddd import (
+    DddEanPassengerPrimalEvaluator,
+    DddFixedKOperatingMode,
+    DddFixedKSeedCoordinator,
+    DddFixedKSeedStatus,
+    DddFixedKStartPolicy,
+    DddFixedKTrajectoryProblem,
     DddTrajectoryConflictRowMode,
     DddTrajectoryDiversityMode,
     DddTrajectoryExactRootColumnGenerationSolver,
     DddTrajectoryMasterDualMode,
     DddTrajectoryPricingFormulation,
     DddTrajectoryRootCgIteration,
+    DddTrajectoryRootCgResult,
+    DddTrajectoryRootCgStatus,
     DddTrajectoryFleetMode,
     DddReservoirBoundaryConfig,
     DddReservoirBoundaryMode,
@@ -42,6 +51,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     write_ddd_trajectory_root_cg_checkpoint,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
+    CanonicalFixedKRopeCabinStartBuilder,
     EanFleetCardinalityMode,
     EanFleetMode,
     EanPassengerCandidateBuilder,
@@ -142,6 +152,25 @@ def main() -> None:
         ),
     )
     parser.add_argument("--pricing-time-limit", type=float, default=5.0)
+    parser.add_argument(
+        "--pricing-time-limit-tier",
+        action="append",
+        type=float,
+        default=[],
+        help="Adaptive proof-pricing tier; repeat in increasing order.",
+    )
+    parser.add_argument("--fixed-k-certified", action="store_true")
+    parser.add_argument(
+        "--fixed-start-policy",
+        choices=tuple(item.value for item in DddFixedKStartPolicy),
+        default=DddFixedKStartPolicy.LEGACY.value,
+    )
+    parser.add_argument("--cp-seed-time-limit", type=float, default=30.0)
+    parser.add_argument("--cp-seed-workers", type=int, default=1)
+    parser.add_argument("--restricted-mip-interval", type=int, default=1)
+    parser.add_argument("--restricted-mip-time-limit", type=float)
+    parser.add_argument("--final-mip-time-limit", type=float, default=0.0)
+    parser.add_argument("--objective-floor", type=float, default=0.0)
     parser.add_argument(
         "--waiting-step-seconds",
         type=float,
@@ -266,6 +295,7 @@ def run_namespace(
     *,
     progress_hook: Callable[[DddTrajectoryRootCgIteration], None] | None = None,
 ) -> dict[str, object]:
+        application_started = perf_counter()
         if args.resume_checkpoint is not None and args.neighbor_k_checkpoint is not None:
             raise ValueError(
                 "--resume-checkpoint and --neighbor-k-checkpoint are mutually exclusive"
@@ -291,6 +321,23 @@ def run_namespace(
             builder = example.build_ean_artifact_builder(scenario, config)
             if not isinstance(builder, NetworkEanBuildArtifactBuilder):
                 raise ValueError("trajectory root CG requires the network EAN builder")
+            fixed_start_policy = DddFixedKStartPolicy(
+                getattr(args, "fixed_start_policy", DddFixedKStartPolicy.LEGACY.value)
+            )
+            if fixed_start_policy is DddFixedKStartPolicy.CANONICAL_ROPE:
+                if args.fleet_mode != "fixed_starts":
+                    raise ValueError(
+                        "canonical rope starts require --fleet-mode fixed_starts"
+                    )
+                builder = replace(
+                    builder,
+                    start_builder=CanonicalFixedKRopeCabinStartBuilder(args.cabins),
+                    fleet_config=replace(
+                        builder.fleet_config,
+                        mode=EanFleetMode.FIXED_STARTS,
+                        available_fleet_count=None,
+                    ),
+                )
             if args.fleet_mode == "optimized_initial_placement":
                 builder = replace(
                     builder,
@@ -399,6 +446,31 @@ def run_namespace(
             else EanPassengerCandidateBuilder().build(scenario, artifact)
         )
         objective = EanPassengerObjective(args.objective)
+        fixed_k_problem = None
+        if getattr(args, "fixed_k_certified", False):
+            fixed_k_problem = DddFixedKTrajectoryProblem(
+                trajectory_problem=trajectory_problem,
+                artifact=artifact,
+                passenger_build=passenger_build,
+                objective=objective,
+                operating_mode=(
+                    DddFixedKOperatingMode.ALL_STOP
+                    if args.force_all_stop
+                    else DddFixedKOperatingMode.SKIP_STOP
+                ),
+                start_policy=DddFixedKStartPolicy(
+                    getattr(
+                        args,
+                        "fixed_start_policy",
+                        DddFixedKStartPolicy.LEGACY.value,
+                    )
+                ),
+                objective_floor=float(getattr(args, "objective_floor", 0.0)),
+            )
+            fixed_k_problem.validate()
+            trajectory_problem = fixed_k_problem.resolved_trajectory_problem
+            movement = trajectory_problem.structural_movement_problem
+            problem = build_initial_ddd_network_problem(movement)
         output_stem = (
             f"{case_id}__reservoir_k{args.cabins}_w{args.warmup_seconds:g}__"
             f"{objective.value}"
@@ -419,6 +491,28 @@ def run_namespace(
             else None
         )
         initial_trajectories = None
+        seed_result = None
+        if fixed_k_problem is not None and resume_state is None:
+            seed_evaluator = DddEanPassengerPrimalEvaluator(
+                scenario=scenario,
+                artifact=artifact,
+                objective=objective,
+                time_limit_seconds=getattr(args, "restricted_mip_time_limit", None),
+                threads=1,
+            )
+            seed_result = DddFixedKSeedCoordinator(
+                cp_sat_time_limit_seconds=float(
+                    getattr(args, "cp_seed_time_limit", 30.0)
+                ),
+                cp_sat_num_workers=int(getattr(args, "cp_seed_workers", 1)),
+            ).solve(
+                problem,
+                evaluate=lambda solution: seed_evaluator.evaluate(
+                    problem, solution
+                ).objective_value,
+            )
+            if seed_result.status is DddFixedKSeedStatus.FEASIBLE:
+                initial_trajectories = seed_result.trajectories
         neighbor_source_k = None
         if args.neighbor_k_checkpoint is not None:
             if not isinstance(
@@ -527,7 +621,9 @@ def run_namespace(
                 f"boundary_pairs={iteration.boundary_incompatibility_pair_count} "
                 f"windows={iteration.resource_window_count}"
                 f"(+{iteration.added_resource_window_count}) "
-                f"LB={iteration.global_lower_bound:.3f} UB={upper} gap={gap} "
+                f"LB={iteration.global_lower_bound:.3f} "
+                f"RMP={iteration.restricted_lp_value:.3f} "
+                f"UB={upper} gap={gap} "
                 f"rc={iteration.minimum_reduced_cost} rc_lb={reduced_cost_bound} "
                 f"correction={correction} existing={existing_pricing_columns} "
                 f"nogoods={iteration.proof_pricing_exclusion_count} "
@@ -548,6 +644,12 @@ def run_namespace(
                 f"build={iteration.pricing_model_build_seconds:.2f}s "
                 f"pricing_model={pricing_variables}v/{pricing_constraints}c "
                 f"exact={iteration.exact_pricing_cabin_count}/{len(trajectory_problem.cabin_ids)} "
+                f"tier={iteration.pricing_tier_seconds:g}s/"
+                f"retry={iteration.pricing_retry_count}/"
+                f"open={iteration.unresolved_pricing_count} "
+                f"mip={int(iteration.restricted_mip_ran)}/"
+                f"{iteration.restricted_mip_solution_count} "
+                f"remaining={('-' if iteration.remaining_budget_seconds is None else f'{iteration.remaining_budget_seconds:.1f}s')} "
                 f"master={iteration.master_build_seconds + iteration.lp_seconds:.2f}s "
                 f"pricing={iteration.pricing_seconds:.2f}s "
                 f"separation={iteration.resource_separation_seconds:.2f}s"
@@ -555,10 +657,18 @@ def run_namespace(
             for detail in iteration.primal_pricing_details:
                 print(f"  primal-detail: {detail}")
 
-        result = DddTrajectoryExactRootColumnGenerationSolver(
+        remaining_root_budget = (
+            None
+            if args.total_time_limit is None
+            else max(1e-6, args.total_time_limit - (perf_counter() - application_started))
+        )
+        solver = DddTrajectoryExactRootColumnGenerationSolver(
             max_iterations=args.max_iterations,
-            total_time_limit_seconds=args.total_time_limit,
+            total_time_limit_seconds=remaining_root_budget,
             pricing_time_limit_seconds=args.pricing_time_limit,
+            pricing_time_limit_tiers_seconds=tuple(
+                getattr(args, "pricing_time_limit_tier", ())
+            ),
             pricing_threads=args.pricing_threads,
             master_dual_mode=DddTrajectoryMasterDualMode(args.master_dual_mode),
             proof_pricing_mip_focus=args.proof_pricing_mip_focus,
@@ -587,29 +697,95 @@ def run_namespace(
                 args.reservoir_primal_max_passenger_arc_product
             ),
             output_flag=args.solver_output,
-        ).solve(
-            problem=problem,
-            trajectory_problem=trajectory_problem,
-            artifact=artifact,
-            passenger_build=passenger_build,
-            objective=objective,
-            initial_trajectories=initial_trajectories,
-            resume_state=resume_state,
-            progress_callback=progress,
-            checkpoint_callback=(
-                None
-                if checkpoint_path is None
-                else lambda state: write_ddd_trajectory_root_cg_checkpoint(
-                    checkpoint_path,
-                    state,
-                )
+            certified_fixed_k_mode=bool(
+                getattr(args, "fixed_k_certified", False)
+            ),
+            objective_floor=float(getattr(args, "objective_floor", 0.0)),
+            restricted_mip_interval=int(
+                getattr(args, "restricted_mip_interval", 1)
+            ),
+            restricted_mip_time_limit_seconds=getattr(
+                args, "restricted_mip_time_limit", None
+            ),
+            final_mip_time_limit_seconds=float(
+                getattr(args, "final_mip_time_limit", 0.0)
             ),
         )
+        root_solve_started = perf_counter()
+        if seed_result is not None and seed_result.status is not DddFixedKSeedStatus.FEASIBLE:
+            status_by_seed = {
+                DddFixedKSeedStatus.MOVEMENT_INFEASIBLE: (
+                    DddTrajectoryRootCgStatus.MOVEMENT_INFEASIBLE
+                ),
+                DddFixedKSeedStatus.UNKNOWN_NO_FEASIBLE_SEED: (
+                    DddTrajectoryRootCgStatus.UNKNOWN_NO_FEASIBLE_SEED
+                ),
+                DddFixedKSeedStatus.INTERNAL_VALIDATION_ERROR: (
+                    DddTrajectoryRootCgStatus.INTERNAL_VALIDATION_ERROR
+                ),
+            }
+            result = DddTrajectoryRootCgResult(
+                status=status_by_seed[seed_result.status],
+                certified_lower_bound=float(getattr(args, "objective_floor", 0.0)),
+                best_upper_bound=None,
+                relative_gap=None,
+                root_lp_certified=False,
+                iterations=(),
+                trajectories=(),
+                incumbent_option_ids=(),
+                incumbent_ride_values_by_id={},
+                total_seconds=perf_counter() - application_started,
+                detail=seed_result.detail,
+                fleet_mode=trajectory_problem.fleet_mode,
+                seed_kind=(
+                    None if seed_result.kind is None else seed_result.kind.value
+                ),
+                certificate_valid=(
+                    seed_result.status
+                    is not DddFixedKSeedStatus.INTERNAL_VALIDATION_ERROR
+                ),
+                objective_floor=float(getattr(args, "objective_floor", 0.0)),
+            )
+        else:
+            result = solver.solve(
+                problem=problem,
+                trajectory_problem=trajectory_problem,
+                artifact=artifact,
+                passenger_build=passenger_build,
+                objective=objective,
+                initial_trajectories=initial_trajectories,
+                resume_state=resume_state,
+                progress_callback=progress,
+                checkpoint_callback=(
+                    None
+                    if checkpoint_path is None
+                    else lambda state: write_ddd_trajectory_root_cg_checkpoint(
+                        checkpoint_path,
+                        state,
+                    )
+                ),
+            )
+            result = replace(
+                result,
+                total_seconds=(
+                    result.total_seconds
+                    + root_solve_started
+                    - application_started
+                ),
+                seed_kind=(
+                    result.seed_kind
+                    if seed_result is None or seed_result.kind is None
+                    else seed_result.kind.value
+                ),
+            )
         payload = {
             "schema_version": 3,
             "generated_at_utc": datetime.now(UTC).isoformat(),
             "case_id": case_id,
             "scope": "exact_root_column_generation",
+            "experimental": not bool(
+                getattr(args, "fixed_k_certified", False)
+            ),
             "fleet_mode": trajectory_problem.fleet_mode.value,
             "objective": objective.value,
             "waiting_policy": asdict(trajectory_problem.waiting_policy),
@@ -640,6 +816,40 @@ def run_namespace(
             "best_upper_bound": result.best_upper_bound,
             "relative_gap": result.relative_gap,
             "root_lp_certified": result.root_lp_certified,
+            "certificate_valid": result.certificate_valid,
+            "objective_floor": result.objective_floor,
+            "fixed_k_certified": bool(
+                getattr(args, "fixed_k_certified", False)
+            ),
+            "fixed_start_policy": getattr(
+                args, "fixed_start_policy", DddFixedKStartPolicy.LEGACY.value
+            ),
+            "operating_mode": (
+                None
+                if fixed_k_problem is None
+                else fixed_k_problem.operating_mode.value
+            ),
+            "fixed_k_problem_fingerprint": (
+                None if fixed_k_problem is None else fixed_k_problem.fingerprint
+            ),
+            "seed_status": (
+                None if seed_result is None else seed_result.status.value
+            ),
+            "seed_cp_sat_seconds": (
+                None if seed_result is None else seed_result.cp_sat_seconds
+            ),
+            "pricing_time_limit_tiers_seconds": list(
+                getattr(args, "pricing_time_limit_tier", ())
+            ),
+            "restricted_mip_interval": int(
+                getattr(args, "restricted_mip_interval", 1)
+            ),
+            "restricted_mip_time_limit_seconds": getattr(
+                args, "restricted_mip_time_limit", None
+            ),
+            "final_mip_time_limit_seconds": float(
+                getattr(args, "final_mip_time_limit", 0.0)
+            ),
             "conflict_row_mode": args.conflict_row_mode,
             "master_dual_mode": args.master_dual_mode,
             "proof_pricing_mip_focus": args.proof_pricing_mip_focus,

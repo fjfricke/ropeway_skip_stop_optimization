@@ -125,6 +125,13 @@ class DddTrajectoryRootCgStatus(StrEnum):
     TIME_LIMIT = "time_limit"
     UNKNOWN = "unknown"
     UNKNOWN_NO_FEASIBLE_SEED = "unknown_no_feasible_seed"
+    INTEGER_OPTIMAL = "integer_optimal"
+    ROOT_LP_CERTIFIED_WITH_INTEGER_GAP = "root_lp_certified_with_integer_gap"
+    TIME_LIMIT_WITH_CERTIFIED_INTERVAL = "time_limit_with_certified_interval"
+    ITERATION_LIMIT_WITH_CERTIFIED_INTERVAL = "iteration_limit_with_certified_interval"
+    MOVEMENT_INFEASIBLE = "movement_infeasible"
+    INTERNAL_VALIDATION_ERROR = "internal_validation_error"
+    INTERNAL_CERTIFICATE_ERROR = "internal_certificate_error"
 
 
 class DddTrajectoryDiversityMode(StrEnum):
@@ -213,6 +220,14 @@ class DddTrajectoryRootCgIteration:
     waiting_column_count: int = 0
     positive_wait_visit_count: int = 0
     maximum_column_wait_seconds: float = 0.0
+    pricing_tier_seconds: float = 0.0
+    pricing_retry_count: int = 0
+    unresolved_pricing_count: int = 0
+    nonexact_certified_nonnegative_pricing_count: int = 0
+    remaining_budget_seconds: float | None = None
+    restricted_mip_ran: bool = True
+    restricted_mip_solution_count: int = 0
+    restricted_mip_solver_status: int | None = None
 
 
 @dataclass(frozen=True)
@@ -233,6 +248,8 @@ class DddTrajectoryRootCgResult:
     full_start_domain_priced: bool = False
     seed_kind: str | None = None
     reservoir_fleet_plan: DddReservoirFleetPlan | None = None
+    certificate_valid: bool = True
+    objective_floor: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -306,6 +323,9 @@ class _DddTrajectoryPricingRound:
     primal_negative_candidate_count: int = 0
     primal_status_counts: tuple[tuple[str, int], ...] = ()
     primal_details: tuple[str, ...] = ()
+    maximum_tier_seconds: float = 0.0
+    retry_count: int = 0
+    unresolved_count: int = 0
 
 
 class _DddTrajectoryRootCgAbort(RuntimeError):
@@ -313,6 +333,14 @@ class _DddTrajectoryRootCgAbort(RuntimeError):
 
 
 class _DddNoFeasibleSeed(RuntimeError):
+    pass
+
+
+class _DddCertificateInvariantError(RuntimeError):
+    pass
+
+
+class _DddTotalBudgetExhausted(_DddTrajectoryRootCgAbort):
     pass
 
 
@@ -350,6 +378,13 @@ class DddTrajectoryExactRootColumnGenerationSolver:
     reservoir_primal_maximum_arc_count: int = 25_000
     reservoir_primal_maximum_passenger_arc_product: int = 250_000
     output_flag: bool = False
+    certified_fixed_k_mode: bool = False
+    objective_floor: float = 0.0
+    pricing_time_limit_tiers_seconds: tuple[float, ...] = ()
+    restricted_mip_interval: int = 1
+    restricted_mip_time_limit_seconds: float | None = None
+    final_mip_time_limit_seconds: float = 0.0
+    restricted_mip_focus: int = 1
 
     def solve(
         self,
@@ -382,7 +417,7 @@ class DddTrajectoryExactRootColumnGenerationSolver:
         except _DddNoFeasibleSeed as error:
             return DddTrajectoryRootCgResult(
                 status=DddTrajectoryRootCgStatus.UNKNOWN_NO_FEASIBLE_SEED,
-                certified_lower_bound=0.0,
+                certified_lower_bound=self.objective_floor,
                 best_upper_bound=None,
                 relative_gap=None,
                 root_lp_certified=False,
@@ -394,10 +429,11 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 detail=str(error),
                 fleet_mode=trajectory_problem.fleet_mode,
                 full_start_domain_priced=False,
+                objective_floor=self.objective_floor,
             )
         if resume_state is not None and resume_state.root_lp_certified:
             return self._run_result(
-                status=DddTrajectoryRootCgStatus.OPTIMAL_ROOT_LP,
+                status=self._root_completion_status(run),
                 run=run,
                 started=started,
                 detail=None,
@@ -412,7 +448,11 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                     >= self.total_time_limit_seconds
                 ):
                     return self._run_result(
-                        status=DddTrajectoryRootCgStatus.TIME_LIMIT,
+                        status=(
+                            DddTrajectoryRootCgStatus.TIME_LIMIT_WITH_CERTIFIED_INTERVAL
+                            if self.certified_fixed_k_mode
+                            else DddTrajectoryRootCgStatus.TIME_LIMIT
+                        ),
                         run=run,
                         started=started,
                         detail=(
@@ -422,12 +462,22 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                     )
                 round_started = perf_counter()
                 master_round = self._solve_restricted_master_round(
+                    round_index=round_index,
                     problem=problem,
                     trajectory_problem=trajectory_problem,
                     artifact=artifact,
                     passenger_build=passenger_build,
                     objective=objective,
                     run=run,
+                    remaining_budget_seconds=self._remaining_budget_seconds(
+                        run=run, started=started
+                    ),
+                    pricing_tolerance=self.pricing_tolerance,
+                )
+                self._validate_bound_invariants(
+                    run=run,
+                    restricted_lp_value=master_round.lp.objective_value,
+                    stage=f"round {round_index} restricted LP",
                 )
                 run.resource_windows = master_round.resource_windows
                 restricted_upper = self._update_incumbent(
@@ -447,10 +497,30 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                     run=run,
                     master_round=master_round,
                     pricing_oracle=pricing_oracle,
+                    remaining_budget_seconds=self._remaining_budget_seconds(
+                        run=run, started=started
+                    ),
                 )
                 corrected = pricing_round.certificate.certified_lower_bound
+                if (
+                    corrected is not None
+                    and corrected
+                    > master_round.lp.objective_value + self._bound_tolerance(
+                        master_round.lp.objective_value
+                    )
+                ):
+                    raise _DddCertificateInvariantError(
+                        "pricing-corrected lower bound exceeds its restricted LP"
+                    )
                 if corrected is not None:
-                    run.lower_bound = max(run.lower_bound, corrected, 0.0)
+                    run.lower_bound = max(
+                        run.lower_bound, corrected, self.objective_floor
+                    )
+                self._validate_bound_invariants(
+                    run=run,
+                    restricted_lp_value=master_round.lp.objective_value,
+                    stage=f"round {round_index} pricing",
+                )
                 added, diverse_added = self._add_priced_columns(
                     run=run,
                     pricing_round=pricing_round,
@@ -464,15 +534,50 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                     restricted_upper=restricted_upper,
                     added=added,
                     diverse_added=diverse_added,
+                    remaining_budget_seconds=self._remaining_budget_seconds(
+                        run=run, started=started
+                    ),
                 )
                 run.iterations.append(iteration)
-                if progress_callback is not None:
-                    progress_callback(iteration)
                 root_lp_certified = (
                     added == 0
                     and pricing_round.certificate.bound_status
                     is DddTrajectoryBoundStatus.FULL_ROOT_LP_CERTIFIED
                 )
+                final_mip_limit = self._clamped_time_limit(
+                    self.final_mip_time_limit_seconds,
+                    self._remaining_budget_seconds(run=run, started=started),
+                )
+                if (
+                    root_lp_certified
+                    and final_mip_limit is not None
+                    and final_mip_limit > 1e-6
+                ):
+                    final_mip = self._solve_restricted_mip(
+                        master_round.reference_master.master_problem,
+                        run=run,
+                        time_limit_seconds=final_mip_limit,
+                    )
+                    master_round = replace(master_round, mip=final_mip)
+                    restricted_upper = self._update_incumbent(
+                        problem=problem,
+                        trajectory_problem=trajectory_problem,
+                        artifact=artifact,
+                        master_round=master_round,
+                        run=run,
+                    )
+                    iteration = replace(
+                        iteration,
+                        restricted_integer_upper_bound=restricted_upper,
+                        global_upper_bound=run.upper_bound,
+                        mip_seconds=iteration.mip_seconds + final_mip.total_seconds,
+                        restricted_mip_ran=True,
+                        restricted_mip_solution_count=final_mip.solution_count,
+                        restricted_mip_solver_status=final_mip.solver_status,
+                    )
+                    run.iterations[-1] = iteration
+                if progress_callback is not None:
+                    progress_callback(iteration)
                 if checkpoint_callback is not None:
                     checkpoint_callback(
                         self._checkpoint_state(
@@ -483,7 +588,11 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                             started=started,
                         )
                     )
-                if not all(item.exact for item in pricing_round.results) and added == 0:
+                if (
+                    pricing_round.certificate.bound_status
+                    is not DddTrajectoryBoundStatus.FULL_ROOT_LP_CERTIFIED
+                    and added == 0
+                ):
                     return self._run_result(
                         status=DddTrajectoryRootCgStatus.UNKNOWN,
                         run=run,
@@ -505,12 +614,32 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                             ),
                         )
                     return self._run_result(
-                        status=DddTrajectoryRootCgStatus.OPTIMAL_ROOT_LP,
+                        status=self._root_completion_status(run),
                         run=run,
                         started=started,
                         detail=None,
                         root_lp_certified=True,
                     )
+        except _DddCertificateInvariantError as error:
+            run.lower_bound = self.objective_floor
+            return self._run_result(
+                status=DddTrajectoryRootCgStatus.INTERNAL_CERTIFICATE_ERROR,
+                run=run,
+                started=started,
+                detail=str(error),
+                certificate_valid=False,
+            )
+        except _DddTotalBudgetExhausted as error:
+            return self._run_result(
+                status=(
+                    DddTrajectoryRootCgStatus.TIME_LIMIT_WITH_CERTIFIED_INTERVAL
+                    if self.certified_fixed_k_mode
+                    else DddTrajectoryRootCgStatus.TIME_LIMIT
+                ),
+                run=run,
+                started=started,
+                detail=str(error),
+            )
         except _DddTrajectoryRootCgAbort as error:
             return self._run_result(
                 status=DddTrajectoryRootCgStatus.UNKNOWN,
@@ -520,7 +649,11 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             )
 
         return self._run_result(
-            status=DddTrajectoryRootCgStatus.ITERATION_LIMIT,
+            status=(
+                DddTrajectoryRootCgStatus.ITERATION_LIMIT_WITH_CERTIFIED_INTERVAL
+                if self.certified_fixed_k_mode
+                else DddTrajectoryRootCgStatus.ITERATION_LIMIT
+            ),
             run=run,
             started=started,
             detail="trajectory root column-generation iteration limit exhausted",
@@ -628,6 +761,17 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                     trajectory_problem,
                     trajectory,
                 )
+        if (
+            self.certified_fixed_k_mode
+            and isinstance(
+                trajectory_problem.start_domain, DddFixedTrajectoryStartDomain
+            )
+        ):
+            validate_ddd_reference_solution(
+                problem.movement_problem,
+                DddReferenceSolution(tuple(trajectories)),
+                waiting_policy=trajectory_problem.waiting_policy,
+            )
         run = _DddTrajectoryRootCgRun(
             instance_fingerprint=instance_fingerprint,
             trajectory_by_id=trajectory_by_id,
@@ -635,7 +779,9 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 list(resume_state.iterations) if resume_state is not None else []
             ),
             lower_bound=(
-                resume_state.certified_lower_bound if resume_state is not None else 0.0
+                resume_state.certified_lower_bound
+                if resume_state is not None
+                else self.objective_floor
             ),
             upper_bound=(
                 resume_state.best_upper_bound if resume_state is not None else None
@@ -765,12 +911,15 @@ class DddTrajectoryExactRootColumnGenerationSolver:
     def _solve_restricted_master_round(
         self,
         *,
+        round_index: int,
         problem: DddNetworkTimeProblem,
         trajectory_problem: DddTrajectoryProblem,
         artifact: EanBuildArtifact,
         passenger_build: EanPassengerCandidateBuildResult,
         objective: EanPassengerObjective,
         run: _DddTrajectoryRootCgRun,
+        remaining_budget_seconds: float | None,
+        pricing_tolerance: float,
     ) -> _DddTrajectoryRestrictedMasterRound:
         master_started = perf_counter()
         reference_master = build_ddd_trajectory_reference_master(
@@ -843,9 +992,37 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             )
         else:
             raise RuntimeError("unreachable resource-window separation loop")
-        mip = DddTrajectoryFactorizedMipReferenceOptimizer(
-            output_flag=self.output_flag
-        ).solve(reference_master.master_problem)
+        run_mip = (
+            self.restricted_mip_interval == 1
+            or (round_index - 1) % self.restricted_mip_interval == 0
+            or run.upper_bound is None
+        )
+        mip_limit = self._clamped_time_limit(
+            self.restricted_mip_time_limit_seconds,
+            remaining_budget_seconds,
+        )
+        if mip_limit is not None and mip_limit <= 1e-6:
+            run_mip = False
+        mip = (
+            self._solve_restricted_mip(
+                reference_master.master_problem,
+                run=run,
+                time_limit_seconds=mip_limit,
+            )
+            if run_mip
+            else DddTrajectoryPassengerMipResult(
+                status=DddTrajectoryPassengerLpStatus.UNKNOWN,
+                objective_value=None,
+                option_values_by_id={},
+                ride_values_by_id={},
+                build_seconds=0.0,
+                optimize_seconds=0.0,
+                total_seconds=0.0,
+                solver_status=None,
+                solution_count=0,
+                best_bound=None,
+            )
+        )
         return _DddTrajectoryRestrictedMasterRound(
             reference_master=reference_master,
             lp=lp,
@@ -855,6 +1032,26 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             master_seconds=master_seconds,
             lp_seconds=lp_seconds,
             resource_separation_seconds=separation_seconds,
+        )
+
+    def _solve_restricted_mip(
+        self,
+        master_problem: object,
+        *,
+        run: _DddTrajectoryRootCgRun,
+        time_limit_seconds: float | None,
+    ) -> DddTrajectoryPassengerMipResult:
+        return DddTrajectoryFactorizedMipReferenceOptimizer(
+            output_flag=self.output_flag,
+            time_limit_seconds=time_limit_seconds,
+            mip_focus=self.restricted_mip_focus,
+            threads=self.pricing_threads,
+        ).solve(
+            master_problem,
+            initial_option_values_by_id={
+                option_id: 1.0 for option_id in run.incumbent_option_ids
+            },
+            initial_ride_values_by_id=run.incumbent_ride_values_by_id,
         )
 
     def _update_incumbent(
@@ -958,6 +1155,7 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             | DddTrajectoryExactOipNoWaitPricingOracle
             | DddTrajectoryExactReservoirNoWaitPricingOracle
         ),
+        remaining_budget_seconds: float | None,
     ) -> _DddTrajectoryPricingRound:
         if master_round.lp.objective_value is None or master_round.lp.duals is None:
             raise RuntimeError("optimal restricted LP is missing objective or duals")
@@ -967,9 +1165,12 @@ class DddTrajectoryExactRootColumnGenerationSolver:
         candidate_option_ids: set[str] = set()
         extra_call_count = 0
         proof_exclusion_count = 0
+        maximum_tier_seconds = 0.0
+        retry_count = 0
         cabin_ids = master_round.reference_master.master_problem.cabin_ids
         shared_oip_results: dict[int, DddTrajectoryExactPricingResult] = {}
         shared_reservoir_results: dict[int, DddTrajectoryExactPricingResult] = {}
+        fixed_start_results: dict[int, DddTrajectoryExactPricingResult] = {}
         reused_from_cabin_id: dict[int, int] = {}
         proof_solve_count = 0
         if isinstance(pricing_oracle, DddTrajectoryExactOipNoWaitPricingOracle):
@@ -1007,6 +1208,27 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 pricing_oracle=pricing_oracle,
                 instance_fingerprint=run.instance_fingerprint,
             )
+        else:
+            (
+                fixed_start_results,
+                maximum_tier_seconds,
+                retry_count,
+                proof_solve_count,
+            ) = self._solve_fixed_start_proof_pricing_batch(
+                movement_problem=problem.movement_problem,
+                artifact=artifact,
+                passenger_build=passenger_build,
+                objective=objective,
+                cabin_ids=cabin_ids,
+                duals=master_round.lp.duals,
+                resource_window_rows=(
+                    master_round.reference_master.master_problem.resource_window_rows
+                ),
+                waiting_policy=trajectory_problem.waiting_policy,
+                instance_fingerprint=run.instance_fingerprint,
+                trajectory_by_id=run.trajectory_by_id,
+                remaining_budget_seconds=remaining_budget_seconds,
+            )
         for cabin_id in cabin_ids:
             bounded_waiting = (
                 trajectory_problem.waiting_policy.domain
@@ -1039,23 +1261,7 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             ):
                 proof_result = shared_reservoir_results[cabin_id]
             else:
-                proof_result = pricing_oracle.solve(
-                    movement_problem=problem.movement_problem,
-                    artifact=artifact,
-                    passenger_build=passenger_build,
-                    objective=objective,
-                    cabin_id=cabin_id,
-                    duals=master_round.lp.duals,
-                    excluded_route_option_sequences=frozenset(excluded_sequences),
-                    excluded_timed_support_signatures=frozenset(
-                        excluded_timed_signatures
-                    ),
-                    resource_window_rows=(
-                        master_round.reference_master.master_problem.resource_window_rows
-                    ),
-                    waiting_policy=trajectory_problem.waiting_policy,
-                    instance_fingerprint=run.instance_fingerprint,
-                )
+                proof_result = fixed_start_results[cabin_id]
                 proof_exclusion_count += len(excluded_sequences) + len(
                     excluded_timed_signatures
                 )
@@ -1311,7 +1517,140 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             primal_details=tuple(
                 result.detail for result in primal_results if result.detail
             ),
+            maximum_tier_seconds=maximum_tier_seconds,
+            retry_count=retry_count,
+            unresolved_count=sum(
+                not result.exact
+                and (
+                    result.certified_reduced_cost_lower_bound is None
+                    or result.certified_reduced_cost_lower_bound
+                    < -self.pricing_tolerance
+                )
+                and not (
+                    result.minimum_reduced_cost < -self.pricing_tolerance
+                    and result.reference_trajectory is not None
+                )
+                for result in pricing_result_tuple
+            ),
         )
+
+    def _solve_fixed_start_proof_pricing_batch(
+        self,
+        *,
+        movement_problem: DddMovementProblem,
+        artifact: EanBuildArtifact,
+        passenger_build: EanPassengerCandidateBuildResult,
+        objective: EanPassengerObjective,
+        cabin_ids: tuple[int, ...],
+        duals: DddTrajectoryPassengerDuals,
+        resource_window_rows: tuple[DddTrajectoryResourceWindowRow, ...],
+        waiting_policy: DddTrajectoryWaitingPolicy,
+        instance_fingerprint: str,
+        trajectory_by_id: dict[str, DddReferenceTrajectory],
+        remaining_budget_seconds: float | None,
+    ) -> tuple[dict[int, DddTrajectoryExactPricingResult], float, int, int]:
+        """Price all cabins breadth-first over deterministic time tiers."""
+
+        tiers = (
+            self.pricing_time_limit_tiers_seconds
+            or (self.pricing_time_limit_seconds,)
+        )
+        started = perf_counter()
+        results: dict[int, DddTrajectoryExactPricingResult] = {}
+        unresolved = set(cabin_ids)
+        retry_count = 0
+        solve_count = 0
+        maximum_tier_seconds = 0.0
+        bounded_waiting = (
+            waiting_policy.domain is DddTrajectoryWaitingDomain.BOUNDED_WAIT
+        )
+        excluded_sequences_by_cabin = {
+            cabin_id: frozenset(
+                trajectory.support_signature
+                for trajectory in trajectory_by_id.values()
+                if trajectory.cabin_id == cabin_id
+            )
+            if not bounded_waiting
+            else frozenset()
+            for cabin_id in cabin_ids
+        }
+        excluded_timed_by_cabin = {
+            cabin_id: frozenset(
+                trajectory.timed_support_signature
+                for trajectory in trajectory_by_id.values()
+                if trajectory.cabin_id == cabin_id
+            )
+            if bounded_waiting
+            else frozenset()
+            for cabin_id in cabin_ids
+        }
+        for tier_index, configured_tier in enumerate(tiers):
+            if not unresolved:
+                break
+            for cabin_id in tuple(sorted(unresolved)):
+                remaining = (
+                    None
+                    if remaining_budget_seconds is None
+                    else remaining_budget_seconds - (perf_counter() - started)
+                )
+                time_limit = self._clamped_time_limit(configured_tier, remaining)
+                if time_limit is None or time_limit <= 1e-6:
+                    if cabin_id not in results:
+                        raise _DddTotalBudgetExhausted(
+                            "no total budget remained for required proof pricing"
+                        )
+                    return (
+                        results,
+                        maximum_tier_seconds,
+                        retry_count,
+                        solve_count,
+                    )
+                maximum_tier_seconds = max(maximum_tier_seconds, time_limit)
+                result = DddTrajectoryExactNoWaitPricingOracle(
+                    time_limit_seconds=time_limit,
+                    threads=self.pricing_threads,
+                    output_flag=self.output_flag,
+                    mip_focus=self.proof_pricing_mip_focus,
+                    formulation=self.pricing_formulation,
+                ).solve(
+                    movement_problem=movement_problem,
+                    artifact=artifact,
+                    passenger_build=passenger_build,
+                    objective=objective,
+                    cabin_id=cabin_id,
+                    duals=duals,
+                    excluded_route_option_sequences=(
+                        excluded_sequences_by_cabin[cabin_id]
+                    ),
+                    excluded_timed_support_signatures=(
+                        excluded_timed_by_cabin[cabin_id]
+                    ),
+                    resource_window_rows=resource_window_rows,
+                    waiting_policy=waiting_policy,
+                    instance_fingerprint=instance_fingerprint,
+                )
+                solve_count += 1
+                if cabin_id in results:
+                    retry_count += 1
+                results[cabin_id] = result
+                certified_nonnegative = (
+                    result.certified_reduced_cost_lower_bound is not None
+                    and result.certified_reduced_cost_lower_bound
+                    >= -self.pricing_tolerance
+                )
+                found_negative = (
+                    result.minimum_reduced_cost < -self.pricing_tolerance
+                    and result.reference_trajectory is not None
+                )
+                if result.exact or certified_nonnegative or found_negative:
+                    unresolved.remove(cabin_id)
+            if tier_index == len(tiers) - 1:
+                break
+        if set(results) != set(cabin_ids):
+            raise _DddTotalBudgetExhausted(
+                "no total budget remained for required proof pricing"
+            )
+        return results, maximum_tier_seconds, retry_count, solve_count
 
     def _solve_shared_reservoir_proof_pricing(
         self,
@@ -1687,8 +2026,11 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 continue
             if (
                 pricing_result.minimum_reduced_cost >= -self.pricing_tolerance
-                and pricing_result.option_id
-                not in pricing_round.primal_candidate_option_ids
+                and (
+                    self.certified_fixed_k_mode
+                    or pricing_result.option_id
+                    not in pricing_round.primal_candidate_option_ids
+                )
             ):
                 continue
             if pricing_result.option_id in run.trajectory_by_id:
@@ -1701,8 +2043,8 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 diverse_added += 1
         return added, diverse_added
 
-    @staticmethod
     def _build_iteration(
+        self,
         *,
         round_index: int,
         round_started: float,
@@ -1712,6 +2054,7 @@ class DddTrajectoryExactRootColumnGenerationSolver:
         restricted_upper: float | None,
         added: int,
         diverse_added: int,
+        remaining_budget_seconds: float | None,
     ) -> DddTrajectoryRootCgIteration:
         minimum_reduced_cost = (
             min(item.minimum_reduced_cost for item in pricing_round.results)
@@ -1832,6 +2175,20 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 ),
                 default=0.0,
             ),
+            pricing_tier_seconds=pricing_round.maximum_tier_seconds,
+            pricing_retry_count=pricing_round.retry_count,
+            unresolved_pricing_count=pricing_round.unresolved_count,
+            nonexact_certified_nonnegative_pricing_count=sum(
+                not result.exact
+                and result.certified_reduced_cost_lower_bound is not None
+                and result.certified_reduced_cost_lower_bound
+                >= -self.pricing_tolerance
+                for result in pricing_round.results
+            ),
+            remaining_budget_seconds=remaining_budget_seconds,
+            restricted_mip_ran=master_round.mip.solver_status is not None,
+            restricted_mip_solution_count=master_round.mip.solution_count,
+            restricted_mip_solver_status=master_round.mip.solver_status,
         )
 
     def _checkpoint_state(
@@ -1879,6 +2236,7 @@ class DddTrajectoryExactRootColumnGenerationSolver:
         started: float,
         detail: str | None,
         root_lp_certified: bool = False,
+        certificate_valid: bool = True,
     ) -> DddTrajectoryRootCgResult:
         return self._result(
             status=status,
@@ -1896,7 +2254,92 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             fleet_plan=run.fleet_plan,
             reservoir_fleet_plan=run.reservoir_fleet_plan,
             seed_kind=run.seed_kind,
+            certificate_valid=certificate_valid,
+            objective_floor=self.objective_floor,
         )
+
+    def _remaining_budget_seconds(
+        self,
+        *,
+        run: _DddTrajectoryRootCgRun,
+        started: float,
+    ) -> float | None:
+        if self.total_time_limit_seconds is None:
+            return None
+        return max(
+            0.0,
+            self.total_time_limit_seconds
+            - run.elapsed_offset_seconds
+            - (perf_counter() - started),
+        )
+
+    @staticmethod
+    def _clamped_time_limit(
+        configured_seconds: float | None,
+        remaining_seconds: float | None,
+    ) -> float | None:
+        if configured_seconds is None:
+            return remaining_seconds
+        if configured_seconds <= 0:
+            return None
+        return (
+            configured_seconds
+            if remaining_seconds is None
+            else min(configured_seconds, max(0.0, remaining_seconds))
+        )
+
+    def _bound_tolerance(self, value: float) -> float:
+        return max(self.pricing_tolerance, 1e-9 * max(1.0, abs(value)))
+
+    def _validate_bound_invariants(
+        self,
+        *,
+        run: _DddTrajectoryRootCgRun,
+        restricted_lp_value: float,
+        stage: str,
+    ) -> None:
+        tolerance = self._bound_tolerance(restricted_lp_value)
+        if run.lower_bound > restricted_lp_value + tolerance:
+            raise _DddCertificateInvariantError(
+                f"{stage}: certified LB {run.lower_bound} exceeds restricted LP "
+                f"{restricted_lp_value}"
+            )
+        if run.upper_bound is not None and (
+            run.lower_bound > run.upper_bound + self._bound_tolerance(run.upper_bound)
+        ):
+            raise _DddCertificateInvariantError(
+                f"{stage}: certified LB {run.lower_bound} exceeds validated UB "
+                f"{run.upper_bound}"
+            )
+        if run.iterations:
+            previous = run.iterations[-1]
+            if run.lower_bound + tolerance < previous.global_lower_bound:
+                raise _DddCertificateInvariantError(
+                    f"{stage}: certified lower bound decreased"
+                )
+            if (
+                run.upper_bound is not None
+                and previous.global_upper_bound is not None
+                and run.upper_bound
+                > previous.global_upper_bound
+                + self._bound_tolerance(previous.global_upper_bound)
+            ):
+                raise _DddCertificateInvariantError(
+                    f"{stage}: validated upper bound increased"
+                )
+
+    def _root_completion_status(
+        self, run: _DddTrajectoryRootCgRun
+    ) -> DddTrajectoryRootCgStatus:
+        if not self.certified_fixed_k_mode:
+            return DddTrajectoryRootCgStatus.OPTIMAL_ROOT_LP
+        if (
+            run.upper_bound is not None
+            and run.upper_bound - run.lower_bound
+            <= self._bound_tolerance(run.upper_bound)
+        ):
+            return DddTrajectoryRootCgStatus.INTEGER_OPTIMAL
+        return DddTrajectoryRootCgStatus.ROOT_LP_CERTIFIED_WITH_INTEGER_GAP
 
     def _validate_resume_state(
         self,
@@ -1928,6 +2371,33 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             raise ValueError("trajectory checkpoint round indices are inconsistent")
         if state.completed_rounds < 0 or state.completed_rounds > self.max_iterations:
             raise ValueError("trajectory checkpoint exceeds the requested round limit")
+        previous_lower = self.objective_floor
+        previous_upper: float | None = None
+        for iteration in state.iterations:
+            tolerance = self._bound_tolerance(iteration.restricted_lp_value)
+            if iteration.global_lower_bound > iteration.restricted_lp_value + tolerance:
+                raise ValueError(
+                    "trajectory checkpoint lower bound exceeds a restricted LP"
+                )
+            if iteration.global_lower_bound + tolerance < previous_lower:
+                raise ValueError("trajectory checkpoint lower bound decreases")
+            if (
+                iteration.global_upper_bound is not None
+                and iteration.global_lower_bound
+                > iteration.global_upper_bound
+                + self._bound_tolerance(iteration.global_upper_bound)
+            ):
+                raise ValueError("trajectory checkpoint bound interval is inverted")
+            if (
+                previous_upper is not None
+                and iteration.global_upper_bound is not None
+                and iteration.global_upper_bound
+                > previous_upper + self._bound_tolerance(previous_upper)
+            ):
+                raise ValueError("trajectory checkpoint upper bound increases")
+            previous_lower = iteration.global_lower_bound
+            if iteration.global_upper_bound is not None:
+                previous_upper = iteration.global_upper_bound
         if state.certified_lower_bound < 0 or not math.isfinite(
             state.certified_lower_bound
         ):
@@ -1966,17 +2436,20 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 "trajectory checkpoint passenger ride is outside incumbent"
             )
         if state.root_lp_certified:
+            final_iteration = state.iterations[-1] if state.iterations else None
             checkpoint_cabin_count = len(
                 {trajectory.cabin_id for trajectory in state.trajectories}
             )
-            final_iteration = state.iterations[-1] if state.iterations else None
             if (
                 final_iteration is None
                 or final_iteration.added_trajectory_count != 0
                 or final_iteration.minimum_reduced_cost is None
                 or final_iteration.minimum_reduced_cost < -self.pricing_tolerance
-                or final_iteration.exact_pricing_cabin_count
-                != checkpoint_cabin_count
+                or (
+                    final_iteration.exact_pricing_cabin_count
+                    + final_iteration.nonexact_certified_nonnegative_pricing_count
+                    != checkpoint_cabin_count
+                )
             ):
                 raise ValueError(
                     "trajectory checkpoint root certificate is inconsistent"
@@ -2085,6 +2558,16 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             raise ValueError("trajectory root total time limit must be positive")
         if self.pricing_time_limit_seconds <= 0:
             raise ValueError("trajectory root pricing limit must be positive")
+        if self.pricing_time_limit_tiers_seconds:
+            if tuple(sorted(set(self.pricing_time_limit_tiers_seconds))) != (
+                self.pricing_time_limit_tiers_seconds
+            ) or any(
+                not math.isfinite(value) or value <= 0
+                for value in self.pricing_time_limit_tiers_seconds
+            ):
+                raise ValueError(
+                    "trajectory root pricing tiers must be increasing positive values"
+                )
         if self.pricing_threads <= 0:
             raise ValueError("trajectory root pricing threads must be positive")
         if not isinstance(self.master_dual_mode, DddTrajectoryMasterDualMode):
@@ -2139,6 +2622,31 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             raise ValueError(
                 "trajectory root reservoir passenger-product cap must be positive"
             )
+        if not math.isfinite(self.objective_floor):
+            raise ValueError("trajectory root objective floor must be finite")
+        if self.restricted_mip_interval <= 0:
+            raise ValueError("trajectory restricted MIP interval must be positive")
+        if self.restricted_mip_time_limit_seconds is not None and (
+            not math.isfinite(self.restricted_mip_time_limit_seconds)
+            or self.restricted_mip_time_limit_seconds <= 0
+        ):
+            raise ValueError("trajectory restricted MIP limit must be positive")
+        if not math.isfinite(self.final_mip_time_limit_seconds) or (
+            self.final_mip_time_limit_seconds < 0
+        ):
+            raise ValueError("trajectory final MIP limit must be nonnegative")
+        if self.restricted_mip_focus not in range(4):
+            raise ValueError("trajectory restricted MIP focus is invalid")
+        if self.certified_fixed_k_mode:
+            if not is_fixed:
+                raise ValueError("certified Fixed-K mode requires fixed starts")
+            if (
+                self.oip_primal_pricing_time_limit_seconds > 0
+                or self.reservoir_primal_pricing_time_limit_seconds > 0
+            ):
+                raise ValueError(
+                    "certified Fixed-K mode forbids independent primal pricing"
+                )
 
     @staticmethod
     def _result(
@@ -2158,6 +2666,8 @@ class DddTrajectoryExactRootColumnGenerationSolver:
         fleet_plan: EanFleetPlan | None = None,
         reservoir_fleet_plan: DddReservoirFleetPlan | None = None,
         seed_kind: str | None = None,
+        certificate_valid: bool = True,
+        objective_floor: float = 0.0,
     ) -> DddTrajectoryRootCgResult:
         relative_gap = (
             max(0.0, upper_bound - lower_bound) / abs(upper_bound)
@@ -2193,6 +2703,8 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 )
             ),
             seed_kind=seed_kind,
+            certificate_valid=certificate_valid,
+            objective_floor=objective_floor,
         )
 
 

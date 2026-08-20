@@ -251,6 +251,9 @@ class DddTrajectoryPassengerMipResult:
     build_seconds: float
     optimize_seconds: float
     total_seconds: float
+    solver_status: int | None = None
+    solution_count: int = 0
+    best_bound: float | None = None
 
 
 @dataclass(frozen=True)
@@ -386,15 +389,32 @@ class DddTrajectoryFactorizedMipReferenceOptimizer:
     """Solve a finite complete trajectory master integrally for tiny references."""
 
     output_flag: bool = False
+    time_limit_seconds: float | None = None
+    mip_focus: int = 1
+    threads: int | None = None
 
     def solve(
         self,
         problem: DddTrajectoryPassengerMasterProblem,
+        *,
+        initial_option_values_by_id: dict[str, float] | None = None,
+        initial_ride_values_by_id: dict[str, float] | None = None,
     ) -> DddTrajectoryPassengerMipResult:
         problem.validate()
         started = perf_counter()
         model = gp.Model("ddd_trajectory_factorized_mip_reference")
         model.Params.OutputFlag = int(self.output_flag)
+        if self.time_limit_seconds is not None:
+            if self.time_limit_seconds <= 0:
+                raise ValueError("trajectory restricted MIP time limit must be positive")
+            model.Params.TimeLimit = self.time_limit_seconds
+        if self.mip_focus not in range(4):
+            raise ValueError("trajectory restricted MIP focus is invalid")
+        model.Params.MIPFocus = self.mip_focus
+        if self.threads is not None:
+            if self.threads <= 0:
+                raise ValueError("trajectory restricted MIP threads must be positive")
+            model.Params.Threads = self.threads
         model.ModelSense = GRB.MINIMIZE
         model.ObjCon = problem.objective_constant
 
@@ -417,6 +437,12 @@ class DddTrajectoryFactorizedMipReferenceOptimizer:
             )
             for index, item in enumerate(_rides(problem))
         }
+        for option_id, value in (initial_option_values_by_id or {}).items():
+            if option_id in select:
+                select[option_id].Start = value
+        for ride_id, value in (initial_ride_values_by_id or {}).items():
+            if ride_id in ride:
+                ride[ride_id].Start = value
         for cabin_id in problem.cabin_ids:
             model.addConstr(
                 gp.quicksum(
@@ -501,9 +527,10 @@ class DddTrajectoryFactorizedMipReferenceOptimizer:
         model.optimize()
         optimize_seconds = perf_counter() - optimize_started
         status = _status(model.Status)
+        has_incumbent = model.SolCount > 0
         objective_value = (
             float(model.ObjVal)
-            if status is DddTrajectoryPassengerLpStatus.OPTIMAL
+            if has_incumbent
             else None
         )
         return DddTrajectoryPassengerMipResult(
@@ -522,6 +549,9 @@ class DddTrajectoryFactorizedMipReferenceOptimizer:
             build_seconds=build_seconds,
             optimize_seconds=optimize_seconds,
             total_seconds=perf_counter() - started,
+            solver_status=int(model.Status),
+            solution_count=int(model.SolCount),
+            best_bound=(float(model.ObjBound) if math.isfinite(model.ObjBound) else None),
         )
 
 

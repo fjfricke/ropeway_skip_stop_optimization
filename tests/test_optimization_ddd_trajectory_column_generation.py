@@ -120,6 +120,31 @@ def test_inexact_pricing_solver_bounds_certify_safe_correction() -> None:
     )
 
 
+def test_nonnegative_solver_bounds_certify_root_convergence_without_exact_pricing() -> None:
+    certificate = _certificate(
+        rmp=100.0,
+        reduced_costs=(
+            DddTrajectoryReducedCost(
+                0,
+                4.0,
+                exact=False,
+                certified_lower_bound=0.0,
+            ),
+            DddTrajectoryReducedCost(
+                1,
+                2.0,
+                exact=False,
+                certified_lower_bound=1.0,
+            ),
+        ),
+        row_complete=True,
+    )
+
+    assert certificate.convergence_certified
+    assert certificate.certified_lower_bound == pytest.approx(100.0)
+    assert certificate.bound_status is DddTrajectoryBoundStatus.FULL_ROOT_LP_CERTIFIED
+
+
 def test_no_wait_pricing_does_not_certify_waiting_enabled_target() -> None:
     certificate = _certificate(
         rmp=100.0,

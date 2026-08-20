@@ -17,10 +17,12 @@ from ropeway_skip_stop_optimization.optimization.ean.builders.headway_checkpoint
     SkipStopHeadwayCheckpointBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ean.builders.fixed_start_builder import (
+    CanonicalFixedKRopeCabinStartBuilder,
     ContinuousAllStopMaxCabinStartBuilder,
     DeterministicPhysicalNodeToSwitchStartBuilder,
     EanCabinStartBuilder,
     EvenlySpacedAllStopCabinStartBuilder,
+    EanCanonicalRopeStartSlot,
 )
 from ropeway_skip_stop_optimization.optimization.ean.builders.headway_pair_builder import (
     AllPairsHeadwayPairBuilder,
@@ -65,6 +67,7 @@ from ropeway_skip_stop_optimization.optimization.ean.builders.physical_network_b
 
 __all__ = [
     "AllPairsHeadwayPairBuilder",
+    "CanonicalFixedKRopeCabinStartBuilder",
     "ContinuousAllStopMaxCabinStartBuilder",
     "CyclicPatternVisitBuilder",
     "DeterministicPhysicalNodeToSwitchStartBuilder",
@@ -73,6 +76,7 @@ __all__ = [
     "EanArtifactConstructionMode",
     "EanCabinStartBuilder",
     "EvenlySpacedAllStopCabinStartBuilder",
+    "EanCanonicalRopeStartSlot",
     "HeadwayCandidateBuilder",
     "HeadwayCheckpointBuilder",
     "HeadwayDurationBuilder",

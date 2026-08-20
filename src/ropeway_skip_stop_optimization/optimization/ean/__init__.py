@@ -23,6 +23,7 @@ _EXPORTS_BY_MODULE: dict[str, tuple[str, ...]] = {
     ),
     'ropeway_skip_stop_optimization.optimization.ean.builders': (
         'AllPairsHeadwayPairBuilder',
+        'CanonicalFixedKRopeCabinStartBuilder',
         'ContinuousAllStopMaxCabinStartBuilder',
         'CyclicPatternVisitBuilder',
         'DeterministicPhysicalNodeToSwitchStartBuilder',
@@ -33,6 +34,7 @@ _EXPORTS_BY_MODULE: dict[str, tuple[str, ...]] = {
         'EanPassengerCandidateBuildResult',
         'EanPassengerCandidateBuilder',
         'EvenlySpacedAllStopCabinStartBuilder',
+        'EanCanonicalRopeStartSlot',
         'HeadwayCandidateBuilder',
         'HeadwayCheckpointBuilder',
         'HeadwayDurationBuilder',
@@ -227,6 +229,7 @@ _EXPORT_MODULE_BY_NAME = {
 
 __all__ = [
     'AllPairsHeadwayPairBuilder',
+    'CanonicalFixedKRopeCabinStartBuilder',
     'SparseHeadwayPairBuilder',
     'ALL_EAN_OPTIMIZATION_NAMES',
     'ALL_EAN_FORMULATION_SELECTION_NAMES',
@@ -253,6 +256,7 @@ __all__ = [
     'EanCabinStart',
     'EanCabinStartKind',
     'EvenlySpacedAllStopCabinStartBuilder',
+    'EanCanonicalRopeStartSlot',
     'EanCabinTrajectory',
     'EanCabinVisit',
     'EanConfig',

@@ -68,10 +68,11 @@ The restricted factorized Passenger LP starts from one all-stop trajectory per
 cabin. Every round solves an exact no-wait route-and-load pricing MILP per
 cabin, adds negative-reduced-cost trajectories, rebuilds all incompatibility
 rows for the current pool, and solves the restricted integer master for an
-upper bound. The LP is certified only when every pricing solve is optimal and
-no negative column remains. Use `--example` for a registered fixed-start,
-no-wait network case; a pricing timeout retains completed bounds but cannot
-certify root convergence. The optional resource-window mode separates
+upper bound. The LP is certified when every pricing problem is optimal or has
+a certified nonnegative solver bound and no negative column remains. Use
+`--example` for a registered fixed-start, no-wait network case; unresolved
+pricing retains completed bounds but cannot certify root convergence. The
+optional resource-window mode separates
 capacity-one clique rows, passes their dual prices into future-column pricing,
 and still rebuilds every incompatibility pair as the exact fallback. The
 default `pair_only` reproduces the previous implementation.
@@ -100,6 +101,23 @@ diversity pass. The Five-Station reference already solved all 399 pricing calls
 exactly with a two-second limit; five seconds is the less brittle general
 default. Larger budgets should be used only when the diagnostics report
 non-exact pricing, not pre-emptively.
+
+For thesis experiments, use the hardened exact-$K$ campaign runner instead of
+the reservoir sweep:
+
+```bash
+.venv/bin/python benchmarks/run_ddd_fixed_k_campaign.py \
+  --config benchmarks/configs/five_station_fixed_k_screening.json \
+  --progress \
+  --frontend-live
+```
+
+It compares All-Stop and Skip-Stop on identical canonical rope starts, uses a
+complete CP-SAT movement fallback when the All-Stop seed is invalid, charges
+all stages to one profile budget, and publishes certified bounds and root-LP
+versus integer status to the Optimization frontend. See
+`docs/reference/ddd_fixed_k_root_cg.md` for the proof contract and profile
+budgets.
 
 The runner atomically writes a complete checkpoint after every finished round
 to `<output-dir>/<case>__<objective>.checkpoint.json`. Continue a run by raising

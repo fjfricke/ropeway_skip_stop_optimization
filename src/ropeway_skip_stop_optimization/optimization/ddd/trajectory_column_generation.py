@@ -63,8 +63,8 @@ class DddTrajectoryPricingCertificate:
     A restricted-master value alone is not a lower bound.  The correction is
     exposed only when every required cabin pricing problem supplies either its
     exact optimum or a certified lower bound over the same waiting domain as
-    the target problem.  Exact pricing remains necessary for a convergence
-    certificate.
+    the target problem.  A convergence certificate needs either an exact
+    optimum or a nonnegative solver lower bound for every pricing problem.
     """
 
     restricted_master_lp_value: float
@@ -118,6 +118,16 @@ class DddTrajectoryPricingCertificate:
         )
 
     @property
+    def convergence_certified(self) -> bool:
+        """Whether omitted columns are proved non-improving for every cabin."""
+
+        return self.pricing_waiting_domain is self.target_waiting_domain and all(
+            item.proof_lower_bound is not None
+            and item.proof_lower_bound >= -self.tolerance
+            for item in self.reduced_costs
+        )
+
+    @property
     def certified_lower_bound(self) -> float | None:
         if not self.pricing_bound_complete:
             return None
@@ -131,11 +141,6 @@ class DddTrajectoryPricingCertificate:
     def bound_status(self) -> DddTrajectoryBoundStatus:
         if not self.pricing_bound_complete:
             return DddTrajectoryBoundStatus.PRIMAL_POOL_ONLY
-        if not self.pricing_complete:
-            return DddTrajectoryBoundStatus.TRAJECTORY_RELAXATION_BOUND
-        converged = all(
-            item.minimum_reduced_cost >= -self.tolerance for item in self.reduced_costs
-        )
-        if converged and self.row_separation_complete:
+        if self.convergence_certified and self.row_separation_complete:
             return DddTrajectoryBoundStatus.FULL_ROOT_LP_CERTIFIED
         return DddTrajectoryBoundStatus.TRAJECTORY_RELAXATION_BOUND

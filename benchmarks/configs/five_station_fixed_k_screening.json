@@ -1,0 +1,10 @@
+{
+  "campaign_id": "five_station_fixed_k_screening",
+  "label": "Five-station exact-K screening",
+  "example_id": "five_station_circle_cw_half_skip_no_wait_v0",
+  "k_values": [18, 19, 20],
+  "operating_modes": ["all_stop", "skip_stop"],
+  "objective": "journey_time",
+  "start_policy": "canonical_rope",
+  "profile": "screening"
+}

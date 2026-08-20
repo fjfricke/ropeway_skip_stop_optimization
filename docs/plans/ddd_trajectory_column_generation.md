@@ -4,14 +4,21 @@ Status: **exact root prototype implemented for fixed starts, fixed-$K$
 optimized initial placement, and single-interface reservoir dispatch; scalable
 pricing and topology campaigns remain experimental**
 
-Implementation checkpoint (2026-08-19): in addition to the Phase-1
+Implementation checkpoint (2026-08-20): the productive No-Wait path now has
+an exact-$K$ campaign contract, canonical mode-independent rope starts, a
+validated All-Stop/CP-SAT seed cascade, breadth-first adaptive proof-pricing
+tiers, periodic warm-started restricted MIPs, and runtime certificate
+invariants. Its stable interface and runner are documented in
+[`../reference/ddd_fixed_k_root_cg.md`](../reference/ddd_fixed_k_root_cg.md).
+In addition to the Phase-1
 `restricted_primal` kernel, a guarded exhaustive tiny-instance oracle, an exact
 single-cabin route--load pricing MILP, and a standalone root row-and-column
 prototype are available. Fixed starts and reservoir dispatch support exact
 finite bounded Waiting; continuous OIP remains No-Wait. Randomized-dual tests
 compare pricing against complete enumeration. Solver dual bounds from
 interrupted pricing are used conservatively in the reduced-cost correction;
-only exact pricing may claim convergence. The scalable Five-Station experiment
+an exact optimum or a certified nonnegative pricing bound may claim root
+convergence. The scalable Five-Station experiment
 remains open because
 short pricing calls generate improving but mutually incompatible columns and
 their corrected bound is weaker than the independent DDD bound. The proof

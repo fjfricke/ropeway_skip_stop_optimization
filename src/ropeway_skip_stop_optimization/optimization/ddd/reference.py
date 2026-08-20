@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import InitVar, dataclass
 from enum import StrEnum
 from itertools import combinations
+from typing import TYPE_CHECKING
 
 from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddFixedStart,
@@ -26,6 +27,11 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_problem import (
     DddReservoirTrajectoryState,
     DddTrajectoryWaitingPolicy,
 )
+
+if TYPE_CHECKING:
+    from ropeway_skip_stop_optimization.optimization.ddd.time_refinement import (
+        DddRecoveredSchedule,
+    )
 
 
 class DddReferenceHorizonCoverageError(ValueError):
@@ -441,6 +447,46 @@ def validate_ddd_reference_solution(
         raise DddReferenceResourceConflictError(
             f"DDD reference solution has resource conflicts: {conflicts[0]}"
         )
+
+
+def ddd_reference_solution_from_recovered_schedules(
+    problem: DddMovementProblem,
+    schedules: tuple["DddRecoveredSchedule", ...],
+    *,
+    tolerance_seconds: float = 1e-9,
+) -> DddReferenceSolution:
+    """Convert one complete CP-SAT schedule batch into validated trajectories."""
+
+    starts_by_cabin = {start.cabin_id: start for start in problem.starts}
+    options_by_id = {option.id: option for option in problem.route_options}
+    if {schedule.cabin_id for schedule in schedules} != set(starts_by_cabin):
+        raise ValueError("recovered schedule batch does not cover every fixed cabin")
+    trajectories = []
+    for schedule in sorted(schedules, key=lambda item: item.cabin_id):
+        start = starts_by_cabin[schedule.cabin_id]
+        if len(schedule.events) != len(schedule.route_option_ids) + 1:
+            raise ValueError("recovered schedule event and route counts differ")
+        visits = tuple(
+            build_ddd_reference_visit(
+                start=start,
+                visit_index=visit_index,
+                switch_time_seconds=schedule.events[visit_index].time_seconds,
+                option=options_by_id[option_id],
+                operational_end_seconds=problem.operational_end_seconds,
+                tolerance_seconds=tolerance_seconds,
+            )
+            for visit_index, option_id in enumerate(schedule.route_option_ids)
+        )
+        trajectories.append(
+            DddReferenceTrajectory(cabin_id=schedule.cabin_id, visits=visits)
+        )
+    solution = DddReferenceSolution(tuple(trajectories))
+    validate_ddd_reference_solution(
+        problem,
+        solution,
+        tolerance_seconds=tolerance_seconds,
+    )
+    return solution
 
 
 def validate_ddd_reference_trajectory(

@@ -14,6 +14,11 @@ from ropeway_skip_stop_optimization.benchmarking.ddd_fleet_sweep import (
     DddFleetTrialResult,
     DispatchCardinality,
 )
+from ropeway_skip_stop_optimization.benchmarking.ddd_fixed_k_campaign import (
+    DddFixedKCampaignConfig,
+    derive_available_fleet_intervals,
+    derive_skip_stop_benefit_interval,
+)
 from ropeway_skip_stop_optimization.benchmarking.ddd_root_cg import (
     DddRootCgTrialConfig,
     DddRootCgTrialResult,
@@ -48,6 +53,7 @@ __all__ = [
     "DddFleetSweepConfig",
     "DddFleetSweepRunner",
     "DddFleetTrialResult",
+    "DddFixedKCampaignConfig",
     "DddRootCgTrialConfig",
     "DddRootCgTrialResult",
     "DddRootCgTrialRunner",
@@ -67,5 +73,7 @@ __all__ = [
     "GurobiMipProgressRecorder",
     "GurobiMipProgressSample",
     "PlotBuilder",
+    "derive_available_fleet_intervals",
+    "derive_skip_stop_benefit_interval",
     "run_ean_passenger_benchmark",
 ]
