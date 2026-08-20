@@ -97,6 +97,8 @@ body {
 .campaign-card:hover,
 .trial-cell:hover { border-color: var(--accent); transform: translateY(-2px); }
 .campaign-card__top, .trial-cell > div { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: .8rem; }
+.campaign-card__footer { display: flex; align-items: baseline; justify-content: space-between; gap: 16px; }
+.campaign-card__footer span { color: var(--accent); font-size: .76rem; font-weight: 800; letter-spacing: .02em; }
 .campaign-card p { color: var(--muted); }
 
 .run-state,

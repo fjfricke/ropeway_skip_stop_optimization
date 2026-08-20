@@ -1,0 +1,10 @@
+{
+  "campaign_id": "five_station_b_fixed_k_k17_22_screening",
+  "label": "Five-station architecture B exact-K screening, K=17–22",
+  "example_id": "five_station_circle_cw_half_skip_no_wait_headway_b_v0",
+  "k_values": [17, 18, 19, 20, 21, 22],
+  "operating_modes": ["all_stop", "skip_stop"],
+  "objective": "journey_time",
+  "start_policy": "canonical_rope",
+  "profile": "screening"
+}
