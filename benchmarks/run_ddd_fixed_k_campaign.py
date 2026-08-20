@@ -48,6 +48,11 @@ def main() -> None:
     )
     parser.add_argument("--frontend-live", action="store_true")
     parser.add_argument("--progress", action="store_true")
+    parser.add_argument(
+        "--verbose-progress",
+        action="store_true",
+        help="Show the full per-round solver diagnostics.",
+    )
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()
 
@@ -123,6 +128,7 @@ def main() -> None:
                 checkpoint_path=checkpoint_path,
                 resume=args.resume and checkpoint_path.exists(),
                 progress=args.progress,
+                verbose_progress=args.verbose_progress,
             )
             trial_started = perf_counter()
 
@@ -242,6 +248,7 @@ def _trial_namespace(
     checkpoint_path: Path,
     resume: bool,
     progress: bool,
+    verbose_progress: bool,
 ) -> argparse.Namespace:
     return argparse.Namespace(
         example=config.example_id,
@@ -291,6 +298,7 @@ def _trial_namespace(
         reservoir_primal_max_passenger_arc_product=1,
         solver_output=False,
         no_progress=not progress,
+        verbose_progress=verbose_progress,
         output_dir=trial_dir,
         checkpoint_path=checkpoint_path,
         resume_checkpoint=checkpoint_path if resume else None,

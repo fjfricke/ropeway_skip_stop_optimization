@@ -63,6 +63,11 @@ Run the supplied screening matrix with live frontend output:
   --frontend-live
 ```
 
+The default terminal line shows only the certificate interval, restricted-LP
+value, pool growth, pricing coverage, MIP activity, and remaining budget. Add
+`--verbose-progress` for the complete per-round diagnostic record; the JSON
+and live frontend retain all metrics in either mode.
+
 Profiles are fixed and reproducible:
 
 | Profile | Total | Rounds | Pricing tiers | Intermediate MIP | Final MIP | CP seed |

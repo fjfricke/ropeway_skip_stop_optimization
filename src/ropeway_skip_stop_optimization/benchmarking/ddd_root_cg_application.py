@@ -259,6 +259,11 @@ def main() -> None:
     parser.add_argument("--solver-output", action="store_true")
     parser.add_argument("--no-progress", action="store_true")
     parser.add_argument(
+        "--verbose-progress",
+        action="store_true",
+        help="Show all diagnostic fields instead of the compact progress line.",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=Path("benchmarks/output/ddd_trajectory_root_cg"),
@@ -566,6 +571,20 @@ def run_namespace(
             if progress_hook is not None:
                 progress_hook(iteration)
             if args.no_progress:
+                return
+            if not getattr(args, "verbose_progress", False):
+                print(
+                    _format_compact_progress(
+                        iteration,
+                        mode=(
+                            fixed_k_problem.operating_mode.value
+                            if fixed_k_problem is not None
+                            else trajectory_problem.fleet_mode.value
+                        ),
+                        cabin_count=len(trajectory_problem.cabin_ids),
+                        max_iterations=args.max_iterations,
+                    )
+                )
                 return
             upper = (
                 "-"
@@ -907,18 +926,97 @@ def run_namespace(
             json.dumps(payload, indent=2, sort_keys=True) + "\n",
             encoding="utf-8",
         )
-        print(
-            f"status={result.status.value} LB={result.certified_lower_bound} "
-            f"UB={result.best_upper_bound} gap={result.relative_gap} "
-            f"columns={len(result.trajectories)} time={result.total_seconds:.2f}s "
-            f"output={output_path}"
-        )
+        print(_format_compact_result(result, column_count=len(result.trajectories)))
+        print(f"output={output_path}")
         return {
             "payload": payload,
             "output_path": output_path,
             "checkpoint_path": checkpoint_path,
             "mathematical_result": result,
         }
+
+
+def _format_compact_progress(
+    iteration: DddTrajectoryRootCgIteration,
+    *,
+    mode: str,
+    cabin_count: int,
+    max_iterations: int,
+) -> str:
+    proved_pricing_count = (
+        iteration.exact_pricing_cabin_count
+        + iteration.nonexact_certified_nonnegative_pricing_count
+    )
+    mip = (
+        f"run({iteration.restricted_mip_solution_count})"
+        if iteration.restricted_mip_ran
+        else "-"
+    )
+    return (
+        f"{_short_mode(mode):>3} K={cabin_count:03d} "
+        f"r={iteration.round_index:03d}/{max_iterations:03d} | "
+        f"LB={_format_objective(iteration.global_lower_bound)} "
+        f"RMP={_format_objective(iteration.restricted_lp_value)} "
+        f"UB={_format_objective(iteration.global_upper_bound)} "
+        f"gap={_format_gap(iteration.global_lower_bound, iteration.global_upper_bound)} | "
+        f"cols={iteration.trajectory_count:04d}(+{iteration.added_trajectory_count:02d}) "
+        f"pairs={iteration.incompatibility_pair_count:05d} | "
+        f"price={proved_pricing_count:02d}/{cabin_count:02d} "
+        f"{iteration.pricing_seconds:5.1f}s "
+        f"tier<={iteration.pricing_tier_seconds:>3g}s "
+        f"open={iteration.unresolved_pricing_count:02d} | "
+        f"MIP={mip:<6} left={_format_duration(iteration.remaining_budget_seconds)}"
+    )
+
+
+def _format_compact_result(
+    result: DddTrajectoryRootCgResult,
+    *,
+    column_count: int,
+) -> str:
+    return (
+        f"done status={result.status.value} | "
+        f"LB={_format_objective(result.certified_lower_bound)} "
+        f"UB={_format_objective(result.best_upper_bound)} "
+        f"gap={_format_gap(result.certified_lower_bound, result.best_upper_bound)} | "
+        f"cols={column_count:04d} time={_format_duration(result.total_seconds)}"
+    )
+
+
+def _short_mode(mode: str) -> str:
+    return {
+        "all_stop": "AS",
+        "skip_stop": "SS",
+        "fixed_starts": "FIX",
+        "optimized_initial_placement": "OIP",
+        "reservoir_dispatch": "RES",
+    }.get(mode, mode[:3].upper())
+
+
+def _format_objective(value: float | None) -> str:
+    return f"{'-':>13}" if value is None else f"{value:13,.1f}"
+
+
+def _format_gap(lower: float, upper: float | None) -> str:
+    if upper is None:
+        return "      -"
+    absolute = max(0.0, upper - lower)
+    tolerance = 1e-9 * max(1.0, abs(upper))
+    relative = 0.0 if absolute <= tolerance else absolute / max(abs(upper), 1e-9)
+    return f"{100.0 * relative:6.2f}%"
+
+
+def _format_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "  --:--"
+    rounded = max(0, round(seconds))
+    hours, remainder = divmod(rounded, 3600)
+    minutes, secs = divmod(remainder, 60)
+    return (
+        f"{hours:02d}:{minutes:02d}:{secs:02d}"
+        if hours
+        else f"{minutes:02d}:{secs:02d}"
+    )
 
 
 if __name__ == "__main__":

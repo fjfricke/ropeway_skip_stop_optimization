@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from types import SimpleNamespace
 
 import pytest
 
@@ -28,6 +29,10 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
 )
 from ropeway_skip_stop_optimization.benchmarking.ddd_scaling import (
     build_initial_ddd_network_problem,
+)
+from ropeway_skip_stop_optimization.benchmarking.ddd_root_cg_application import (
+    _format_compact_progress,
+    _format_compact_result,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
     CanonicalFixedKRopeCabinStartBuilder,
@@ -221,3 +226,51 @@ def test_seed_coordinator_maps_complete_cp_infeasibility(monkeypatch: pytest.Mon
 
     assert result.status is DddFixedKSeedStatus.MOVEMENT_INFEASIBLE
     assert result.cp_sat_seconds == pytest.approx(0.25)
+
+
+def test_compact_fixed_k_progress_omits_irrelevant_diagnostics() -> None:
+    iteration = SimpleNamespace(
+        exact_pricing_cabin_count=17,
+        nonexact_certified_nonnegative_pricing_count=1,
+        restricted_mip_solution_count=2,
+        restricted_mip_ran=True,
+        round_index=5,
+        global_lower_bound=560_244.9915,
+        restricted_lp_value=575_000.0,
+        global_upper_bound=683_915.7799,
+        trajectory_count=90,
+        added_trajectory_count=18,
+        incompatibility_pair_count=784,
+        pricing_seconds=7.34,
+        pricing_tier_seconds=5.0,
+        unresolved_pricing_count=0,
+        remaining_budget_seconds=558.4,
+    )
+
+    output = _format_compact_progress(
+        iteration,
+        mode="skip_stop",
+        cabin_count=18,
+        max_iterations=30,
+    )
+
+    assert output.startswith(" SS K=018 r=005/030")
+    assert "gap= 18.08%" in output
+    assert "price=18/18" in output
+    assert "reservoir" not in output
+    assert "starts=" not in output
+    assert "wait=" not in output
+
+
+def test_compact_result_clamps_numerical_zero_gap() -> None:
+    result = SimpleNamespace(
+        status=SimpleNamespace(value="integer_optimal"),
+        certified_lower_bound=683_915.7798719998,
+        best_upper_bound=683_915.7798719999,
+        total_seconds=1.95,
+    )
+
+    output = _format_compact_result(result, column_count=18)
+
+    assert "gap=  0.00%" in output
+    assert "time=00:02" in output
