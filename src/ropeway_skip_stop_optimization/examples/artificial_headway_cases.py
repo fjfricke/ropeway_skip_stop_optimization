@@ -11,6 +11,7 @@ from ropeway_skip_stop_optimization.examples.base import (
 from ropeway_skip_stop_optimization.examples.circular_skip_stop import (
     CircularSkipStopSpec,
     FiveStationCircleCwFullSkipNoWaitExample,
+    FiveStationCircleCwHalfSkipNoWaitExample,
     build_circular_skip_stop_ean_config,
     build_circular_skip_stop_ean_pattern_definition,
     build_circular_skip_stop_scenario,
@@ -60,6 +61,40 @@ ARTIFICIAL_STATION_IDS = ("S0", "S1", "S2", "S3", "S4", "S5")
 ARTIFICIAL_CABIN_COUNT = 12
 
 
+class FiveStationCircleCwHalfSkipNoWaitHeadwayBExample(
+    FiveStationCircleCwHalfSkipNoWaitExample
+):
+    """Half-demand five-station reference with architecture-B headways."""
+
+    metadata = ScenarioExampleMetadata(
+        id="five_station_circle_cw_half_skip_no_wait_headway_b_v0",
+        label="Five station circle cw half demand skip+no_wait, headway B",
+        description=(
+            "Clockwise five-station half-demand reference case with skip enabled, "
+            "waiting disabled, and physically derived architecture-B headways."
+        ),
+        tags=(
+            "circle",
+            "cw",
+            "skip-stop",
+            "half-demand",
+            "no-waiting",
+            "physical-headway",
+            "architecture-b",
+        ),
+        family_id="five_station_circle",
+        family_label="Five station circle",
+        variant_id="half_skip_no_wait_headway_b",
+        variant_label="Half demand skip+no_wait, headway B",
+    )
+
+    def build_scenario(self) -> Scenario:
+        return _with_architecture_b_headways(
+            super().build_scenario(),
+            scenario_id=self.metadata.id,
+        )
+
+
 class FiveStationCircleCwFullSkipNoWaitHeadwayBExample(
     FiveStationCircleCwFullSkipNoWaitExample
 ):
@@ -89,26 +124,9 @@ class FiveStationCircleCwFullSkipNoWaitHeadwayBExample(
     )
 
     def build_scenario(self) -> Scenario:
-        scenario = super().build_scenario()
-        return replace(
-            scenario,
-            id=self.metadata.id,
-            headway_design=HeadwayDesign(
-                physical=_physical_parameters(),
-                station_mechanisms=tuple(
-                    StationMechanismAssignment(
-                        exit_switch_id=f"{station}_exit_cw",
-                        design=DefaultBypassStopOnFaultDesign(
-                            mechanical_service_cycle_seconds=6.0,
-                            service_resource_id=f"service_attachment::{station}::cw",
-                        ),
-                    )
-                    for station in ("A", "B", "C", "D", "E")
-                ),
-                provenance=(
-                    _architecture_provenance(ArtificialHeadwayArchitecture.B),
-                ),
-            ),
+        return _with_architecture_b_headways(
+            super().build_scenario(),
+            scenario_id=self.metadata.id,
         )
 
 
@@ -157,6 +175,33 @@ class FiveStationCircleCwFullSkipWaitHeadwayBExample(
                 for station in config.station_configs
             ),
         )
+
+
+def _with_architecture_b_headways(
+    scenario: Scenario,
+    *,
+    scenario_id: str,
+) -> Scenario:
+    return replace(
+        scenario,
+        id=scenario_id,
+        headway_design=HeadwayDesign(
+            physical=_physical_parameters(),
+            station_mechanisms=tuple(
+                StationMechanismAssignment(
+                    exit_switch_id=f"{station}_exit_cw",
+                    design=DefaultBypassStopOnFaultDesign(
+                        mechanical_service_cycle_seconds=6.0,
+                        service_resource_id=f"service_attachment::{station}::cw",
+                    ),
+                )
+                for station in ("A", "B", "C", "D", "E")
+            ),
+            provenance=(
+                _architecture_provenance(ArtificialHeadwayArchitecture.B),
+            ),
+        ),
+    )
 
 
 def build_six_station_ring_headway_scenario(

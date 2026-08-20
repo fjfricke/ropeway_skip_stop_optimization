@@ -50,6 +50,9 @@ Current plans:
 - `ddd_reservoir_fleet_planning.md`: an ideal warm-up entry reservoir,
   optional one-way cabin dispatch, continuous compact proof pricing,
   fixed-available-fleet bound curves, and exact finite bounded Waiting.
+- `ddd_fleet_sweep_live_dashboard.md`: typed fixed-K trajectory campaign
+  runner, checkpoint-safe neighboring-fleet warm starts, certified cross-K
+  analysis, and a live Optimization Lab inside the existing frontend.
 - `demand_driven_network_operations.md`: recommended finite-horizon
   passenger-guided planner using continuous-time resource reservations,
   bounded conflict repair, exact fixed-movement passenger evaluation, and

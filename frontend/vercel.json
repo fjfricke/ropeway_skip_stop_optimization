@@ -1,0 +1,8 @@
+{
+  "rewrites": [
+    {
+      "source": "/optimization/:path*",
+      "destination": "/index.html"
+    }
+  ]
+}

@@ -4,6 +4,7 @@ from ropeway_skip_stop_optimization.examples.artificial_headway_cases import (
     ArtificialHeadwayArchitecture,
     FiveStationCircleCwFullSkipNoWaitHeadwayBExample,
     FiveStationCircleCwFullSkipWaitHeadwayBExample,
+    FiveStationCircleCwHalfSkipNoWaitHeadwayBExample,
     artificial_physical_headway_examples,
     build_six_station_line_headway_scenario,
     build_six_station_ring_headway_scenario,
@@ -52,6 +53,15 @@ def test_five_station_full_skip_headway_b_reuses_reference_case() -> None:
     assert len(artifact.cabin_starts) == 38
     assert artifact.headway_policy is not None
     assert artifact.headway_policy.has_leader_behavior_rules
+
+
+def test_five_station_half_demand_headway_b_preserves_reference_demand() -> None:
+    example = FiveStationCircleCwHalfSkipNoWaitHeadwayBExample()
+    scenario = example.build_scenario()
+
+    assert scenario.id == example.metadata.id
+    assert sum(demand.count for demand in scenario.demands) == 1280
+    assert example.metadata.id in EXAMPLES
 
 
 def test_five_station_headway_b_waiting_case_has_explicit_ten_second_limit() -> None:

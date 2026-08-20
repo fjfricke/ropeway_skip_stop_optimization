@@ -5,6 +5,20 @@ from ropeway_skip_stop_optimization.benchmarking.ean_bottleneck import (
     EanBottleneckDiagnosticResult,
     EanBottleneckDiagnosticRunner,
 )
+from ropeway_skip_stop_optimization.benchmarking.ddd_fleet_sweep import (
+    BoundEnvelopePoint,
+    DddFleetPolicyConfig,
+    DddFleetSweepAnalyzer,
+    DddFleetSweepConfig,
+    DddFleetSweepRunner,
+    DddFleetTrialResult,
+    DispatchCardinality,
+)
+from ropeway_skip_stop_optimization.benchmarking.ddd_root_cg import (
+    DddRootCgTrialConfig,
+    DddRootCgTrialResult,
+    DddRootCgTrialRunner,
+)
 from ropeway_skip_stop_optimization.benchmarking.ean_passenger import (
     BenchmarkRunConfig,
     BenchmarkRunResult,
@@ -28,6 +42,16 @@ from ropeway_skip_stop_optimization.benchmarking.plots import (
 __all__ = [
     "BenchmarkRunConfig",
     "BenchmarkRunResult",
+    "BoundEnvelopePoint",
+    "DddFleetPolicyConfig",
+    "DddFleetSweepAnalyzer",
+    "DddFleetSweepConfig",
+    "DddFleetSweepRunner",
+    "DddFleetTrialResult",
+    "DddRootCgTrialConfig",
+    "DddRootCgTrialResult",
+    "DddRootCgTrialRunner",
+    "DispatchCardinality",
     "EanBottleneckCase",
     "EanBottleneckCaseResult",
     "EanBottleneckDiagnosticConfig",

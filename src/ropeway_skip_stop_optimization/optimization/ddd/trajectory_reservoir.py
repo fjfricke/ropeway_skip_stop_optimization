@@ -5,6 +5,7 @@ import math
 
 from ropeway_skip_stop_optimization.models import Scenario
 from ropeway_skip_stop_optimization.optimization.ddd.models import (
+    DddMovementCore,
     DddRouteDecision,
     DddRouteOption,
 )
@@ -632,7 +633,10 @@ def validate_ddd_reservoir_plan_against_artifact(
     expected_core = EanArtifactToDddMovementProblemAdapter(
         tolerance_seconds=tolerance_seconds,
     ).build_movement_core(artifact)
-    if problem.movement_core != expected_core:
+    if not _is_exact_route_restriction(
+        restricted=problem.movement_core,
+        complete=expected_core,
+    ):
         raise ValueError(
             "reservoir trajectory problem does not match the supplied EAN artifact"
         )
@@ -661,6 +665,31 @@ def validate_ddd_reservoir_plan_against_artifact(
         raise ValueError("reservoir movement plan horizon does not match artifact")
     movement_plan.validate()
     return movement_plan, fleet_plan
+
+
+def _is_exact_route_restriction(
+    *,
+    restricted: DddMovementCore,
+    complete: DddMovementCore,
+) -> bool:
+    """Accept a policy domain that removes routes but changes no physical data."""
+
+    if restricted == complete:
+        return True
+    if (
+        restricted.scenario_id != complete.scenario_id
+        or restricted.passenger_service_end_seconds
+        != complete.passenger_service_end_seconds
+        or restricted.operational_end_seconds != complete.operational_end_seconds
+        or restricted.states != complete.states
+        or restricted.resources != complete.resources
+    ):
+        return False
+    complete_options = {option.id: option for option in complete.route_options}
+    return bool(restricted.route_options) and all(
+        complete_options.get(option.id) == option
+        for option in restricted.route_options
+    )
 
 
 def build_ddd_reservoir_passenger_candidates(

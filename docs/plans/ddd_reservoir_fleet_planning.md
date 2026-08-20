@@ -409,6 +409,11 @@ minimization problem in which Waiting is optional.
 
 ## Fixed-K experiment runner
 
+The detailed runner, certificate-analysis, live-event, and frontend design is
+specified in
+[`ddd_fleet_sweep_live_dashboard.md`](ddd_fleet_sweep_live_dashboard.md).
+This section retains the fleet experiment's mathematical reporting contract.
+
 Add a runner that takes one topology, demand profile, operating policy, and a
 set of available fleets. Each `K_available` is a separate resumable solve.
 Neighboring runs warm-start each other:

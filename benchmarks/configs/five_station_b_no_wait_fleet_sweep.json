@@ -1,0 +1,35 @@
+{
+  "campaign_id": "five_station_b_half_demand_no_wait_k18_21",
+  "label": "Five-station architecture B, half demand: reservoir fleet sweep",
+  "objective": "journey_time",
+  "dispatch_cardinality": "optional",
+  "warmup_seconds": 300.0,
+  "max_iterations": 30,
+  "total_time_limit_seconds": 600.0,
+  "pricing_time_limit_seconds": 5.0,
+  "pricing_threads": 1,
+  "reservoir_primal_pricing_time_limit_seconds": 2.0,
+  "reservoir_primal_maximum_cabin_calls_per_round": 4,
+  "fleet_counts": [18, 19, 20, 21],
+  "policies": [
+    {
+      "id": "all_stop_no_wait",
+      "label": "All-Stop, no waiting",
+      "example_id": "five_station_circle_cw_half_skip_no_wait_headway_b_v0",
+      "reservoir_entry_state": "A_entry_cw",
+      "force_all_stop": true,
+      "waiting_step_seconds": 1.0,
+      "tags": ["all-stop", "no-wait", "architecture-b"]
+    },
+    {
+      "id": "skip_stop_no_wait",
+      "label": "Skip-Stop, no waiting",
+      "example_id": "five_station_circle_cw_half_skip_no_wait_headway_b_v0",
+      "reservoir_entry_state": "A_entry_cw",
+      "waiting_step_seconds": 1.0,
+      "tags": ["skip-stop", "no-wait", "architecture-b"]
+    }
+  ],
+  "service_targets": [],
+  "cabin_costs": []
+}

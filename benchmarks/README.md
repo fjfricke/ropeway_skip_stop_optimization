@@ -361,3 +361,22 @@ variable counts by family and lower-bound development over root runtime.
 Movement-only has objective zero. Its construction and feasibility behavior
 are diagnostic, but its objective bound and gap are not comparable to the
 passenger cases.
+
+## DDD Reservoir Fleet Sweep
+
+Run the matched architecture-B, half-demand All-Stop/Skip-Stop fixed-K
+campaign with live frontend snapshots:
+
+```bash
+.venv/bin/python benchmarks/run_ddd_reservoir_fleet_sweep.py \
+  --config benchmarks/configs/five_station_b_no_wait_fleet_sweep.json \
+  --progress \
+  --frontend-live
+```
+
+The canonical event log, checkpoints, and results are written below
+`benchmarks/output/ddd_fleet_sweeps/`. The derived live snapshots are mirrored
+below `frontend/public/generated/optimization/`; open `/optimization` in the
+Vite frontend to inspect them. The All-Stop policy uses the same physical
+skip-capable architecture-B network and restricts only the admissible DDD
+route options, so its headway assumptions remain matched to Skip-Stop.
