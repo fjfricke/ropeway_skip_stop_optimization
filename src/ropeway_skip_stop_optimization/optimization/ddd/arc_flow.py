@@ -19,12 +19,16 @@ from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_passenger_model im
 )
 from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_movement_master import (
     DddArcFlowMovementMasterBuilder,
+    build_ddd_arc_flow_movement_values,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_preparation import (
     DddArcFlowProblemPreparer,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.fixed_k import (
     DddFixedKTrajectoryProblem,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.fixed_k_primal_seed import (
+    DddFixedKPrimalSeed,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.reference import (
     DddReferenceSolution,
@@ -132,6 +136,7 @@ class DddFixedKArcFlowResult:
     total_seconds: float
     time_to_first_incumbent_seconds: float | None
     seed_kind: str | None = None
+    primal_seed_objective_value: float | None = None
     detail: str | None = None
 
 
@@ -210,12 +215,17 @@ class DddFixedKArcFlowOptimizer:
         problem: DddFixedKTrajectoryProblem,
         *,
         seed_trajectories: tuple[DddReferenceTrajectory, ...] = (),
+        primal_seed: DddFixedKPrimalSeed | None = None,
         seed_kind: str | None = None,
         root_cg_lower_bound: float | None = None,
         progress_hook: DddFixedKArcFlowProgressHook | None = None,
     ) -> DddFixedKArcFlowResult:
         self.config.validate()
         problem.validate()
+        if primal_seed is not None:
+            primal_seed.validate(problem)
+            seed_trajectories = primal_seed.solution.trajectories
+            seed_kind = primal_seed.provenance
         initial_lower_bound = max(
             problem.objective_floor,
             (
@@ -229,7 +239,9 @@ class DddFixedKArcFlowOptimizer:
             initial=DddFixedKArcFlowProgress(
                 elapsed_seconds=0.0,
                 node_count=0.0,
-                solver_incumbent=None,
+                solver_incumbent=(
+                    None if primal_seed is None else primal_seed.objective_value
+                ),
                 solver_bound=None,
                 certified_lower_bound=initial_lower_bound,
                 solver_gap=None,
@@ -251,6 +263,7 @@ class DddFixedKArcFlowOptimizer:
             result = self._solve(
                 problem,
                 seed_trajectories=seed_trajectories,
+                primal_seed=primal_seed,
                 seed_kind=seed_kind,
                 root_cg_lower_bound=root_cg_lower_bound,
                 progress_hook=heartbeat.update,
@@ -286,6 +299,7 @@ class DddFixedKArcFlowOptimizer:
         problem: DddFixedKTrajectoryProblem,
         *,
         seed_trajectories: tuple[DddReferenceTrajectory, ...] = (),
+        primal_seed: DddFixedKPrimalSeed | None = None,
         seed_kind: str | None = None,
         root_cg_lower_bound: float | None = None,
         progress_hook: DddFixedKArcFlowProgressHook | None = None,
@@ -293,6 +307,9 @@ class DddFixedKArcFlowOptimizer:
         self.config.validate()
         problem.validate()
         started = perf_counter()
+        external_upper_bound = (
+            None if primal_seed is None else primal_seed.objective_value
+        )
         movement_variable_count = 0
         passenger_variable_count = 0
         movement_constraint_count = 0
@@ -315,7 +332,7 @@ class DddFixedKArcFlowOptimizer:
                 DddFixedKArcFlowProgress(
                     elapsed_seconds=elapsed,
                     node_count=0.0,
-                    solver_incumbent=None,
+                    solver_incumbent=external_upper_bound,
                     solver_bound=None,
                     certified_lower_bound=certified_bound(),
                     solver_gap=None,
@@ -375,13 +392,39 @@ class DddFixedKArcFlowOptimizer:
         passenger_variable_count = passenger_model.variable_count
         passenger_constraint_count = passenger_model.constraint_count
         movement_master.apply_seed(seed_trajectories)
+        if primal_seed is not None:
+            movement_values = build_ddd_arc_flow_movement_values(
+                prepared,
+                primal_seed.solution,
+            )
+            seeded_objective = passenger_model.apply_seed(
+                ride_counts_by_candidate_id=(
+                    primal_seed.ride_counts_by_candidate_id
+                ),
+                movement_values_by_arc_id=movement_values,
+            )
+            if not math.isclose(
+                seeded_objective,
+                primal_seed.objective_value,
+                rel_tol=0.0,
+                abs_tol=self.config.certificate_tolerance,
+            ):
+                raise ValueError(
+                    "arc-flow Passenger MIP start objective differs from the "
+                    "validated primal seed"
+                )
+            model.addConstr(
+                model.getObjective()
+                <= primal_seed.objective_value + self.config.certificate_tolerance,
+                name="validated_primal_cutoff",
+            )
         model.update()
         model_build_seconds = perf_counter() - model_started
         update_phase("presolve")
 
         first_incumbent: float | None = None
         last_sample_seconds = -math.inf
-        latest_incumbent: float | None = None
+        latest_incumbent: float | None = external_upper_bound
         latest_bound: float | None = None
         latest_node_count = 0.0
         latest_solution_count = 0
@@ -440,6 +483,10 @@ class DddFixedKArcFlowOptimizer:
                 latest_incumbent = _finite_solver_value(
                     float(callback_model.cbGet(GRB.Callback.MIP_OBJBST))
                 )
+                latest_incumbent = _minimum_optional(
+                    latest_incumbent,
+                    external_upper_bound,
+                )
                 latest_bound = _finite_solver_value(
                     float(callback_model.cbGet(GRB.Callback.MIP_OBJBND))
                 )
@@ -458,6 +505,10 @@ class DddFixedKArcFlowOptimizer:
                 )
                 latest_incumbent = _finite_solver_value(
                     float(callback_model.cbGet(GRB.Callback.MIPNODE_OBJBST))
+                )
+                latest_incumbent = _minimum_optional(
+                    latest_incumbent,
+                    external_upper_bound,
                 )
                 latest_bound = _finite_solver_value(
                     float(callback_model.cbGet(GRB.Callback.MIPNODE_OBJBND))
@@ -503,35 +554,50 @@ class DddFixedKArcFlowOptimizer:
         solve_seconds = perf_counter() - solve_started
 
         solver_bound = _finite_solver_value(float(model.ObjBound))
-        objective = float(model.ObjVal) if model.SolCount > 0 else None
-        solution: DddReferenceSolution | None = None
+        solver_objective = float(model.ObjVal) if model.SolCount > 0 else None
+        objective = external_upper_bound
+        solution: DddReferenceSolution | None = (
+            None if primal_seed is None else primal_seed.solution
+        )
         detail: str | None = None
         status = DddFixedKArcFlowStatus.UNKNOWN_NO_INCUMBENT
         if model.SolCount > 0:
             try:
-                solution = movement_master.extract_solution(
+                solver_solution = movement_master.extract_solution(
                     boundary_occurrences=problem.boundary_context.resource_occurrences,
                 )
-                validate_ddd_reference_solution(prepared.movement, solution)
+                validate_ddd_reference_solution(prepared.movement, solver_solution)
                 self._validate_passenger_solution(
                     problem=problem,
                     passenger_model=passenger_model,
-                    objective=objective,
+                    objective=solver_objective,
                     model=model,
                 )
             except (RuntimeError, ValueError) as error:
                 detail = str(error)
-                solution = None
-                objective = None
                 status = DddFixedKArcFlowStatus.INTERNAL_VALIDATION_ERROR
             else:
+                if objective is None or (
+                    solver_objective is not None
+                    and solver_objective < objective - self.config.certificate_tolerance
+                ):
+                    objective = solver_objective
+                    solution = solver_solution
                 status = (
                     DddFixedKArcFlowStatus.INTEGER_OPTIMAL
                     if model.Status == GRB.OPTIMAL
                     else DddFixedKArcFlowStatus.TIME_LIMIT_WITH_CERTIFIED_INTERVAL
                 )
         elif model.Status == GRB.INFEASIBLE:
-            status = DddFixedKArcFlowStatus.MOVEMENT_INFEASIBLE
+            if primal_seed is None:
+                status = DddFixedKArcFlowStatus.MOVEMENT_INFEASIBLE
+            else:
+                status = DddFixedKArcFlowStatus.INTERNAL_CERTIFICATE_ERROR
+                detail = "Gurobi declared a model with a validated primal seed infeasible"
+                objective = None
+                solution = None
+        elif primal_seed is not None:
+            status = DddFixedKArcFlowStatus.TIME_LIMIT_WITH_CERTIFIED_INTERVAL
 
         lower_candidates = [problem.objective_floor]
         if solver_bound is not None:
@@ -573,8 +639,11 @@ class DddFixedKArcFlowOptimizer:
             model_build_seconds=model_build_seconds,
             solve_seconds=solve_seconds,
             total_seconds=perf_counter() - started,
-            time_to_first_incumbent_seconds=first_incumbent,
+            time_to_first_incumbent_seconds=(
+                0.0 if primal_seed is not None else first_incumbent
+            ),
             seed_kind=seed_kind,
+            primal_seed_objective_value=external_upper_bound,
             detail=detail,
         )
 
@@ -626,3 +695,8 @@ def _relative_gap(lower: float | None, upper: float | None) -> float | None:
 
 def _finite_solver_value(value: float) -> float | None:
     return value if math.isfinite(value) and abs(value) < GRB.INFINITY / 2 else None
+
+
+def _minimum_optional(left: float | None, right: float | None) -> float | None:
+    values = tuple(value for value in (left, right) if value is not None)
+    return None if not values else min(values)

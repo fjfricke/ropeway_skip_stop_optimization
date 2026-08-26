@@ -125,6 +125,11 @@ _EXPORTS_BY_MODULE: dict[str, tuple[str, ...]] = {
         'DddFixedKSeedResult',
         'DddFixedKSeedStatus',
     ),
+    'ropeway_skip_stop_optimization.optimization.ddd.fixed_k_primal_seed': (
+        'DddFixedKPrimalSeed',
+        'DddFixedKPrimalSeedFactory',
+        'load_ddd_fixed_k_root_cg_seed_trajectories',
+    ),
     'ropeway_skip_stop_optimization.optimization.ddd.iterative_solver': (
         'DddDelayedConflictSolver',
         'DddIterationRecord',
@@ -545,6 +550,8 @@ __all__ = [
     'DddFixedKSeedKind',
     'DddFixedKSeedResult',
     'DddFixedKSeedStatus',
+    'DddFixedKPrimalSeed',
+    'DddFixedKPrimalSeedFactory',
     'DddExactTimedEvent',
     'DddFixedStart',
     'DddIterationRecord',
@@ -632,6 +639,7 @@ __all__ = [
     'write_ddd_trajectory_root_cg_checkpoint',
     'build_ddd_arc_flow_resource_cliques',
     'build_ddd_arc_flow_boundary_intervals',
+    'load_ddd_fixed_k_root_cg_seed_trajectories',
     'DddTrajectoryIntegratedLpReferenceOptimizer',
     'DddTrajectoryHeuristicPricingSignal',
     'DddTrajectoryCoordinatedPrimalGenerator',

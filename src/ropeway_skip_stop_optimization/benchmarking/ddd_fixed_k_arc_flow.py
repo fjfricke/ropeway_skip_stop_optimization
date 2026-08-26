@@ -27,6 +27,8 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddFixedKSeedStatus,
     DddFixedKStartPolicy,
     DddFixedKTrajectoryProblem,
+    DddFixedKPrimalSeed,
+    DddFixedKPrimalSeedFactory,
     DddEanPassengerPrimalEvaluator,
     DddPrimalEvaluationStatus,
     DddReferenceResourceOccurrence,
@@ -34,6 +36,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddReferenceTrajectory,
     EanArtifactToDddMovementProblemAdapter,
     build_ddd_reference_visit,
+    load_ddd_fixed_k_root_cg_seed_trajectories,
     validate_ddd_reference_solution,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
@@ -70,6 +73,8 @@ class DddFixedKArcFlowRunConfig:
     seed: int = 0
     output_flag: bool = False
     root_cg_result_path: Path | None = None
+    primal_seed_checkpoint_path: Path | None = None
+    seed_passenger_time_limit_seconds: float = 60.0
 
     def validate(self) -> None:
         if not self.example_id or self.cabin_count <= 0:
@@ -84,6 +89,7 @@ class DddFixedKArcFlowRunConfig:
             self.total_time_limit_seconds <= 0
             or self.cp_seed_time_limit_seconds < 0
             or self.start_layout_time_limit_seconds <= 0
+            or self.seed_passenger_time_limit_seconds <= 0
         ):
             raise ValueError("arc-flow run budgets are invalid")
         if self.cp_seed_workers <= 0:
@@ -573,11 +579,13 @@ def run_ddd_fixed_k_arc_flow(
     movement = problem.resolved_trajectory_problem.structural_movement_problem
     network_problem = build_initial_ddd_network_problem(movement)
 
+    seed_candidates: list[tuple[str, tuple[DddReferenceTrajectory, ...], float | None]] = []
     if prepared.seed_trajectories:
         seed_trajectories = prepared.seed_trajectories
         seed_status = DddFixedKSeedStatus.FEASIBLE.value
         seed_kind = prepared.start_layout_kind
         seed_seconds = 0.0
+        seed_candidates.append((seed_kind, seed_trajectories, None))
     else:
         seed_result = DddFixedKSeedCoordinator(
             cp_sat_time_limit_seconds=max(config.cp_seed_time_limit_seconds, 0.001),
@@ -596,6 +604,58 @@ def run_ddd_fixed_k_arc_flow(
         seed_status = seed_result.status.value
         seed_kind = None if seed_result.kind is None else seed_result.kind.value
         seed_seconds = seed_result.cp_sat_seconds
+        if seed_trajectories:
+            seed_candidates.append((seed_kind or "cp_sat", seed_trajectories, None))
+
+    if config.primal_seed_checkpoint_path is not None:
+        checkpoint_trajectories, checkpoint_upper_bound = (
+            load_ddd_fixed_k_root_cg_seed_trajectories(
+                config.primal_seed_checkpoint_path,
+                problem=problem,
+            )
+        )
+        seed_candidates.append(
+            ("root_cg_checkpoint", checkpoint_trajectories, checkpoint_upper_bound)
+        )
+
+    primal_seed: DddFixedKPrimalSeed | None = None
+    seed_evaluation_started = perf_counter()
+    for provenance, trajectories, expected_upper_bound in seed_candidates:
+        remaining_seed_budget = config.total_time_limit_seconds - (
+            perf_counter() - started
+        )
+        if remaining_seed_budget <= 0.01:
+            break
+        candidate = DddFixedKPrimalSeedFactory(
+            scenario=scenario,
+            problem=problem,
+            network_problem=network_problem,
+            passenger_time_limit_seconds=min(
+                config.seed_passenger_time_limit_seconds,
+                remaining_seed_budget,
+            ),
+            threads=1,
+        ).build(
+            trajectories,
+            provenance=provenance,
+        )
+        if (
+            expected_upper_bound is not None
+            and candidate.objective_value
+            > expected_upper_bound + 1e-4
+        ):
+            raise RuntimeError(
+                "re-evaluated Root-CG seed is worse than its stored validated UB"
+            )
+        if (
+            primal_seed is None
+            or candidate.objective_value < primal_seed.objective_value - 1e-4
+        ):
+            primal_seed = candidate
+    seed_seconds += perf_counter() - seed_evaluation_started
+    if primal_seed is not None:
+        seed_trajectories = primal_seed.solution.trajectories
+        seed_kind = primal_seed.provenance
 
     root_cg_lower_bound = _read_compatible_root_cg_lower_bound(
         config.root_cg_result_path,
@@ -616,6 +676,7 @@ def run_ddd_fixed_k_arc_flow(
     ).solve(
         problem,
         seed_trajectories=seed_trajectories,
+        primal_seed=primal_seed,
         seed_kind=seed_kind,
         root_cg_lower_bound=root_cg_lower_bound,
         progress_hook=progress_hook,

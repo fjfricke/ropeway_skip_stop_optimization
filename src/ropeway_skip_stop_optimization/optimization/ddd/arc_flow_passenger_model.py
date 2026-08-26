@@ -38,6 +38,40 @@ class DddArcFlowIntegratedPassengerModel:
     def constraint_count(self) -> int:
         return self.domain.constraint_count
 
+    def apply_seed(
+        self,
+        *,
+        ride_counts_by_candidate_id: Mapping[str, float],
+        movement_values_by_arc_id: Mapping[str, float],
+        tolerance: float = 1e-6,
+    ) -> float:
+        """Set a complete Passenger start on one selected Movement path set."""
+
+        unknown = set(ride_counts_by_candidate_id) - {
+            flow.candidate_id for flow in self.domain.flows
+        }
+        if unknown:
+            raise ValueError("Passenger seed references a candidate outside the domain")
+        variable_by_id = self.domain.variable_by_id
+        objective = self.domain.objective_constant
+        selected_count_by_flow: dict[str, int] = {}
+        for flow in self.domain.flows:
+            value = ride_counts_by_candidate_id.get(flow.candidate_id, 0.0)
+            selected_count = 0
+            for arc_id, variable_id in flow.variable_ids_by_arc_id:
+                selected = movement_values_by_arc_id.get(arc_id, 0.0) > 0.5
+                start = value if selected else 0.0
+                self.variable_by_id[variable_id].Start = start
+                objective += variable_by_id[variable_id].objective_coefficient * start
+                selected_count += int(selected)
+            selected_count_by_flow[flow.candidate_id] = selected_count
+        if any(
+            value > tolerance and selected_count_by_flow.get(candidate_id, 0) == 0
+            for candidate_id, value in ride_counts_by_candidate_id.items()
+        ):
+            raise ValueError("Passenger seed ride is not supported by the Movement seed")
+        return objective
+
 
 @dataclass(frozen=True, slots=True)
 class DddArcFlowPassengerModelBuilder:

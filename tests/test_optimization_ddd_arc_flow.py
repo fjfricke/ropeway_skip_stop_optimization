@@ -10,6 +10,9 @@ from ropeway_skip_stop_optimization.benchmarking.ddd_fixed_k_arc_flow import (
     build_ddd_fixed_k_arc_flow_problem,
     run_ddd_fixed_k_arc_flow,
 )
+from ropeway_skip_stop_optimization.benchmarking.ddd_scaling import (
+    build_initial_ddd_network_problem,
+)
 from ropeway_skip_stop_optimization.examples.registry import get_example
 from ropeway_skip_stop_optimization.optimization.ddd import (
     DddArcFlowResourceInterval,
@@ -30,6 +33,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddFixedKOperatingMode,
     DddFixedKStartPolicy,
     DddFixedKTrajectoryProblem,
+    DddFixedKPrimalSeedFactory,
     DddTrajectoryWaitingDomain,
     DddTrajectoryWaitingPolicy,
     DddFixedMovementPassengerRecourseOracle,
@@ -259,6 +263,37 @@ def test_full_arc_flow_matches_known_fixed_timetable_passenger_objective() -> No
     assert result.solution is not None
     assert result.movement_variable_count > 0
     assert result.passenger_variable_count > 0
+
+
+def test_complete_primal_seed_supplies_validated_upper_bound_and_passengers() -> None:
+    problem = _fixed_problem()
+    scenario = get_example(EXAMPLE_ID).build_scenario()
+    movement = DddFixedKMovementArcFlowOptimizer(
+        DddFixedKMovementArcFlowConfig(time_limit_seconds=10.0)
+    ).solve(problem)
+    assert movement.solution is not None
+    network_problem = build_initial_ddd_network_problem(
+        problem.resolved_trajectory_problem.structural_movement_problem
+    )
+    seed = DddFixedKPrimalSeedFactory(
+        scenario=scenario,
+        problem=problem,
+        network_problem=network_problem,
+        passenger_time_limit_seconds=10.0,
+    ).build(movement.solution.trajectories, provenance="test")
+
+    result = DddFixedKArcFlowOptimizer(
+        DddFixedKArcFlowSolveConfig(time_limit_seconds=10.0)
+    ).solve(problem, primal_seed=seed)
+
+    seed.validate(problem)
+    assert seed.ride_counts_by_candidate_id
+    assert result.status is DddFixedKArcFlowStatus.INTEGER_OPTIMAL
+    assert result.primal_seed_objective_value == pytest.approx(seed.objective_value)
+    assert result.validated_upper_bound is not None
+    assert result.validated_upper_bound <= seed.objective_value + 1e-5
+    assert result.solution is not None
+    assert result.time_to_first_incumbent_seconds == pytest.approx(0.0)
 
 
 def test_shared_arc_flow_preparation_supports_movement_only_solve() -> None:

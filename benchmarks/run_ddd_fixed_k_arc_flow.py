@@ -62,6 +62,8 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--gurobi-output", action="store_true")
     parser.add_argument("--root-cg-result", type=Path)
+    parser.add_argument("--primal-seed-checkpoint", type=Path)
+    parser.add_argument("--seed-passenger-time-limit", type=float, default=60.0)
     parser.add_argument(
         "--output-dir",
         type=Path,
@@ -199,6 +201,10 @@ def main() -> None:
                 seed=args.seed,
                 output_flag=args.gurobi_output,
                 root_cg_result_path=args.root_cg_result,
+                primal_seed_checkpoint_path=args.primal_seed_checkpoint,
+                seed_passenger_time_limit_seconds=(
+                    args.seed_passenger_time_limit
+                ),
             ),
             progress_hook=progress,
         )
