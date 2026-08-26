@@ -38,27 +38,32 @@ Passenger model.
 On Five-Station architecture B, half demand, Skip-Stop, no waiting, balanced
 fixed starts, $K=20$:
 
-| formulation | Movement binaries | Passenger variables | rows | 60 s result |
+| formulation | Movement binaries | Passenger variables | rows | result |
 |---|---:|---:|---:|---|
 | labeled | 21,630 | 158,925 | 288,435 | optimum 525,730.908 in 24.0 s |
-| exact anonymous | 16,250 | 171,010 | 207,596 | LB 0, seeded UB 635,520 after 60 s |
+| exact anonymous | 16,250 | 171,010 | 207,596 | optimum 525,730.908 in 134.9 s |
 
 The quotient removes about 24.9% of Movement binaries and about 28.0% of all
 rows. Passenger-domain construction also falls from about 6.5 seconds to 0.34
 seconds after indexing arc lookup once. This does **not** translate into a
-stronger solve. The labeled candidate-flow relaxation reaches the exact root
-bound quickly, whereas fractional anonymous Movement can split and re-pair
-flow at exact nodes. Node capacity prevents that behavior only after
-integrality.
+faster solve. A first 60-second screening ended before the anonymous root LP
+completed and therefore still reported the objective floor as its bound. The
+five-minute follow-up changes that interpretation: the anonymous root
+relaxation itself reaches 525,730.908, equal to the integer optimum and to the
+labeled optimum. Root processing is the bottleneck. It takes about 121.4
+seconds, including a barrier factorization reported at roughly 1.3 GB,
+whereas the complete labeled run needs only 24.0 seconds in total. After the
+anonymous root finishes, Gurobi closes the integer problem at one explored
+node in about six further seconds.
 
 ## Decision
 
 The exact anonymous model is correct and useful as a controlled research
-alternative, but it fails the first production gate. It must not replace the
-labeled complete arc-flow or the Root-CG certificate path. No long $K=39$
-campaign is justified before a proof-strengthening mechanism closes this root
-relaxation deficit. Reintroducing source commodities would remove much of the
-symmetry gain; taking the convex hull of source paths leads back toward
-Dantzig--Wolfe/trajectory column generation. This negative result therefore
-supports retaining the labeled candidate structure for the immediate thesis
-experiments.
+alternative, but it does not pass the performance gate as a replacement for
+the labeled model: on this instance it is about 5.6 times slower despite being
+smaller. The evidence does **not** support the earlier hypothesis of a weak
+root objective; it instead identifies expensive root-LP linear algebra as the
+limitation. The labeled complete arc-flow and Root-CG certificate path remain
+the production defaults. A bounded $K=39$ comparison is now scientifically
+meaningful, but should be treated as a scaling experiment rather than as an
+expected improvement.

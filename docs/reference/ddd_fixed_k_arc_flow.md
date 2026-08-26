@@ -50,9 +50,13 @@ anonymous re-pairing: exactly one physical cabin enters and leaves a used
 state-time node. The formulation is consequently integer-equivalent, not a
 relaxation.
 
-Its LP relaxation is nevertheless different. Fractional Movement can split
-and re-pair at a node, which may weaken the root bound. The formulation is
-therefore an experimental gated alternative; `labeled` remains the default.
+Its LP relaxation is nevertheless structurally different. Fractional Movement
+can split and re-pair at a node, so equality of LP bounds is not guaranteed in
+general. In the first Five-Station $K=20$ gate, however, both formulations
+attained the same root objective and integer optimum. The anonymous model was
+slower because its root LP took substantially longer to solve, not because its
+bound was weaker. It therefore remains an experimental gated alternative;
+`labeled` remains the default.
 
 ## Capacity-dependent start policy
 
