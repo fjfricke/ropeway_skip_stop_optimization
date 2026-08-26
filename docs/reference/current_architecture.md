@@ -198,6 +198,17 @@ certified passenger-objective lower bounds from exact finite-domain trajectory
 pricing. These algorithms share domain models and validation contracts but
 remain distinct solver strategies.
 
+The complete fixed-$K$ arc-flow runner additionally exposes the gated
+`exact_anonymous` formulation. It quotients the complete labeled no-wait DAG
+by exact physical state and tick, retains labels only on fixed source slots,
+and reconstructs labels by deterministic integer-flow decomposition. Exact
+node capacity makes its integer Movement and Passenger solutions equivalent
+to the labeled model, but its fractional relaxation permits anonymous
+re-pairing. The first $K=20$ gate was materially weaker than the labeled
+candidate-flow formulation, so `labeled` remains the production default. See
+`ddd_fixed_k_arc_flow.md` for the equations and
+`../findings/ddd_exact_anonymous_arc_flow_gate.md` for the measured gate.
+
 `EanArtifactToDddMovementProblemAdapter` projects a sparse, network-backed EAN
 artifact into domain types that import neither Gurobi nor EAN model classes. The
 currently certified trajectory DDD domain accepts fixed starts, continuous

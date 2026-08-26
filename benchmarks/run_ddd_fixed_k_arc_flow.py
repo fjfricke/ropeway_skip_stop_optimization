@@ -8,6 +8,7 @@ from time import perf_counter
 
 from ropeway_skip_stop_optimization.benchmarking.ddd_fixed_k_arc_flow import (
     DddAnalyticAllStopInfeasible,
+    DddFixedKArcFlowFormulation,
     DddFixedKArcFlowRunConfig,
     run_ddd_fixed_k_arc_flow,
     write_ddd_fixed_k_arc_flow_result,
@@ -53,6 +54,12 @@ def main() -> None:
         default=EanPassengerObjective.JOURNEY_TIME.value,
     )
     parser.add_argument("--time-limit", type=float, default=600.0)
+    parser.add_argument(
+        "--formulation",
+        choices=tuple(item.value for item in DddFixedKArcFlowFormulation),
+        default=DddFixedKArcFlowFormulation.LABELED.value,
+        help="Complete labeled arc-flow or exact state-time anonymous quotient.",
+    )
     parser.add_argument("--cp-seed-time-limit", type=float, default=60.0)
     parser.add_argument("--start-layout-time-limit", type=float, default=120.0)
     parser.add_argument("--cp-seed-workers", type=int, default=8)
@@ -80,10 +87,11 @@ def main() -> None:
     args = parser.parse_args()
 
     mode = DddFixedKOperatingMode(args.mode)
+    formulation = DddFixedKArcFlowFormulation(args.formulation)
     campaign_id = args.campaign_id or (
-        f"{args.example}_arc_flow_{mode.value}_k{args.cabins}"
+        f"{args.example}_arc_flow_{formulation.value}_{mode.value}_k{args.cabins}"
     )
-    policy_id = f"arc_flow_{mode.value}"
+    policy_id = f"arc_flow_{formulation.value}_{mode.value}"
     output_path = args.output_dir / campaign_id / "result.json"
     store = (
         OptimizationLiveStore(
@@ -100,11 +108,14 @@ def main() -> None:
             OptimizationEventKind.CAMPAIGN_STARTED,
             campaign_id,
             payload={
-                "label": f"{args.example}: complete DDD arc-flow K={args.cabins}",
+                "label": (
+                    f"{args.example}: {formulation.value} DDD arc-flow K={args.cabins}"
+                ),
                 "objective": args.objective,
                 "example_id": args.example,
                 "trial_count": 1,
-                "method": "fixed_k_complete_ddd_arc_flow",
+                "method": f"fixed_k_complete_ddd_arc_flow_{formulation.value}",
+                "formulation": formulation.value,
             },
         )
         store.append_new(
@@ -116,6 +127,7 @@ def main() -> None:
             payload={
                 "exact_active_cabin_count": args.cabins,
                 "start_policy": args.start_policy,
+                "formulation": formulation.value,
             },
         )
         _publish(store)
@@ -135,7 +147,8 @@ def main() -> None:
         )
         gap = "      -" if certified_gap is None else f"{100 * certified_gap:7.2f}%"
         line = (
-            f" {mode.value[:2].upper()} K={args.cabins:03d} | "
+            f" {formulation.value[:2].upper()} {mode.value[:2].upper()} "
+            f"K={args.cabins:03d} | "
             f"LB={bound} UB={incumbent} gap={gap} | "
             f"phase={sample.phase:<20.20} | "
             f"nodes={sample.node_count:9.0f} sol={sample.solution_count:03d} | "
@@ -173,9 +186,7 @@ def main() -> None:
                     "remaining_budget_seconds": sample.remaining_seconds,
                     "simplex_iteration_count": sample.simplex_iteration_count,
                     "barrier_iteration_count": sample.barrier_iteration_count,
-                    "presolved_removed_row_count": (
-                        sample.presolved_removed_row_count
-                    ),
+                    "presolved_removed_row_count": (sample.presolved_removed_row_count),
                     "presolved_removed_column_count": (
                         sample.presolved_removed_column_count
                     ),
@@ -202,9 +213,8 @@ def main() -> None:
                 output_flag=args.gurobi_output,
                 root_cg_result_path=args.root_cg_result,
                 primal_seed_checkpoint_path=args.primal_seed_checkpoint,
-                seed_passenger_time_limit_seconds=(
-                    args.seed_passenger_time_limit
-                ),
+                seed_passenger_time_limit_seconds=(args.seed_passenger_time_limit),
+                formulation=formulation,
             ),
             progress_hook=progress,
         )

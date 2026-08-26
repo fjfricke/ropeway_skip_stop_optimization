@@ -386,3 +386,23 @@ pricing unchanged and increase coordinated-package frequency (for example,
 every third round), followed by fix-and-optimize over whole package
 neighbourhoods. A Branch-Price tree is justified only if this stronger primal
 gate still leaves the $K=39$ upper bound far from the certified root value.
+
+### Exact anonymous state-time flow follow-up
+
+A separate exact formulation spike quotiented the complete labeled no-wait
+arc-flow by physical `(state, tick)` and integrated direct Passenger flow on
+the quotient. Tiny $K=1,2$ cases matched the labeled integer optimum and every
+reconstructed timetable passed independent EAN validation. At Five-Station B,
+$K=20$, it reduced Movement binaries by about 25% and all rows by about 28%,
+but failed the root gate: after 60 seconds its certified bound remained zero,
+while the labeled formulation proved the exact 525,730.908 optimum in about
+24 seconds under the same seed and machine.
+
+The cause is structural rather than an implementation-time artifact. Integer
+node capacity prevents cabin and Passenger re-pairing, but fractional
+anonymous flow can split and recombine at exact nodes. Source-commodity flow
+could strengthen this relaxation, but would reintroduce much of the label
+dimension; the source-path convex hull is precisely the Dantzig--Wolfe family
+already represented by trajectory Root-CG. The anonymous formulation remains
+available as `--formulation exact_anonymous`, but this gate rules it out as the
+next production solver and does not justify a long $K=39$ run.

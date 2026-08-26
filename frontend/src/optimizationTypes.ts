@@ -9,6 +9,7 @@ export interface OptimizationCampaignSummary {
   status?: string;
   objective?: string;
   method?: string;
+  formulation?: string;
   campaign_kind?: string;
   operating_mode?: string;
   updated_at_utc?: string;
@@ -52,6 +53,7 @@ export interface OptimizationTrialSnapshot {
   root_lp_certified?: boolean;
   dispatched_fleet_count?: number | null;
   method?: string;
+  formulation?: string;
   certificate_kind?: string;
   termination?: string;
   attempt_count?: number;
@@ -103,6 +105,7 @@ export interface OptimizationCampaignSnapshot {
   status: string;
   objective?: string;
   method?: string;
+  formulation?: string;
   campaign_kind?: string;
   operating_mode?: string;
   minimum_k?: number;

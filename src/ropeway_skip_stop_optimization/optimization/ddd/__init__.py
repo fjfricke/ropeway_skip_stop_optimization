@@ -22,7 +22,27 @@ _EXPORTS_BY_MODULE: dict[str, tuple[str, ...]] = {
         'DddCabinTimeExpandedNetwork',
         'DddCabinTimeExpandedNetworkBuilder',
         'build_ddd_arc_flow_resource_cliques',
+        'build_ddd_arc_flow_resource_cliques_from_intervals',
         'build_ddd_arc_flow_boundary_intervals',
+    ),
+    'ropeway_skip_stop_optimization.optimization.ddd.exact_anonymous_arc_flow': (
+        'DddExactAnonymousArcFlowOptimizer',
+        'DddExactAnonymousArcFlowResult',
+        'build_ddd_exact_anonymous_movement_values',
+    ),
+    'ropeway_skip_stop_optimization.optimization.ddd.exact_anonymous_arc_flow_network': (
+        'DddExactAnonymousArc',
+        'DddExactAnonymousArcFlowNetwork',
+        'DddExactAnonymousArcFlowNetworkBuilder',
+        'DddExactAnonymousNode',
+        'DddExactAnonymousStartToken',
+    ),
+    'ropeway_skip_stop_optimization.optimization.ddd.exact_anonymous_passenger': (
+        'DddExactAnonymousPassengerDomain',
+        'DddExactAnonymousPassengerDomainBuilder',
+        'DddExactAnonymousPassengerEvent',
+        'DddExactAnonymousPassengerModel',
+        'DddExactAnonymousPassengerModelBuilder',
     ),
     'ropeway_skip_stop_optimization.optimization.ddd.arc_flow_movement': (
         'DddFixedKMovementArcFlowConfig',

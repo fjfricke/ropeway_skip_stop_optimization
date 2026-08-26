@@ -87,7 +87,9 @@ class OptimizationLiveStore:
                 return ()
             return tuple(
                 OptimizationProgressEvent.from_dict(json.loads(line))
-                for line in self.paths.events_path.read_text(encoding="utf-8").splitlines()
+                for line in self.paths.events_path.read_text(
+                    encoding="utf-8"
+                ).splitlines()
                 if line.strip()
             )
 
@@ -109,6 +111,7 @@ class OptimizationLiveStore:
                 "status",
                 "objective",
                 "method",
+                "formulation",
                 "campaign_kind",
                 "operating_mode",
                 "updated_at_utc",
@@ -165,7 +168,8 @@ def reduce_optimization_events(
                 {
                     key: value
                     for key, value in event.payload.items()
-                    if key not in {"trials", "events", "trial_count", "completed_trial_count"}
+                    if key
+                    not in {"trials", "events", "trial_count", "completed_trial_count"}
                 }
             )
         if event.policy_id is None or event.available_fleet_count is None:
@@ -198,6 +202,7 @@ def reduce_optimization_events(
             if source is not None:
                 trial[target] = source
         if event.kind is OptimizationEventKind.TRIAL_STARTED:
+            trial.update(event.payload)
             trial["status"] = "running"
         elif event.kind is OptimizationEventKind.TRIAL_COMPLETED:
             trial.update(event.payload)

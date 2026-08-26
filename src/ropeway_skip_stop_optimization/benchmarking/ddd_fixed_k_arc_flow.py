@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, replace
+from enum import StrEnum
 import json
 import math
 from pathlib import Path
@@ -20,6 +21,9 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddFixedKArcFlowProgress,
     DddFixedKArcFlowResult,
     DddFixedKArcFlowSolveConfig,
+    DddFixedKArcFlowStatus,
+    DddExactAnonymousArcFlowOptimizer,
+    DddExactAnonymousArcFlowResult,
     DddBalancedReferenceStartBuilder,
     DddFixedKBoundaryContext,
     DddFixedKOperatingMode,
@@ -56,6 +60,11 @@ from ropeway_skip_stop_optimization.optimization.ean import (
 )
 
 
+class DddFixedKArcFlowFormulation(StrEnum):
+    LABELED = "labeled"
+    EXACT_ANONYMOUS = "exact_anonymous"
+
+
 @dataclass(frozen=True, slots=True)
 class DddFixedKArcFlowRunConfig:
     example_id: str
@@ -75,6 +84,7 @@ class DddFixedKArcFlowRunConfig:
     root_cg_result_path: Path | None = None
     primal_seed_checkpoint_path: Path | None = None
     seed_passenger_time_limit_seconds: float = 60.0
+    formulation: DddFixedKArcFlowFormulation = DddFixedKArcFlowFormulation.LABELED
 
     def validate(self) -> None:
         if not self.example_id or self.cabin_count <= 0:
@@ -85,6 +95,8 @@ class DddFixedKArcFlowRunConfig:
             raise ValueError("arc-flow run objective is invalid")
         if not isinstance(self.start_policy, DddFixedKStartPolicy):
             raise ValueError("arc-flow run start policy is invalid")
+        if not isinstance(self.formulation, DddFixedKArcFlowFormulation):
+            raise ValueError("arc-flow run formulation is invalid")
         if (
             self.total_time_limit_seconds <= 0
             or self.cp_seed_time_limit_seconds < 0
@@ -106,7 +118,8 @@ class DddFixedKArcFlowRunConfig:
 class DddFixedKArcFlowRunResult:
     problem: DddFixedKTrajectoryProblem
     scenario: Scenario
-    solve_result: DddFixedKArcFlowResult
+    solve_result: DddFixedKArcFlowResult | DddExactAnonymousArcFlowResult
+    formulation: DddFixedKArcFlowFormulation
     setup_seconds: float
     seed_status: str
     seed_seconds: float
@@ -130,17 +143,20 @@ class DddFixedKArcFlowRunResult:
         raw = asdict(self.solve_result)
         raw.pop("solution", None)
         raw["status"] = self.solve_result.status.value
+        if isinstance(self.solve_result, DddExactAnonymousArcFlowResult):
+            raw["movement_compression_ratio"] = (
+                self.solve_result.movement_compression_ratio
+            )
         raw.update(
             {
                 "example_id": self.scenario.id,
                 "exact_active_cabin_count": self.problem.fleet_cardinality,
                 "operating_mode": self.problem.operating_mode.value,
                 "objective": self.problem.objective.value,
+                "formulation": self.formulation.value,
                 "start_policy": self.problem.start_policy.value,
                 "start_layout_kind": self.start_layout_kind,
-                "all_stop_maximum_cabin_count": (
-                    self.all_stop_maximum_cabin_count
-                ),
+                "all_stop_maximum_cabin_count": (self.all_stop_maximum_cabin_count),
                 "start_layout_cycle_seconds": self.start_layout_cycle_seconds,
                 "start_layout_bottleneck_headway_seconds": (
                     self.start_layout_bottleneck_headway_seconds
@@ -159,9 +175,7 @@ class DddFixedKArcFlowRunResult:
                     self.start_layout_maximum_service_gap_seconds
                 ),
                 "start_layout_seconds": self.start_layout_seconds,
-                "start_layout_objective_proven": (
-                    self.start_layout_objective_proven
-                ),
+                "start_layout_objective_proven": (self.start_layout_objective_proven),
                 "setup_seconds": self.setup_seconds,
                 "seed_status": self.seed_status,
                 "seed_seconds": self.seed_seconds,
@@ -281,9 +295,7 @@ def prepare_ddd_fixed_k_arc_flow_run(
             config=config,
             scenario=scenario,
             artifact=artifact,
-            boundary_context=DddFixedKBoundaryContext(
-                source="evenly_spaced_all_stop"
-            ),
+            boundary_context=DddFixedKBoundaryContext(source="evenly_spaced_all_stop"),
         )
         return DddPreparedFixedKArcFlowRun(
             scenario=scenario,
@@ -291,9 +303,7 @@ def prepare_ddd_fixed_k_arc_flow_run(
             all_stop_maximum_cabin_count=analysis.maximum_cabin_count,
             start_layout_kind="evenly_spaced_all_stop",
             start_layout_cycle_seconds=analysis.cycle_seconds,
-            start_layout_bottleneck_headway_seconds=(
-                analysis.limiting_headway_seconds
-            ),
+            start_layout_bottleneck_headway_seconds=(analysis.limiting_headway_seconds),
             start_layout_service_station_count=len(artifact.timings),
         )
     if config.operating_mode is DddFixedKOperatingMode.ALL_STOP:
@@ -351,10 +361,8 @@ def _prepare_periodic_balanced_skip_stop_problem(
         ),
         headway_resource_reduction_mode=HeadwayResourceReductionMode.DISABLED,
     ).build(scenario, ean_config)
-    oip_problem = (
-        EanArtifactToDddMovementProblemAdapter().build_trajectory_problem(
-            oip_artifact
-        )
+    oip_problem = EanArtifactToDddMovementProblemAdapter().build_trajectory_problem(
+        oip_artifact
     )
     balanced = DddBalancedReferenceStartBuilder(
         time_limit_seconds=min(
@@ -398,12 +406,8 @@ def _prepare_periodic_balanced_skip_stop_problem(
         start_layout_kind="periodic_balanced_reference",
         start_layout_service_station_count=balanced.served_station_count,
         start_layout_candidate_count=balanced.candidate_count,
-        start_layout_incompatibility_pair_count=(
-            balanced.incompatibility_pair_count
-        ),
-        start_layout_minimum_station_stop_count=(
-            balanced.minimum_station_stop_count
-        ),
+        start_layout_incompatibility_pair_count=(balanced.incompatibility_pair_count),
+        start_layout_minimum_station_stop_count=(balanced.minimum_station_stop_count),
         start_layout_maximum_service_gap_seconds=(
             balanced.maximum_station_service_gap_seconds
         ),
@@ -432,9 +436,7 @@ def _fixed_snapshot_from_oip_seed(
     oip_by_cabin = {trajectory.cabin_id: trajectory for trajectory in oip_trajectories}
     starts: list[EanCabinStart] = []
     retained_visit_index_by_cabin: dict[int, int] = {}
-    boundary_occurrences: dict[
-        tuple[object, ...], DddReferenceResourceOccurrence
-    ] = {}
+    boundary_occurrences: dict[tuple[object, ...], DddReferenceResourceOccurrence] = {}
     resources = (
         EanArtifactToDddMovementProblemAdapter()
         .build_trajectory_problem(oip_artifact)
@@ -464,13 +466,10 @@ def _fixed_snapshot_from_oip_seed(
         trajectory = oip_by_cabin[cabin_id]
         for occurrence in trajectory.resource_occurrences:
             resource = resources[occurrence.resource_id]
-            clear_with_headway = (
-                occurrence.leader_clear_time_seconds
-                + (
-                    occurrence.separation_after_seconds
-                    if occurrence.separation_after_seconds is not None
-                    else resource.minimum_headway_seconds
-                )
+            clear_with_headway = occurrence.leader_clear_time_seconds + (
+                occurrence.separation_after_seconds
+                if occurrence.separation_after_seconds is not None
+                else resource.minimum_headway_seconds
             )
             belongs_to_omitted_prefix = occurrence.visit_index < first.visit_index
             if not (
@@ -479,17 +478,15 @@ def _fixed_snapshot_from_oip_seed(
             ):
                 continue
             candidate = DddReferenceResourceOccurrence(
-                    resource_id=occurrence.resource_id,
-                    cabin_id=cabin_id,
-                    visit_index=occurrence.visit_index,
-                    leader_clear_time_seconds=occurrence.leader_clear_time_seconds,
-                    follower_enter_time_seconds=(
-                        occurrence.follower_enter_time_seconds
-                    ),
-                    separation_after_seconds=occurrence.separation_after_seconds,
-                    boundary_only=occurrence.boundary_only,
-                    boundary_origin=True,
-                )
+                resource_id=occurrence.resource_id,
+                cabin_id=cabin_id,
+                visit_index=occurrence.visit_index,
+                leader_clear_time_seconds=occurrence.leader_clear_time_seconds,
+                follower_enter_time_seconds=(occurrence.follower_enter_time_seconds),
+                separation_after_seconds=occurrence.separation_after_seconds,
+                boundary_only=occurrence.boundary_only,
+                boundary_origin=True,
+            )
             key = (
                 candidate.resource_id,
                 candidate.cabin_id,
@@ -498,7 +495,9 @@ def _fixed_snapshot_from_oip_seed(
                 candidate.separation_after_seconds,
             )
             previous = boundary_occurrences.get(key)
-            if previous is None or (previous.boundary_only and not candidate.boundary_only):
+            if previous is None or (
+                previous.boundary_only and not candidate.boundary_only
+            ):
                 boundary_occurrences[key] = candidate
     context = DddFixedKBoundaryContext(
         initial_states=tuple(
@@ -579,7 +578,9 @@ def run_ddd_fixed_k_arc_flow(
     movement = problem.resolved_trajectory_problem.structural_movement_problem
     network_problem = build_initial_ddd_network_problem(movement)
 
-    seed_candidates: list[tuple[str, tuple[DddReferenceTrajectory, ...], float | None]] = []
+    seed_candidates: list[
+        tuple[str, tuple[DddReferenceTrajectory, ...], float | None]
+    ] = []
     if prepared.seed_trajectories:
         seed_trajectories = prepared.seed_trajectories
         seed_status = DddFixedKSeedStatus.FEASIBLE.value
@@ -641,8 +642,7 @@ def run_ddd_fixed_k_arc_flow(
         )
         if (
             expected_upper_bound is not None
-            and candidate.objective_value
-            > expected_upper_bound + 1e-4
+            and candidate.objective_value > expected_upper_bound + 1e-4
         ):
             raise RuntimeError(
                 "re-evaluated Root-CG seed is worse than its stored validated UB"
@@ -664,23 +664,35 @@ def run_ddd_fixed_k_arc_flow(
     remaining = config.total_time_limit_seconds - (perf_counter() - started)
     if remaining <= 0:
         raise TimeoutError("arc-flow setup and seed exhausted the total budget")
-    solve_result = DddFixedKArcFlowOptimizer(
-        DddFixedKArcFlowSolveConfig(
-            time_limit_seconds=remaining,
-            mip_gap=config.mip_gap,
-            threads=config.solver_threads,
-            seed=config.seed,
-            mip_focus=config.mip_focus,
-            output_flag=config.output_flag,
-        )
-    ).solve(
-        problem,
-        seed_trajectories=seed_trajectories,
-        primal_seed=primal_seed,
-        seed_kind=seed_kind,
-        root_cg_lower_bound=root_cg_lower_bound,
-        progress_hook=progress_hook,
+    validation_reserve = min(
+        config.seed_passenger_time_limit_seconds,
+        max(1.0, 0.1 * remaining),
     )
+    solve_budget = max(0.001, remaining - validation_reserve)
+    solve_config = DddFixedKArcFlowSolveConfig(
+        time_limit_seconds=solve_budget,
+        mip_gap=config.mip_gap,
+        threads=config.solver_threads,
+        seed=config.seed,
+        mip_focus=config.mip_focus,
+        output_flag=config.output_flag,
+    )
+    if config.formulation is DddFixedKArcFlowFormulation.EXACT_ANONYMOUS:
+        solve_result = DddExactAnonymousArcFlowOptimizer(solve_config).solve(
+            problem,
+            primal_seed=primal_seed,
+            root_cg_lower_bound=root_cg_lower_bound,
+            progress_hook=progress_hook,
+        )
+    else:
+        solve_result = DddFixedKArcFlowOptimizer(solve_config).solve(
+            problem,
+            seed_trajectories=seed_trajectories,
+            primal_seed=primal_seed,
+            seed_kind=seed_kind,
+            root_cg_lower_bound=root_cg_lower_bound,
+            progress_hook=progress_hook,
+        )
     validation_status = "not_run"
     validation_objective = None
     validation_seconds = 0.0
@@ -703,20 +715,60 @@ def run_ddd_fixed_k_arc_flow(
             and evaluation.objective_value is not None
             and solve_result.objective_value is not None
         ):
-            if not math.isclose(
-                evaluation.objective_value,
-                solve_result.objective_value,
-                rel_tol=0.0,
-                abs_tol=1e-4,
-            ):
+            if evaluation.objective_value < solve_result.objective_value - 1e-4:
                 raise RuntimeError(
-                    "integrated arc-flow and independent EAN Passenger objectives differ: "
+                    "integrated arc-flow overestimates independent EAN Passenger recourse: "
                     f"{solve_result.objective_value} != {evaluation.objective_value}"
+                )
+            if evaluation.objective_value > solve_result.objective_value + 1e-4:
+                solve_result = replace(
+                    solve_result,
+                    status=DddFixedKArcFlowStatus.TIME_LIMIT_WITH_CERTIFIED_INTERVAL,
+                    objective_value=evaluation.objective_value,
+                    validated_upper_bound=evaluation.objective_value,
+                    relative_gap=max(
+                        0.0,
+                        evaluation.objective_value - solve_result.certified_lower_bound,
+                    )
+                    / max(abs(evaluation.objective_value), 1e-9),
+                    detail=(
+                        "independent Passenger recourse returned a valid incumbent "
+                        "above the integrated objective"
+                    ),
+                )
+        elif solve_result.solution is not None and (
+            primal_seed is None or solve_result.solution != primal_seed.solution
+        ):
+            if primal_seed is None:
+                solve_result = replace(
+                    solve_result,
+                    status=DddFixedKArcFlowStatus.UNKNOWN_NO_INCUMBENT,
+                    objective_value=None,
+                    validated_upper_bound=None,
+                    relative_gap=None,
+                    solution=None,
+                    detail="independent Passenger validation found no incumbent",
+                )
+            else:
+                solve_result = replace(
+                    solve_result,
+                    status=DddFixedKArcFlowStatus.TIME_LIMIT_WITH_CERTIFIED_INTERVAL,
+                    objective_value=primal_seed.objective_value,
+                    validated_upper_bound=primal_seed.objective_value,
+                    relative_gap=max(
+                        0.0,
+                        primal_seed.objective_value
+                        - solve_result.certified_lower_bound,
+                    )
+                    / max(abs(primal_seed.objective_value), 1e-9),
+                    solution=primal_seed.solution,
+                    detail="solver incumbent failed independent Passenger validation",
                 )
     return DddFixedKArcFlowRunResult(
         problem=problem,
         scenario=scenario,
         solve_result=solve_result,
+        formulation=config.formulation,
         setup_seconds=setup_seconds,
         seed_status=seed_status,
         seed_seconds=seed_seconds,
@@ -744,9 +796,7 @@ def run_ddd_fixed_k_arc_flow(
             prepared.start_layout_maximum_service_gap_seconds
         ),
         start_layout_seconds=prepared.start_layout_seconds,
-        start_layout_objective_proven=(
-            prepared.start_layout_objective_proven
-        ),
+        start_layout_objective_proven=(prepared.start_layout_objective_proven),
     )
 
 

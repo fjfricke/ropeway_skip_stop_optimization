@@ -6,6 +6,7 @@ import pytest
 
 from ropeway_skip_stop_optimization.benchmarking.ddd_fixed_k_arc_flow import (
     DddAnalyticAllStopInfeasible,
+    DddFixedKArcFlowFormulation,
     DddFixedKArcFlowRunConfig,
     build_ddd_fixed_k_arc_flow_problem,
     run_ddd_fixed_k_arc_flow,
@@ -34,6 +35,8 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddFixedKStartPolicy,
     DddFixedKTrajectoryProblem,
     DddFixedKPrimalSeedFactory,
+    DddExactAnonymousArcFlowNetworkBuilder,
+    DddExactAnonymousArcFlowOptimizer,
     DddTrajectoryWaitingDomain,
     DddTrajectoryWaitingPolicy,
     DddFixedMovementPassengerRecourseOracle,
@@ -41,6 +44,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     build_ddd_arc_flow_movement_values,
     EanArtifactToDddMovementProblemAdapter,
     build_ddd_arc_flow_resource_cliques,
+    build_ddd_exact_anonymous_movement_values,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
     CanonicalFixedKRopeCabinStartBuilder,
@@ -265,6 +269,64 @@ def test_full_arc_flow_matches_known_fixed_timetable_passenger_objective() -> No
     assert result.passenger_variable_count > 0
 
 
+def test_exact_anonymous_network_is_deterministic_and_removes_label_copies() -> None:
+    prepared = DddArcFlowProblemPreparer().build(_fixed_problem(cabin_count=2))
+
+    first = DddExactAnonymousArcFlowNetworkBuilder().build(prepared)
+    second = DddExactAnonymousArcFlowNetworkBuilder().build(prepared)
+
+    assert first == second
+    assert len(first.start_tokens) == 2
+    assert len(first.arcs) < len(prepared.arcs)
+    assert all(arc.source_token_id is None for arc in first.movement_arcs)
+    assert all(arc.target_tick > arc.source_tick for arc in first.arcs)
+    first.validate()
+
+
+def test_exact_anonymous_projection_preserves_a_valid_labeled_schedule() -> None:
+    problem = _fixed_problem(cabin_count=2)
+    prepared = DddArcFlowProblemPreparer().build(problem)
+    network = DddExactAnonymousArcFlowNetworkBuilder().build(prepared)
+    movement = DddFixedKMovementArcFlowOptimizer(
+        DddFixedKMovementArcFlowConfig(time_limit_seconds=10.0)
+    ).solve_prepared(prepared)
+    assert movement.solution is not None
+
+    values = build_ddd_exact_anonymous_movement_values(
+        prepared,
+        network,
+        movement.solution,
+    )
+
+    assert (
+        sum(values[arc.id] for arc in network.source_arcs) == problem.fleet_cardinality
+    )
+    assert (
+        sum(values[arc.id] for arc in network.terminal_arcs)
+        == problem.fleet_cardinality
+    )
+
+
+@pytest.mark.parametrize("cabin_count", (1, 2))
+def test_exact_anonymous_arc_flow_matches_labeled_exact_tiny_optimum(
+    cabin_count: int,
+) -> None:
+    problem = _fixed_problem(cabin_count)
+    labeled = DddFixedKArcFlowOptimizer(
+        DddFixedKArcFlowSolveConfig(time_limit_seconds=10.0)
+    ).solve(problem)
+    anonymous = DddExactAnonymousArcFlowOptimizer(
+        DddFixedKArcFlowSolveConfig(time_limit_seconds=10.0)
+    ).solve(problem)
+
+    assert labeled.status is DddFixedKArcFlowStatus.INTEGER_OPTIMAL
+    assert anonymous.status is DddFixedKArcFlowStatus.INTEGER_OPTIMAL
+    assert anonymous.objective_value == pytest.approx(labeled.objective_value)
+    assert anonymous.certified_lower_bound == pytest.approx(anonymous.objective_value)
+    assert anonymous.solution is not None
+    assert anonymous.movement_compression_ratio <= 1.0
+
+
 def test_complete_primal_seed_supplies_validated_upper_bound_and_passengers() -> None:
     problem = _fixed_problem()
     scenario = get_example(EXAMPLE_ID).build_scenario()
@@ -368,14 +430,10 @@ def test_normalized_passenger_domain_and_recourse_match_monolithic_tiny_case() -
     assert lp.optimal
     assert integer.optimal
     assert lp.objective_value == pytest.approx(integer.objective_value)
-    assert integer.objective_value == pytest.approx(
-        independent.integer.objective_value
-    )
+    assert integer.objective_value == pytest.approx(independent.integer.objective_value)
     assert lp.objective_value == pytest.approx(independent.lp.objective_value)
     assert lp.benders_cut is not None
-    assert lp.benders_cut.evaluate(movement_values) == pytest.approx(
-        lp.objective_value
-    )
+    assert lp.benders_cut.evaluate(movement_values) == pytest.approx(lp.objective_value)
     assert all(value <= 1e-8 for _, value in lp.benders_cut.coefficients)
 
 
@@ -399,9 +457,7 @@ def test_passenger_dual_cuts_are_valid_across_diverse_tiny_movements() -> None:
             )
         ).solve_prepared(prepared)
         assert movement.solution is not None
-        vectors.append(
-            build_ddd_arc_flow_movement_values(prepared, movement.solution)
-        )
+        vectors.append(build_ddd_arc_flow_movement_values(prepared, movement.solution))
     evaluations = tuple(recourse.evaluate(vector) for vector in vectors)
 
     for source in evaluations:
@@ -446,6 +502,16 @@ def test_incompatible_imported_bound_is_rejected_as_certificate_error() -> None:
     assert result.solution is None
 
 
+def test_exact_anonymous_rejects_an_imported_bound_above_its_incumbent() -> None:
+    result = DddExactAnonymousArcFlowOptimizer(
+        DddFixedKArcFlowSolveConfig(time_limit_seconds=10.0)
+    ).solve(_fixed_problem(), root_cg_lower_bound=2_000_000.0)
+
+    assert result.status is DddFixedKArcFlowStatus.INTERNAL_CERTIFICATE_ERROR
+    assert result.validated_upper_bound is None
+    assert result.solution is None
+
+
 @pytest.mark.parametrize(
     "objective",
     (EanPassengerObjective.JOURNEY_TIME, EanPassengerObjective.WAITING_TIME),
@@ -470,6 +536,36 @@ def test_arc_flow_application_independently_reproduces_passenger_objective(
         result.solve_result.objective_value
     )
     assert result.to_payload()["problem_fingerprint"] == result.problem.fingerprint
+
+
+@pytest.mark.parametrize(
+    "objective",
+    (EanPassengerObjective.JOURNEY_TIME, EanPassengerObjective.WAITING_TIME),
+)
+def test_exact_anonymous_application_is_gated_and_independently_validated(
+    objective: EanPassengerObjective,
+) -> None:
+    result = run_ddd_fixed_k_arc_flow(
+        DddFixedKArcFlowRunConfig(
+            example_id=EXAMPLE_ID,
+            cabin_count=2,
+            operating_mode=DddFixedKOperatingMode.SKIP_STOP,
+            objective=objective,
+            formulation=DddFixedKArcFlowFormulation.EXACT_ANONYMOUS,
+            total_time_limit_seconds=20.0,
+            cp_seed_time_limit_seconds=1.0,
+        )
+    )
+
+    assert result.solve_result.status is DddFixedKArcFlowStatus.INTEGER_OPTIMAL
+    assert result.formulation is DddFixedKArcFlowFormulation.EXACT_ANONYMOUS
+    assert result.independent_validation_status == "feasible"
+    assert result.independent_validation_objective == pytest.approx(
+        result.solve_result.objective_value
+    )
+    assert result.solve_result.primal_seed_objective_value is not None
+    assert result.solve_result.time_to_first_incumbent_seconds == pytest.approx(0.0)
+    assert result.to_payload()["formulation"] == "exact_anonymous"
 
 
 @pytest.mark.parametrize(

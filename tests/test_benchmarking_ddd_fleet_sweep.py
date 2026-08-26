@@ -59,8 +59,12 @@ def test_exact_dispatch_does_not_mix_fleet_bounds() -> None:
 def test_trial_fingerprint_is_stable_and_covers_k() -> None:
     config = _config()
     policy = config.policies[0]
-    assert trial_fingerprint(config, policy, 18) == trial_fingerprint(config, policy, 18)
-    assert trial_fingerprint(config, policy, 18) != trial_fingerprint(config, policy, 19)
+    assert trial_fingerprint(config, policy, 18) == trial_fingerprint(
+        config, policy, 18
+    )
+    assert trial_fingerprint(config, policy, 18) != trial_fingerprint(
+        config, policy, 19
+    )
 
 
 def test_event_store_is_ordered_atomic_and_reducible(tmp_path: Path) -> None:
@@ -83,12 +87,14 @@ def test_event_store_is_ordered_atomic_and_reducible(tmp_path: Path) -> None:
             campaign_id="test",
             policy_id="skip",
             available_fleet_count=18,
+            payload={"formulation": "exact_anonymous"},
         )
     )
     snapshot = reduce_optimization_events(store.read_events())
     store.publish(snapshot)
     assert snapshot["status"] == "running"
     assert snapshot["trials"]["skip__k18"]["status"] == "running"
+    assert snapshot["trials"]["skip__k18"]["formulation"] == "exact_anonymous"
     assert (frontend / "test" / "snapshot.json").exists()
     assert (frontend / "index.json").exists()
     with pytest.raises(ValueError, match="expected event sequence"):

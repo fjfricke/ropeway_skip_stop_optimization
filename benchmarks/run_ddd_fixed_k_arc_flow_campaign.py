@@ -7,6 +7,7 @@ from time import perf_counter
 
 from ropeway_skip_stop_optimization.benchmarking.ddd_fixed_k_arc_flow import (
     DddAnalyticAllStopInfeasible,
+    DddFixedKArcFlowFormulation,
     DddFixedKArcFlowRunConfig,
     run_ddd_fixed_k_arc_flow,
     write_ddd_fixed_k_arc_flow_result,
@@ -52,7 +53,13 @@ def main() -> None:
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--threads", type=int)
     parser.add_argument("--cp-seed-workers", type=int, default=8)
+    parser.add_argument(
+        "--formulation",
+        choices=tuple(item.value for item in DddFixedKArcFlowFormulation),
+        default=DddFixedKArcFlowFormulation.LABELED.value,
+    )
     args = parser.parse_args()
+    formulation = DddFixedKArcFlowFormulation(args.formulation)
 
     campaign = DddFixedKCampaignConfig.from_dict(
         json.loads(args.config.read_text(encoding="utf-8"))
@@ -98,7 +105,8 @@ def main() -> None:
                 "profile": campaign.profile.value,
                 "start_policy": campaign.start_policy.value,
                 "trial_count": len(campaign.k_values) * len(campaign.operating_modes),
-                "method": "fixed_k_complete_ddd_arc_flow",
+                "method": f"fixed_k_complete_ddd_arc_flow_{formulation.value}",
+                "formulation": formulation.value,
             },
         )
         _publish(store)
@@ -117,6 +125,7 @@ def main() -> None:
                 payload={
                     "exact_active_cabin_count": cabin_count,
                     "start_policy": campaign.start_policy.value,
+                    "formulation": formulation.value,
                 },
             )
             _publish(store)
@@ -158,7 +167,7 @@ def main() -> None:
                 )
                 _publish(store)
                 if args.progress:
-                    line = _progress_line(mode, cabin_count, sample)
+                    line = _progress_line(formulation, mode, cabin_count, sample)
                     padding = " " * max(0, last_progress_width - len(line))
                     print(
                         f"\r{line}{padding}",
@@ -182,6 +191,7 @@ def main() -> None:
                         cp_seed_time_limit_seconds=profile.cp_seed_time_limit_seconds,
                         cp_seed_workers=args.cp_seed_workers,
                         solver_threads=args.threads,
+                        formulation=formulation,
                     ),
                     progress_hook=progress,
                 )
@@ -319,8 +329,7 @@ def _comparisons(results: list[dict[str, object]]) -> dict[str, object]:
             "skip_stop_status": result.get("status"),
         }
         for result in results
-        if result.get("operating_mode")
-        == DddFixedKOperatingMode.SKIP_STOP.value
+        if result.get("operating_mode") == DddFixedKOperatingMode.SKIP_STOP.value
         and analytic_all_stop_limit is not None
         and int(result["exact_active_cabin_count"]) > analytic_all_stop_limit
         and result.get("validated_upper_bound") is not None
@@ -333,13 +342,15 @@ def _comparisons(results: list[dict[str, object]]) -> dict[str, object]:
 
 
 def _progress_line(
+    formulation: DddFixedKArcFlowFormulation,
     mode: DddFixedKOperatingMode,
     cabin_count: int,
     sample: DddFixedKArcFlowProgress,
 ) -> str:
     upper = "-" if sample.solver_incumbent is None else f"{sample.solver_incumbent:.1f}"
     return (
-        f"{mode.value} K={cabin_count} LB={sample.certified_lower_bound:.1f} "
+        f"{formulation.value} {mode.value} K={cabin_count} "
+        f"LB={sample.certified_lower_bound:.1f} "
         f"UB={upper} nodes={sample.node_count:.0f} "
         f"phase={sample.phase:<20.20} left={sample.remaining_seconds:.0f}s"
     )

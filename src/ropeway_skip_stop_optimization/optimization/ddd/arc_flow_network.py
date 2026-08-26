@@ -312,14 +312,25 @@ def build_ddd_arc_flow_resource_cliques(
 ) -> tuple[DddArcFlowResourceClique, ...]:
     """Return all inclusion-maximal interval cliques, deterministically deduplicated."""
 
-    intervals_by_resource: dict[str, list[DddArcFlowResourceInterval]] = defaultdict(
-        list
-    )
+    intervals: list[DddArcFlowResourceInterval] = []
     for network in networks:
         network.validate()
         for arc in network.arcs:
-            for interval in arc.resource_intervals:
-                intervals_by_resource[interval.resource_id].append(interval)
+            intervals.extend(arc.resource_intervals)
+    return build_ddd_arc_flow_resource_cliques_from_intervals(tuple(intervals))
+
+
+def build_ddd_arc_flow_resource_cliques_from_intervals(
+    intervals: tuple[DddArcFlowResourceInterval, ...],
+) -> tuple[DddArcFlowResourceClique, ...]:
+    """Build maximal interval cliques for any exact arc-indexed flow network."""
+
+    intervals_by_resource: dict[str, list[DddArcFlowResourceInterval]] = defaultdict(
+        list
+    )
+    for interval in intervals:
+        interval.validate()
+        intervals_by_resource[interval.resource_id].append(interval)
 
     result: list[DddArcFlowResourceClique] = []
     for resource_id, intervals in sorted(intervals_by_resource.items()):

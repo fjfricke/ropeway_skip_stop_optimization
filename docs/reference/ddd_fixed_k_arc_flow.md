@@ -5,6 +5,55 @@ for fixed starts and no waiting. It gives Gurobi every cabin path, resource
 interval, and passenger flow in one MILP. A validated incumbent is a global
 upper bound; `ObjBound` is a global lower bound for the same DDD tick domain.
 
+## Two exact formulations
+
+The public runner exposes two independently selectable formulations:
+
+- `labeled` is the established layered cabin-by-cabin DAG. Its binary
+  variables retain cabin and visit indices.
+- `exact_anonymous` quotients the complete labeled DAG by the exact physical
+  state and integer time tick. Cabin identity remains only on the fixed source
+  token and is reconstructed after the solve.
+
+For an exact node $v=(s,t)$, let $A^-(v)$ and $A^+(v)$ be its incoming
+and outgoing arcs. The anonymous integer Movement model uses
+
+$$
+\sum_{a\in A^-(v)}x_a=\sum_{a\in A^+(v)}x_a,
+\qquad
+\sum_{a\in A^-(v)}x_a\le 1,
+$$
+
+plus one unit of source flow per fixed start slot, exactly $K$ terminal
+arcs, and the same maximal half-open resource-interval cliques as the labeled
+model. Route durations are strictly positive, so the graph is acyclic. Every
+integer solution therefore decomposes deterministically into (K) physical
+paths. Reattaching each source-slot label produces a complete reference
+solution, which must pass the unchanged Movement and resource validator.
+
+Passenger variables form a direct-ride multicommodity flow on those same
+exact nodes. For demand group $g$,
+
+$$
+\sum_{a\in A^-(v)}f_{ga}+b_{gv}
+=
+\sum_{a\in A^+(v)}f_{ga}+d_{gv},
+\qquad
+\sum_g f_{ga}\le Qx_a.
+$$
+
+Boarding and alighting exist only on selected Stop arcs and use their exact
+platform event ticks. Reachability stops at the origin or destination, so the
+model preserves the current no-transfer, less-than-one-circulation ride
+semantics. At an integer Movement solution, node capacity one prevents
+anonymous re-pairing: exactly one physical cabin enters and leaves a used
+state-time node. The formulation is consequently integer-equivalent, not a
+relaxation.
+
+Its LP relaxation is nevertheless different. Fractional Movement can split
+and re-pair at a node, which may weaken the root bound. The formulation is
+therefore an experimental gated alternative; `labeled` remains the default.
+
 ## Capacity-dependent start policy
 
 `balanced_reference` is the comparison policy for experiments. It first
@@ -77,6 +126,17 @@ start snapshot cannot be combined accidentally.
   --frontend-live
 ```
 
+Add the following switch for the exact anonymous quotient:
+
+```bash
+  --formulation exact_anonymous
+```
+
+The output records the formulation, exact node count, original labeled arc
+count, anonymous Movement arc count, and compression ratio. Single-run and
+campaign live events carry the formulation from `trial_started`, so terminal
+and frontend distinguish the two models while they are still running.
+
 An existing Root-CG bound can be combined only after a strict problem
 fingerprint check:
 
@@ -87,6 +147,13 @@ fingerprint check:
 CP-SAT is used only for a complete movement MIP start. A CP-SAT timeout does
 not stop Gurobi. The exported incumbent is independently checked with the EAN
 fixed-timetable passenger optimizer.
+
+The application reserves ten percent of the remaining post-seed budget, at
+least one second and at most `seed_passenger_time_limit_seconds`, for that
+independent check. If a new solver timetable cannot be validated in the
+reserve, it is not exported as the validated upper bound; the last independently
+validated seed remains the safe fallback. Setup, solve, and validation still
+share the declared total wall-clock budget.
 
 ## Campaign
 
@@ -134,6 +201,7 @@ legitimately continue to display the objective floor as its certified bound.
 - integer direct passenger assignment;
 - waiting-time or journey-time objective;
 - eager maximal interval-clique headway rows.
+- optional exact anonymous state-time quotient (`labeled` remains default).
 
 The balanced policy optimizes only the initial reference snapshot. Reservoir
 dispatch, a jointly optimized initial placement inside the passenger MILP,
