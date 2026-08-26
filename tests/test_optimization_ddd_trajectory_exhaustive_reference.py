@@ -18,6 +18,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddExhaustiveTrajectoryMasterBuilder,
     DddTrajectoryBoundStatus,
     DddTrajectoryConflictRowMode,
+    DddTrajectoryCoordinatedPrimalGenerator,
     DddTrajectoryDiversityMode,
     DddTrajectoryFactorizedLpOptimizer,
     DddTrajectoryFactorizedMipReferenceOptimizer,
@@ -28,12 +29,17 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddTrajectoryExactPricingStatus,
     DddTrajectoryExhaustivePricingOracle,
     DddTrajectoryPassengerDuals,
+    DddReferenceSolution,
+    DddReferenceTrajectory,
     DddTrajectoryRootCgStatus,
     DddTrajectoryPassengerLpStatus,
     EanArtifactToDddMovementProblemAdapter,
     build_ddd_trajectory_resource_window_rows,
     ddd_trajectory_pair_has_resource_window_witness,
+    ddd_trajectory_resource_intervals,
     enumerate_ddd_trajectory_resource_windows,
+    find_ddd_reference_conflicts,
+    validate_ddd_reference_solution,
     read_ddd_trajectory_root_cg_checkpoint,
     write_ddd_trajectory_root_cg_checkpoint,
 )
@@ -288,6 +294,136 @@ def test_exact_pricing_matches_exhaustive_resource_window_duals() -> None:
             reference.minimum_reduced_cost,
             abs=1e-6,
         )
+
+
+def test_exact_resource_window_pricing_includes_fixed_boundary_coefficient() -> None:
+    problem, artifact, passenger_build = _physical_problem()
+    exhaustive = DddExhaustiveTrajectoryMasterBuilder().build(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+    )
+    cabin_id = 0
+    trajectories = exhaustive.reference_trajectory_by_option_id
+    cabin_option_ids = {
+        option.id
+        for option in exhaustive.master_problem.options
+        if option.cabin_id == cabin_id
+    }
+    boundary = next(
+        replace(occurrence, cabin_id=cabin_id, boundary_origin=True)
+        for trajectory in trajectories.values()
+        if trajectory.cabin_id != cabin_id
+        for occurrence in trajectory.resource_occurrences
+        if 0
+        < sum(
+            not find_ddd_reference_conflicts(
+                (
+                    *trajectories[option_id].resource_occurrences,
+                    replace(occurrence, cabin_id=cabin_id, boundary_origin=True),
+                ),
+                problem.movement_problem,
+            )
+            for option_id in cabin_option_ids
+        )
+        < len(cabin_option_ids)
+    )
+    allowed = {
+        option_id
+        for option_id in cabin_option_ids
+        if not find_ddd_reference_conflicts(
+            (*trajectories[option_id].resource_occurrences, boundary),
+            problem.movement_problem,
+        )
+    }
+    bounded_trajectories = {
+        option_id: (
+            replace(trajectory, boundary_resource_occurrences=(boundary,))
+            if option_id in allowed
+            else trajectory
+        )
+        for option_id, trajectory in trajectories.items()
+    }
+    boundary_interval = ddd_trajectory_resource_intervals(
+        DddReferenceTrajectory(
+            cabin_id=cabin_id,
+            visits=(),
+            boundary_resource_occurrences=(boundary,),
+        ),
+        problem.movement_problem,
+    )[0]
+    windows = enumerate_ddd_trajectory_resource_windows(
+        movement_problem=problem.movement_problem,
+        trajectories=(
+            DddReferenceTrajectory(
+                cabin_id=cabin_id,
+                visits=(),
+                boundary_resource_occurrences=(boundary,),
+            ),
+        ),
+    )
+    window = next(
+        item
+        for item in windows
+        if item.resource_id == boundary_interval.resource_id
+        and item.anchor_tick == boundary_interval.enter_tick
+    )
+    rows = build_ddd_trajectory_resource_window_rows(
+        windows=(window,),
+        movement_problem=problem.movement_problem,
+        trajectory_by_option_id=bounded_trajectories,
+    )
+    assert all(
+        rows[0].coefficient_by_option_id[option_id] == 1
+        for option_id in allowed
+    )
+    exhaustive = replace(
+        exhaustive,
+        reference_trajectory_by_option_id=bounded_trajectories,
+        master_problem=replace(
+            exhaustive.master_problem,
+            resource_window_rows=rows,
+        ),
+    )
+    duals = DddTrajectoryPassengerDuals(
+        cabin_choice_raw_by_cabin_id={
+            item: 0.0 for item in exhaustive.master_problem.cabin_ids
+        },
+        demand_raw_by_group_id={
+            group_id: -17.0
+            for group_id in exhaustive.master_problem.demand_by_group_id
+        },
+        demand_marginal_value_by_group_id={},
+        incompatibility_raw_by_pair={},
+        ride_activation_raw_by_ride_id={},
+        capacity_raw_by_option_segment={},
+        fingerprint="boundary-resource-window-pricing-test",
+        resource_window_raw_by_row_id={rows[0].id: -23.0},
+    )
+    reference = DddTrajectoryExhaustivePricingOracle().solve(
+        exhaustive=exhaustive,
+        cabin_id=cabin_id,
+        duals=duals,
+        excluded_option_ids=frozenset(cabin_option_ids - allowed),
+    )
+    exact = DddTrajectoryExactNoWaitPricingOracle(time_limit_seconds=10.0).solve(
+        movement_problem=problem.movement_problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+        cabin_id=cabin_id,
+        duals=duals,
+        resource_window_rows=rows,
+        boundary_occurrences=(boundary,),
+    )
+
+    assert exact.exact
+    assert exact.minimum_reduced_cost == pytest.approx(
+        reference.minimum_reduced_cost,
+        abs=1e-6,
+    )
+    assert exact.option_id in allowed
 
 
 def test_all_tiny_pair_conflicts_have_a_resource_window_witness() -> None:
@@ -639,3 +775,75 @@ def test_extra_diverse_columns_do_not_change_root_certificate() -> None:
     assert diverse.best_upper_bound == pytest.approx(baseline.best_upper_bound)
     assert diverse.iterations[0].diverse_added_trajectory_count == 6
     assert diverse.iterations[0].extra_pricing_call_count == 6
+
+
+def test_coordinated_primal_returns_complete_validated_schedule_batches() -> None:
+    problem, artifact, passenger_build = _physical_problem()
+    exhaustive = DddExhaustiveTrajectoryMasterBuilder().build(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+    )
+    lp = DddTrajectoryFactorizedLpOptimizer().solve(exhaustive.master_problem)
+
+    generated = DddTrajectoryCoordinatedPrimalGenerator(
+        time_limit_seconds=10.0,
+        num_workers=1,
+        max_candidate_count=2,
+        maximum_preference_count=12,
+    ).generate(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+        lp_result=lp,
+        waiting_policy=EanArtifactToDddMovementProblemAdapter().build_waiting_policy(
+            artifact,
+            core=problem.movement_problem.core,
+        ),
+    )
+
+    assert generated.trajectory_batches
+    assert len(generated.trajectory_batches) == 2
+    assert generated.preference_count == 12
+    for batch in generated.trajectory_batches:
+        validate_ddd_reference_solution(
+            problem.movement_problem,
+            DddReferenceSolution(batch),
+        )
+
+
+def test_coordinated_primal_does_not_change_the_root_certificate() -> None:
+    problem, artifact, passenger_build = _physical_problem()
+    baseline = DddTrajectoryExactRootColumnGenerationSolver(
+        max_iterations=20,
+        pricing_time_limit_seconds=10.0,
+    ).solve(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+    )
+    coordinated = DddTrajectoryExactRootColumnGenerationSolver(
+        max_iterations=20,
+        pricing_time_limit_seconds=10.0,
+        coordinated_primal_time_limit_seconds=5.0,
+        coordinated_primal_workers=1,
+        coordinated_primal_candidate_count=2,
+    ).solve(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+    )
+
+    assert coordinated.root_lp_certified
+    assert coordinated.certified_lower_bound == pytest.approx(
+        baseline.certified_lower_bound
+    )
+    assert coordinated.best_upper_bound == pytest.approx(baseline.best_upper_bound)
+    assert any(
+        iteration.primal_pricing_call_count > 0
+        for iteration in coordinated.iterations
+    )

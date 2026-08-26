@@ -108,10 +108,17 @@ class OptimizationLiveStore:
                 "label",
                 "status",
                 "objective",
+                "method",
+                "campaign_kind",
+                "operating_mode",
                 "updated_at_utc",
                 "sequence",
                 "completed_trial_count",
                 "trial_count",
+                "largest_certified_feasible_k",
+                "frontier_k",
+                "frontier_status",
+                "frontier_termination",
             )
         }
         campaigns = [

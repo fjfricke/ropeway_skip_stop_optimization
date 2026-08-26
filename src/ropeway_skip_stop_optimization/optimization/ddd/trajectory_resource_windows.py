@@ -217,7 +217,16 @@ def _ddd_trajectory_resource_interval_or_none(
     resource = movement_problem.resources_by_id.get(occurrence.resource_id)
     if resource is None:
         raise ValueError("trajectory occurrence references an unknown resource")
-    enter_tick = ddd_seconds_to_tick(occurrence.follower_enter_time_seconds)
+    raw_enter_tick = ddd_seconds_to_tick(occurrence.follower_enter_time_seconds)
+    if raw_enter_tick < 0 and not occurrence.boundary_origin:
+        raise ValueError(
+            "non-boundary trajectory resource interval entry must be nonnegative"
+        )
+    # A retained boundary occurrence may have entered the resource before the
+    # optimization horizon and still protect it after t=0. Resource-window
+    # rows live on the modeled horizon, so intersect that fixed interval with
+    # [0, +inf) instead of discarding its remaining occupancy.
+    enter_tick = max(0, raw_enter_tick)
     clear_with_headway_tick = (
         ddd_seconds_to_tick(occurrence.leader_clear_time_seconds)
         + occurrence.separation_after_tick(resource)

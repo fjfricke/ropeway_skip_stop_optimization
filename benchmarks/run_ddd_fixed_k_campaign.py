@@ -14,6 +14,9 @@ from ropeway_skip_stop_optimization.benchmarking.ddd_fixed_k_campaign import (
     derive_available_fleet_intervals,
     derive_skip_stop_benefit_interval,
 )
+from ropeway_skip_stop_optimization.benchmarking.ddd_fixed_k_arc_flow import (
+    DddAnalyticAllStopInfeasible,
+)
 from ropeway_skip_stop_optimization.benchmarking.ddd_root_cg_application import (
     run_namespace,
 )
@@ -174,6 +177,16 @@ def main() -> None:
                         "restricted_integer_upper_bound": (
                             iteration.restricted_integer_upper_bound
                         ),
+                        "primal_pricing_call_count": (
+                            iteration.primal_pricing_call_count
+                        ),
+                        "primal_pricing_seconds": iteration.primal_pricing_seconds,
+                        "primal_pricing_candidate_count": (
+                            iteration.primal_pricing_candidate_count
+                        ),
+                        "primal_pricing_status_counts": dict(
+                            iteration.primal_pricing_status_counts
+                        ),
                         "remaining_budget_seconds": (
                             iteration.remaining_budget_seconds
                         ),
@@ -184,6 +197,38 @@ def main() -> None:
             try:
                 raw = run_namespace(namespace, progress_hook=on_round)
                 payload = dict(raw["payload"])
+            except DddAnalyticAllStopInfeasible as error:
+                payload = {
+                    "status": "movement_infeasible",
+                    "certificate_kind": "analytic_all_stop_capacity",
+                    "detail": str(error),
+                    "case_id": config.example_id,
+                    "operating_mode": operating_mode.value,
+                    "cabin_count": cabin_count,
+                    "objective": config.objective.value,
+                    "fixed_start_policy": config.start_policy.value,
+                    "all_stop_maximum_cabin_count": error.maximum_cabin_count,
+                    "total_seconds": perf_counter() - trial_started,
+                }
+                completed.append(payload)
+                store.append_new(
+                    OptimizationEventKind.TRIAL_COMPLETED,
+                    config.campaign_id,
+                    policy_id=policy_id,
+                    available_fleet_count=cabin_count,
+                    trial_fingerprint=fingerprint,
+                    stage="analytic_all_stop_capacity",
+                    elapsed_seconds=float(payload["total_seconds"]),
+                    payload=payload,
+                )
+                _publish(store)
+                print(
+                    f"{operating_mode.value} K={cabin_count} "
+                    "status=movement_infeasible analytic K_max_AS="
+                    f"{error.maximum_cabin_count}",
+                    flush=True,
+                )
+                continue
             except Exception as error:
                 store.append_new(
                     OptimizationEventKind.TRIAL_FAILED,
@@ -289,6 +334,19 @@ def _trial_namespace(
         diversity_mode="off",
         minimum_diversity_distance=1,
         extra_column_time_limit=10.0,
+        coordinated_primal_time_limit=(
+            config.coordinated_primal_time_limit_seconds
+            if operating_mode is DddFixedKOperatingMode.SKIP_STOP
+            else 0.0
+        ),
+        coordinated_primal_interval=config.coordinated_primal_interval,
+        coordinated_primal_workers=config.coordinated_primal_workers,
+        coordinated_primal_candidates=(
+            config.coordinated_primal_candidate_count
+        ),
+        coordinated_primal_max_preferences=(
+            config.coordinated_primal_maximum_preference_count
+        ),
         oip_primal_pricing_time_limit=0.0,
         reservoir_primal_pricing_time_limit=0.0,
         reservoir_primal_pricing_mode="compact_dispatch_windows",
@@ -328,6 +386,8 @@ def _derive_comparisons(
 ) -> dict[str, Any]:
     by_mode: dict[str, dict[int, tuple[float, float | None]]] = {}
     for payload in payloads:
+        if payload.get("certified_lower_bound") is None:
+            continue
         by_mode.setdefault(str(payload["operating_mode"]), {})[
             int(payload["cabin_count"])
         ] = (

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 import math
 from time import perf_counter
@@ -8,6 +8,9 @@ from time import perf_counter
 import gurobipy as gp
 from gurobipy import GRB
 
+from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_network import (
+    DddCabinTimeExpandedNetworkBuilder,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddFixedStart,
     DddMovementProblem,
@@ -17,6 +20,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.models import (
 )
 from ropeway_skip_stop_optimization.optimization.ddd.reference import (
     DddReferenceResourceConflictError,
+    DddReferenceResourceOccurrence,
     DddReferenceTrajectory,
     build_ddd_reference_visit,
     find_ddd_reference_conflicts,
@@ -34,6 +38,10 @@ from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generation import (
     DddTrajectoryWaitingDomain,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_branching import (
+    DddTrajectoryBranchDomain,
+    DddTrajectoryBranchPredicateKind,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_exhaustive_reference import (
     DddExhaustiveTrajectoryMasterBuildResult,
     ddd_trajectory_instance_fingerprint,
@@ -46,6 +54,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_passenger_lp imp
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_resource_windows import (
     DddTrajectoryResourceWindowPricingTerm,
     DddTrajectoryResourceWindowRow,
+    ddd_trajectory_resource_intervals,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_slot import (
     ddd_trajectory_column,
@@ -116,7 +125,9 @@ def _waiting_policy_for_artifact(
         if station.waiting_mode is StationWaitingMode.STATION_FIFO_BUFFER
     )
     if unsupported:
-        raise ValueError(f"DDD pricing does not support station FIFO waiting: {unsupported}")
+        raise ValueError(
+            f"DDD pricing does not support station FIFO waiting: {unsupported}"
+        )
     if not waiting_limits:
         return DddTrajectoryWaitingPolicy()
     missing = tuple(
@@ -390,6 +401,8 @@ class DddTrajectoryExactNoWaitPricingOracle:
         resource_window_rows: tuple[DddTrajectoryResourceWindowRow, ...] = (),
         waiting_policy: DddTrajectoryWaitingPolicy | None = None,
         instance_fingerprint: str | None = None,
+        branch_domain: DddTrajectoryBranchDomain = DddTrajectoryBranchDomain(),
+        boundary_occurrences: tuple[DddReferenceResourceOccurrence, ...] = (),
     ) -> DddTrajectoryExactPricingResult:
         started = perf_counter()
         waiting_policy = waiting_policy or _waiting_policy_for_artifact(artifact)
@@ -401,6 +414,8 @@ class DddTrajectoryExactNoWaitPricingOracle:
             duals,
             resource_window_rows,
             waiting_policy,
+            branch_domain,
+            boundary_occurrences,
         )
         start = next(
             item for item in movement_problem.starts if item.cabin_id == cabin_id
@@ -423,6 +438,8 @@ class DddTrajectoryExactNoWaitPricingOracle:
             excluded_timed_support_signatures=excluded_timed_support_signatures,
             resource_window_rows=resource_window_rows,
             waiting_policy=waiting_policy,
+            branch_domain=branch_domain,
+            boundary_occurrences=boundary_occurrences,
         )
         self_conflict_round_count = 0
         certified_lower_bound: float | None = None
@@ -477,6 +494,7 @@ class DddTrajectoryExactNoWaitPricingOracle:
                     ),
                     waiting_policy=waiting_policy,
                     instance_fingerprint=instance_fingerprint,
+                    boundary_occurrences=boundary_occurrences,
                 )
                 if incumbent is not None:
                     return incumbent
@@ -494,6 +512,10 @@ class DddTrajectoryExactNoWaitPricingOracle:
                 model_data,
                 tolerance_seconds=self.tolerance_seconds,
                 waiting_policy=waiting_policy,
+            )
+            trajectory = _with_fixed_boundary_occurrences(
+                trajectory,
+                boundary_occurrences=boundary_occurrences,
             )
             try:
                 validate_ddd_reference_trajectory(
@@ -549,10 +571,17 @@ class DddTrajectoryExactNoWaitPricingOracle:
         duals: DddTrajectoryPassengerDuals,
         resource_window_rows: tuple[DddTrajectoryResourceWindowRow, ...],
         waiting_policy: DddTrajectoryWaitingPolicy,
+        branch_domain: DddTrajectoryBranchDomain,
+        boundary_occurrences: tuple[DddReferenceResourceOccurrence, ...],
     ) -> None:
         movement_problem.validate()
         artifact.validate()
         passenger_build.validate()
+        branch_domain.validate()
+        _validate_fixed_boundary_occurrences(
+            movement_problem=movement_problem,
+            boundary_occurrences=boundary_occurrences,
+        )
         if movement_problem.scenario_id != artifact.scenario_id:
             raise ValueError("exact trajectory pricing instance differs")
         if artifact.fleet_mode is not EanFleetMode.FIXED_STARTS:
@@ -1127,8 +1156,7 @@ class DddTrajectoryExactReservoirNoWaitPricingOracle:
         stored_reduced_cost = (
             -alpha
             if not dispatch_only
-            and domain.cardinality_mode
-            is DddReservoirDispatchCardinalityMode.OPTIONAL
+            and domain.cardinality_mode is DddReservoirDispatchCardinalityMode.OPTIONAL
             else math.inf
         )
         stored_trajectory = (
@@ -1310,8 +1338,7 @@ class DddTrajectoryExactReservoirNoWaitPricingOracle:
             )
             model_data.model.addConstr(
                 model_data.event_time[visit_index]
-                >= -big_m
-                * (pre_service + 1 - model_data.active[visit_index]),
+                >= -big_m * (pre_service + 1 - model_data.active[visit_index]),
                 name=f"reservoir_service_time[{visit_index}]",
             )
             for option in movement_problem.route_options_by_state_id[state_id]:
@@ -1350,9 +1377,7 @@ class DddTrajectoryExactReservoirNoWaitPricingOracle:
                     wait_positive,
                     True,
                     minimum_exit
-                    >= ddd_seconds_to_tick(
-                        waiting_policy.earliest_wait_time_seconds
-                    ),
+                    >= ddd_seconds_to_tick(waiting_policy.earliest_wait_time_seconds),
                     name=f"reservoir_wait_after_boundary[{visit_index}]",
                 )
 
@@ -1816,6 +1841,194 @@ class _ExactPricingModel:
     model_build_seconds: float = 0.0
 
 
+def _add_branch_domain_constraints(
+    *,
+    model: gp.Model,
+    movement_problem: DddMovementProblem,
+    cabin_id: int,
+    states: tuple[str, ...],
+    route_selection: dict[tuple[int, str], gp.Var],
+    branch_domain: DddTrajectoryBranchDomain,
+) -> None:
+    """Restrict pricing by predicates whose complements cover missing visits."""
+
+    branch_domain.validate()
+    for index, decision in enumerate(branch_domain.decisions_for_cabin(cabin_id)):
+        predicate = decision.predicate
+        terms: list[gp.Var] = []
+        if predicate.visit_index < len(states) - 1:
+            state_id = states[predicate.visit_index]
+            options = movement_problem.route_options_by_state_id[state_id]
+            if predicate.kind is DddTrajectoryBranchPredicateKind.SERVICE_DECISION:
+                route_decision = DddRouteDecision(predicate.value)
+                terms = [
+                    route_selection[predicate.visit_index, option.id]
+                    for option in options
+                    if option.decision is route_decision
+                    and (predicate.visit_index, option.id) in route_selection
+                ]
+            else:
+                variable = route_selection.get((predicate.visit_index, predicate.value))
+                if variable is not None:
+                    terms = [variable]
+        model.addConstr(
+            gp.quicksum(terms) == float(decision.required),
+            name=f"branch_domain[{index}]",
+        )
+
+
+def _validate_fixed_boundary_occurrences(
+    *,
+    movement_problem: DddMovementProblem,
+    boundary_occurrences: tuple[DddReferenceResourceOccurrence, ...],
+) -> None:
+    cabin_ids = {start.cabin_id for start in movement_problem.starts}
+    resources = movement_problem.resources_by_id
+    identities: set[tuple[object, ...]] = set()
+    for occurrence in boundary_occurrences:
+        if occurrence.cabin_id not in cabin_ids:
+            raise ValueError("pricing boundary occurrence has an unknown cabin")
+        if occurrence.resource_id not in resources:
+            raise ValueError("pricing boundary occurrence has an unknown resource")
+        if not occurrence.boundary_origin:
+            raise ValueError("pricing boundary occurrence lacks boundary provenance")
+        identity = (
+            occurrence.resource_id,
+            occurrence.cabin_id,
+            occurrence.visit_index,
+            occurrence.leader_clear_time_seconds,
+            occurrence.follower_enter_time_seconds,
+            occurrence.separation_after_seconds,
+            occurrence.boundary_only,
+        )
+        if identity in identities:
+            raise ValueError("pricing boundary occurrences contain a duplicate")
+        identities.add(identity)
+    if find_ddd_reference_conflicts(boundary_occurrences, movement_problem):
+        raise ValueError("pricing boundary occurrences conflict with each other")
+
+
+def _with_fixed_boundary_occurrences(
+    trajectory: DddReferenceTrajectory,
+    *,
+    boundary_occurrences: tuple[DddReferenceResourceOccurrence, ...],
+) -> DddReferenceTrajectory:
+    own = tuple(
+        occurrence
+        for occurrence in boundary_occurrences
+        if occurrence.cabin_id == trajectory.cabin_id
+    )
+    return replace(trajectory, boundary_resource_occurrences=own)
+
+
+def _add_fixed_boundary_occurrence_constraints(
+    *,
+    model: gp.Model,
+    movement_problem: DddMovementProblem,
+    states: tuple[str, ...],
+    event_time: tuple[gp.Var, ...],
+    route_selection: dict[tuple[int, str], gp.Var],
+    wait_steps: tuple[gp.Var, ...],
+    waiting_policy: DddTrajectoryWaitingPolicy,
+    boundary_occurrences: tuple[DddReferenceResourceOccurrence, ...],
+) -> None:
+    """Keep every priced occurrence clear of the fixed pre-horizon prefix."""
+
+    if not boundary_occurrences:
+        return
+    model.update()
+    step_tick = ddd_seconds_to_tick(waiting_policy.step_seconds or 0.0)
+    resources = movement_problem.resources_by_id
+
+    def expression_bounds(
+        *,
+        visit_index: int,
+        offset_tick: int,
+        wait_coefficient: int,
+    ) -> tuple[float, float]:
+        coefficient = wait_coefficient * step_tick
+        wait = wait_steps[visit_index]
+        wait_lower = coefficient * (wait.LB if coefficient >= 0 else wait.UB)
+        wait_upper = coefficient * (wait.UB if coefficient >= 0 else wait.LB)
+        return (
+            event_time[visit_index].LB + offset_tick + wait_lower,
+            event_time[visit_index].UB + offset_tick + wait_upper,
+        )
+
+    for boundary_index, boundary in enumerate(boundary_occurrences):
+        resource = resources[boundary.resource_id]
+        boundary_leader = ddd_seconds_to_tick(boundary.leader_clear_time_seconds)
+        boundary_follower = ddd_seconds_to_tick(boundary.follower_enter_time_seconds)
+        boundary_separation = boundary.separation_after_tick(resource)
+        for visit_index, state_id in enumerate(states[:-1]):
+            usages = tuple(
+                (option, usage_index, usage)
+                for option in movement_problem.route_options_by_state_id[state_id]
+                for usage_index, usage in enumerate(option.resource_usages)
+                if usage.resource_id == boundary.resource_id
+            )
+            if not usages:
+                continue
+            after_boundary = model.addVar(
+                vtype=GRB.BINARY,
+                name=f"boundary_order[{boundary_index},{visit_index}]",
+            )
+            for option, usage_index, usage in usages:
+                selected = route_selection[visit_index, option.id]
+                leader = (
+                    event_time[visit_index]
+                    + usage.leader_clear_offset_tick
+                    + usage.leader_clear_wait_coefficient
+                    * step_tick
+                    * wait_steps[visit_index]
+                )
+                follower = (
+                    event_time[visit_index]
+                    + usage.follower_enter_offset_tick
+                    + usage.follower_enter_wait_coefficient
+                    * step_tick
+                    * wait_steps[visit_index]
+                )
+                follower_lower, _ = expression_bounds(
+                    visit_index=visit_index,
+                    offset_tick=usage.follower_enter_offset_tick,
+                    wait_coefficient=usage.follower_enter_wait_coefficient,
+                )
+                _, leader_upper = expression_bounds(
+                    visit_index=visit_index,
+                    offset_tick=usage.leader_clear_offset_tick,
+                    wait_coefficient=usage.leader_clear_wait_coefficient,
+                )
+                candidate_separation = usage.separation_after_tick(
+                    resource.minimum_headway_tick
+                )
+                minimum_forward = follower_lower - boundary_leader
+                minimum_reverse = boundary_follower - leader_upper
+                if (
+                    minimum_forward >= boundary_separation
+                    or minimum_reverse >= candidate_separation
+                ):
+                    continue
+                forward_m = boundary_separation - minimum_forward
+                reverse_m = candidate_separation - minimum_reverse
+                model.addConstr(
+                    follower - boundary_leader
+                    >= boundary_separation
+                    - forward_m * (2 - selected - after_boundary),
+                    name=(
+                        f"boundary_after[{boundary_index},{visit_index},{usage_index}]"
+                    ),
+                )
+                model.addConstr(
+                    boundary_follower - leader
+                    >= candidate_separation
+                    - reverse_m * (1 - selected + after_boundary),
+                    name=(
+                        f"boundary_before[{boundary_index},{visit_index},{usage_index}]"
+                    ),
+                )
+
+
 def _build_exact_pricing_model(
     *,
     movement_problem: DddMovementProblem,
@@ -1833,6 +2046,8 @@ def _build_exact_pricing_model(
         tuple[tuple[str, float], ...]
     ] = frozenset(),
     resource_window_rows: tuple[DddTrajectoryResourceWindowRow, ...],
+    branch_domain: DddTrajectoryBranchDomain = DddTrajectoryBranchDomain(),
+    boundary_occurrences: tuple[DddReferenceResourceOccurrence, ...] = (),
     continuous_start_bounds_ticks: tuple[float, float] | None = None,
     visit_index_offset: int = 0,
     station_boundary: bool = False,
@@ -1887,7 +2102,9 @@ def _build_exact_pricing_model(
                 for option in movement_problem.route_options_by_state_id[state_id]
             )
             current_lower += min(durations)
-            station_id = movement_problem.route_options_by_state_id[state_id][0].station_id
+            station_id = movement_problem.route_options_by_state_id[state_id][
+                0
+            ].station_id
             current_upper += max(durations) + ddd_seconds_to_tick(
                 waiting_policy.maximum_wait_seconds(station_id)
             )
@@ -1905,9 +2122,7 @@ def _build_exact_pricing_model(
                 active_lower,
                 min(current_upper, movement_problem.operational_end_tick),
             )
-            active_bounds.append(
-                (active_lower, active_upper)
-            )
+            active_bounds.append((active_lower, active_upper))
         event_time_bounds = tuple(bounds)
         active_event_time_bounds = tuple(active_bounds)
         if _is_relative_oip_formulation(formulation) and relative_graph is not None:
@@ -2001,14 +2216,30 @@ def _build_exact_pricing_model(
             sequence,
             name=f"excluded[{index}]",
         )
+    _add_branch_domain_constraints(
+        model=model,
+        movement_problem=movement_problem,
+        cabin_id=start.cabin_id,
+        states=states,
+        route_selection=route_selection,
+        branch_domain=branch_domain,
+    )
+    _add_fixed_boundary_occurrence_constraints(
+        model=model,
+        movement_problem=movement_problem,
+        states=states,
+        event_time=event_time,
+        route_selection=route_selection,
+        wait_steps=wait_steps,
+        waiting_policy=waiting_policy,
+        boundary_occurrences=boundary_occurrences,
+    )
     if excluded_timed_support_signatures:
         if formulation is not DddTrajectoryPricingFormulation.TIME_EXPANDED_PATH:
             raise ValueError(
                 "timed-support exclusions require time_expanded_path pricing"
             )
-        for index, signature in enumerate(
-            sorted(excluded_timed_support_signatures)
-        ):
+        for index, signature in enumerate(sorted(excluded_timed_support_signatures)):
             _exclude_time_expanded_timed_support(
                 model=model,
                 movement_problem=movement_problem,
@@ -2024,11 +2255,15 @@ def _build_exact_pricing_model(
         else _add_resource_window_pricing_terms(
             model=model,
             movement_problem=movement_problem,
+            cabin_id=start.cabin_id,
             states=states,
             event_time=event_time,
             route_selection=route_selection,
+            route_time_membership=route_time_membership,
             rows=resource_window_rows,
             duals=duals,
+            boundary_occurrences=boundary_occurrences,
+            waiting_policy=waiting_policy,
         )
     )
 
@@ -2051,9 +2286,7 @@ def _build_exact_pricing_model(
         )
     ride_count_bits: dict[str, tuple[tuple[int, gp.Var], ...]] = {}
     ride_count_expressions: dict[str, gp.LinExpr] = {}
-    passenger_flow_by_candidate_arc: dict[
-        tuple[str, int, int, str, int], gp.Var
-    ] = {}
+    passenger_flow_by_candidate_arc: dict[tuple[str, int, int, str, int], gp.Var] = {}
     relative_passenger_flow: dict[tuple[str, int, int], gp.Var] = {}
     relative_alight_visit_by_candidate: dict[str, int] = {}
     origin_product_count = 0
@@ -2108,9 +2341,9 @@ def _build_exact_pricing_model(
         event_wait_upper = (
             ddd_seconds_to_tick(
                 waiting_policy.maximum_wait_seconds(
-                    movement_problem.route_options_by_state_id[
-                        states[event_index]
-                    ][0].station_id
+                    movement_problem.route_options_by_state_id[states[event_index]][
+                        0
+                    ].station_id
                 )
             )
             if definition.event is EanPassengerObjectiveEvent.BOARDING
@@ -2291,9 +2524,7 @@ def _build_exact_pricing_model(
                     bit,
                     True,
                     event_product
-                    == event_time[event_index]
-                    + event_offset
-                    + event_wait_expression,
+                    == event_time[event_index] + event_offset + event_wait_expression,
                     name=f"ride_event_on[{candidate.id},{bit_index}]",
                 )
                 model.addGenConstrIndicator(
@@ -2509,9 +2740,7 @@ def _event_time_bounds(
     )
     maximum_wait = max(
         (
-            ddd_seconds_to_tick(
-                waiting_policy.maximum_wait_seconds(option.station_id)
-            )
+            ddd_seconds_to_tick(waiting_policy.maximum_wait_seconds(option.station_id))
             for option in movement_problem.route_options
         ),
         default=0,
@@ -2827,8 +3056,7 @@ def _add_compact_route_core(
             else 0.0
         )
         model.addConstr(
-            wait_steps[visit_index]
-            <= maximum_wait_steps * stop_selection,
+            wait_steps[visit_index] <= maximum_wait_steps * stop_selection,
             name=f"wait_only_stop[{visit_index}]",
         )
         if visit_index + 1 < start.max_visit_count:
@@ -2874,6 +3102,18 @@ def _add_time_expanded_route_core(
     tuple[tuple[int, int, bool, str | None, int, int, bool, gp.Var], ...],
 ]:
     waiting_policy = waiting_policy or DddTrajectoryWaitingPolicy()
+    if (
+        waiting_policy.domain is DddTrajectoryWaitingDomain.NO_WAIT
+        and start.time_tick >= 0
+    ):
+        return _add_no_wait_time_expanded_route_core(
+            model=model,
+            movement_problem=movement_problem,
+            start=start,
+            states=states,
+            event_time_bounds=event_time_bounds,
+            waiting_policy=waiting_policy,
+        )
     event_time = tuple(
         model.addVar(
             lb=float(lower),
@@ -2932,11 +3172,8 @@ def _add_time_expanded_route_core(
                             continue
                         if option.platform_exit_offset_seconds is None:
                             continue
-                        minimum_exit_tick = (
-                            source_tick
-                            + ddd_seconds_to_tick(
-                                option.platform_exit_offset_seconds
-                            )
+                        minimum_exit_tick = source_tick + ddd_seconds_to_tick(
+                            option.platform_exit_offset_seconds
                         )
                         if minimum_exit_tick < ddd_seconds_to_tick(
                             waiting_policy.earliest_wait_time_seconds
@@ -3048,8 +3285,7 @@ def _add_time_expanded_route_core(
         model.addConstr(
             event_time[visit_index]
             == gp.quicksum(
-                source_tick * variable
-                for source_tick, _, _, _, _, _, variable in arcs
+                source_tick * variable for source_tick, _, _, _, _, _, variable in arcs
             ),
             name=f"time_from_flow[{visit_index}]",
         )
@@ -3075,8 +3311,7 @@ def _add_time_expanded_route_core(
         model.addConstr(
             wait_step_tick * wait_steps[visit_index]
             == gp.quicksum(
-                wait_tick * variable
-                for _, _, _, wait_tick, _, _, variable in arcs
+                wait_tick * variable for _, _, _, wait_tick, _, _, variable in arcs
             ),
             name=f"wait_from_flow[{visit_index}]",
         )
@@ -3127,6 +3362,160 @@ def _add_time_expanded_route_core(
                 target_active,
                 variable,
             ) in arcs
+        ),
+    )
+
+
+def _add_no_wait_time_expanded_route_core(
+    *,
+    model: gp.Model,
+    movement_problem: DddMovementProblem,
+    start: DddFixedStart,
+    states: tuple[str, ...],
+    event_time_bounds: tuple[tuple[int, int], ...],
+    waiting_policy: DddTrajectoryWaitingPolicy,
+) -> tuple[
+    tuple[gp.Var, ...],
+    tuple[gp.Var, ...],
+    dict[tuple[int, str], gp.Var],
+    tuple[gp.Var, ...],
+    dict[tuple[int, int], gp.LinExpr],
+    dict[tuple[int, str, int, int], gp.Var],
+    tuple[tuple[int, int, bool, str | None, int, int, bool, gp.Var], ...],
+]:
+    network = DddCabinTimeExpandedNetworkBuilder().build(
+        movement_problem,
+        start,
+        waiting_policy=waiting_policy,
+    )
+    if network.state_ids != states:
+        raise RuntimeError("shared time-expanded network state sequence differs")
+    event_time = tuple(
+        model.addVar(
+            lb=float(lower),
+            ub=float(upper),
+            vtype=GRB.INTEGER,
+            name=f"time[{index}]",
+        )
+        for index, (lower, upper) in enumerate(event_time_bounds)
+    )
+    active = tuple(
+        model.addVar(vtype=GRB.BINARY, name=f"active[{index}]")
+        for index in range(start.max_visit_count)
+    )
+    route_selection = {
+        (visit_index, option.id): model.addVar(
+            vtype=GRB.BINARY,
+            name=f"route[{visit_index},{option_index}]",
+        )
+        for visit_index, state_id in enumerate(states[:-1])
+        for option_index, option in enumerate(
+            movement_problem.route_options_by_state_id[state_id]
+        )
+    }
+    wait_steps = tuple(
+        model.addVar(
+            lb=0.0,
+            ub=0.0,
+            vtype=GRB.INTEGER,
+            name=f"wait_steps[{index}]",
+        )
+        for index in range(start.max_visit_count)
+    )
+    arc_variable = {
+        arc.id: model.addVar(vtype=GRB.BINARY, name=f"time_arc[{index}]")
+        for index, arc in enumerate(network.arcs)
+    }
+    outgoing: dict[tuple[int, int, bool], list[gp.Var]] = {}
+    incoming: dict[tuple[int, int, bool], list[gp.Var]] = {}
+    for arc in network.arcs:
+        outgoing.setdefault(arc.source_node, []).append(arc_variable[arc.id])
+        incoming.setdefault(arc.target_node, []).append(arc_variable[arc.id])
+    source = (0, start.time_tick, True)
+    for node in network.nodes:
+        if node[0] == start.max_visit_count:
+            continue
+        model.addConstr(
+            gp.quicksum(outgoing.get(node, ()))
+            == (1.0 if node == source else gp.quicksum(incoming.get(node, ()))),
+            name=f"time_flow[{node[0]},{node[1]},{int(node[2])}]",
+        )
+    for visit_index in range(start.max_visit_count):
+        layer_arcs = tuple(
+            arc for arc in network.arcs if arc.visit_index == visit_index
+        )
+        model.addConstr(
+            event_time[visit_index]
+            == gp.quicksum(
+                arc.source_tick * arc_variable[arc.id] for arc in layer_arcs
+            ),
+            name=f"time_from_flow[{visit_index}]",
+        )
+        model.addConstr(
+            active[visit_index]
+            == gp.quicksum(
+                arc_variable[arc.id] for arc in layer_arcs if arc.source_active
+            ),
+            name=f"active_from_flow[{visit_index}]",
+        )
+        for option in movement_problem.route_options_by_state_id[states[visit_index]]:
+            model.addConstr(
+                route_selection[visit_index, option.id]
+                == gp.quicksum(
+                    arc_variable[arc.id]
+                    for arc in layer_arcs
+                    if arc.option_id == option.id
+                ),
+                name=f"route_from_flow[{visit_index},{option.id}]",
+            )
+    final_arcs = tuple(
+        arc for arc in network.arcs if arc.visit_index == start.max_visit_count - 1
+    )
+    model.addConstr(
+        event_time[-1]
+        == gp.quicksum(arc.target_tick * arc_variable[arc.id] for arc in final_arcs),
+        name="final_time_from_flow",
+    )
+    model.addConstr(
+        gp.quicksum(arc_variable[arc.id] for arc in final_arcs if not arc.target_active)
+        == 1.0,
+        name="complete_horizon_coverage",
+    )
+    active_time_membership = {
+        (visit_index, tick): gp.quicksum(
+            arc_variable[arc.id]
+            for arc in network.arcs
+            if arc.visit_index == visit_index
+            and arc.source_active
+            and arc.source_tick == tick
+        )
+        for visit_index, tick, active_node in network.nodes
+        if active_node and visit_index < start.max_visit_count
+    }
+    route_time_membership = {
+        (arc.visit_index, arc.option_id, arc.source_tick, 0): arc_variable[arc.id]
+        for arc in network.arcs
+        if arc.source_active and arc.option_id is not None
+    }
+    return (
+        event_time,
+        active,
+        route_selection,
+        wait_steps,
+        active_time_membership,
+        route_time_membership,
+        tuple(
+            (
+                arc.visit_index,
+                arc.source_tick,
+                arc.source_active,
+                arc.option_id,
+                0,
+                arc.target_tick,
+                arc.target_active,
+                arc_variable[arc.id],
+            )
+            for arc in network.arcs
         ),
     )
 
@@ -3382,9 +3771,7 @@ def _add_time_expanded_ride_flow(
     objective_event: EanPassengerObjectiveEvent,
     constant_unit_cost: float,
     upper: int,
-    arcs: tuple[
-        tuple[int, int, bool, str | None, int, int, bool, gp.Var], ...
-    ],
+    arcs: tuple[tuple[int, int, bool, str | None, int, int, bool, gp.Var], ...],
 ) -> dict[tuple[int, int, str, int], gp.Var]:
     flow_by_arc: dict[tuple[int, int, str, int], gp.Var] = {}
     arc_target_by_key: dict[tuple[int, int, str, int], int] = {}
@@ -3478,9 +3865,7 @@ def _add_time_expanded_passenger_capacity(
     passenger_build: EanPassengerCandidateBuildResult,
     cabin_id: int,
     cabin_capacity: float,
-    passenger_flow_by_candidate_arc: dict[
-        tuple[str, int, int, str, int], gp.Var
-    ],
+    passenger_flow_by_candidate_arc: dict[tuple[str, int, int, str, int], gp.Var],
     route_time_membership: dict[tuple[int, str, int, int], gp.Var],
 ) -> None:
     candidate_by_id = {
@@ -3519,18 +3904,72 @@ def _add_resource_window_pricing_terms(
     *,
     model: gp.Model,
     movement_problem: DddMovementProblem,
+    cabin_id: int,
     states: tuple[str, ...],
     event_time: tuple[gp.Var, ...],
     route_selection: dict[tuple[int, str], gp.Var],
+    route_time_membership: dict[tuple[int, str, int, int], gp.Var],
     rows: tuple[DddTrajectoryResourceWindowRow, ...],
     duals: DddTrajectoryPassengerDuals,
+    boundary_occurrences: tuple[DddReferenceResourceOccurrence, ...] = (),
+    waiting_policy: DddTrajectoryWaitingPolicy = DddTrajectoryWaitingPolicy(),
 ) -> dict[tuple[str, int, str, int], gp.Var]:
     membership: dict[tuple[str, int, str, int], gp.Var] = {}
+    fixed_boundary_penalty = 0.0
+    own_boundary_intervals = ddd_trajectory_resource_intervals(
+        DddReferenceTrajectory(
+            cabin_id=cabin_id,
+            visits=(),
+            boundary_resource_occurrences=tuple(
+                occurrence
+                for occurrence in boundary_occurrences
+                if occurrence.cabin_id == cabin_id
+            ),
+        ),
+        movement_problem,
+    )
+    active_terms: list[
+        tuple[int, DddTrajectoryResourceWindowRow, DddTrajectoryResourceWindowPricingTerm]
+    ] = []
     for row_index, row in enumerate(rows):
         term = DddTrajectoryResourceWindowPricingTerm(
             window=row.window,
             raw_dual=duals.resource_window_raw_by_row_id[row.id],
         )
+        # A zero-dual master row contributes exactly zero to every reduced
+        # cost. Omitting all of its containment auxiliaries is therefore an
+        # exact pricing reduction, and is essential when separation has
+        # accumulated hundreds of currently inactive resource windows.
+        if term.congestion_penalty == 0.0:
+            continue
+        active_terms.append((row_index, row, term))
+        fixed_membership = sum(
+            interval.resource_id == row.window.resource_id
+            and interval.contains(row.window.anchor_tick)
+            for interval in own_boundary_intervals
+        )
+        if fixed_membership > row.window.capacity:
+            raise ValueError(
+                "fixed boundary occurrences exceed a trajectory resource-window "
+                "capacity"
+            )
+        fixed_boundary_penalty += fixed_membership * term.congestion_penalty
+
+    if (
+        route_time_membership
+        and waiting_policy.domain is DddTrajectoryWaitingDomain.NO_WAIT
+    ):
+        _add_time_expanded_resource_window_objective(
+            movement_problem=movement_problem,
+            route_time_membership=route_time_membership,
+            active_terms=active_terms,
+        )
+        if fixed_boundary_penalty:
+            model.update()
+            model.ObjCon = float(model.ObjCon) + fixed_boundary_penalty
+        return membership
+
+    for row_index, row, term in active_terms:
         resource = movement_problem.resources_by_id[row.window.resource_id]
         for visit_index, state_id in enumerate(states[:-1]):
             for option in movement_problem.route_options_by_state_id[state_id]:
@@ -3607,7 +4046,65 @@ def _add_resource_window_pricing_terms(
                     model.addConstr(contains <= uncleared)
                     model.addConstr(contains >= selected + entered + uncleared - 2)
                     membership[key] = contains
+    if fixed_boundary_penalty:
+        # Gurobi does not expose the pending ObjCon assignment reliably before
+        # the first update. Update once before adding the fixed boundary term,
+        # otherwise a zero boundary coefficient could overwrite the cabin
+        # convexity constant set by the caller.
+        model.update()
+        model.ObjCon = float(model.ObjCon) + fixed_boundary_penalty
     return membership
+
+
+def _add_time_expanded_resource_window_objective(
+    *,
+    movement_problem: DddMovementProblem,
+    route_time_membership: dict[tuple[int, str, int, int], gp.Var],
+    active_terms: list[
+        tuple[int, DddTrajectoryResourceWindowRow, DddTrajectoryResourceWindowPricingTerm]
+    ],
+) -> None:
+    """Price No-Wait resource rows directly on exact time-expanded arcs."""
+
+    options_by_id = {
+        option.id: option for option in movement_problem.route_options
+    }
+    objective_by_key: dict[tuple[int, str, int, int], float] = {}
+    for _, row, term in active_terms:
+        resource = movement_problem.resources_by_id[row.window.resource_id]
+        for key in route_time_membership:
+            _, option_id, source_tick, wait_tick = key
+            if wait_tick != 0:
+                raise ValueError(
+                    "No-Wait resource-window pricing received a positive wait arc"
+                )
+            coefficient = 0
+            for usage in options_by_id[option_id].resource_usages:
+                if usage.resource_id != row.window.resource_id:
+                    continue
+                enter_tick = source_tick + usage.follower_enter_offset_tick
+                clear_with_headway_tick = (
+                    source_tick
+                    + usage.leader_clear_offset_tick
+                    + usage.separation_after_tick(resource.minimum_headway_tick)
+                )
+                coefficient += (
+                    enter_tick
+                    <= row.window.anchor_tick
+                    < clear_with_headway_tick
+                )
+            if coefficient > row.window.capacity:
+                raise ValueError(
+                    "one time-expanded route arc exceeds a trajectory "
+                    "resource-window capacity"
+                )
+            if coefficient:
+                objective_by_key[key] = (
+                    objective_by_key.get(key, 0.0)
+                    + coefficient * term.congestion_penalty
+                )
+    for key, coefficient in objective_by_key.items():
+        route_time_membership[key].Obj = coefficient
 
 
 def _extract_reference_trajectory(
@@ -3752,9 +4249,7 @@ def _add_reference_self_conflict_disjunction(
     second_leader, second_follower = occurrence_expressions(
         second_visit.visit_index, second_usage
     )
-    first_separation = first_usage.separation_after_tick(
-        resource.minimum_headway_tick
-    )
+    first_separation = first_usage.separation_after_tick(resource.minimum_headway_tick)
     second_separation = second_usage.separation_after_tick(
         resource.minimum_headway_tick
     )
@@ -3773,7 +4268,9 @@ def _add_reference_self_conflict_disjunction(
     )
     big_m = max(
         1.0,
-        event_span + 2 * (maximum_offset + maximum_wait) + resource.maximum_headway_tick,
+        event_span
+        + 2 * (maximum_offset + maximum_wait)
+        + resource.maximum_headway_tick,
     )
     order = model_data.model.addVar(vtype=GRB.BINARY, name=f"{name}_order")
     first_selected = model_data.route_selection[
@@ -3885,6 +4382,7 @@ def _extract_valid_incumbent_result(
     detail: str,
     waiting_policy: DddTrajectoryWaitingPolicy | None = None,
     instance_fingerprint: str | None = None,
+    boundary_occurrences: tuple[DddReferenceResourceOccurrence, ...] = (),
 ) -> DddTrajectoryExactPricingResult | None:
     if model_data.model.SolCount <= 0:
         return None
@@ -3893,18 +4391,18 @@ def _extract_valid_incumbent_result(
         start,
         model_data,
         tolerance_seconds=tolerance_seconds,
-        waiting_policy=(
-            waiting_policy or _waiting_policy_for_artifact(artifact)
-        ),
+        waiting_policy=(waiting_policy or _waiting_policy_for_artifact(artifact)),
+    )
+    trajectory = _with_fixed_boundary_occurrences(
+        trajectory,
+        boundary_occurrences=boundary_occurrences,
     )
     try:
         validate_ddd_reference_trajectory(
             movement_problem,
             trajectory,
             tolerance_seconds=tolerance_seconds,
-            waiting_policy=(
-                waiting_policy or _waiting_policy_for_artifact(artifact)
-            ),
+            waiting_policy=(waiting_policy or _waiting_policy_for_artifact(artifact)),
         )
     except DddReferenceResourceConflictError:
         return None

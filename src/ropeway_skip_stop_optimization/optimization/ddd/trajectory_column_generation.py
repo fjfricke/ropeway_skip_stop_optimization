@@ -79,6 +79,7 @@ class DddTrajectoryPricingCertificate:
     target_waiting_domain: DddTrajectoryWaitingDomain
     row_separation_complete: bool = False
     tolerance: float = 1e-9
+    pricing_domain_fingerprint: str = "root"
 
     def __post_init__(self) -> None:
         if not math.isfinite(self.restricted_master_lp_value):
@@ -92,6 +93,8 @@ class DddTrajectoryPricingCertificate:
         )
         if any(not value.strip() for value in fingerprints):
             raise ValueError("trajectory pricing certificate fingerprints are required")
+        if not self.pricing_domain_fingerprint.strip():
+            raise ValueError("trajectory pricing domain fingerprint is required")
         if self.tolerance < 0 or not math.isfinite(self.tolerance):
             raise ValueError(
                 "trajectory pricing tolerance must be finite and nonnegative"

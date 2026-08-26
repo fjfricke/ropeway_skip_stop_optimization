@@ -7,6 +7,10 @@ import json
 import math
 
 from ropeway_skip_stop_optimization.optimization.ddd.models import DddRouteDecision
+from ropeway_skip_stop_optimization.optimization.ddd.reference import (
+    DddReferenceResourceOccurrence,
+    find_ddd_reference_conflicts,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generation import (
     DddTrajectoryWaitingDomain,
 )
@@ -15,6 +19,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_problem import (
     DddTrajectoryProblem,
 )
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
+from ropeway_skip_stop_optimization.optimization.ean.fleet import (
+    EanInitialPlacementState,
+)
 from ropeway_skip_stop_optimization.optimization.ean.builders.passenger_builder import (
     EanPassengerCandidateBuildResult,
 )
@@ -31,6 +38,62 @@ class DddFixedKOperatingMode(StrEnum):
 class DddFixedKStartPolicy(StrEnum):
     LEGACY = "legacy"
     CANONICAL_ROPE = "canonical_rope"
+    BALANCED_REFERENCE = "balanced_reference"
+
+
+@dataclass(frozen=True)
+class DddFixedKBoundaryContext:
+    """Physical resource provenance that crosses the fixed boundary t=0."""
+
+    initial_states: tuple[EanInitialPlacementState, ...] = ()
+    resource_occurrences: tuple[DddReferenceResourceOccurrence, ...] = ()
+    source: str = "none"
+
+    def validate(self, problem: DddTrajectoryProblem) -> None:
+        problem.validate()
+        if not self.source:
+            raise ValueError("Fixed-K boundary context source must not be empty")
+        cabin_ids = set(problem.cabin_ids)
+        if {state.cabin_id for state in self.initial_states} - cabin_ids:
+            raise ValueError("Fixed-K boundary state references an unknown cabin")
+        if len({state.cabin_id for state in self.initial_states}) != len(
+            self.initial_states
+        ):
+            raise ValueError("Fixed-K boundary states must be unique per cabin")
+        for state in self.initial_states:
+            state.validate()
+        resources = problem.movement_core.resources_by_id
+        for occurrence in self.resource_occurrences:
+            if occurrence.cabin_id not in cabin_ids:
+                raise ValueError(
+                    "Fixed-K boundary occurrence references an unknown cabin"
+                )
+            resource = resources.get(occurrence.resource_id)
+            if resource is None:
+                raise ValueError(
+                    "Fixed-K boundary occurrence references an unknown resource"
+                )
+            if (
+                occurrence.leader_clear_time_seconds
+                + (
+                    occurrence.separation_after_seconds
+                    if occurrence.separation_after_seconds is not None
+                    else resource.minimum_headway_seconds
+                )
+                <= 0
+            ):
+                raise ValueError(
+                    "Fixed-K boundary occurrence does not reach the model horizon"
+                )
+        movement = problem.structural_movement_problem
+        conflicts = find_ddd_reference_conflicts(
+            self.resource_occurrences,
+            movement,
+        )
+        if conflicts:
+            raise ValueError(
+                f"Fixed-K boundary context contains a conflict: {conflicts[0]}"
+            )
 
 
 class DddFixedKExperimentProfile(StrEnum):
@@ -97,6 +160,7 @@ class DddFixedKTrajectoryProblem:
     objective: EanPassengerObjective
     operating_mode: DddFixedKOperatingMode
     start_policy: DddFixedKStartPolicy
+    boundary_context: DddFixedKBoundaryContext = DddFixedKBoundaryContext()
     objective_floor: float = 0.0
 
     @property
@@ -142,6 +206,34 @@ class DddFixedKTrajectoryProblem:
                 )
                 for start in resolved.start_domain.starts
             ],
+            "boundary": {
+                "source": self.boundary_context.source,
+                "initial_states": [
+                    (
+                        state.cabin_id,
+                        state.kind.value,
+                        state.switch_id,
+                        state.visit_index,
+                        state.previous_event_time_seconds,
+                        state.next_event_time_seconds,
+                        state.previous_service,
+                    )
+                    for state in self.boundary_context.initial_states
+                ],
+                "resource_occurrences": [
+                    (
+                        item.resource_id,
+                        item.cabin_id,
+                        item.visit_index,
+                        item.leader_clear_time_seconds,
+                        item.follower_enter_time_seconds,
+                        item.separation_after_seconds,
+                        item.boundary_only,
+                        item.boundary_origin,
+                    )
+                    for item in self.boundary_context.resource_occurrences
+                ],
+            },
             "route_option_ids": [
                 option.id for option in resolved.movement_core.route_options
             ],
@@ -186,6 +278,7 @@ class DddFixedKTrajectoryProblem:
             raise ValueError("Fixed-K objective floor must be finite")
         resolved = self.resolved_trajectory_problem
         resolved.validate()
+        self.boundary_context.validate(resolved)
         if self.operating_mode is DddFixedKOperatingMode.ALL_STOP:
             state_ids = {state.id for state in resolved.movement_core.states}
             outgoing = {

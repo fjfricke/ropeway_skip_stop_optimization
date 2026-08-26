@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from hashlib import sha256
 from itertools import zip_longest
@@ -21,6 +21,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
     DddNetworkTimeProblem,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.reference import (
+    DddReferenceResourceOccurrence,
     DddReferenceSolution,
     DddReferenceTrajectory,
     build_ddd_reference_visit,
@@ -32,6 +33,13 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generatio
     DddTrajectoryPricingCertificate,
     DddTrajectoryReducedCost,
     DddTrajectoryWaitingDomain,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_coordinated_primal import (
+    DddTrajectoryCoordinatedPrimalGenerator,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_branching import (
+    DddTrajectoryBranchCandidateEvaluator,
+    DddTrajectoryBranchDomain,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_exact_pricing import (
     DddTrajectoryExactNoWaitPricingOracle,
@@ -94,6 +102,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_resource_windows
     build_ddd_trajectory_resource_window_rows,
     ddd_trajectory_resource_intervals,
     separate_ddd_trajectory_resource_windows,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.time_refinement import (
+    DddRecoveredSchedule,
 )
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
 from ropeway_skip_stop_optimization.optimization.ean.builders.passenger_builder import (
@@ -228,6 +239,12 @@ class DddTrajectoryRootCgIteration:
     restricted_mip_ran: bool = True
     restricted_mip_solution_count: int = 0
     restricted_mip_solver_status: int | None = None
+    fractional_trajectory_option_count: int = 0
+    fractional_service_decision_count: int = 0
+    best_branch_cabin_id: int | None = None
+    best_branch_visit_index: int | None = None
+    best_branch_true_mass: float | None = None
+    best_branch_false_mass: float | None = None
 
 
 @dataclass(frozen=True)
@@ -250,6 +267,7 @@ class DddTrajectoryRootCgResult:
     reservoir_fleet_plan: DddReservoirFleetPlan | None = None
     certificate_valid: bool = True
     objective_floor: float = 0.0
+    instance_fingerprint: str = ""
 
 
 @dataclass(frozen=True)
@@ -287,9 +305,14 @@ class _DddTrajectoryRootCgRun:
     resource_windows: tuple[DddTrajectoryResourceWindow, ...]
     first_round: int
     trajectory_problem: DddTrajectoryProblem
+    branch_domain: DddTrajectoryBranchDomain = DddTrajectoryBranchDomain()
+    boundary_occurrences: tuple[DddReferenceResourceOccurrence, ...] = ()
     fleet_plan: EanFleetPlan | None = None
     seed_kind: str | None = None
     reservoir_fleet_plan: DddReservoirFleetPlan | None = None
+    coordinated_schedule_batches: list[tuple[DddRecoveredSchedule, ...]] = field(
+        default_factory=list
+    )
 
 
 @dataclass(frozen=True)
@@ -323,6 +346,10 @@ class _DddTrajectoryPricingRound:
     primal_negative_candidate_count: int = 0
     primal_status_counts: tuple[tuple[str, int], ...] = ()
     primal_details: tuple[str, ...] = ()
+    coordinated_trajectory_batches: tuple[
+        tuple[DddReferenceTrajectory, ...], ...
+    ] = ()
+    coordinated_schedule_batches: tuple[tuple[DddRecoveredSchedule, ...], ...] = ()
     maximum_tier_seconds: float = 0.0
     retry_count: int = 0
     unresolved_count: int = 0
@@ -368,6 +395,11 @@ class DddTrajectoryExactRootColumnGenerationSolver:
     diversity_mode: DddTrajectoryDiversityMode = DddTrajectoryDiversityMode.OFF
     minimum_diversity_distance: int = 1
     extra_column_time_limit_seconds: float = 10.0
+    coordinated_primal_time_limit_seconds: float = 0.0
+    coordinated_primal_interval: int = 1
+    coordinated_primal_workers: int = 8
+    coordinated_primal_candidate_count: int = 1
+    coordinated_primal_maximum_preference_count: int = 2_000
     oip_primal_pricing_time_limit_seconds: float = 0.0
     reservoir_primal_pricing_time_limit_seconds: float = 0.0
     reservoir_primal_pricing_mode: DddReservoirPrimalPricingMode = (
@@ -398,6 +430,8 @@ class DddTrajectoryExactRootColumnGenerationSolver:
         resume_state: DddTrajectoryRootCgState | None = None,
         progress_callback: Callable[[DddTrajectoryRootCgIteration], None] | None = None,
         checkpoint_callback: Callable[[DddTrajectoryRootCgState], None] | None = None,
+        branch_domain: DddTrajectoryBranchDomain = DddTrajectoryBranchDomain(),
+        boundary_occurrences: tuple[DddReferenceResourceOccurrence, ...] = (),
     ) -> DddTrajectoryRootCgResult:
         started = perf_counter()
         trajectory_problem = trajectory_problem or DddTrajectoryProblem(
@@ -405,6 +439,23 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             start_domain=DddFixedTrajectoryStartDomain(problem.movement_problem.starts),
         )
         self._validate(problem, artifact, trajectory_problem)
+        branch_domain.validate()
+        if branch_domain.decisions and not isinstance(
+            trajectory_problem.start_domain,
+            DddFixedTrajectoryStartDomain,
+        ):
+            raise ValueError("trajectory branching currently requires fixed starts")
+        if not {
+            decision.predicate.cabin_id for decision in branch_domain.decisions
+        } <= set(trajectory_problem.cabin_ids):
+            raise ValueError("trajectory branch domain references an unknown cabin")
+        if resume_state is not None and branch_domain.decisions:
+            raise ValueError("trajectory branch nodes do not yet support resume state")
+        instance_fingerprint = ddd_trajectory_problem_instance_fingerprint(
+            artifact,
+            trajectory_problem,
+            boundary_occurrences=boundary_occurrences,
+        )
         try:
             run = self._initialize_run(
                 problem=problem,
@@ -413,6 +464,8 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 objective=objective,
                 initial_trajectories=initial_trajectories,
                 resume_state=resume_state,
+                branch_domain=branch_domain,
+                boundary_occurrences=boundary_occurrences,
             )
         except _DddNoFeasibleSeed as error:
             return DddTrajectoryRootCgResult(
@@ -430,6 +483,7 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 fleet_mode=trajectory_problem.fleet_mode,
                 full_start_domain_priced=False,
                 objective_floor=self.objective_floor,
+                instance_fingerprint=instance_fingerprint,
             )
         if resume_state is not None and resume_state.root_lp_certified:
             return self._run_result(
@@ -442,10 +496,22 @@ class DddTrajectoryExactRootColumnGenerationSolver:
         pricing_oracle = self._proof_pricing_oracle(trajectory_problem)
         try:
             for round_index in range(run.first_round, self.max_iterations + 1):
-                if (
-                    self.total_time_limit_seconds is not None
-                    and run.elapsed_offset_seconds + perf_counter() - started
-                    >= self.total_time_limit_seconds
+                remaining_at_round_start = self._remaining_budget_seconds(
+                    run=run,
+                    started=started,
+                )
+                previous_master_seconds = (
+                    run.iterations[-1].master_build_seconds
+                    if run.iterations
+                    else 0.0
+                )
+                next_master_reserve = 1.0 + 1.25 * previous_master_seconds
+                if remaining_at_round_start is not None and (
+                    remaining_at_round_start <= 0
+                    or (
+                        run.iterations
+                        and remaining_at_round_start < next_master_reserve
+                    )
                 ):
                     return self._run_result(
                         status=(
@@ -456,8 +522,9 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                         run=run,
                         started=started,
                         detail=(
-                            "trajectory root column-generation total time limit "
-                            "reached between completed rounds"
+                            "trajectory root column-generation stopped between "
+                            "completed rounds before the remaining total budget "
+                            "fell below the conservative next-master build reserve"
                         ),
                     )
                 round_started = perf_counter()
@@ -505,9 +572,8 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 if (
                     corrected is not None
                     and corrected
-                    > master_round.lp.objective_value + self._bound_tolerance(
-                        master_round.lp.objective_value
-                    )
+                    > master_round.lp.objective_value
+                    + self._bound_tolerance(master_round.lp.objective_value)
                 ):
                     raise _DddCertificateInvariantError(
                         "pricing-corrected lower bound exceeds its restricted LP"
@@ -668,10 +734,13 @@ class DddTrajectoryExactRootColumnGenerationSolver:
         objective: EanPassengerObjective,
         initial_trajectories: tuple[DddReferenceTrajectory, ...] | None,
         resume_state: DddTrajectoryRootCgState | None,
+        branch_domain: DddTrajectoryBranchDomain,
+        boundary_occurrences: tuple[DddReferenceResourceOccurrence, ...],
     ) -> _DddTrajectoryRootCgRun:
         instance_fingerprint = ddd_trajectory_problem_instance_fingerprint(
             artifact,
             trajectory_problem,
+            boundary_occurrences=boundary_occurrences,
         )
         if resume_state is not None and initial_trajectories is not None:
             raise ValueError(
@@ -716,14 +785,38 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 )
             else:
                 try:
-                    trajectories = build_ddd_reservoir_all_stop_seed(
-                        trajectory_problem
-                    )
+                    trajectories = build_ddd_reservoir_all_stop_seed(trajectory_problem)
                 except ValueError as error:
                     raise _DddNoFeasibleSeed(
                         f"no validated reservoir all-stop seed is available: {error}"
                     ) from error
                 seed_kind = "reservoir_all_stop"
+        if boundary_occurrences:
+            if not isinstance(
+                trajectory_problem.start_domain, DddFixedTrajectoryStartDomain
+            ):
+                raise ValueError("fixed boundary occurrences require fixed starts")
+            normalized_trajectories = []
+            for trajectory in trajectories:
+                expected = tuple(
+                    occurrence
+                    for occurrence in boundary_occurrences
+                    if occurrence.cabin_id == trajectory.cabin_id
+                )
+                if (
+                    trajectory.boundary_resource_occurrences
+                    and trajectory.boundary_resource_occurrences != expected
+                ):
+                    raise ValueError(
+                        "initial trajectory has inconsistent boundary occurrences"
+                    )
+                normalized_trajectories.append(
+                    replace(
+                        trajectory,
+                        boundary_resource_occurrences=expected,
+                    )
+                )
+            trajectories = tuple(normalized_trajectories)
         trajectory_by_id = {
             ddd_trajectory_column(
                 trajectory,
@@ -733,6 +826,8 @@ class DddTrajectoryExactRootColumnGenerationSolver:
         }
         if len(trajectory_by_id) != len(trajectories):
             raise ValueError("initial trajectory root pool contains duplicates")
+        if any(not branch_domain.allows(item) for item in trajectories):
+            raise ValueError("initial trajectory pool violates its branch domain")
         if resume_state is not None and not set(
             resume_state.incumbent_option_ids
         ).issubset(trajectory_by_id):
@@ -766,6 +861,7 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             and isinstance(
                 trajectory_problem.start_domain, DddFixedTrajectoryStartDomain
             )
+            and len(trajectories) == len(expected_cabin_ids)
         ):
             validate_ddd_reference_solution(
                 problem.movement_problem,
@@ -804,6 +900,8 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 resume_state.completed_rounds + 1 if resume_state is not None else 1
             ),
             trajectory_problem=trajectory_problem,
+            branch_domain=branch_domain,
+            boundary_occurrences=boundary_occurrences,
             seed_kind=seed_kind,
         )
         if (
@@ -1228,6 +1326,8 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 instance_fingerprint=run.instance_fingerprint,
                 trajectory_by_id=run.trajectory_by_id,
                 remaining_budget_seconds=remaining_budget_seconds,
+                branch_domain=run.branch_domain,
+                boundary_occurrences=run.boundary_occurrences,
             )
         for cabin_id in cabin_ids:
             bounded_waiting = (
@@ -1299,11 +1399,23 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 and perf_counter() - extra_started
                 < self.extra_column_time_limit_seconds
             ):
-                remaining = self.extra_column_time_limit_seconds - (
+                local_remaining = self.extra_column_time_limit_seconds - (
                     perf_counter() - extra_started
                 )
+                global_remaining = (
+                    None
+                    if remaining_budget_seconds is None
+                    else remaining_budget_seconds
+                    - (perf_counter() - pricing_started)
+                )
+                remaining = self._clamped_time_limit(
+                    local_remaining,
+                    global_remaining,
+                )
+                if remaining is None or remaining <= 1e-6:
+                    break
                 extra = DddTrajectoryExactNoWaitPricingOracle(
-                    time_limit_seconds=max(remaining, 1e-6),
+                    time_limit_seconds=remaining,
                     threads=self.pricing_threads,
                     output_flag=self.output_flag,
                     mip_focus=self.extra_pricing_mip_focus,
@@ -1319,6 +1431,8 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                     resource_window_rows=(
                         master_round.reference_master.master_problem.resource_window_rows
                     ),
+                    branch_domain=run.branch_domain,
+                    boundary_occurrences=run.boundary_occurrences,
                 )
                 extra_call_count += 1
                 if (
@@ -1408,11 +1522,72 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                     candidate_results.append(primal_result)
                     candidate_option_ids.add(primal_result.option_id)
                     primal_candidate_option_ids.add(primal_result.option_id)
-                    if (
-                        primal_result.minimum_reduced_cost
-                        < -self.pricing_tolerance
-                    ):
+                    if primal_result.minimum_reduced_cost < -self.pricing_tolerance:
                         primal_negative_candidate_count += 1
+        coordinated_trajectory_batches: tuple[
+            tuple[DddReferenceTrajectory, ...], ...
+        ] = ()
+        coordinated_schedule_batches: tuple[tuple[DddRecoveredSchedule, ...], ...] = ()
+        coordinated_status: tuple[tuple[str, int], ...] = ()
+        coordinated_details: tuple[str, ...] = ()
+        run_coordinated_primal = (
+            self.coordinated_primal_time_limit_seconds > 0
+            and isinstance(
+                trajectory_problem.start_domain,
+                DddFixedTrajectoryStartDomain,
+            )
+            and trajectory_problem.waiting_policy.domain
+            is DddTrajectoryWaitingDomain.NO_WAIT
+            and not run.branch_domain.decisions
+            and (round_index - 1) % self.coordinated_primal_interval == 0
+        )
+        if run_coordinated_primal:
+            global_remaining = (
+                None
+                if remaining_budget_seconds is None
+                else remaining_budget_seconds - (perf_counter() - pricing_started)
+            )
+            coordinated_limit = self._clamped_time_limit(
+                self.coordinated_primal_time_limit_seconds,
+                global_remaining,
+            )
+            if coordinated_limit is not None and coordinated_limit > 1e-6:
+                coordinated = DddTrajectoryCoordinatedPrimalGenerator(
+                    time_limit_seconds=coordinated_limit,
+                    num_workers=self.coordinated_primal_workers,
+                    max_candidate_count=self.coordinated_primal_candidate_count,
+                    maximum_preference_count=(
+                        self.coordinated_primal_maximum_preference_count
+                    ),
+                ).generate(
+                    problem=problem,
+                    artifact=artifact,
+                    passenger_build=passenger_build,
+                    objective=objective,
+                    lp_result=master_round.lp,
+                    waiting_policy=trajectory_problem.waiting_policy,
+                    boundary_occurrences=run.boundary_occurrences,
+                    excluded_schedules=tuple(run.coordinated_schedule_batches),
+                    hint_trajectories=tuple(
+                        run.trajectory_by_id[option_id]
+                        for option_id in run.incumbent_option_ids
+                    ),
+                )
+                primal_call_count += 1
+                primal_seconds += coordinated.wall_seconds
+                coordinated_trajectory_batches = coordinated.trajectory_batches
+                coordinated_schedule_batches = coordinated.schedule_batches
+                coordinated_status = ((coordinated.status.value, 1),)
+                if coordinated.detail is not None:
+                    coordinated_details = (coordinated.detail,)
+                for batch in coordinated.trajectory_batches:
+                    for trajectory in batch:
+                        option_id = ddd_trajectory_column(
+                            trajectory,
+                            instance_fingerprint=run.instance_fingerprint,
+                        ).id
+                        if option_id not in run.trajectory_by_id:
+                            primal_candidate_option_ids.add(option_id)
         pricing_result_tuple = tuple(pricing_results)
         diagnostics = tuple(
             DddTrajectoryRootCgPricingDiagnostic(
@@ -1485,6 +1660,7 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             target_waiting_domain=trajectory_problem.waiting_policy.domain,
             row_separation_complete=True,
             tolerance=self.pricing_tolerance,
+            pricing_domain_fingerprint=run.branch_domain.fingerprint,
         )
         return _DddTrajectoryPricingRound(
             results=pricing_result_tuple,
@@ -1507,16 +1683,30 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             primal_status_counts=tuple(
                 sorted(
                     (
-                        status.value,
-                        sum(result.status is status for result in primal_results),
+                        *(
+                            (
+                                status.value,
+                                sum(
+                                    result.status is status
+                                    for result in primal_results
+                                ),
+                            )
+                            for status in DddTrajectoryExactPricingStatus
+                            if any(
+                                result.status is status
+                                for result in primal_results
+                            )
+                        ),
+                        *coordinated_status,
                     )
-                    for status in DddTrajectoryExactPricingStatus
-                    if any(result.status is status for result in primal_results)
                 )
             ),
-            primal_details=tuple(
-                result.detail for result in primal_results if result.detail
+            primal_details=(
+                *(result.detail for result in primal_results if result.detail),
+                *coordinated_details,
             ),
+            coordinated_trajectory_batches=coordinated_trajectory_batches,
+            coordinated_schedule_batches=coordinated_schedule_batches,
             maximum_tier_seconds=maximum_tier_seconds,
             retry_count=retry_count,
             unresolved_count=sum(
@@ -1548,12 +1738,13 @@ class DddTrajectoryExactRootColumnGenerationSolver:
         instance_fingerprint: str,
         trajectory_by_id: dict[str, DddReferenceTrajectory],
         remaining_budget_seconds: float | None,
+        branch_domain: DddTrajectoryBranchDomain,
+        boundary_occurrences: tuple[DddReferenceResourceOccurrence, ...],
     ) -> tuple[dict[int, DddTrajectoryExactPricingResult], float, int, int]:
         """Price all cabins breadth-first over deterministic time tiers."""
 
-        tiers = (
-            self.pricing_time_limit_tiers_seconds
-            or (self.pricing_time_limit_seconds,)
+        tiers = self.pricing_time_limit_tiers_seconds or (
+            self.pricing_time_limit_seconds,
         )
         started = perf_counter()
         results: dict[int, DddTrajectoryExactPricingResult] = {}
@@ -1628,6 +1819,8 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                     resource_window_rows=resource_window_rows,
                     waiting_policy=waiting_policy,
                     instance_fingerprint=instance_fingerprint,
+                    branch_domain=branch_domain,
+                    boundary_occurrences=boundary_occurrences,
                 )
                 solve_count += 1
                 if cabin_id in results:
@@ -1725,8 +1918,7 @@ class DddTrajectoryExactRootColumnGenerationSolver:
         eligible_cabin_ids = tuple(
             cabin_id
             for cabin_id in cabin_ids
-            if proof_results[cabin_id].certified_reduced_cost_lower_bound
-            is not None
+            if proof_results[cabin_id].certified_reduced_cost_lower_bound is not None
             and proof_results[cabin_id].certified_reduced_cost_lower_bound
             < -self.pricing_tolerance
         )
@@ -1851,16 +2043,18 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             for cabin_id in selected_cabin_ids:
                 position = position_by_cabin_id[cabin_id]
                 anchor = anchors[(position + round_index - 1) % len(anchors)]
-                results.append(oracle.solve(
-                    trajectory_problem=trajectory_problem,
-                    artifact=artifact,
-                    passenger_build=passenger_build,
-                    objective=objective,
-                    cabin_id=cabin_id,
-                    dispatch_time_seconds=anchor,
-                    duals=duals,
-                    instance_fingerprint=instance_fingerprint,
-                ))
+                results.append(
+                    oracle.solve(
+                        trajectory_problem=trajectory_problem,
+                        artifact=artifact,
+                        passenger_build=passenger_build,
+                        objective=objective,
+                        cabin_id=cabin_id,
+                        dispatch_time_seconds=anchor,
+                        duals=duals,
+                        instance_fingerprint=instance_fingerprint,
+                    )
+                )
         else:
             raise RuntimeError("unsupported reservoir primal pricing mode")
         return tuple(results), len(results)
@@ -2024,13 +2218,10 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 or pricing_result.option_id is None
             ):
                 continue
-            if (
-                pricing_result.minimum_reduced_cost >= -self.pricing_tolerance
-                and (
-                    self.certified_fixed_k_mode
-                    or pricing_result.option_id
-                    not in pricing_round.primal_candidate_option_ids
-                )
+            if pricing_result.minimum_reduced_cost >= -self.pricing_tolerance and (
+                self.certified_fixed_k_mode
+                or pricing_result.option_id
+                not in pricing_round.primal_candidate_option_ids
             ):
                 continue
             if pricing_result.option_id in run.trajectory_by_id:
@@ -2041,6 +2232,31 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             added += 1
             if id(pricing_result) not in proof_result_ids:
                 diverse_added += 1
+        for batch in pricing_round.coordinated_trajectory_batches:
+            validate_ddd_reference_solution(
+                run.trajectory_problem.structural_movement_problem,
+                DddReferenceSolution(batch),
+                waiting_policy=run.trajectory_problem.waiting_policy,
+            )
+            if any(not run.branch_domain.allows(trajectory) for trajectory in batch):
+                raise RuntimeError(
+                    "coordinated primal batch violates the root branch domain"
+                )
+            for trajectory in batch:
+                option_id = ddd_trajectory_column(
+                    trajectory,
+                    instance_fingerprint=run.instance_fingerprint,
+                ).id
+                if option_id in run.trajectory_by_id:
+                    continue
+                run.trajectory_by_id[option_id] = trajectory
+                added += 1
+                diverse_added += 1
+        run.coordinated_schedule_batches.extend(
+            batch
+            for batch in pricing_round.coordinated_schedule_batches
+            if batch not in run.coordinated_schedule_batches
+        )
         return added, diverse_added
 
     def _build_iteration(
@@ -2065,6 +2281,16 @@ class DddTrajectoryExactRootColumnGenerationSolver:
         master_trajectories = tuple(
             master_round.reference_master.reference_trajectory_by_option_id.values()
         )
+        branch_candidates = DddTrajectoryBranchCandidateEvaluator(
+            tolerance=self.pricing_tolerance,
+        ).evaluate(
+            trajectory_by_option_id=(
+                master_round.reference_master.reference_trajectory_by_option_id
+            ),
+            option_values_by_id=master_round.lp.option_values_by_id,
+            domain=run.branch_domain,
+        )
+        best_branch = branch_candidates[0] if branch_candidates else None
         return DddTrajectoryRootCgIteration(
             round_index=round_index,
             trajectory_count=len(master_problem.options),
@@ -2143,8 +2369,7 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             ),
             stored_column_count=sum(
                 trajectory.reservoir_state is not None
-                and trajectory.reservoir_state.kind
-                is DddReservoirTrajectoryKind.STORED
+                and trajectory.reservoir_state.kind is DddReservoirTrajectoryKind.STORED
                 for trajectory in master_trajectories
             ),
             dispatched_column_count=sum(
@@ -2181,14 +2406,30 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             nonexact_certified_nonnegative_pricing_count=sum(
                 not result.exact
                 and result.certified_reduced_cost_lower_bound is not None
-                and result.certified_reduced_cost_lower_bound
-                >= -self.pricing_tolerance
+                and result.certified_reduced_cost_lower_bound >= -self.pricing_tolerance
                 for result in pricing_round.results
             ),
             remaining_budget_seconds=remaining_budget_seconds,
             restricted_mip_ran=master_round.mip.solver_status is not None,
             restricted_mip_solution_count=master_round.mip.solution_count,
             restricted_mip_solver_status=master_round.mip.solver_status,
+            fractional_trajectory_option_count=sum(
+                self.pricing_tolerance < value < 1.0 - self.pricing_tolerance
+                for value in master_round.lp.option_values_by_id.values()
+            ),
+            fractional_service_decision_count=len(branch_candidates),
+            best_branch_cabin_id=(
+                None if best_branch is None else best_branch.predicate.cabin_id
+            ),
+            best_branch_visit_index=(
+                None if best_branch is None else best_branch.predicate.visit_index
+            ),
+            best_branch_true_mass=(
+                None if best_branch is None else best_branch.true_mass
+            ),
+            best_branch_false_mass=(
+                None if best_branch is None else best_branch.false_mass
+            ),
         )
 
     def _checkpoint_state(
@@ -2256,6 +2497,7 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             seed_kind=run.seed_kind,
             certificate_valid=certificate_valid,
             objective_floor=self.objective_floor,
+            instance_fingerprint=run.instance_fingerprint,
         )
 
     def _remaining_budget_seconds(
@@ -2512,14 +2754,11 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 "continuous reservoir proof pricing requires tight_convex_hull"
             )
         if (
-            (
-                is_oip
-                or is_reservoir
-                or trajectory_problem.waiting_policy.domain
-                is DddTrajectoryWaitingDomain.BOUNDED_WAIT
-            )
-            and self.conflict_row_mode is not DddTrajectoryConflictRowMode.PAIR_ONLY
-        ):
+            is_oip
+            or is_reservoir
+            or trajectory_problem.waiting_policy.domain
+            is DddTrajectoryWaitingDomain.BOUNDED_WAIT
+        ) and self.conflict_row_mode is not DddTrajectoryConflictRowMode.PAIR_ONLY:
             raise ValueError(
                 "continuous starts and bounded waiting require pair_only conflict rows"
             )
@@ -2594,13 +2833,24 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             self.extra_column_time_limit_seconds
         ):
             raise ValueError("trajectory root extra-column limit is invalid")
+        if self.coordinated_primal_time_limit_seconds < 0 or not math.isfinite(
+            self.coordinated_primal_time_limit_seconds
+        ):
+            raise ValueError("coordinated primal time limit is invalid")
+        if self.coordinated_primal_interval <= 0:
+            raise ValueError("coordinated primal interval must be positive")
+        if self.coordinated_primal_workers <= 0:
+            raise ValueError("coordinated primal worker count must be positive")
+        if self.coordinated_primal_candidate_count <= 0:
+            raise ValueError("coordinated primal candidate count must be positive")
+        if self.coordinated_primal_maximum_preference_count <= 0:
+            raise ValueError("coordinated primal preference limit must be positive")
         if self.oip_primal_pricing_time_limit_seconds < 0 or not math.isfinite(
             self.oip_primal_pricing_time_limit_seconds
         ):
             raise ValueError("trajectory root OIP primal-pricing limit is invalid")
-        if (
-            self.reservoir_primal_pricing_time_limit_seconds < 0
-            or not math.isfinite(self.reservoir_primal_pricing_time_limit_seconds)
+        if self.reservoir_primal_pricing_time_limit_seconds < 0 or not math.isfinite(
+            self.reservoir_primal_pricing_time_limit_seconds
         ):
             raise ValueError(
                 "trajectory root reservoir primal-pricing limit is invalid"
@@ -2668,6 +2918,7 @@ class DddTrajectoryExactRootColumnGenerationSolver:
         seed_kind: str | None = None,
         certificate_valid: bool = True,
         objective_floor: float = 0.0,
+        instance_fingerprint: str = "",
     ) -> DddTrajectoryRootCgResult:
         relative_gap = (
             max(0.0, upper_bound - lower_bound) / abs(upper_bound)
@@ -2705,20 +2956,25 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             seed_kind=seed_kind,
             certificate_valid=certificate_valid,
             objective_floor=objective_floor,
+            instance_fingerprint=instance_fingerprint,
         )
 
 
 def ddd_trajectory_problem_instance_fingerprint(
     artifact: EanBuildArtifact,
     trajectory_problem: DddTrajectoryProblem,
+    *,
+    boundary_occurrences: tuple[DddReferenceResourceOccurrence, ...] = (),
 ) -> str:
     base = ddd_trajectory_instance_fingerprint(artifact)
     domain = trajectory_problem.start_domain
     waiting_policy = trajectory_problem.waiting_policy
-    bounded_waiting = (
-        waiting_policy.domain is DddTrajectoryWaitingDomain.BOUNDED_WAIT
-    )
-    if not isinstance(domain, DddReservoirTrajectoryStartDomain) and not bounded_waiting:
+    bounded_waiting = waiting_policy.domain is DddTrajectoryWaitingDomain.BOUNDED_WAIT
+    if (
+        not isinstance(domain, DddReservoirTrajectoryStartDomain)
+        and not bounded_waiting
+        and not boundary_occurrences
+    ):
         return base
     payload: dict[str, object] = {
         "base": base,
@@ -2766,10 +3022,31 @@ def ddd_trajectory_problem_instance_fingerprint(
             "maximum_wait_seconds_by_station_id": (
                 waiting_policy.maximum_wait_seconds_by_station_id
             ),
-            "earliest_wait_time_seconds": (
-                waiting_policy.earliest_wait_time_seconds
-            ),
+            "earliest_wait_time_seconds": (waiting_policy.earliest_wait_time_seconds),
         }
+    if boundary_occurrences:
+        payload["boundary_occurrences"] = [
+            (
+                occurrence.resource_id,
+                occurrence.cabin_id,
+                occurrence.visit_index,
+                occurrence.leader_clear_time_seconds,
+                occurrence.follower_enter_time_seconds,
+                occurrence.separation_after_seconds,
+                occurrence.boundary_only,
+                occurrence.boundary_origin,
+            )
+            for occurrence in sorted(
+                boundary_occurrences,
+                key=lambda item: (
+                    item.resource_id,
+                    item.cabin_id,
+                    item.visit_index,
+                    item.follower_enter_time_seconds,
+                    item.leader_clear_time_seconds,
+                ),
+            )
+        ]
     return sha256(
         json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()

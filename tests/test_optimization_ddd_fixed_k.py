@@ -192,6 +192,27 @@ def test_campaign_config_rejects_nonpositive_k() -> None:
         )
 
 
+def test_campaign_config_parses_coordinated_primal_settings() -> None:
+    config = DddFixedKCampaignConfig.from_dict(
+        {
+            "campaign_id": "hybrid",
+            "example_id": EXAMPLE_ID,
+            "k_values": [39],
+            "coordinated_primal_time_limit_seconds": 20,
+            "coordinated_primal_interval": 5,
+            "coordinated_primal_workers": 4,
+            "coordinated_primal_candidate_count": 2,
+            "coordinated_primal_maximum_preference_count": 300,
+        }
+    )
+
+    assert config.coordinated_primal_time_limit_seconds == pytest.approx(20.0)
+    assert config.coordinated_primal_interval == 5
+    assert config.coordinated_primal_workers == 4
+    assert config.coordinated_primal_candidate_count == 2
+    assert config.coordinated_primal_maximum_preference_count == 300
+
+
 def test_seed_coordinator_maps_complete_cp_infeasibility(monkeypatch: pytest.MonkeyPatch) -> None:
     fixed_problem = _fixed_problem(DddFixedKOperatingMode.SKIP_STOP, cabin_count=2)
     network_problem = build_initial_ddd_network_problem(

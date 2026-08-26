@@ -31,6 +31,10 @@ from ropeway_skip_stop_optimization.optimization.ean.passenger_objective import 
     EanPassengerObjectiveEvent,
     ean_passenger_objective_definition,
 )
+from ropeway_skip_stop_optimization.optimization.ean.models import (
+    EanDemandGroup,
+    EanRideCandidate,
+)
 
 
 @dataclass(frozen=True)
@@ -50,6 +54,7 @@ def build_ddd_trajectory_heuristic_pricing_signal(
     passenger_build: EanPassengerCandidateBuildResult,
     objective: EanPassengerObjective,
     lp_result: DddTrajectoryPassengerLpResult,
+    maximum_preference_count: int | None = None,
 ) -> DddTrajectoryHeuristicPricingSignal:
     """Translate Passenger RMP duals into a deterministic no-wait CP objective.
 
@@ -67,6 +72,8 @@ def build_ddd_trajectory_heuristic_pricing_signal(
         raise ValueError("trajectory pricing requires an optimal restricted LP")
     if lp_result.duals is None:
         raise ValueError("trajectory pricing requires restricted-LP duals")
+    if maximum_preference_count is not None and maximum_preference_count <= 0:
+        raise ValueError("trajectory pricing preference limit must be positive")
     definition = ean_passenger_objective_definition(objective)
     event = (
         DddCpSatPassengerObjectiveEvent.BOARDING
@@ -85,8 +92,16 @@ def build_ddd_trajectory_heuristic_pricing_signal(
         for cabin_id, start in starts_by_cabin_id.items()
     }
     horizon_tick = ddd_seconds_to_tick(artifact.config.horizon_seconds)
+    candidates = _select_balanced_ride_candidates(
+        passenger_build.ride_candidates,
+        group_by_id=group_by_id,
+        raw_dual_by_group_id=lp_result.duals.demand_raw_by_group_id,
+        cabin_capacity=artifact.config.cabin_capacity,
+        horizon_seconds=artifact.config.horizon_seconds,
+        maximum_count=maximum_preference_count,
+    )
     preferences = []
-    for candidate in sorted(passenger_build.ride_candidates, key=lambda item: item.id):
+    for candidate in candidates:
         if candidate.cabin_id not in state_ids_by_cabin_id:
             continue
         states = state_ids_by_cabin_id[candidate.cabin_id]
@@ -156,3 +171,37 @@ def build_ddd_trajectory_heuristic_pricing_signal(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest(),
     )
+
+
+def _select_balanced_ride_candidates(
+    candidates: tuple[EanRideCandidate, ...],
+    *,
+    group_by_id: dict[str, EanDemandGroup],
+    raw_dual_by_group_id: dict[str, float],
+    cabin_capacity: float,
+    horizon_seconds: float,
+    maximum_count: int | None,
+) -> tuple[EanRideCandidate, ...]:
+    if maximum_count is None or len(candidates) <= maximum_count:
+        return tuple(sorted(candidates, key=lambda item: item.id))
+    by_cabin: dict[int, list[EanRideCandidate]] = {}
+    for candidate in candidates:
+        by_cabin.setdefault(candidate.cabin_id, []).append(candidate)
+
+    def priority(candidate: EanRideCandidate) -> tuple[float, str]:
+        group = group_by_id[candidate.demand_group_id]
+        optimistic_value = (
+            horizon_seconds
+            + raw_dual_by_group_id.get(group.id, 0.0)
+            - group.release_time_seconds
+        )
+        weight = min(group.count, cabin_capacity)
+        return (-weight * optimistic_value, candidate.id)
+
+    cabin_ids = tuple(sorted(by_cabin))
+    quota, remainder = divmod(maximum_count, len(cabin_ids))
+    selected = []
+    for position, cabin_id in enumerate(cabin_ids):
+        cabin_quota = quota + int(position < remainder)
+        selected.extend(sorted(by_cabin[cabin_id], key=priority)[:cabin_quota])
+    return tuple(sorted(selected, key=lambda item: item.id))

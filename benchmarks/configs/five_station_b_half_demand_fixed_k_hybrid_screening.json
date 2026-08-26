@@ -1,0 +1,15 @@
+{
+  "campaign_id": "five_station_b_half_demand_fixed_k_hybrid_screening",
+  "label": "Five-station architecture B, half demand: fixed-K hybrid screening",
+  "example_id": "five_station_circle_cw_half_skip_no_wait_headway_b_v0",
+  "k_values": [20, 38, 39],
+  "operating_modes": ["all_stop", "skip_stop"],
+  "objective": "journey_time",
+  "start_policy": "balanced_reference",
+  "profile": "screening",
+  "coordinated_primal_time_limit_seconds": 20,
+  "coordinated_primal_interval": 5,
+  "coordinated_primal_workers": 8,
+  "coordinated_primal_candidate_count": 1,
+  "coordinated_primal_maximum_preference_count": 200
+}

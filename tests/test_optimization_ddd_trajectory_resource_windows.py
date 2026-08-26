@@ -99,6 +99,48 @@ def test_protected_interval_uses_half_open_headway_boundary() -> None:
     assert not interval.contains(ddd_seconds_to_tick(3.0))
 
 
+def test_boundary_interval_is_clipped_to_the_optimization_horizon() -> None:
+    problem = _movement_problem(headway_seconds=1.0)
+    boundary = DddReferenceResourceOccurrence(
+        resource_id="merge",
+        cabin_id=0,
+        visit_index=0,
+        leader_clear_time_seconds=0.5,
+        follower_enter_time_seconds=-2.0,
+        boundary_origin=True,
+    )
+    trajectory = DddReferenceTrajectory(
+        cabin_id=0,
+        visits=(),
+        boundary_resource_occurrences=(boundary,),
+    )
+
+    interval = ddd_trajectory_resource_intervals(trajectory, problem)[0]
+
+    assert interval.enter_tick == 0
+    assert interval.clear_with_headway_tick == ddd_seconds_to_tick(1.5)
+    assert interval.contains(0)
+
+
+def test_negative_non_boundary_interval_is_rejected() -> None:
+    problem = _movement_problem(headway_seconds=1.0)
+    occurrence = DddReferenceResourceOccurrence(
+        resource_id="merge",
+        cabin_id=0,
+        visit_index=0,
+        leader_clear_time_seconds=0.5,
+        follower_enter_time_seconds=-2.0,
+    )
+    trajectory = DddReferenceTrajectory(
+        cabin_id=0,
+        visits=(),
+        boundary_resource_occurrences=(occurrence,),
+    )
+
+    with pytest.raises(ValueError, match="non-boundary"):
+        ddd_trajectory_resource_intervals(trajectory, problem)
+
+
 def test_resource_window_pricing_term_uses_minimization_dual_sign() -> None:
     window = DddTrajectoryResourceWindow("merge", 1)
 

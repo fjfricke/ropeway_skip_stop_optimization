@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Any, Mapping
 
 from ropeway_skip_stop_optimization.optimization.ddd.fixed_k import (
@@ -23,6 +24,11 @@ class DddFixedKCampaignConfig:
     objective: EanPassengerObjective = EanPassengerObjective.JOURNEY_TIME
     start_policy: DddFixedKStartPolicy = DddFixedKStartPolicy.CANONICAL_ROPE
     profile: DddFixedKExperimentProfile = DddFixedKExperimentProfile.SCREENING
+    coordinated_primal_time_limit_seconds: float = 0.0
+    coordinated_primal_interval: int = 5
+    coordinated_primal_workers: int = 8
+    coordinated_primal_candidate_count: int = 1
+    coordinated_primal_maximum_preference_count: int = 200
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> DddFixedKCampaignConfig:
@@ -58,6 +64,21 @@ class DddFixedKCampaignConfig:
                     )
                 )
             ),
+            coordinated_primal_time_limit_seconds=float(
+                value.get("coordinated_primal_time_limit_seconds", 0.0)
+            ),
+            coordinated_primal_interval=int(
+                value.get("coordinated_primal_interval", 5)
+            ),
+            coordinated_primal_workers=int(
+                value.get("coordinated_primal_workers", 8)
+            ),
+            coordinated_primal_candidate_count=int(
+                value.get("coordinated_primal_candidate_count", 1)
+            ),
+            coordinated_primal_maximum_preference_count=int(
+                value.get("coordinated_primal_maximum_preference_count", 200)
+            ),
         )
         result.validate()
         return result
@@ -71,6 +92,18 @@ class DddFixedKCampaignConfig:
             self.operating_modes
         ):
             raise ValueError("Fixed-K operating modes must be nonempty and unique")
+        if (
+            not math.isfinite(self.coordinated_primal_time_limit_seconds)
+            or self.coordinated_primal_time_limit_seconds < 0
+        ):
+            raise ValueError("coordinated primal time limit must be nonnegative")
+        if (
+            self.coordinated_primal_interval <= 0
+            or self.coordinated_primal_workers <= 0
+            or self.coordinated_primal_candidate_count <= 0
+            or self.coordinated_primal_maximum_preference_count <= 0
+        ):
+            raise ValueError("coordinated primal settings must be positive")
 
 
 def derive_available_fleet_intervals(

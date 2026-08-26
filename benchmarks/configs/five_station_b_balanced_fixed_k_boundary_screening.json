@@ -1,0 +1,10 @@
+{
+  "campaign_id": "five_station_b_balanced_fixed_k_boundary_screening",
+  "label": "Five-station architecture B balanced starts around all-stop capacity",
+  "example_id": "five_station_circle_cw_half_skip_no_wait_headway_b_v0",
+  "k_values": [20, 38, 39],
+  "operating_modes": ["all_stop", "skip_stop"],
+  "objective": "journey_time",
+  "start_policy": "balanced_reference",
+  "profile": "screening"
+}

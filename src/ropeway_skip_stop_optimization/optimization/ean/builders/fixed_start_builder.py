@@ -29,6 +29,9 @@ from ropeway_skip_stop_optimization.optimization.ean.network import (
 )
 
 if TYPE_CHECKING:
+    from ropeway_skip_stop_optimization.optimization.ean.artifact import (
+        EanBuildArtifact,
+    )
     from ropeway_skip_stop_optimization.optimization.ean.models import SkipStopTiming
 
 
@@ -43,6 +46,115 @@ class EanCabinStartBuilder(ABC):
         headway_policy: DerivedHeadwayPolicy | None = None,
     ) -> tuple[EanCabinStart, ...]:
         """Derive EAN cabin starts from scenario-specific start data."""
+
+
+@dataclass(frozen=True)
+class ExplicitEanCabinStartBuilder(EanCabinStartBuilder):
+    """Reuse an already validated physical snapshot as fixed EAN starts."""
+
+    starts: tuple[EanCabinStart, ...]
+
+    def build(
+        self,
+        scenario: Scenario,
+        config: EanConfig,
+        network: EanMovementNetwork,
+        pattern: EanCirculationPattern,
+        headway_policy: DerivedHeadwayPolicy | None = None,
+    ) -> tuple[EanCabinStart, ...]:
+        del scenario, config, headway_policy
+        _validate_selected_pattern(network, pattern)
+        state_ids = set(pattern.state_ids)
+        if not self.starts:
+            raise ValueError("explicit EAN starts must not be empty")
+        if tuple(start.cabin_id for start in self.starts) != tuple(
+            range(len(self.starts))
+        ):
+            raise ValueError("explicit EAN starts need canonical cabin IDs")
+        for start in self.starts:
+            start.validate()
+            if start.first_switch_id not in state_ids:
+                raise ValueError("explicit EAN start references another pattern")
+            if start.kind is not EanCabinStartKind.FIXED:
+                raise ValueError("explicit EAN starts must be fixed")
+        return self.starts
+
+
+@dataclass(frozen=True)
+class EanAllStopStartCapacityAnalysis:
+    """Exact no-wait capacity of one deterministic all-stop circulation."""
+
+    cycle_seconds: float
+    limiting_headway_seconds: float
+    maximum_cabin_count: int
+    limiting_resource_ids: tuple[str, ...]
+
+    @property
+    def throughput_cabins_per_second(self) -> float:
+        return 1.0 / self.limiting_headway_seconds
+
+    def minimum_slack_seconds(self, cabin_count: int) -> float:
+        if cabin_count <= 0:
+            raise ValueError("all-stop slack needs a positive cabin count")
+        return self.cycle_seconds / cabin_count - self.limiting_headway_seconds
+
+    def validate(self) -> None:
+        if self.cycle_seconds <= 0 or self.limiting_headway_seconds <= 0:
+            raise ValueError("all-stop capacity times must be positive")
+        if self.maximum_cabin_count != max(
+            1,
+            math.floor(
+                (self.cycle_seconds + 1e-9) / self.limiting_headway_seconds
+            ),
+        ):
+            raise ValueError("all-stop maximum cabin count is inconsistent")
+        if not self.limiting_resource_ids:
+            raise ValueError("all-stop capacity needs a limiting resource")
+
+
+def analyze_all_stop_start_capacity(
+    artifact: "EanBuildArtifact",
+) -> EanAllStopStartCapacityAnalysis:
+    """Analyze the all-stop cycle represented by a built network artifact."""
+
+    artifact.validate()
+    policy = artifact.headway_policy
+    if policy is None:
+        raise ValueError("all-stop capacity analysis requires headway provenance")
+    timing_by_switch_id = {item.switch_id: item for item in artifact.timings}
+    cycle_seconds = sum(
+        _all_stop_switch_to_next_seconds(timing_by_switch_id[switch_id])
+        for switch_id in artifact.circulation_state_ids
+    )
+    service = HeadwayRouteBehavior.SERVICE
+    values = tuple(
+        (
+            resource.id,
+            policy.rule(resource.rule_id).required_seconds(service, service),
+        )
+        for resource in policy.resource_requirements
+        if resource.applies_to_service
+    )
+    if not values:
+        raise ValueError("all-stop capacity analysis found no service resource")
+    limiting = max(value for _, value in values)
+    result = EanAllStopStartCapacityAnalysis(
+        cycle_seconds=cycle_seconds,
+        limiting_headway_seconds=limiting,
+        maximum_cabin_count=max(
+            1,
+            math.floor((cycle_seconds + 1e-9) / limiting),
+        ),
+        limiting_resource_ids=tuple(
+            sorted(
+                resource_id
+                for resource_id, value in values
+                if math.isclose(value, limiting, rel_tol=0.0, abs_tol=1e-9)
+            )
+        ),
+    )
+    result.validate()
+    return result
 
 
 @dataclass(frozen=True)

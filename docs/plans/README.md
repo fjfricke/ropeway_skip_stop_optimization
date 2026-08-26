@@ -31,6 +31,9 @@ Current plans:
   inactive-variable handling, and fixed-fleet-size passenger decomposition.
 - `ean_decomposition.md`: scaling diagnosis, passenger decomposition,
   progressive search, delayed constraints, and alternative solver paths.
+- `ddd_arc_flow_passenger_benders.md`: research-backed classical, logic-based,
+  and Branch-and-Benders passenger decomposition of the complete fixed-K DDD
+  movement arc-flow, with shared OO components and diagnostic gates.
 - `dynamic_discretization_cabin_passenger.md`: exact partial time-space cabin
   and passenger planning through Dynamic Discretization Discovery, with an
   optimistic lower-bound master, exact continuous-time lifting, refinement,
@@ -47,6 +50,10 @@ Current plans:
 - `ddd_trajectory_column_generation.md`: DDD-guided whole-horizon cabin
   trajectory master, joint route-and-load pricing, delayed resource-conflict
   rows, and the exact-pricing gate for a second certified fixed-$K$ lower bound.
+- `ddd_dive_branch_price_cut.md`: gated extension of certified trajectory
+  Root-CG into Dive-and-Cut-and-Price for validated Skip-Stop incumbents and,
+  only when the measured root integrality gap warrants it, exact
+  Branch-Price-and-Cut with pricing-compatible branching and conflict cuts.
 - `ddd_reservoir_fleet_planning.md`: an ideal warm-up entry reservoir,
   optional one-way cabin dispatch, continuous compact proof pricing,
   fixed-available-fleet bound curves, and exact finite bounded Waiting.
@@ -96,3 +103,7 @@ Implemented certified Fixed-$K$ trajectory Root-CG behavior and the campaign
 command are maintained in
 [`../reference/ddd_fixed_k_root_cg.md`](../reference/ddd_fixed_k_root_cg.md),
 not duplicated as future work here.
+
+Implemented pricing-compatible trajectory branch domains, bounded primal
+dives, and their first K=20 gate are maintained in
+[`../reference/ddd_trajectory_branching_and_diving.md`](../reference/ddd_trajectory_branching_and_diving.md).

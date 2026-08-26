@@ -16,6 +16,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddRouteDecision,
     DddRouteOption,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.reference import (
+    DddReferenceResourceOccurrence,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
     DddNetworkTimeProblem,
 )
@@ -36,6 +39,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
     DDD_TIME_TICKS_PER_SECOND,
+    ddd_seconds_to_tick,
     ddd_tick_to_seconds,
 )
 
@@ -116,6 +120,8 @@ class DddCpSatPrimalResult:
     passenger_pricing_preference_count: int = 0
     passenger_pricing_objective_value: float | None = None
     passenger_pricing_objective_bound: float | None = None
+    solver_status_name: str = "NOT_RUN"
+    solver_response_stats: str | None = None
 
 
 DddCpSatCandidateCallback = Callable[[int, float], None]
@@ -151,6 +157,7 @@ class DddCpSatPrimalOracle:
         excluded_schedules: tuple[tuple[DddRecoveredSchedule, ...], ...] = (),
         passenger_ride_preferences: tuple[DddCpSatPassengerRidePreference, ...] = (),
         candidate_callback: DddCpSatCandidateCallback | None = None,
+        boundary_occurrences: tuple[DddReferenceResourceOccurrence, ...] = (),
     ) -> DddCpSatPrimalResult:
         problem.validate()
         if fixed_support is not None:
@@ -197,6 +204,7 @@ class DddCpSatPrimalOracle:
         if self.minimum_hamming_distance <= 0:
             raise ValueError("DDD CP-SAT Hamming distance must be positive")
 
+        started = perf_counter()
         movement = problem.movement_problem
         if enabled_resource_ids is not None:
             if not enabled_resource_ids:
@@ -231,6 +239,31 @@ class DddCpSatPrimalOracle:
             for resource in movement.resources
             if enabled_resource_id_set is None or resource.id in enabled_resource_id_set
         }
+        for index, occurrence in enumerate(boundary_occurrences):
+            resource = movement.resources_by_id.get(occurrence.resource_id)
+            if resource is None:
+                raise ValueError("CP-SAT boundary occurrence uses an unknown resource")
+            if (
+                enabled_resource_id_set is not None
+                and occurrence.resource_id not in enabled_resource_id_set
+            ):
+                continue
+            end_tick = ddd_seconds_to_tick(
+                occurrence.leader_clear_time_seconds
+            ) + occurrence.separation_after_tick(resource)
+            start_tick = max(
+                0,
+                ddd_seconds_to_tick(occurrence.follower_enter_time_seconds),
+            )
+            if end_tick <= start_tick:
+                continue
+            resource_intervals[occurrence.resource_id].append(
+                model.new_fixed_size_interval_var(
+                    start_tick,
+                    end_tick - start_tick,
+                    f"boundary[{index}]",
+                )
+            )
 
         for start in sorted(movement.starts, key=lambda item: item.cabin_id):
             states, options_by_visit = _deterministic_visit_structure(
@@ -361,12 +394,12 @@ class DddCpSatPrimalOracle:
         elif passenger_pricing_expression is not None:
             model.minimize(passenger_pricing_expression)
 
-        started = perf_counter()
         candidate_schedules: list[tuple[DddRecoveredSchedule, ...]] = []
         conflict_count = 0
         branch_count = 0
         search_complete = False
         terminal_status = cp_model.UNKNOWN
+        last_solver: cp_model.CpSolver | None = None
         candidate_limit = 1 if nearest_support is not None else self.max_candidate_count
         last_feasible_solver: cp_model.CpSolver | None = None
         while len(candidate_schedules) < candidate_limit:
@@ -375,6 +408,7 @@ class DddCpSatPrimalOracle:
                 terminal_status = cp_model.UNKNOWN
                 break
             solver = cp_model.CpSolver()
+            last_solver = solver
             solver.parameters.max_time_in_seconds = remaining_seconds
             solver.parameters.num_search_workers = self.num_workers
             solver.parameters.log_search_progress = self.log_search_progress
@@ -497,6 +531,14 @@ class DddCpSatPrimalOracle:
             passenger_pricing_preference_count=len(passenger_ride_preferences),
             passenger_pricing_objective_value=passenger_pricing_objective_value,
             passenger_pricing_objective_bound=passenger_pricing_objective_bound,
+            solver_status_name=(
+                "UNKNOWN"
+                if last_solver is None
+                else last_solver.status_name(terminal_status)
+            ),
+            solver_response_stats=(
+                None if last_solver is None else last_solver.response_stats()
+            ),
         )
 
 

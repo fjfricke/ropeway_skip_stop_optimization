@@ -32,6 +32,8 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EvenlySpacedAllStopCabinStartBuilder,
     NetworkEanBuildArtifactBuilder,
     PhysicalMovementNetworkBuilder,
+    SparseHeadwayPairBuilder,
+    analyze_all_stop_start_capacity,
     network_ean_builder_for_pattern,
     validate_ean_movement_plan_against_artifact,
 )
@@ -170,6 +172,25 @@ def test_evenly_spaced_all_stop_builder_rejects_fleet_above_ring_capacity() -> N
             network,
             pattern,
         )
+
+
+def test_all_stop_capacity_analysis_reports_exact_headway_slack() -> None:
+    example = FiveStationOptimizedInitialPlacementNoSkipNoWaitExample()
+    scenario = example.build_scenario()
+    config = example.build_ean_config(scenario)
+    artifact = replace(
+        example.build_ean_artifact_builder(scenario, config),
+        start_builder=EvenlySpacedAllStopCabinStartBuilder(1),
+        headway_pair_builder=SparseHeadwayPairBuilder(),
+    ).build(scenario, config)
+
+    analysis = analyze_all_stop_start_capacity(artifact)
+
+    assert analysis.maximum_cabin_count > 1
+    assert analysis.minimum_slack_seconds(analysis.maximum_cabin_count) >= 0
+    assert (
+        analysis.minimum_slack_seconds(analysis.maximum_cabin_count + 1) < 0
+    )
 
 
 def test_physical_network_rejects_unknown_or_non_entry_pattern_states() -> None:

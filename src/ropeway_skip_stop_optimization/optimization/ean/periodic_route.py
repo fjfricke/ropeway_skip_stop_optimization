@@ -149,6 +149,50 @@ class EanPeriodicRouteCapacityBoundBuilder:
     """
 
     def build(self, artifact: EanBuildArtifact) -> EanPeriodicRouteCapacityBound:
+        candidates = self.build_candidates(artifact)
+        if not candidates:
+            raise EanNoPeriodicRouteCertificateError(
+                "no homogeneous periodic route is admissible"
+            )
+        return max(candidates, key=_preference_key)
+
+    def build_for_fleet(
+        self,
+        artifact: EanBuildArtifact,
+        cabin_count: int,
+    ) -> EanPeriodicRouteCapacityBound:
+        """Return the most service-rich certified route supporting exact K.
+
+        This is a start-layout policy, not a restriction on the subsequent
+        fixed-start optimization: after t=0 every cabin may choose another
+        route at every visit.
+        """
+
+        if cabin_count <= 0:
+            raise ValueError("periodic fleet selection needs a positive K")
+        candidates = tuple(
+            candidate
+            for candidate in self.build_candidates(artifact)
+            if candidate.fleet_lower_bound >= cabin_count
+        )
+        if not candidates:
+            raise EanNoPeriodicRouteCertificateError(
+                f"no homogeneous periodic route supports K={cabin_count}"
+            )
+        return max(
+            candidates,
+            key=lambda candidate: _fixed_fleet_preference_key(
+                candidate,
+                cabin_count,
+            ),
+        )
+
+    def build_candidates(
+        self,
+        artifact: EanBuildArtifact,
+    ) -> tuple[EanPeriodicRouteCapacityBound, ...]:
+        """Enumerate deterministic threshold-optimal route certificates."""
+
         artifact.validate()
         timings = {timing.switch_id: timing for timing in artifact.timings}
         checkpoints_by_switch: dict[str, tuple[HeadwayCheckpointDefinition, ...]] = {
@@ -160,7 +204,9 @@ class EanPeriodicRouteCapacityBoundBuilder:
             for switch_id in artifact.circulation_state_ids
         }
         thresholds = tuple(sorted(_periodic_thresholds(artifact)))
-        best: EanPeriodicRouteCapacityBound | None = None
+        candidates: dict[
+            tuple[EanRouteDecision, ...], EanPeriodicRouteCapacityBound
+        ] = {}
         for threshold in thresholds:
             legs: list[EanPeriodicRouteLeg] = []
             for switch_id in artifact.circulation_state_ids:
@@ -177,14 +223,24 @@ class EanPeriodicRouteCapacityBoundBuilder:
                 candidate = _bound_for_legs(tuple(legs), artifact)
                 if candidate is None:
                     continue
-                if best is None or _preference_key(candidate) > _preference_key(best):
-                    best = candidate
-        if best is None:
-            raise EanNoPeriodicRouteCertificateError(
-                "no homogeneous periodic route is admissible"
+                signature = tuple(leg.decision for leg in candidate.legs)
+                previous = candidates.get(signature)
+                if previous is None or _preference_key(candidate) > _preference_key(
+                    previous
+                ):
+                    candidates[signature] = candidate
+        result = tuple(
+            sorted(
+                candidates.values(),
+                key=lambda item: (
+                    tuple(leg.decision.value for leg in item.legs),
+                    item.cycle_seconds,
+                ),
             )
-        best.validate()
-        return best
+        )
+        for candidate in result:
+            candidate.validate()
+        return result
 
     def build_optional(
         self, artifact: EanBuildArtifact
@@ -352,5 +408,26 @@ def _preference_key(bound: EanPeriodicRouteCapacityBound) -> tuple[float, ...]:
         float(bound.fleet_lower_bound),
         phase_slack,
         bound.throughput_cabins_per_second,
+        *decisions,
+    )
+
+
+def _fixed_fleet_preference_key(
+    bound: EanPeriodicRouteCapacityBound,
+    cabin_count: int,
+) -> tuple[float, ...]:
+    service_count = sum(
+        leg.decision is EanRouteDecision.STOP for leg in bound.legs
+    )
+    fixed_k_slack = (
+        bound.cycle_seconds / cabin_count - bound.bottleneck_headway_seconds
+    )
+    decisions = tuple(
+        1 if leg.decision is EanRouteDecision.STOP else 0 for leg in bound.legs
+    )
+    return (
+        float(service_count),
+        fixed_k_slack,
+        bound.cycle_seconds,
         *decisions,
     )
