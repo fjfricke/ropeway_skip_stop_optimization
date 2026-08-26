@@ -47,7 +47,20 @@ export default function OptimizationPage() {
             <div className="campaign-card__top"><span className={`run-state run-state--${campaign.status ?? "queued"}`}>{campaign.status ?? "queued"}</span><span>seq {campaign.sequence ?? 0}</span></div>
             <h2>{campaign.label ?? campaign.campaign_id}</h2>
             <p>{campaign.objective ?? "objective pending"}</p>
-            <div className="campaign-card__footer"><strong>{campaign.completed_trial_count ?? 0} / {campaign.trial_count ?? 0} trials</strong><span>{campaign.status === "running" ? "Open live details →" : "Open results →"}</span></div>
+            <div className="campaign-card__footer">
+              <strong>
+                {campaign.campaign_kind === "movement_feasibility"
+                  ? campaign.largest_certified_feasible_k != null
+                    ? `Feasible through K=${campaign.largest_certified_feasible_k}`
+                    : `${campaign.completed_trial_count ?? 0} values tested`
+                  : `${campaign.completed_trial_count ?? 0} / ${campaign.trial_count ?? 0} trials`}
+              </strong>
+              <span>
+                {campaign.campaign_kind === "movement_feasibility" && campaign.frontier_k != null
+                  ? `Frontier K=${campaign.frontier_k}: ${campaign.frontier_status ?? "unknown"} →`
+                  : campaign.status === "running" ? "Open live details →" : "Open results →"}
+              </span>
+            </div>
           </AppLink>
         ))}
       </section>
