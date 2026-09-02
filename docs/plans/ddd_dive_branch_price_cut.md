@@ -1,7 +1,12 @@
 # Certified trajectory Dive-and-Cut-and-Price and Branch-Price-and-Cut
 
-Status: **remaining gated work after implementation of typed service/route
-branch domains and bounded service-decision dives**
+Status: **fractional cabin-cohort fix-and-optimize implemented; corridor and
+visit-band neighborhoods remain gated**
+
+The immediate root-formulation prerequisite, coordinated-pricing design, and
+quantitative K=20/K=39 gate are specified in
+[`ddd_merge_aware_branch_price_cut.md`](ddd_merge_aware_branch_price_cut.md).
+That plan must pass before the Stage-C tree described here is activated.
 
 Implemented behavior and the first Five-Station $K=20$ gate are maintained in
 [`../reference/ddd_trajectory_branching_and_diving.md`](../reference/ddd_trajectory_branching_and_diving.md).
@@ -262,16 +267,55 @@ observed $522{,}335$ under exactly the same fingerprint as the known optimum
 near $525{,}731$. No historical number may be combined until this equivalence
 check passes.
 
-## Remaining Stage B: Dive-and-Cut-and-Price LNS
+## Stage B: Dive-and-Cut-and-Price LNS
 
 A basic service-decision dive is implemented and did not improve the K=20
 All-Stop seed. The remaining Stage-B work is therefore the neighborhood layer;
 the dive still does not claim that unexplored sibling domains were proved or
 searched.
 
-The primal layer performs trajectory LNS/fix-and-optimize:
+The first implemented primal neighborhood performs trajectory
+fix-and-optimize as follows. Let $\bar p_c$ be the trajectory of cabin $c$ in
+the current validated incumbent and let $R\subseteq C$ be the released cabin
+cohort. For every fixed cabin,
 
-- fix all but a selected cabin cohort;
+$$
+c\notin R
+\quad\Longrightarrow\quad
+p_c=\bar p_c.
+$$
+
+In the current No-Wait domain, a fixed start and the complete route-option
+sequence uniquely determine every event time. CP-SAT therefore fixes the
+complete route sequence of $c\notin R$ and jointly chooses conflict-free
+routes for $c\in R$. This equivalence must not be assumed after bounded
+Waiting is enabled; that extension must additionally fix or bound the waiting
+profile.
+
+The released cabins are ranked by the current root-LP mass outside the
+incumbent trajectory plus a smaller fractionality term. Deterministic cohort
+sizes cycle through a configured sequence, initially $(4,8,12)$. Ties rotate
+deterministically across calls so that an integral or symmetric LP does not
+always release the same cabin IDs.
+
+The CP objective uses the existing Passenger-dual ride preferences only as a
+search heuristic. A returned candidate is a complete physical fleet package,
+is independently movement/headway validated, and contributes no lower bound.
+Its columns enter the persistent global pool and force a Restricted MIP in the
+next CG round. Only that exact Passenger master may update the validated upper
+bound. Formally,
+
+$$
+LB_t^{\mathrm{rootCG}}
+\quad\text{is unchanged by LNS},
+\qquad
+UB_{t+1}=\min\{UB_t,z^{\mathrm{package\text{-}IP}}_{t+1},
+z^{\mathrm{RMP\text{-}IP}}_{t+1}\}.
+$$
+
+The full Stage-B neighborhood portfolio is:
+
+- fix all but a selected cabin cohort (**implemented**);
 - or release trajectories intersecting one station/resource-time corridor;
 - or release one visit/rotation band across all cabins;
 - solve the resulting restricted exact master;
@@ -279,10 +323,18 @@ The primal layer performs trajectory LNS/fix-and-optimize:
 - import every new trajectory into the persistent global pool;
 - accept only independently validated improving schedules.
 
-Neighborhoods begin with 3--6 cabins and grow after repeated stagnation. Root
-proof pricing and heuristic neighborhood pricing remain separate services and
-metrics. A heuristic negative column may enter the pool, but a failed
-heuristic search never proves nonnegativity.
+Root proof pricing and heuristic neighborhood pricing remain separate services
+and metrics. A heuristic column may enter the pool regardless of reduced cost,
+but a failed heuristic search never proves nonnegativity. Physical merge/time
+corridor selection is implemented; visit-band selection remains a possible
+follow-up after its experimental gate.
+
+The cabin-cohort gate is complete and documented in
+[`../findings/ddd_fractional_cabin_neighborhood_gate.md`](../findings/ddd_fractional_cabin_neighborhood_gate.md).
+It improved K=39 by 2.62% but did not improve K=20, whose Root LP already
+matched the known complete arc-flow optimum. The cohort mechanism remains an
+optional intensification channel. The physical merge/time-corridor neighborhood
+is now implemented and awaits the matched K=20/K=39 gate.
 
 The Stage-B output is a valid anytime interval
 
@@ -522,7 +574,7 @@ bound.
 **Reject tree work** if exact pricing cannot reproduce the reference root
 relaxation or if pair/resource rows lack future-column coefficient semantics.
 
-### Gate 2: primal value
+### Gate 2: primal value (**cabin-cohort subgate complete**)
 
 Compare on $K=20$ and $K=38$:
 

@@ -187,6 +187,28 @@ def main() -> None:
                         "primal_pricing_status_counts": dict(
                             iteration.primal_pricing_status_counts
                         ),
+                        "neighborhood_primal_status": (
+                            iteration.neighborhood_primal_status
+                        ),
+                        "neighborhood_primal_id": iteration.neighborhood_primal_id,
+                        "neighborhood_primal_released_cabin_count": (
+                            iteration.neighborhood_primal_released_cabin_count
+                        ),
+                        "neighborhood_primal_fixed_cabin_count": (
+                            iteration.neighborhood_primal_fixed_cabin_count
+                        ),
+                        "neighborhood_primal_candidate_count": (
+                            iteration.neighborhood_primal_candidate_count
+                        ),
+                        "neighborhood_primal_seconds": (
+                            iteration.neighborhood_primal_seconds
+                        ),
+                        "primal_package_upper_bound": (
+                            iteration.primal_package_upper_bound
+                        ),
+                        "primal_package_evaluation_seconds": (
+                            iteration.primal_package_evaluation_seconds
+                        ),
                         "remaining_budget_seconds": (
                             iteration.remaining_budget_seconds
                         ),
@@ -346,6 +368,25 @@ def _trial_namespace(
         ),
         coordinated_primal_max_preferences=(
             config.coordinated_primal_maximum_preference_count
+        ),
+        neighborhood_primal_time_limit=(
+            config.neighborhood_primal_time_limit_seconds
+            if operating_mode is DddFixedKOperatingMode.SKIP_STOP
+            else 0.0
+        ),
+        neighborhood_primal_interval=config.neighborhood_primal_interval,
+        neighborhood_primal_cabin_count=list(
+            config.neighborhood_primal_cabin_counts
+        ),
+        neighborhood_primal_workers=config.neighborhood_primal_workers,
+        neighborhood_primal_candidates=(
+            config.neighborhood_primal_candidate_count
+        ),
+        neighborhood_primal_max_preferences=(
+            config.neighborhood_primal_maximum_preference_count
+        ),
+        primal_package_evaluation_time_limit=(
+            config.primal_package_evaluation_time_limit_seconds
         ),
         oip_primal_pricing_time_limit=0.0,
         reservoir_primal_pricing_time_limit=0.0,

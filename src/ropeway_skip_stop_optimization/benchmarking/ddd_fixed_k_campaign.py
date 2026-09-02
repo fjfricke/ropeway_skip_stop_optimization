@@ -29,6 +29,13 @@ class DddFixedKCampaignConfig:
     coordinated_primal_workers: int = 8
     coordinated_primal_candidate_count: int = 1
     coordinated_primal_maximum_preference_count: int = 200
+    neighborhood_primal_time_limit_seconds: float = 0.0
+    neighborhood_primal_interval: int = 5
+    neighborhood_primal_cabin_counts: tuple[int, ...] = (4, 8, 12)
+    neighborhood_primal_workers: int = 8
+    neighborhood_primal_candidate_count: int = 1
+    neighborhood_primal_maximum_preference_count: int = 200
+    primal_package_evaluation_time_limit_seconds: float = 30.0
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> DddFixedKCampaignConfig:
@@ -79,6 +86,34 @@ class DddFixedKCampaignConfig:
             coordinated_primal_maximum_preference_count=int(
                 value.get("coordinated_primal_maximum_preference_count", 200)
             ),
+            neighborhood_primal_time_limit_seconds=float(
+                value.get("neighborhood_primal_time_limit_seconds", 0.0)
+            ),
+            neighborhood_primal_interval=int(
+                value.get("neighborhood_primal_interval", 5)
+            ),
+            neighborhood_primal_cabin_counts=tuple(
+                sorted(
+                    {
+                        int(item)
+                        for item in value.get(
+                            "neighborhood_primal_cabin_counts", (4, 8, 12)
+                        )
+                    }
+                )
+            ),
+            neighborhood_primal_workers=int(
+                value.get("neighborhood_primal_workers", 8)
+            ),
+            neighborhood_primal_candidate_count=int(
+                value.get("neighborhood_primal_candidate_count", 1)
+            ),
+            neighborhood_primal_maximum_preference_count=int(
+                value.get("neighborhood_primal_maximum_preference_count", 200)
+            ),
+            primal_package_evaluation_time_limit_seconds=float(
+                value.get("primal_package_evaluation_time_limit_seconds", 30.0)
+            ),
         )
         result.validate()
         return result
@@ -104,6 +139,27 @@ class DddFixedKCampaignConfig:
             or self.coordinated_primal_maximum_preference_count <= 0
         ):
             raise ValueError("coordinated primal settings must be positive")
+        if (
+            not math.isfinite(self.neighborhood_primal_time_limit_seconds)
+            or self.neighborhood_primal_time_limit_seconds < 0
+        ):
+            raise ValueError("neighborhood primal time limit must be nonnegative")
+        if (
+            self.neighborhood_primal_interval <= 0
+            or not self.neighborhood_primal_cabin_counts
+            or any(value <= 0 for value in self.neighborhood_primal_cabin_counts)
+            or self.neighborhood_primal_workers <= 0
+            or self.neighborhood_primal_candidate_count <= 0
+            or self.neighborhood_primal_maximum_preference_count <= 0
+        ):
+            raise ValueError("neighborhood primal settings must be positive")
+        if (
+            not math.isfinite(self.primal_package_evaluation_time_limit_seconds)
+            or self.primal_package_evaluation_time_limit_seconds <= 0
+        ):
+            raise ValueError(
+                "primal package evaluation time limit must be positive"
+            )
 
 
 def derive_available_fleet_intervals(

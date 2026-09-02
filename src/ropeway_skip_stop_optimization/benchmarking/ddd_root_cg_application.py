@@ -33,6 +33,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddFixedKStartPolicy,
     DddFixedKTrajectoryProblem,
     DddTrajectoryConflictRowMode,
+    DddTrajectoryCompatibleBatchMode,
     DddTrajectoryDiveConfig,
     DddTrajectoryDiveCoordinator,
     DddTrajectoryDiversityMode,
@@ -224,6 +225,16 @@ def main() -> None:
     parser.add_argument("--minimum-diversity-distance", type=int, default=1)
     parser.add_argument("--extra-column-time-limit", type=float, default=10.0)
     parser.add_argument(
+        "--compatible-batch-mode",
+        choices=tuple(item.value for item in DddTrajectoryCompatibleBatchMode),
+        default=DddTrajectoryCompatibleBatchMode.OFF.value,
+        help=(
+            "Select a jointly compatible subset of negative priced columns; "
+            "this changes column admission, never the proof bound."
+        ),
+    )
+    parser.add_argument("--compatible-batch-time-limit", type=float, default=10.0)
+    parser.add_argument(
         "--coordinated-primal-time-limit",
         type=float,
         default=0.0,
@@ -239,6 +250,66 @@ def main() -> None:
         "--coordinated-primal-max-preferences",
         type=int,
         default=2_000,
+    )
+    parser.add_argument(
+        "--neighborhood-primal-time-limit",
+        type=float,
+        default=0.0,
+        help=(
+            "Per-call CP-SAT fix-and-optimize budget; zero disables the "
+            "primal-only cabin-neighborhood channel."
+        ),
+    )
+    parser.add_argument("--neighborhood-primal-interval", type=int, default=5)
+    parser.add_argument(
+        "--neighborhood-primal-cabin-count",
+        type=int,
+        action="append",
+        default=[],
+        help="Released cabin count; repeat to cycle through several neighborhood sizes.",
+    )
+    parser.add_argument("--neighborhood-primal-workers", type=int, default=8)
+    parser.add_argument("--neighborhood-primal-candidates", type=int, default=1)
+    parser.add_argument(
+        "--neighborhood-primal-max-preferences",
+        type=int,
+        default=2_000,
+    )
+    parser.add_argument(
+        "--merge-corridor-primal-time-limit",
+        type=float,
+        default=0.0,
+        help=(
+            "Per-call CP-SAT budget for physical merge/time corridor "
+            "fix-and-optimize; zero disables this primal-only channel."
+        ),
+    )
+    parser.add_argument("--merge-corridor-primal-interval", type=int, default=5)
+    parser.add_argument(
+        "--merge-corridor-window-seconds",
+        type=float,
+        action="append",
+        default=[],
+        help="Corridor width; repeat to cycle through increasingly broad windows.",
+    )
+    parser.add_argument("--merge-corridor-upstream-visits", type=int, default=1)
+    parser.add_argument("--merge-corridor-downstream-visits", type=int, default=1)
+    parser.add_argument("--merge-corridor-min-occurrences", type=int, default=2)
+    parser.add_argument("--merge-corridor-primal-workers", type=int, default=8)
+    parser.add_argument("--merge-corridor-primal-candidates", type=int, default=1)
+    parser.add_argument(
+        "--merge-corridor-primal-max-preferences",
+        type=int,
+        default=2_000,
+    )
+    parser.add_argument(
+        "--primal-package-evaluation-time-limit",
+        type=float,
+        default=30.0,
+        help=(
+            "Per-package time limit for exact fixed-movement Passenger MIP "
+            "evaluation of complete CP candidates."
+        ),
     )
     parser.add_argument(
         "--oip-primal-pricing-time-limit",
@@ -560,7 +631,11 @@ def run_namespace(
     )
     initial_trajectories = (
         None
-        if prepared_fixed_k is None or not prepared_fixed_k.seed_trajectories
+        if (
+            resume_state is not None
+            or prepared_fixed_k is None
+            or not prepared_fixed_k.seed_trajectories
+        )
         else prepared_fixed_k.seed_trajectories
     )
     seed_result = None
@@ -726,6 +801,18 @@ def run_namespace(
             f"{iteration.primal_pricing_candidate_count}c/"
             f"{iteration.primal_pricing_negative_candidate_count}n/"
             f"{iteration.primal_pricing_seconds:.2f}s[{primal_statuses}] "
+            f"lns={iteration.neighborhood_primal_status or '-'}/"
+            f"{iteration.neighborhood_primal_released_cabin_count}r/"
+            f"{iteration.neighborhood_primal_candidate_count}c/"
+            f"{iteration.neighborhood_primal_seconds:.1f}s "
+            f"corridor={iteration.merge_corridor_primal_status or '-'}/"
+            f"{iteration.merge_corridor_released_cabin_count}c/"
+            f"{iteration.merge_corridor_released_decision_count}d/"
+            f"{iteration.merge_corridor_primal_candidate_count}p/"
+            f"{iteration.merge_corridor_primal_seconds:.1f}s "
+            f"pkgUB={('-' if iteration.primal_package_upper_bound is None else f'{iteration.primal_package_upper_bound:.3f}')}/"
+            f"{iteration.primal_package_solution_count}s/"
+            f"{iteration.primal_package_evaluation_seconds:.1f}s "
             f"classes={iteration.bounded_start_class_count}/"
             f"{iteration.required_start_class_count}b "
             f"rel={iteration.relative_node_count}n/"
@@ -780,6 +867,16 @@ def run_namespace(
         diversity_mode=DddTrajectoryDiversityMode(args.diversity_mode),
         minimum_diversity_distance=args.minimum_diversity_distance,
         extra_column_time_limit_seconds=args.extra_column_time_limit,
+        compatible_batch_mode=DddTrajectoryCompatibleBatchMode(
+            getattr(
+                args,
+                "compatible_batch_mode",
+                DddTrajectoryCompatibleBatchMode.OFF.value,
+            )
+        ),
+        compatible_batch_time_limit_seconds=float(
+            getattr(args, "compatible_batch_time_limit", 10.0)
+        ),
         coordinated_primal_time_limit_seconds=(
             args.coordinated_primal_time_limit
         ),
@@ -788,6 +885,62 @@ def run_namespace(
         coordinated_primal_candidate_count=args.coordinated_primal_candidates,
         coordinated_primal_maximum_preference_count=(
             args.coordinated_primal_max_preferences
+        ),
+        neighborhood_primal_time_limit_seconds=(
+            getattr(args, "neighborhood_primal_time_limit", 0.0)
+        ),
+        neighborhood_primal_interval=getattr(
+            args, "neighborhood_primal_interval", 5
+        ),
+        neighborhood_primal_cabin_counts=tuple(
+            sorted(
+                set(
+                    getattr(args, "neighborhood_primal_cabin_count", ())
+                    or (4, 8, 12)
+                )
+            )
+        ),
+        neighborhood_primal_workers=getattr(args, "neighborhood_primal_workers", 8),
+        neighborhood_primal_candidate_count=getattr(
+            args, "neighborhood_primal_candidates", 1
+        ),
+        neighborhood_primal_maximum_preference_count=(
+            getattr(args, "neighborhood_primal_max_preferences", 2_000)
+        ),
+        merge_corridor_primal_time_limit_seconds=getattr(
+            args, "merge_corridor_primal_time_limit", 0.0
+        ),
+        merge_corridor_primal_interval=getattr(
+            args, "merge_corridor_primal_interval", 5
+        ),
+        merge_corridor_window_widths_seconds=tuple(
+            sorted(
+                set(
+                    getattr(args, "merge_corridor_window_seconds", ())
+                    or (120.0, 240.0, 480.0)
+                )
+            )
+        ),
+        merge_corridor_upstream_visit_count=getattr(
+            args, "merge_corridor_upstream_visits", 1
+        ),
+        merge_corridor_downstream_visit_count=getattr(
+            args, "merge_corridor_downstream_visits", 1
+        ),
+        merge_corridor_minimum_occurrence_count=getattr(
+            args, "merge_corridor_min_occurrences", 2
+        ),
+        merge_corridor_primal_workers=getattr(
+            args, "merge_corridor_primal_workers", 8
+        ),
+        merge_corridor_primal_candidate_count=getattr(
+            args, "merge_corridor_primal_candidates", 1
+        ),
+        merge_corridor_primal_maximum_preference_count=getattr(
+            args, "merge_corridor_primal_max_preferences", 2_000
+        ),
+        primal_package_evaluation_time_limit_seconds=getattr(
+            args, "primal_package_evaluation_time_limit", 30.0
         ),
         oip_primal_pricing_time_limit_seconds=(args.oip_primal_pricing_time_limit),
         reservoir_primal_pricing_time_limit_seconds=(
@@ -1032,6 +1185,14 @@ def run_namespace(
         "coordinated_primal_time_limit_seconds": (
             args.coordinated_primal_time_limit
         ),
+        "compatible_batch_mode": getattr(
+            args,
+            "compatible_batch_mode",
+            DddTrajectoryCompatibleBatchMode.OFF.value,
+        ),
+        "compatible_batch_time_limit_seconds": float(
+            getattr(args, "compatible_batch_time_limit", 10.0)
+        ),
         "coordinated_primal_interval": args.coordinated_primal_interval,
         "coordinated_primal_workers": args.coordinated_primal_workers,
         "coordinated_primal_candidate_count": (
@@ -1039,6 +1200,64 @@ def run_namespace(
         ),
         "coordinated_primal_maximum_preference_count": (
             args.coordinated_primal_max_preferences
+        ),
+        "neighborhood_primal_time_limit_seconds": (
+            getattr(args, "neighborhood_primal_time_limit", 0.0)
+        ),
+        "neighborhood_primal_interval": getattr(
+            args, "neighborhood_primal_interval", 5
+        ),
+        "neighborhood_primal_cabin_counts": list(
+            sorted(
+                set(
+                    getattr(args, "neighborhood_primal_cabin_count", ())
+                    or (4, 8, 12)
+                )
+            )
+        ),
+        "neighborhood_primal_workers": getattr(
+            args, "neighborhood_primal_workers", 8
+        ),
+        "neighborhood_primal_candidate_count": (
+            getattr(args, "neighborhood_primal_candidates", 1)
+        ),
+        "neighborhood_primal_maximum_preference_count": (
+            getattr(args, "neighborhood_primal_max_preferences", 2_000)
+        ),
+        "merge_corridor_primal_time_limit_seconds": getattr(
+            args, "merge_corridor_primal_time_limit", 0.0
+        ),
+        "merge_corridor_primal_interval": getattr(
+            args, "merge_corridor_primal_interval", 5
+        ),
+        "merge_corridor_window_widths_seconds": list(
+            sorted(
+                set(
+                    getattr(args, "merge_corridor_window_seconds", ())
+                    or (120.0, 240.0, 480.0)
+                )
+            )
+        ),
+        "merge_corridor_upstream_visit_count": getattr(
+            args, "merge_corridor_upstream_visits", 1
+        ),
+        "merge_corridor_downstream_visit_count": getattr(
+            args, "merge_corridor_downstream_visits", 1
+        ),
+        "merge_corridor_minimum_occurrence_count": getattr(
+            args, "merge_corridor_min_occurrences", 2
+        ),
+        "merge_corridor_primal_workers": getattr(
+            args, "merge_corridor_primal_workers", 8
+        ),
+        "merge_corridor_primal_candidate_count": getattr(
+            args, "merge_corridor_primal_candidates", 1
+        ),
+        "merge_corridor_primal_maximum_preference_count": getattr(
+            args, "merge_corridor_primal_max_preferences", 2_000
+        ),
+        "primal_package_evaluation_time_limit_seconds": getattr(
+            args, "primal_package_evaluation_time_limit", 30.0
         ),
         "oip_primal_pricing_time_limit_seconds": (args.oip_primal_pricing_time_limit),
         "reservoir_primal_pricing_time_limit_seconds": (
@@ -1134,6 +1353,14 @@ def _format_compact_progress(
         f"{iteration.pricing_seconds:5.1f}s "
         f"tier<={iteration.pricing_tier_seconds:>3g}s "
         f"open={iteration.unresolved_pricing_count:02d} | "
+        f"batch={getattr(iteration, 'compatible_batch_selected_count', 0):02d}/"
+        f"{getattr(iteration, 'compatible_batch_candidate_count', 0):02d} "
+        f"lns={getattr(iteration, 'neighborhood_primal_released_cabin_count', 0):02d}/"
+        f"{getattr(iteration, 'neighborhood_primal_candidate_count', 0):01d} "
+        f"mc={getattr(iteration, 'merge_corridor_released_cabin_count', 0):02d}/"
+        f"{getattr(iteration, 'merge_corridor_released_decision_count', 0):03d}/"
+        f"{getattr(iteration, 'merge_corridor_primal_candidate_count', 0):01d} "
+        f"pkg={_format_objective(getattr(iteration, 'primal_package_upper_bound', None))} "
         f"MIP={mip:<6} left={_format_duration(iteration.remaining_budget_seconds)}"
     )
 

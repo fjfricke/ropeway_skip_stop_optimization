@@ -203,6 +203,13 @@ def test_campaign_config_parses_coordinated_primal_settings() -> None:
             "coordinated_primal_workers": 4,
             "coordinated_primal_candidate_count": 2,
             "coordinated_primal_maximum_preference_count": 300,
+            "neighborhood_primal_time_limit_seconds": 30,
+            "neighborhood_primal_interval": 4,
+            "neighborhood_primal_cabin_counts": [4, 8],
+            "neighborhood_primal_workers": 3,
+            "neighborhood_primal_candidate_count": 2,
+            "neighborhood_primal_maximum_preference_count": 250,
+            "primal_package_evaluation_time_limit_seconds": 12,
         }
     )
 
@@ -211,6 +218,13 @@ def test_campaign_config_parses_coordinated_primal_settings() -> None:
     assert config.coordinated_primal_workers == 4
     assert config.coordinated_primal_candidate_count == 2
     assert config.coordinated_primal_maximum_preference_count == 300
+    assert config.neighborhood_primal_time_limit_seconds == pytest.approx(30.0)
+    assert config.neighborhood_primal_interval == 4
+    assert config.neighborhood_primal_cabin_counts == (4, 8)
+    assert config.neighborhood_primal_workers == 3
+    assert config.neighborhood_primal_candidate_count == 2
+    assert config.neighborhood_primal_maximum_preference_count == 250
+    assert config.primal_package_evaluation_time_limit_seconds == pytest.approx(12.0)
 
 
 def test_seed_coordinator_maps_complete_cp_infeasibility(monkeypatch: pytest.MonkeyPatch) -> None:

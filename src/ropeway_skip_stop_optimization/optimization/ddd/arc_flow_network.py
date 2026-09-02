@@ -2,10 +2,12 @@ from __future__ import annotations
 
 from collections import Counter, defaultdict
 from dataclasses import dataclass
+from time import perf_counter
 
 from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddFixedStart,
     DddMovementProblem,
+    DddRouteDecision,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.reference import (
     DddReferenceResourceOccurrence,
@@ -13,15 +15,23 @@ from ropeway_skip_stop_optimization.optimization.ddd.reference import (
 from ropeway_skip_stop_optimization.optimization.ddd.route_topology import (
     deterministic_route_state_ids,
 )
-from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generation import (
-    DddTrajectoryWaitingDomain,
-)
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_problem import (
     DddTrajectoryWaitingPolicy,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
     ddd_seconds_to_tick,
 )
+
+
+class DddArcFlowBuildTimeLimitError(TimeoutError):
+    """The shared wall-clock budget expired during exact graph construction."""
+
+
+def check_ddd_arc_flow_build_deadline(deadline_monotonic: float | None) -> None:
+    if deadline_monotonic is not None and perf_counter() >= deadline_monotonic:
+        raise DddArcFlowBuildTimeLimitError(
+            "fixed-K arc-flow budget expired during network construction"
+        )
 
 
 @dataclass(frozen=True, order=True, slots=True)
@@ -192,6 +202,7 @@ class DddCabinTimeExpandedNetworkBuilder:
         *,
         waiting_policy: DddTrajectoryWaitingPolicy | None = None,
         boundary_intervals: tuple[DddArcFlowBoundaryInterval, ...] = (),
+        deadline_monotonic: float | None = None,
     ) -> DddCabinTimeExpandedNetwork:
         movement_problem.validate()
         start.validate()
@@ -199,8 +210,6 @@ class DddCabinTimeExpandedNetworkBuilder:
         waiting_policy.validate(movement_problem.core)
         for boundary_interval in boundary_intervals:
             boundary_interval.validate()
-        if waiting_policy.domain is not DddTrajectoryWaitingDomain.NO_WAIT:
-            raise ValueError("fixed-K arc-flow v1 supports no-wait only")
         states = deterministic_route_state_ids(
             movement_problem,
             start_state_id=start.state_id,
@@ -211,71 +220,104 @@ class DddCabinTimeExpandedNetworkBuilder:
         nodes: set[tuple[int, bool]] = {(start.time_tick, True)}
         arcs: list[DddCabinTimeExpandedArc] = []
         for visit_index, state_id in enumerate(states[:-1]):
+            check_ddd_arc_flow_build_deadline(deadline_monotonic)
             next_nodes: set[tuple[int, bool]] = set()
             for source_index, (source_tick, source_active) in enumerate(sorted(nodes)):
+                if source_index % 256 == 0:
+                    check_ddd_arc_flow_build_deadline(deadline_monotonic)
                 options = (
                     movement_problem.route_options_by_state_id[state_id]
                     if source_active
                     else (None,)
                 )
                 for option_index, option in enumerate(options):
-                    target_tick = (
-                        source_tick
+                    wait_values = (
+                        (0.0,)
                         if option is None
-                        else source_tick + option.duration_tick
+                        else waiting_policy.wait_values_seconds(option.station_id)
                     )
-                    target_active = (
-                        option is not None
-                        and target_tick <= movement_problem.operational_end_tick
-                    )
-                    arc_id = (
-                        f"c{start.cabin_id}:v{visit_index}:s{source_index}:"
-                        f"o{option_index}:t{source_tick}"
-                    )
-                    intervals: list[DddArcFlowResourceInterval] = []
-                    if option is not None:
-                        for usage_index, usage in enumerate(option.resource_usages):
-                            enter_tick = source_tick + usage.follower_enter_offset_tick
-                            if enter_tick > movement_problem.operational_end_tick:
+                    for wait_index, wait_seconds in enumerate(wait_values):
+                        wait_tick = ddd_seconds_to_tick(wait_seconds)
+                        if option is not None and wait_tick > 0:
+                            if option.decision is DddRouteDecision.SKIP:
                                 continue
-                            resource = resources[usage.resource_id]
-                            clear_tick = (
+                            if option.platform_exit_offset_seconds is None:
+                                continue
+                            minimum_exit_tick = (
                                 source_tick
-                                + usage.leader_clear_offset_tick
-                                + usage.separation_after_tick(
-                                    resource.minimum_headway_tick
+                                + ddd_seconds_to_tick(
+                                    option.platform_exit_offset_seconds
                                 )
                             )
-                            interval = DddArcFlowResourceInterval(
-                                resource_id=usage.resource_id,
-                                arc_id=arc_id,
-                                usage_index=usage_index,
-                                enter_tick=enter_tick,
-                                clear_with_headway_tick=clear_tick,
-                            )
-                            interval.validate()
-                            intervals.append(interval)
-                    if any(
-                        boundary.overlaps(interval)
-                        for boundary in boundary_intervals
-                        for interval in intervals
-                    ):
-                        continue
-                    arcs.append(
-                        DddCabinTimeExpandedArc(
-                            id=arc_id,
-                            cabin_id=start.cabin_id,
-                            visit_index=visit_index,
-                            source_tick=source_tick,
-                            source_active=source_active,
-                            option_id=None if option is None else option.id,
-                            wait_tick=0,
-                            target_tick=target_tick,
-                            target_active=target_active,
-                            resource_intervals=tuple(intervals),
+                            if minimum_exit_tick < ddd_seconds_to_tick(
+                                waiting_policy.earliest_wait_time_seconds
+                            ):
+                                continue
+                        target_tick = (
+                            source_tick
+                            if option is None
+                            else source_tick + option.duration_tick + wait_tick
                         )
-                    )
-                    next_nodes.add((target_tick, target_active))
+                        target_active = (
+                            option is not None
+                            and target_tick <= movement_problem.operational_end_tick
+                        )
+                        arc_id = (
+                            f"c{start.cabin_id}:v{visit_index}:s{source_index}:"
+                            f"o{option_index}:w{wait_index}:t{source_tick}"
+                        )
+                        intervals: list[DddArcFlowResourceInterval] = []
+                        if option is not None:
+                            for usage_index, usage in enumerate(
+                                option.resource_usages
+                            ):
+                                enter_tick = (
+                                    source_tick
+                                    + usage.follower_enter_offset_tick
+                                    + usage.follower_enter_wait_coefficient
+                                    * wait_tick
+                                )
+                                if enter_tick > movement_problem.operational_end_tick:
+                                    continue
+                                resource = resources[usage.resource_id]
+                                clear_tick = (
+                                    source_tick
+                                    + usage.leader_clear_offset_tick
+                                    + usage.leader_clear_wait_coefficient * wait_tick
+                                    + usage.separation_after_tick(
+                                        resource.minimum_headway_tick
+                                    )
+                                )
+                                interval = DddArcFlowResourceInterval(
+                                    resource_id=usage.resource_id,
+                                    arc_id=arc_id,
+                                    usage_index=usage_index,
+                                    enter_tick=enter_tick,
+                                    clear_with_headway_tick=clear_tick,
+                                )
+                                interval.validate()
+                                intervals.append(interval)
+                        if any(
+                            boundary.overlaps(interval)
+                            for boundary in boundary_intervals
+                            for interval in intervals
+                        ):
+                            continue
+                        arcs.append(
+                            DddCabinTimeExpandedArc(
+                                id=arc_id,
+                                cabin_id=start.cabin_id,
+                                visit_index=visit_index,
+                                source_tick=source_tick,
+                                source_active=source_active,
+                                option_id=None if option is None else option.id,
+                                wait_tick=wait_tick,
+                                target_tick=target_tick,
+                                target_active=target_active,
+                                resource_intervals=tuple(intervals),
+                            )
+                        )
+                        next_nodes.add((target_tick, target_active))
             nodes = next_nodes
         result = DddCabinTimeExpandedNetwork(
             cabin_id=start.cabin_id,
@@ -309,6 +351,8 @@ class DddArcFlowResourceClique:
 
 def build_ddd_arc_flow_resource_cliques(
     networks: tuple[DddCabinTimeExpandedNetwork, ...],
+    *,
+    deadline_monotonic: float | None = None,
 ) -> tuple[DddArcFlowResourceClique, ...]:
     """Return all inclusion-maximal interval cliques, deterministically deduplicated."""
 
@@ -317,11 +361,16 @@ def build_ddd_arc_flow_resource_cliques(
         network.validate()
         for arc in network.arcs:
             intervals.extend(arc.resource_intervals)
-    return build_ddd_arc_flow_resource_cliques_from_intervals(tuple(intervals))
+    return build_ddd_arc_flow_resource_cliques_from_intervals(
+        tuple(intervals),
+        deadline_monotonic=deadline_monotonic,
+    )
 
 
 def build_ddd_arc_flow_resource_cliques_from_intervals(
     intervals: tuple[DddArcFlowResourceInterval, ...],
+    *,
+    deadline_monotonic: float | None = None,
 ) -> tuple[DddArcFlowResourceClique, ...]:
     """Build maximal interval cliques for any exact arc-indexed flow network."""
 
@@ -334,6 +383,7 @@ def build_ddd_arc_flow_resource_cliques_from_intervals(
 
     result: list[DddArcFlowResourceClique] = []
     for resource_id, intervals in sorted(intervals_by_resource.items()):
+        check_ddd_arc_flow_build_deadline(deadline_monotonic)
         ordered = tuple(sorted(intervals))
         starts: dict[int, list[int]] = defaultdict(list)
         ends: dict[int, list[int]] = defaultdict(list)
@@ -342,7 +392,9 @@ def build_ddd_arc_flow_resource_cliques_from_intervals(
             ends[interval.clear_with_headway_tick].append(interval_index)
         active_mask = 0
         candidate_anchor_by_mask: dict[int, int] = {}
-        for tick in sorted(set(starts) | set(ends)):
+        for tick_index, tick in enumerate(sorted(set(starts) | set(ends))):
+            if tick_index % 256 == 0:
+                check_ddd_arc_flow_build_deadline(deadline_monotonic)
             for interval_index in ends.get(tick, ()):
                 active_mask &= ~(1 << interval_index)
             if tick not in starts:
@@ -351,10 +403,18 @@ def build_ddd_arc_flow_resource_cliques_from_intervals(
                 active_mask |= 1 << interval_index
             candidate_anchor_by_mask.setdefault(active_mask, tick)
         maximal_masks: list[int] = []
-        for mask in sorted(
-            candidate_anchor_by_mask,
-            key=lambda item: (-item.bit_count(), candidate_anchor_by_mask[item], item),
+        for mask_index, mask in enumerate(
+            sorted(
+                candidate_anchor_by_mask,
+                key=lambda item: (
+                    -item.bit_count(),
+                    candidate_anchor_by_mask[item],
+                    item,
+                ),
+            )
         ):
+            if mask_index % 64 == 0:
+                check_ddd_arc_flow_build_deadline(deadline_monotonic)
             if any(mask & other == mask for other in maximal_masks):
                 continue
             maximal_masks.append(mask)

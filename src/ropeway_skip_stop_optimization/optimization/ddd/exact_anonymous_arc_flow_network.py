@@ -3,8 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from hashlib import sha256
 import json
+from time import perf_counter
 
 from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_network import (
+    DddArcFlowBuildTimeLimitError,
     DddArcFlowResourceClique,
     DddArcFlowResourceInterval,
     build_ddd_arc_flow_resource_cliques_from_intervals,
@@ -53,6 +55,7 @@ class DddExactAnonymousArc:
     option_id: str
     target_state_id: str
     target_tick: int
+    wait_tick: int
     source_node_id: str | None
     target_node_id: str | None
     source_token_id: str | None = None
@@ -75,6 +78,7 @@ class DddExactAnonymousArc:
             or not self.option_id
             or self.source_tick < 0
             or self.target_tick <= self.source_tick
+            or self.wait_tick < 0
         ):
             raise ValueError("exact anonymous arc identity or timing is invalid")
         if (self.source_token_id is None) == (self.source_node_id is None):
@@ -97,7 +101,7 @@ class DddExactAnonymousArc:
 
 @dataclass(frozen=True, slots=True)
 class DddExactAnonymousArcFlowNetwork:
-    """Exact no-wait fixed-start network after quotienting cabin/visit labels."""
+    """Exact fixed-start network after quotienting cabin/visit labels."""
 
     problem_fingerprint: str
     start_tokens: tuple[DddExactAnonymousStartToken, ...]
@@ -180,6 +184,8 @@ class DddExactAnonymousArcFlowNetworkBuilder:
     def build(
         self,
         prepared: DddPreparedArcFlowProblem,
+        *,
+        deadline_monotonic: float | None = None,
     ) -> DddExactAnonymousArcFlowNetwork:
         prepared.validate()
         token_by_cabin = {
@@ -192,8 +198,21 @@ class DddExactAnonymousArcFlowNetworkBuilder:
         }
         nodes: dict[str, DddExactAnonymousNode] = {}
         arcs_by_key: dict[tuple[object, ...], DddExactAnonymousArc] = {}
+        provenance_by_key: dict[tuple[object, ...], list[str]] = {}
         for network in prepared.networks:
-            for labeled in network.arcs:
+            if deadline_monotonic is not None and perf_counter() >= deadline_monotonic:
+                raise DddArcFlowBuildTimeLimitError(
+                    "fixed-K arc-flow budget expired during anonymous quotienting"
+                )
+            for arc_index, labeled in enumerate(network.arcs):
+                if (
+                    arc_index % 1024 == 0
+                    and deadline_monotonic is not None
+                    and perf_counter() >= deadline_monotonic
+                ):
+                    raise DddArcFlowBuildTimeLimitError(
+                        "fixed-K arc-flow budget expired during anonymous quotienting"
+                    )
                 if not labeled.source_active or labeled.option_id is None:
                     continue
                 source_state = network.state_ids[labeled.visit_index]
@@ -235,16 +254,12 @@ class DddExactAnonymousArcFlowNetworkBuilder:
                     labeled.option_id,
                     target_state,
                     labeled.target_tick,
+                    labeled.wait_tick,
                     interval_signature,
                 )
                 existing = arcs_by_key.get(key)
                 if existing is not None:
-                    arcs_by_key[key] = replace(
-                        existing,
-                        represented_labeled_arc_ids=tuple(
-                            sorted((*existing.represented_labeled_arc_ids, labeled.id))
-                        ),
-                    )
+                    provenance_by_key[key].append(labeled.id)
                     continue
                 arc_id = f"exact_arc::{_stable_digest(key)}"
                 intervals = tuple(
@@ -264,13 +279,28 @@ class DddExactAnonymousArcFlowNetworkBuilder:
                     option_id=labeled.option_id,
                     target_state_id=target_state,
                     target_tick=labeled.target_tick,
+                    wait_tick=labeled.wait_tick,
                     source_node_id=None if source_node is None else source_node.id,
                     target_node_id=None if target_node is None else target_node.id,
                     source_token_id=(None if source_token is None else source_token.id),
                     resource_intervals=intervals,
                     represented_labeled_arc_ids=(labeled.id,),
                 )
-        arcs = tuple(sorted(arcs_by_key.values(), key=lambda item: item.id))
+                provenance_by_key[key] = [labeled.id]
+        arcs = tuple(
+            sorted(
+                (
+                    replace(
+                        arc,
+                        represented_labeled_arc_ids=tuple(
+                            sorted(provenance_by_key[key])
+                        ),
+                    )
+                    for key, arc in arcs_by_key.items()
+                ),
+                key=lambda item: item.id,
+            )
+        )
         incomplete = DddExactAnonymousArcFlowNetwork(
             problem_fingerprint=prepared.problem.fingerprint,
             start_tokens=tuple(
@@ -279,7 +309,8 @@ class DddExactAnonymousArcFlowNetworkBuilder:
             nodes=tuple(sorted(nodes.values())),
             arcs=arcs,
             resource_cliques=build_ddd_arc_flow_resource_cliques_from_intervals(
-                tuple(interval for arc in arcs for interval in arc.resource_intervals)
+                tuple(interval for arc in arcs for interval in arc.resource_intervals),
+                deadline_monotonic=deadline_monotonic,
             ),
             fingerprint="",
         )
@@ -315,6 +346,7 @@ def _network_fingerprint(network: DddExactAnonymousArcFlowNetwork) -> str:
                 arc.option_id,
                 arc.target_state_id,
                 arc.target_tick,
+                arc.wait_tick,
                 arc.source_node_id,
                 arc.target_node_id,
                 arc.source_token_id,

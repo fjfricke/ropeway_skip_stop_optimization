@@ -15,6 +15,15 @@ from ropeway_skip_stop_optimization.optimization.ddd.reference import (
 )
 
 
+DDD_CP_SAT_CABIN_PATH_CORE_PROVENANCE = "exact_cp_sat_cabin_path_core"
+DDD_CP_SAT_CABIN_PATH_CORE_PROVENANCES = frozenset(
+    {
+        DDD_CP_SAT_CABIN_PATH_CORE_PROVENANCE,
+        "exact_cp_sat_no_wait_cabin_path_core",
+    }
+)
+
+
 @dataclass(frozen=True, order=True)
 class DddSupportLiteral:
     cabin_id: int
@@ -84,7 +93,7 @@ class DddSupportConflictCut:
             raise ValueError("DDD support conflict cut needs at least one literal")
         if (
             len(self.literals) < 2
-            and self.provenance != "exact_cp_sat_no_wait_cabin_path_core"
+            and self.provenance not in DDD_CP_SAT_CABIN_PATH_CORE_PROVENANCES
         ):
             raise ValueError("DDD resource-prefix conflict cut needs two literals")
         if len(set(self.literals)) != len(self.literals):

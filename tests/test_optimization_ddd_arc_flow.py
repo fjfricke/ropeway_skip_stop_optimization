@@ -1,8 +1,13 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from time import perf_counter
 
 import pytest
+
+from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_network import (
+    DddArcFlowBuildTimeLimitError,
+)
 
 from ropeway_skip_stop_optimization.benchmarking.ddd_fixed_k_arc_flow import (
     DddAnalyticAllStopInfeasible,
@@ -16,11 +21,13 @@ from ropeway_skip_stop_optimization.benchmarking.ddd_scaling import (
 )
 from ropeway_skip_stop_optimization.examples.registry import get_example
 from ropeway_skip_stop_optimization.optimization.ddd import (
+    DddArcFlowResourceRowMode,
     DddArcFlowResourceInterval,
     DddArcFlowBoundaryInterval,
     DddArcFlowProblemPreparer,
     DddArcFlowPassengerDomainBuilder,
     DddArcFlowPassengerModelBuilder,
+    DddArcFlowSelectedResourceCliqueSeparator,
     DddCabinTimeExpandedArc,
     DddCabinTimeExpandedNetwork,
     DddCabinTimeExpandedNetworkBuilder,
@@ -45,6 +52,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     EanArtifactToDddMovementProblemAdapter,
     build_ddd_arc_flow_resource_cliques,
     build_ddd_exact_anonymous_movement_values,
+    ddd_seconds_to_tick,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
     CanonicalFixedKRopeCabinStartBuilder,
@@ -100,19 +108,49 @@ def test_time_expanded_network_is_deterministic_and_covers_horizon() -> None:
     )
 
 
-def test_time_expanded_network_rejects_waiting_v1() -> None:
+def test_time_expanded_network_adds_wait_only_to_stop_arcs() -> None:
     problem = _fixed_problem()
     movement = problem.resolved_trajectory_problem.structural_movement_problem
-    station_id = movement.route_options[0].station_id
-    with pytest.raises(ValueError, match="no-wait"):
+    station_ids = tuple(
+        sorted({option.station_id for option in movement.route_options})
+    )
+    network = DddCabinTimeExpandedNetworkBuilder().build(
+        movement,
+        movement.starts[0],
+        waiting_policy=DddTrajectoryWaitingPolicy(
+            domain=DddTrajectoryWaitingDomain.BOUNDED_WAIT,
+            step_seconds=1.0,
+            maximum_wait_seconds_by_station_id=tuple(
+                (station_id, 1.0) for station_id in station_ids
+            ),
+        ),
+    )
+    option_by_id = {option.id: option for option in movement.route_options}
+
+    assert any(arc.wait_tick == ddd_seconds_to_tick(1.0) for arc in network.arcs)
+    assert all(
+        arc.wait_tick == 0
+        for arc in network.arcs
+        if arc.option_id is not None
+        and option_by_id[arc.option_id].decision.value == "skip"
+    )
+    assert all(
+        arc.target_tick
+        == arc.source_tick + option_by_id[arc.option_id].duration_tick + arc.wait_tick
+        for arc in network.arcs
+        if arc.option_id is not None
+    )
+
+
+def test_time_expanded_network_honors_the_shared_build_deadline() -> None:
+    problem = _fixed_problem()
+    movement = problem.resolved_trajectory_problem.structural_movement_problem
+
+    with pytest.raises(DddArcFlowBuildTimeLimitError):
         DddCabinTimeExpandedNetworkBuilder().build(
             movement,
             movement.starts[0],
-            waiting_policy=DddTrajectoryWaitingPolicy(
-                domain=DddTrajectoryWaitingDomain.BOUNDED_WAIT,
-                step_seconds=1.0,
-                maximum_wait_seconds_by_station_id=((station_id, 1.0),),
-            ),
+            deadline_monotonic=perf_counter() - 1.0,
         )
 
 
@@ -166,6 +204,28 @@ def test_balanced_reference_uses_identical_all_stop_starts_below_capacity() -> N
     assert all_stop.artifact.cabin_starts == skip_stop.artifact.cabin_starts
     assert not all_stop.boundary_context.resource_occurrences
     assert not skip_stop.boundary_context.resource_occurrences
+
+
+def test_headway_scaled_waiting_policy_is_station_local_and_grid_safe() -> None:
+    no_wait_config = DddFixedKArcFlowRunConfig(
+        example_id=HEADWAY_B_EXAMPLE_ID,
+        cabin_count=1,
+        operating_mode=DddFixedKOperatingMode.SKIP_STOP,
+        start_policy=DddFixedKStartPolicy.BALANCED_REFERENCE,
+    )
+    waiting_config = replace(no_wait_config, waiting_headway_multiplier=0.5)
+
+    _, no_wait = build_ddd_fixed_k_arc_flow_problem(no_wait_config)
+    _, waiting = build_ddd_fixed_k_arc_flow_problem(waiting_config)
+    policy = waiting.resolved_trajectory_problem.waiting_policy
+
+    assert policy.domain is DddTrajectoryWaitingDomain.BOUNDED_WAIT
+    assert policy.step_seconds == pytest.approx(1.0)
+    assert dict(policy.maximum_wait_seconds_by_station_id) == {
+        station_id: 3.0 for station_id in ("A", "B", "C", "D", "E")
+    }
+    assert no_wait.artifact.cabin_starts == waiting.artifact.cabin_starts
+    assert no_wait.fingerprint != waiting.fingerprint
 
 
 def test_balanced_reference_certifies_all_stop_above_capacity_analytically() -> None:
@@ -253,6 +313,67 @@ def test_resource_cliques_respect_half_open_boundaries_and_deduplicate() -> None
         (("a", 1), ("b", 1)),
         (("c", 1),),
     )
+
+
+def test_selected_resource_separator_finds_and_deduplicates_conflicts() -> None:
+    prepared = DddArcFlowProblemPreparer().build(
+        _fixed_problem(cabin_count=2),
+        build_labeled_resource_cliques=False,
+    )
+    conflicting_pair = next(
+        (first, second)
+        for first in prepared.arcs
+        for second in prepared.arcs
+        if first.cabin_id != second.cabin_id
+        and any(
+            first_interval.resource_id == second_interval.resource_id
+            and first_interval.enter_tick
+            < second_interval.clear_with_headway_tick
+            and second_interval.enter_tick
+            < first_interval.clear_with_headway_tick
+            for first_interval in first.resource_intervals
+            for second_interval in second.resource_intervals
+        )
+    )
+    separator = DddArcFlowSelectedResourceCliqueSeparator(prepared)
+
+    first = separator.separate(
+        frozenset(arc.id for arc in conflicting_pair)
+    )
+    separator.mark_materialized(first.new_violations)
+    duplicate = separator.separate(
+        frozenset(arc.id for arc in conflicting_pair)
+    )
+
+    assert first.violations
+    assert first.new_violations == first.violations
+    assert duplicate.violations == first.violations
+    assert not duplicate.new_violations
+    assert duplicate.duplicate_violation_count == len(first.violations)
+
+
+def test_delayed_selected_cliques_match_eager_tiny_optimum() -> None:
+    problem = _fixed_problem(cabin_count=2)
+    eager = DddFixedKArcFlowOptimizer(
+        DddFixedKArcFlowSolveConfig(time_limit_seconds=20.0)
+    ).solve(problem)
+    delayed = DddFixedKArcFlowOptimizer(
+        DddFixedKArcFlowSolveConfig(
+            time_limit_seconds=20.0,
+            resource_row_mode=(
+                DddArcFlowResourceRowMode.DELAYED_SELECTED_CLIQUES
+            ),
+        )
+    ).solve(problem)
+
+    assert eager.status is DddFixedKArcFlowStatus.INTEGER_OPTIMAL
+    assert delayed.status is DddFixedKArcFlowStatus.INTEGER_OPTIMAL
+    assert delayed.objective_value == pytest.approx(eager.objective_value)
+    assert delayed.certified_lower_bound == pytest.approx(
+        delayed.objective_value
+    )
+    assert delayed.solution is not None
+    assert delayed.resource_row_count <= eager.resource_row_count
 
 
 def test_full_arc_flow_matches_known_fixed_timetable_passenger_objective() -> None:
@@ -576,6 +697,8 @@ def test_exact_anonymous_application_is_gated_and_independently_validated(
         {"mip_gap": 1.1},
         {"mip_focus": 4},
         {"seed": -1},
+        {"waiting_headway_multiplier": -0.1},
+        {"waiting_step_seconds": 0.0},
     ),
 )
 def test_arc_flow_run_config_rejects_invalid_solver_controls(

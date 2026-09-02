@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+from collections import defaultdict
 from dataclasses import asdict, dataclass, replace
 from hashlib import sha256
 import json
+import math
 
 from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_preparation import (
     DddPreparedArcFlowProblem,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_network import (
+    DddCabinTimeExpandedArc,
+    check_ddd_arc_flow_build_deadline,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.route_topology import (
     unique_stop_route_option,
@@ -196,6 +202,8 @@ class DddArcFlowPassengerDomainBuilder:
     def build(
         self,
         prepared: DddPreparedArcFlowProblem,
+        *,
+        deadline_monotonic: float | None = None,
     ) -> DddArcFlowPassengerDomain:
         prepared.validate()
         problem = prepared.problem
@@ -216,13 +224,32 @@ class DddArcFlowPassengerDomainBuilder:
         network_by_cabin = {
             network.cabin_id: network for network in prepared.networks
         }
+        arcs_by_visit_by_cabin = {}
+        for network in prepared.networks:
+            arcs_by_visit: dict[int, list[DddCabinTimeExpandedArc]] = defaultdict(
+                list
+            )
+            for arc_index, arc in enumerate(network.arcs):
+                if arc_index % 4096 == 0:
+                    check_ddd_arc_flow_build_deadline(deadline_monotonic)
+                arcs_by_visit[arc.visit_index].append(arc)
+            arcs_by_visit_by_cabin[network.cabin_id] = {
+                visit_index: tuple(arcs_by_visit.get(visit_index, ()))
+                for visit_index in range(network.start.max_visit_count)
+            }
         variables: list[DddArcFlowPassengerVariable] = []
         flows: list[DddArcFlowPassengerFlow] = []
         equality_rows: list[DddArcFlowPassengerEqualityRow] = []
-        for candidate in sorted(
-            problem.passenger_build.ride_candidates,
-            key=lambda item: item.id,
+        demand_board_variables: dict[str, list[str]] = defaultdict(list)
+        onboard_variables_by_arc_id: dict[str, list[str]] = defaultdict(list)
+        for candidate_index, candidate in enumerate(
+            sorted(
+                problem.passenger_build.ride_candidates,
+                key=lambda item: item.id,
+            )
         ):
+            if candidate_index % 16 == 0:
+                check_ddd_arc_flow_build_deadline(deadline_monotonic)
             network = network_by_cabin.get(candidate.cabin_id)
             if (
                 network is None
@@ -255,94 +282,95 @@ class DddArcFlowPassengerDomainBuilder:
                 )
             )
             variable_ids_by_arc_id: list[tuple[str, str]] = []
-            for arc in network.arcs:
-                if (
-                    not arc.source_active
-                    or arc.option_id is None
-                    or not candidate.board_visit_index
-                    <= arc.visit_index
-                    <= candidate.alight_visit_index
-                ):
-                    continue
-                if arc.visit_index == candidate.board_visit_index and (
-                    arc.option_id != board_stop.id
-                    or arc.source_tick + board_offset
-                    < ddd_seconds_to_tick(group.release_time_seconds)
-                ):
-                    continue
-                if arc.visit_index == candidate.alight_visit_index and (
-                    arc.option_id != alight_stop.id
-                    or arc.source_tick + alight_offset
-                    > movement.passenger_service_end_tick
-                ):
-                    continue
-                coefficient = 0.0
-                if arc.visit_index == candidate.board_visit_index:
-                    coefficient -= horizon
-                    if definition.event is EanPassengerObjectiveEvent.BOARDING:
+            coefficients_by_node: dict[
+                tuple[int, int, bool], list[tuple[str, float]]
+            ] = defaultdict(list)
+            candidate_arc_index = 0
+            arcs_by_visit = arcs_by_visit_by_cabin[candidate.cabin_id]
+            for visit_index in range(
+                candidate.board_visit_index,
+                candidate.alight_visit_index + 1,
+            ):
+                for arc in arcs_by_visit[visit_index]:
+                    candidate_arc_index += 1
+                    if candidate_arc_index % 4096 == 0:
+                        check_ddd_arc_flow_build_deadline(deadline_monotonic)
+                    if not arc.source_active or arc.option_id is None:
+                        continue
+                    if arc.visit_index == candidate.board_visit_index and (
+                        arc.option_id != board_stop.id
+                        or arc.source_tick + board_offset + arc.wait_tick
+                        < ddd_seconds_to_tick(group.release_time_seconds)
+                    ):
+                        continue
+                    if arc.visit_index == candidate.alight_visit_index and (
+                        arc.option_id != alight_stop.id
+                        or arc.source_tick + alight_offset
+                        > movement.passenger_service_end_tick
+                    ):
+                        continue
+                    coefficient = 0.0
+                    if arc.visit_index == candidate.board_visit_index:
+                        coefficient -= horizon
+                        if definition.event is EanPassengerObjectiveEvent.BOARDING:
+                            coefficient += ddd_tick_to_seconds(
+                                arc.source_tick + board_offset + arc.wait_tick
+                            )
+                    if (
+                        arc.visit_index == candidate.alight_visit_index
+                        and definition.event is EanPassengerObjectiveEvent.ALIGHTING
+                    ):
                         coefficient += ddd_tick_to_seconds(
-                            arc.source_tick + board_offset
+                            arc.source_tick + alight_offset
                         )
-                if (
-                    arc.visit_index == candidate.alight_visit_index
-                    and definition.event is EanPassengerObjectiveEvent.ALIGHTING
-                ):
-                    coefficient += ddd_tick_to_seconds(
-                        arc.source_tick + alight_offset
+                    variable_id = f"passenger[{len(variables)}]"
+                    variables.append(
+                        DddArcFlowPassengerVariable(
+                            id=variable_id,
+                            candidate_id=candidate.id,
+                            demand_group_id=candidate.demand_group_id,
+                            cabin_id=candidate.cabin_id,
+                            board_visit_index=candidate.board_visit_index,
+                            alight_visit_index=candidate.alight_visit_index,
+                            arc_id=arc.id,
+                            visit_index=arc.visit_index,
+                            upper_bound=upper,
+                            objective_coefficient=coefficient,
+                        )
                     )
-                variable_id = f"passenger[{len(variables)}]"
-                variables.append(
-                    DddArcFlowPassengerVariable(
-                        id=variable_id,
-                        candidate_id=candidate.id,
-                        demand_group_id=candidate.demand_group_id,
-                        cabin_id=candidate.cabin_id,
-                        board_visit_index=candidate.board_visit_index,
-                        alight_visit_index=candidate.alight_visit_index,
-                        arc_id=arc.id,
-                        visit_index=arc.visit_index,
-                        upper_bound=upper,
-                        objective_coefficient=coefficient,
+                    variable_ids_by_arc_id.append((arc.id, variable_id))
+                    coefficients_by_node[arc.source_node].append(
+                        (variable_id, -1.0)
                     )
-                )
-                variable_ids_by_arc_id.append((arc.id, variable_id))
+                    coefficients_by_node[arc.target_node].append(
+                        (variable_id, 1.0)
+                    )
+                    if arc.visit_index == candidate.board_visit_index:
+                        demand_board_variables[candidate.demand_group_id].append(
+                            variable_id
+                        )
+                    if arc.visit_index < candidate.alight_visit_index:
+                        onboard_variables_by_arc_id[arc.id].append(variable_id)
             if not variable_ids_by_arc_id:
                 continue
-            variable_id_by_arc_id = dict(variable_ids_by_arc_id)
             for layer in range(
                 candidate.board_visit_index + 1,
                 candidate.alight_visit_index + 1,
             ):
-                nodes = {
-                    arc.target_node
-                    for arc in network.arcs
-                    if arc.id in variable_id_by_arc_id
-                    and arc.visit_index == layer - 1
-                } | {
-                    arc.source_node
-                    for arc in network.arcs
-                    if arc.id in variable_id_by_arc_id
-                    and arc.visit_index == layer
-                }
-                for node in sorted(nodes):
-                    coefficients = tuple(
-                        (variable_id_by_arc_id[arc.id], 1.0)
-                        for arc in network.arcs
-                        if arc.id in variable_id_by_arc_id
-                        and arc.target_node == node
-                    ) + tuple(
-                        (variable_id_by_arc_id[arc.id], -1.0)
-                        for arc in network.arcs
-                        if arc.id in variable_id_by_arc_id
-                        and arc.source_node == node
+                check_ddd_arc_flow_build_deadline(deadline_monotonic)
+                nodes = tuple(
+                    sorted(
+                        node for node in coefficients_by_node if node[0] == layer
                     )
+                )
+                for node in sorted(nodes):
                     equality_rows.append(
                         DddArcFlowPassengerEqualityRow(
                             id=(
                                 f"passenger_flow[{len(equality_rows)},"
                                 f"{layer},{node[1]}]"
                             ),
-                            coefficients=coefficients,
+                            coefficients=tuple(coefficients_by_node[node]),
                         )
                     )
             flows.append(
@@ -356,42 +384,22 @@ class DddArcFlowPassengerDomainBuilder:
                 )
             )
 
-        variable_by_id = {variable.id: variable for variable in variables}
+        check_ddd_arc_flow_build_deadline(deadline_monotonic)
         demand_rows = tuple(
             DddArcFlowPassengerDemandRow(
                 id=f"demand[{group_id}]",
                 demand_group_id=group_id,
-                variable_ids=tuple(
-                    variable_id
-                    for flow in flows
-                    if flow.demand_group_id == group_id
-                    for _, variable_id in flow.variable_ids_by_arc_id
-                    if variable_by_id[variable_id].visit_index
-                    == flow.board_visit_index
-                ),
+                variable_ids=tuple(demand_board_variables[group_id]),
                 right_hand_side=float(group.count),
             )
             for group_id, group in sorted(group_by_id.items())
         )
-        flows_by_cabin: dict[int, list[DddArcFlowPassengerFlow]] = {}
-        flow_variable_ids_by_candidate = {
-            flow.candidate_id: flow.variable_id_by_arc_id for flow in flows
-        }
-        for flow in flows:
-            flows_by_cabin.setdefault(flow.cabin_id, []).append(flow)
         capacity_rows: list[DddArcFlowPassengerCapacityRow] = []
         for network in prepared.networks:
-            cabin_flows = flows_by_cabin.get(network.cabin_id, [])
-            for arc in network.arcs:
-                onboard = tuple(
-                    flow_variable_ids_by_candidate[flow.candidate_id][arc.id]
-                    for flow in cabin_flows
-                    if arc.id
-                    in flow_variable_ids_by_candidate[flow.candidate_id]
-                    and flow.board_visit_index
-                    <= arc.visit_index
-                    < flow.alight_visit_index
-                )
+            for arc_index, arc in enumerate(network.arcs):
+                if arc_index % 4096 == 0:
+                    check_ddd_arc_flow_build_deadline(deadline_monotonic)
+                onboard = tuple(onboard_variables_by_arc_id.get(arc.id, ()))
                 if onboard:
                     capacity_rows.append(
                         DddArcFlowPassengerCapacityRow(
@@ -407,6 +415,7 @@ class DddArcFlowPassengerDomainBuilder:
                             ),
                         )
                     )
+        check_ddd_arc_flow_build_deadline(deadline_monotonic)
         incomplete = DddArcFlowPassengerDomain(
             problem_fingerprint=problem.fingerprint,
             objective_constant=objective_constant,
@@ -421,8 +430,84 @@ class DddArcFlowPassengerDomainBuilder:
             incomplete,
             fingerprint=_domain_fingerprint(incomplete),
         )
+        check_ddd_arc_flow_build_deadline(deadline_monotonic)
         result.validate(prepared)
         return result
+
+
+def build_ddd_arc_flow_passenger_subdomain(
+    domain: DddArcFlowPassengerDomain,
+    *,
+    demand_group_ids: frozenset[str],
+    objective_constant: float,
+    prepared: DddPreparedArcFlowProblem | None = None,
+) -> DddArcFlowPassengerDomain:
+    """Return the exact row/column restriction for selected demand groups.
+
+    Variable and row IDs intentionally remain the canonical IDs of the full
+    domain.  This makes core/residual values directly comparable and lets the
+    partial-master coupling layer refer back to the original capacity rows.
+    """
+
+    if not math.isfinite(objective_constant) or objective_constant < 0:
+        raise ValueError("Passenger subdomain objective constant is invalid")
+    known_groups = {row.demand_group_id for row in domain.demand_rows}
+    unknown = demand_group_ids - known_groups
+    if unknown:
+        raise ValueError(
+            "Passenger subdomain references unknown demand groups: "
+            f"{sorted(unknown)[:3]}"
+        )
+    variables = tuple(
+        variable
+        for variable in domain.variables
+        if variable.demand_group_id in demand_group_ids
+    )
+    variable_ids = {variable.id for variable in variables}
+    flows = tuple(
+        flow
+        for flow in domain.flows
+        if flow.demand_group_id in demand_group_ids
+    )
+    equality_rows = tuple(
+        replace(
+            row,
+            coefficients=tuple(
+                item for item in row.coefficients if item[0] in variable_ids
+            ),
+        )
+        for row in domain.equality_rows
+        if any(variable_id in variable_ids for variable_id, _ in row.coefficients)
+    )
+    demand_rows = tuple(
+        row for row in domain.demand_rows if row.demand_group_id in demand_group_ids
+    )
+    capacity_rows = tuple(
+        replace(
+            row,
+            variable_ids=tuple(
+                variable_id
+                for variable_id in row.variable_ids
+                if variable_id in variable_ids
+            ),
+        )
+        for row in domain.capacity_rows
+        if any(variable_id in variable_ids for variable_id in row.variable_ids)
+    )
+    incomplete = DddArcFlowPassengerDomain(
+        problem_fingerprint=domain.problem_fingerprint,
+        objective_constant=objective_constant,
+        variables=variables,
+        flows=flows,
+        equality_rows=equality_rows,
+        demand_rows=demand_rows,
+        capacity_rows=capacity_rows,
+        fingerprint="",
+    )
+    result = replace(incomplete, fingerprint=_domain_fingerprint(incomplete))
+    if prepared is not None:
+        result.validate(prepared)
+    return result
 
 
 def _domain_fingerprint(domain: DddArcFlowPassengerDomain) -> str:

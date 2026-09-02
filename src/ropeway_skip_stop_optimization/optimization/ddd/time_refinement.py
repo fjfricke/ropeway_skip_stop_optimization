@@ -17,6 +17,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
     ddd_seconds_to_tick,
     ddd_tick_to_seconds,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.models import DddRouteDecision
 
 
 @dataclass(frozen=True)
@@ -94,8 +95,30 @@ def validate_ddd_recovered_schedule(
             raise ValueError("DDD recovered route chain is inconsistent")
         if source.time_tick > problem.movement_problem.operational_end_tick:
             raise ValueError("DDD recovered route departs after operational horizon")
-        if target.time_tick != source.time_tick + option.duration_tick:
+        wait_tick = target.time_tick - source.time_tick - option.duration_tick
+        if wait_tick < 0:
             raise ValueError("DDD recovered route duration is inconsistent")
+        allowed_wait_ticks = {
+            ddd_seconds_to_tick(value)
+            for value in problem.waiting_policy.wait_values_seconds(
+                option.station_id
+            )
+        }
+        if wait_tick not in allowed_wait_ticks:
+            raise ValueError("DDD recovered wait lies outside the configured domain")
+        if option.decision is DddRouteDecision.SKIP and wait_tick:
+            raise ValueError("DDD recovered SKIP route cannot wait")
+        if wait_tick:
+            if option.platform_exit_offset_seconds is None:
+                raise ValueError("DDD recovered waiting route lacks a platform exit")
+            if (
+                source.time_tick
+                + ddd_seconds_to_tick(option.platform_exit_offset_seconds)
+                < ddd_seconds_to_tick(
+                    problem.waiting_policy.earliest_wait_time_seconds
+                )
+            ):
+                raise ValueError("DDD recovered route waits before the boundary")
     if schedule.events[-1].state_id != problem.terminal_state_id:
         raise ValueError("DDD recovered schedule does not reach terminal state")
     expected_objective = problem.objective.exact_value(
@@ -339,11 +362,13 @@ def _propagate_route_support(
     events = [DddExactTimedEvent(0, start.state_id, start.time_seconds)]
     state_id = start.state_id
     time_tick = start.time_tick
-    for index, option_id in enumerate(path.route_option_ids):
+    for index, (option_id, partial_arc) in enumerate(
+        zip(path.route_option_ids, path.arcs, strict=True)
+    ):
         option = options_by_id.get(option_id)
         if option is None or option.from_state_id != state_id:
             raise ValueError("DDD partial path route support is inconsistent")
-        time_tick += option.duration_tick
+        time_tick += option.duration_tick + partial_arc.minimum_wait_tick
         state_id = option.to_state_id
         events.append(
             DddExactTimedEvent(

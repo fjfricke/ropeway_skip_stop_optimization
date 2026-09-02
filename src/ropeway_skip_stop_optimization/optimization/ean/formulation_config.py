@@ -100,6 +100,21 @@ class EanBoardTimeFormulation(StrEnum):
     PROJECTED_JOURNEY_TIME = "board_time_projected_journey_time"
 
 
+class EanHeadwayOrderFormulation(StrEnum):
+    """Representation of precedence on shared movement resources.
+
+    ``PAIRWISE_EAGER`` is the historical production formulation.
+    ``PAIRWISE_SHARED`` reuses a pair order along deterministic corridors.
+    ``PAIRWISE_FIFO`` is the physical FIFO reference for Stop/Skip branches.
+    Merge-Sequence remains an isolated gated formulation until its performance
+    gate passes; it is deliberately not a production EAN selection.
+    """
+
+    PAIRWISE_EAGER = "headway_order_pairwise_eager"
+    PAIRWISE_SHARED = "headway_order_pairwise_shared"
+    PAIRWISE_FIFO = "headway_order_pairwise_fifo"
+
+
 @dataclass(frozen=True)
 class EanFormulationConfig:
     """Mutually exclusive EAN formulation choices.
@@ -115,6 +130,9 @@ class EanFormulationConfig:
     stop_skip_timing: EanStopSkipTimingFormulation = EanStopSkipTimingFormulation.AFFINE
     slot_activation: EanSlotActivationFormulation = EanSlotActivationFormulation.FIRST_SLOT_IMPLICATIONS
     board_time: EanBoardTimeFormulation = EanBoardTimeFormulation.AUTO
+    headway_order: EanHeadwayOrderFormulation = (
+        EanHeadwayOrderFormulation.PAIRWISE_EAGER
+    )
 
     def selection_names(self) -> tuple[str, ...]:
         names: list[str] = []
@@ -128,6 +146,8 @@ class EanFormulationConfig:
             names.append(self.slot_activation.value)
         if self.board_time is not EanBoardTimeFormulation.AUTO:
             names.append(self.board_time.value)
+        if self.headway_order is not EanHeadwayOrderFormulation.PAIRWISE_EAGER:
+            names.append(self.headway_order.value)
         return tuple(names)
 
 
@@ -141,4 +161,5 @@ ALL_EAN_FORMULATION_SELECTION_NAMES: tuple[str, ...] = (
         for value in EanBoardTimeFormulation
         if value is not EanBoardTimeFormulation.AUTO
     ),
+    *(value.value for value in EanHeadwayOrderFormulation),
 )

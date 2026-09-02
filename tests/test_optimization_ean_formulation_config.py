@@ -7,6 +7,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanFormulationConfig,
     EanFleetMode,
     EanHorizonFormulation,
+    EanHeadwayOrderFormulation,
     EanOptimizationConfig,
     EanPassengerObjective,
     EanSlotActivationFormulation,
@@ -80,6 +81,29 @@ def test_ean_configuration_rejects_multiple_values_in_one_category() -> None:
         EanOptimizationConfig.from_selection(
             "board_time_explicit,board_time_projected_journey_time"
         )
+
+    with pytest.raises(ValueError, match="at most one EAN headway-order"):
+        EanOptimizationConfig.from_selection(
+            "headway_order_pairwise_fifo,headway_order_pairwise_shared"
+        )
+
+
+def test_headway_order_formulation_and_shared_alias_are_resolved() -> None:
+    fifo = EanOptimizationConfig.from_selection("headway_order_pairwise_fifo")
+    shared = EanOptimizationConfig.from_selection("shared_merge_headway_order")
+
+    assert (
+        fifo.resolved_headway_order_formulation()
+        is EanHeadwayOrderFormulation.PAIRWISE_FIFO
+    )
+    assert (
+        shared.resolved_headway_order_formulation()
+        is EanHeadwayOrderFormulation.PAIRWISE_SHARED
+    )
+    with pytest.raises(ValueError, match="cannot be combined"):
+        EanOptimizationConfig.from_selection(
+            "shared_merge_headway_order,headway_order_pairwise_fifo"
+        ).resolved_for_fleet_mode(EanFleetMode.FIXED_STARTS)
 
 
 def test_ean_configuration_all_and_none_use_current_formulation_defaults() -> None:

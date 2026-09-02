@@ -22,6 +22,7 @@ from ropeway_skip_stop_optimization.benchmarking.optimization_live_store import 
     reduce_optimization_events,
 )
 from ropeway_skip_stop_optimization.optimization.ddd import (
+    DddArcFlowResourceRowMode,
     DddFixedKArcFlowProgress,
     DddFixedKOperatingMode,
     DddFixedKStartPolicy,
@@ -60,6 +61,15 @@ def main() -> None:
         default=DddFixedKArcFlowFormulation.LABELED.value,
         help="Complete labeled arc-flow or exact state-time anonymous quotient.",
     )
+    parser.add_argument(
+        "--resource-row-mode",
+        choices=tuple(item.value for item in DddArcFlowResourceRowMode),
+        default=DddArcFlowResourceRowMode.EAGER_MAXIMAL_CLIQUES.value,
+        help=(
+            "Build every maximal resource clique eagerly or separate selected "
+            "integer cliques lazily (labeled formulation only)."
+        ),
+    )
     parser.add_argument("--cp-seed-time-limit", type=float, default=60.0)
     parser.add_argument("--start-layout-time-limit", type=float, default=120.0)
     parser.add_argument("--cp-seed-workers", type=int, default=8)
@@ -67,9 +77,32 @@ def main() -> None:
     parser.add_argument("--mip-gap", type=float, default=0.0)
     parser.add_argument("--mip-focus", type=int, choices=range(4), default=0)
     parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument(
+        "--waiting-headway-multiplier",
+        type=float,
+        default=0.0,
+        help=(
+            "Per-station wait cap as a multiple of the local exit-merge "
+            "headway; zero selects no-wait."
+        ),
+    )
+    parser.add_argument(
+        "--waiting-step-seconds",
+        type=float,
+        default=1.0,
+        help="Discrete waiting-time grid used by the complete arc-flow.",
+    )
     parser.add_argument("--gurobi-output", action="store_true")
     parser.add_argument("--root-cg-result", type=Path)
     parser.add_argument("--primal-seed-checkpoint", type=Path)
+    parser.add_argument(
+        "--primal-seed-result",
+        type=Path,
+        help=(
+            "Previous complete arc-flow result.json; its trajectory supports "
+            "are revalidated and re-evaluated in the current waiting domain"
+        ),
+    )
     parser.add_argument("--seed-passenger-time-limit", type=float, default=60.0)
     parser.add_argument(
         "--output-dir",
@@ -88,10 +121,21 @@ def main() -> None:
 
     mode = DddFixedKOperatingMode(args.mode)
     formulation = DddFixedKArcFlowFormulation(args.formulation)
+    resource_row_mode = DddArcFlowResourceRowMode(args.resource_row_mode)
+    waiting_slug = _number_slug(args.waiting_headway_multiplier)
+    resource_suffix = (
+        ""
+        if resource_row_mode is DddArcFlowResourceRowMode.EAGER_MAXIMAL_CLIQUES
+        else f"_{resource_row_mode.value}"
+    )
     campaign_id = args.campaign_id or (
         f"{args.example}_arc_flow_{formulation.value}_{mode.value}_k{args.cabins}"
+        f"_wait_{waiting_slug}h{resource_suffix}"
     )
-    policy_id = f"arc_flow_{formulation.value}_{mode.value}"
+    policy_id = (
+        f"arc_flow_{formulation.value}_{mode.value}_wait_{waiting_slug}h"
+        f"{resource_suffix}"
+    )
     output_path = args.output_dir / campaign_id / "result.json"
     store = (
         OptimizationLiveStore(
@@ -116,6 +160,8 @@ def main() -> None:
                 "trial_count": 1,
                 "method": f"fixed_k_complete_ddd_arc_flow_{formulation.value}",
                 "formulation": formulation.value,
+                "waiting_headway_multiplier": args.waiting_headway_multiplier,
+                "resource_row_mode": resource_row_mode.value,
             },
         )
         store.append_new(
@@ -128,6 +174,8 @@ def main() -> None:
                 "exact_active_cabin_count": args.cabins,
                 "start_policy": args.start_policy,
                 "formulation": formulation.value,
+                "waiting_headway_multiplier": args.waiting_headway_multiplier,
+                "resource_row_mode": resource_row_mode.value,
             },
         )
         _publish(store)
@@ -213,8 +261,12 @@ def main() -> None:
                 output_flag=args.gurobi_output,
                 root_cg_result_path=args.root_cg_result,
                 primal_seed_checkpoint_path=args.primal_seed_checkpoint,
+                primal_seed_result_path=args.primal_seed_result,
                 seed_passenger_time_limit_seconds=(args.seed_passenger_time_limit),
                 formulation=formulation,
+                waiting_headway_multiplier=args.waiting_headway_multiplier,
+                waiting_step_seconds=args.waiting_step_seconds,
+                resource_row_mode=resource_row_mode,
             ),
             progress_hook=progress,
         )
@@ -317,6 +369,10 @@ def _number(value: float | None) -> str:
 def _clock(seconds: float) -> str:
     value = max(0, int(round(seconds)))
     return f"{value // 60:02d}:{value % 60:02d}"
+
+
+def _number_slug(value: float) -> str:
+    return f"{value:g}".replace("-", "m").replace(".", "p")
 
 
 def _publish(store: OptimizationLiveStore) -> None:

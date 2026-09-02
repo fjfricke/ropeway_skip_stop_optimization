@@ -14,6 +14,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.reference import (
     validate_ddd_reference_solution,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.support_master import (
+    DDD_CP_SAT_CABIN_PATH_CORE_PROVENANCE,
     DddSupportConflictCut,
     DddSupportLiteral,
     DddSupportSelection,
@@ -159,7 +160,7 @@ def build_ddd_cabin_path_core_cut(
         # This cut is a logical no-good, not a measured pairwise headway
         # violation.  The legacy field remains positive for schema compatibility.
         violation_seconds=1.0,
-        provenance="exact_cp_sat_no_wait_cabin_path_core",
+        provenance=DDD_CP_SAT_CABIN_PATH_CORE_PROVENANCE,
     )
     cut.validate()
     return cut

@@ -152,7 +152,7 @@ class DddExactAnonymousPassengerDomainBuilder:
                     continue
                 event_tick = arc.source_tick + ddd_seconds_to_tick(
                     option.platform_exit_offset_seconds
-                )
+                ) + arc.wait_tick
                 if not release_tick <= event_tick <= service_end:
                     continue
                 coefficient = (

@@ -130,6 +130,7 @@ class EanSolveConfig:
     progress_recorder: Any | None = None
     diagnostic_recorders: tuple[Any, ...] = ()
     progress_sample_interval_seconds: float = 5.0
+    total_time_limit_seconds: float | None = None
     build_only: bool = False
     build_progress_callback: EanBuildProgressCallback | None = None
 
@@ -139,6 +140,11 @@ class EanSolveConfig:
             self.checkpoint.validate()
         if self.progress_sample_interval_seconds <= 0:
             raise ValueError("progress_sample_interval_seconds must be positive")
+        if (
+            self.total_time_limit_seconds is not None
+            and self.total_time_limit_seconds <= 0
+        ):
+            raise ValueError("total_time_limit_seconds must be positive")
 
 
 @dataclass(frozen=True)
@@ -208,6 +214,9 @@ class EanModelBuildMetrics:
     singleton_headway_order_family_count: int = 0
     diagnostically_omitted_headway_checkpoint_count: int = 0
     diagnostically_omitted_headway_pair_count: int = 0
+    fifo_constrained_headway_pair_count: int = 0
+    fifo_service_row_count: int = 0
+    fifo_skip_row_count: int = 0
     peak_rss_bytes: int | None = None
 
 
@@ -333,6 +342,7 @@ class EanOptimizer:
     config: EanSolveConfig = field(default_factory=EanSolveConfig)
 
     def solve(self, problem: EanOptimizationProblem) -> EanOptimizationResult:
+        total_started = perf_counter()
         try:
             import gurobipy as gp
             from gurobipy import GRB
@@ -604,6 +614,15 @@ class EanOptimizer:
             diagnostically_omitted_headway_pair_count=(
                 movement_model.build_metrics.diagnostically_omitted_headway_pair_count
             ),
+            fifo_constrained_headway_pair_count=(
+                movement_model.build_metrics.fifo_constrained_headway_pair_count
+            ),
+            fifo_service_row_count=(
+                movement_model.build_metrics.fifo_service_row_count
+            ),
+            fifo_skip_row_count=(
+                movement_model.build_metrics.fifo_skip_row_count
+            ),
             peak_rss_bytes=peak_rss_bytes(),
         )
         _log_model_summary(
@@ -620,6 +639,11 @@ class EanOptimizer:
             solve_phase_metrics = None
             diagnostics = _build_only_diagnostics(self.config.solver_policy)
         else:
+            if self.config.total_time_limit_seconds is not None:
+                remaining = self.config.total_time_limit_seconds - (
+                    perf_counter() - total_started
+                )
+                model.Params.TimeLimit = max(0.001, remaining)
             _prepare_diagnostic_recorders(
                 self.config.diagnostic_recorders,
                 model,

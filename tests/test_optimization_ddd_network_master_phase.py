@@ -85,6 +85,30 @@ def test_master_phase_without_separation_solves_once() -> None:
     assert result.resource_window_lower_bound_after == 12.0
 
 
+def test_master_phase_forwards_shared_budget_and_stops_on_time_limit() -> None:
+    timed_out = SimpleNamespace(
+        status=DddAnonymousFlowStatus.TIME_LIMIT,
+        best_bound=7.0,
+        arc_values=(),
+        prefix_arc_values=(),
+    )
+    master = _FakeMaster((timed_out,))
+    network = SimpleNamespace(arcs=(), cabin_ids=(0,))
+    solver = DddNetworkMasterPhaseSolver(
+        resource_window_cut_mode=DddResourceWindowCutMode.ENTRY_COUNT,
+        max_resource_window_rows_per_resolve=10,
+        max_resource_window_resolves=2,
+    )
+
+    result = _solve(solver, master, network, time_limit_seconds=3.0)
+
+    assert result.flow.status is DddAnonymousFlowStatus.TIME_LIMIT
+    assert len(master.calls) == 1
+    assert 0.0 < master.calls[0]["time_limit_seconds"] <= 3.0
+    assert result.resource_window_resolve_count == 0
+    assert result.resource_window_lower_bound_before is None
+
+
 def test_master_phase_rejects_nonpositive_resolve_budget() -> None:
     with pytest.raises(ValueError, match="resolve limit"):
         DddNetworkMasterPhaseSolver(

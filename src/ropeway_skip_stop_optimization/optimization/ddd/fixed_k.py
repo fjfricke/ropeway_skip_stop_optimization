@@ -11,9 +11,6 @@ from ropeway_skip_stop_optimization.optimization.ddd.reference import (
     DddReferenceResourceOccurrence,
     find_ddd_reference_conflicts,
 )
-from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generation import (
-    DddTrajectoryWaitingDomain,
-)
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_problem import (
     DddFixedTrajectoryStartDomain,
     DddTrajectoryProblem,
@@ -248,6 +245,14 @@ class DddFixedKTrajectoryProblem:
                 for group in self.passenger_build.demand_groups
             ],
         }
+        if resolved.waiting_policy.step_seconds is not None:
+            payload["waiting_step_seconds"] = resolved.waiting_policy.step_seconds
+            payload["maximum_wait_seconds_by_station_id"] = (
+                resolved.waiting_policy.maximum_wait_seconds_by_station_id
+            )
+            payload["earliest_wait_time_seconds"] = (
+                resolved.waiting_policy.earliest_wait_time_seconds
+            )
         return sha256(
             json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
         ).hexdigest()
@@ -260,10 +265,6 @@ class DddFixedKTrajectoryProblem:
             self.trajectory_problem.start_domain, DddFixedTrajectoryStartDomain
         ):
             raise ValueError("Fixed-K trajectory problem requires fixed starts")
-        if self.trajectory_problem.waiting_policy.domain is not (
-            DddTrajectoryWaitingDomain.NO_WAIT
-        ):
-            raise ValueError("certified Fixed-K v1 supports no-wait only")
         if self.fleet_cardinality <= 0:
             raise ValueError("Fixed-K fleet cardinality must be positive")
         if self.trajectory_problem.cabin_ids != tuple(range(self.fleet_cardinality)):

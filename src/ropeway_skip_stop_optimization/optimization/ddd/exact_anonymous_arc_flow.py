@@ -10,12 +10,16 @@ import gurobipy as gp
 from gurobipy import GRB
 
 from ropeway_skip_stop_optimization.optimization.ddd.arc_flow import (
+    DddArcFlowProgressHeartbeat,
     DddFixedKArcFlowProgress,
     DddFixedKArcFlowSolveConfig,
     DddFixedKArcFlowStatus,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_movement_master import (
     build_ddd_arc_flow_movement_values,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_network import (
+    DddArcFlowBuildTimeLimitError,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_preparation import (
     DddArcFlowProblemPreparer,
@@ -146,6 +150,7 @@ class _DddExactAnonymousMovementMaster:
                         option=option_by_id[arc.option_id],
                         operational_end_seconds=movement.operational_end_seconds,
                         tolerance_seconds=0.0,
+                        wait_seconds=ddd_tick_to_seconds(arc.wait_tick),
                     )
                 )
                 if arc.target_node_id is None:
@@ -177,7 +182,13 @@ class _DddExactAnonymousMovementMaster:
         if consumed != selected:
             raise RuntimeError("anonymous solution contains disconnected selected flow")
         result = DddReferenceSolution(tuple(trajectories))
-        validate_ddd_reference_solution(movement, result)
+        validate_ddd_reference_solution(
+            movement,
+            result,
+            waiting_policy=(
+                self.prepared.problem.resolved_trajectory_problem.waiting_policy
+            ),
+        )
         return result
 
 
@@ -274,6 +285,61 @@ class DddExactAnonymousArcFlowOptimizer:
     ) -> DddExactAnonymousArcFlowResult:
         self.config.validate()
         problem.validate()
+        if primal_seed is not None:
+            primal_seed.validate(problem)
+        initial_lower_bound = self._certified_bound(
+            problem,
+            root_cg_lower_bound,
+            None,
+        )
+        heartbeat = DddArcFlowProgressHeartbeat(
+            hook=progress_hook,
+            initial=DddFixedKArcFlowProgress(
+                elapsed_seconds=0.0,
+                node_count=0.0,
+                solver_incumbent=(
+                    None if primal_seed is None else primal_seed.objective_value
+                ),
+                solver_bound=None,
+                certified_lower_bound=initial_lower_bound,
+                solver_gap=_relative_gap(
+                    initial_lower_bound,
+                    None if primal_seed is None else primal_seed.objective_value,
+                ),
+                solution_count=0,
+                movement_variable_count=0,
+                passenger_variable_count=0,
+                movement_constraint_count=0,
+                passenger_constraint_count=0,
+                resource_row_count=0,
+                linear_constraint_count=0,
+                remaining_seconds=self.config.time_limit_seconds,
+                phase="network_build",
+            ),
+            time_limit_seconds=self.config.time_limit_seconds,
+            interval_seconds=self.config.progress_interval_seconds,
+        )
+        heartbeat.start()
+        try:
+            return self._solve(
+                problem,
+                primal_seed=primal_seed,
+                root_cg_lower_bound=root_cg_lower_bound,
+                progress_hook=heartbeat.update,
+            )
+        finally:
+            heartbeat.stop()
+
+    def _solve(
+        self,
+        problem: DddFixedKTrajectoryProblem,
+        *,
+        primal_seed: DddFixedKPrimalSeed | None = None,
+        root_cg_lower_bound: float | None = None,
+        progress_hook: DddExactAnonymousArcFlowProgressHook | None = None,
+    ) -> DddExactAnonymousArcFlowResult:
+        self.config.validate()
+        problem.validate()
         if root_cg_lower_bound is not None and not math.isfinite(root_cg_lower_bound):
             raise ValueError("Root-CG lower bound must be finite")
         if primal_seed is not None:
@@ -287,8 +353,26 @@ class DddExactAnonymousArcFlowOptimizer:
             primal_seed,
             root_cg_lower_bound,
         )
-        prepared = DddArcFlowProblemPreparer().build(problem)
-        network = DddExactAnonymousArcFlowNetworkBuilder().build(prepared)
+        deadline = started + self.config.time_limit_seconds
+        try:
+            prepared = DddArcFlowProblemPreparer().build(
+                problem,
+                build_labeled_resource_cliques=False,
+                deadline_monotonic=deadline,
+            )
+            network = DddExactAnonymousArcFlowNetworkBuilder().build(
+                prepared,
+                deadline_monotonic=deadline,
+            )
+        except DddArcFlowBuildTimeLimitError as error:
+            return self._build_time_limit_result(
+                problem=problem,
+                started=started,
+                primal_seed=primal_seed,
+                root_cg_lower_bound=root_cg_lower_bound,
+                detail=str(error),
+                progress_hook=progress_hook,
+            )
         network_build_seconds = perf_counter() - started
         self._publish_empty(
             progress_hook,
@@ -594,6 +678,66 @@ class DddExactAnonymousArcFlowOptimizer:
             seed_kind=None if seed is None else seed.provenance,
             detail="total budget exhausted during exact anonymous model build",
         )
+
+    def _build_time_limit_result(
+        self,
+        *,
+        problem: DddFixedKTrajectoryProblem,
+        started: float,
+        primal_seed: DddFixedKPrimalSeed | None,
+        root_cg_lower_bound: float | None,
+        detail: str,
+        progress_hook: DddExactAnonymousArcFlowProgressHook | None,
+    ) -> DddExactAnonymousArcFlowResult:
+        total = perf_counter() - started
+        lower = self._certified_bound(problem, root_cg_lower_bound, None)
+        upper = None if primal_seed is None else primal_seed.objective_value
+        result = DddExactAnonymousArcFlowResult(
+            status=(
+                DddFixedKArcFlowStatus.TIME_LIMIT_WITH_CERTIFIED_INTERVAL
+                if primal_seed is not None
+                else DddFixedKArcFlowStatus.UNKNOWN_NO_INCUMBENT
+            ),
+            problem_fingerprint=problem.fingerprint,
+            network_fingerprint="unavailable_build_time_limit",
+            objective_value=upper,
+            solver_best_bound=None,
+            root_cg_lower_bound=root_cg_lower_bound,
+            certified_lower_bound=lower,
+            validated_upper_bound=upper,
+            relative_gap=_relative_gap(lower, upper),
+            solution=None if primal_seed is None else primal_seed.solution,
+            solver_status=int(GRB.TIME_LIMIT),
+            solution_count=0,
+            node_count=0.0,
+            exact_node_count=0,
+            movement_variable_count=0,
+            passenger_variable_count=0,
+            movement_constraint_count=0,
+            passenger_constraint_count=0,
+            resource_row_count=0,
+            linear_constraint_count=0,
+            labeled_movement_arc_count=0,
+            network_build_seconds=total,
+            model_build_seconds=0.0,
+            solve_seconds=0.0,
+            total_seconds=total,
+            time_to_first_incumbent_seconds=(
+                0.0 if primal_seed is not None else None
+            ),
+            primal_seed_objective_value=upper,
+            seed_kind=(None if primal_seed is None else primal_seed.provenance),
+            detail=detail,
+        )
+        self._publish_empty(
+            progress_hook,
+            problem,
+            started,
+            "network_build_time_limit",
+            primal_seed,
+            root_cg_lower_bound,
+        )
+        return result
 
 
 def build_ddd_exact_anonymous_movement_values(

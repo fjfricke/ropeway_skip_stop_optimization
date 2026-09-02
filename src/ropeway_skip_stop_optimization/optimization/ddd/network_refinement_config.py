@@ -28,6 +28,7 @@ class DddNetworkTimeRefinementConfig:
     """Validated configuration shared by DDD refinement and runtime wiring."""
 
     max_iterations: int = 100
+    total_time_limit_seconds: float | None = None
     tolerance_seconds: float = 1e-9
     bound_tolerance: float = 1e-9
     output_flag: bool = False
@@ -188,6 +189,11 @@ class DddNetworkTimeRefinementConfig:
     def _validate_numeric_limits(self) -> None:
         if self.max_iterations <= 0:
             raise ValueError("DDD network refinement max_iterations must be positive")
+        if self.total_time_limit_seconds is not None and (
+            not math.isfinite(self.total_time_limit_seconds)
+            or self.total_time_limit_seconds <= 0
+        ):
+            raise ValueError("DDD total time limit must be finite and positive")
         if self.max_new_cuts_per_iteration <= 0:
             raise ValueError(
                 "DDD network refinement max_new_cuts_per_iteration must be positive"

@@ -1,0 +1,14 @@
+{
+  "campaign_id": "five_station_b_no_wait_model_bakeoff_k20_k39_30m_v3",
+  "example_id": "five_station_circle_cw_half_skip_no_wait_headway_b_v0",
+  "cabin_counts": [20, 39],
+  "methods": ["ean_pairwise_shared", "ddd_arc_flow_labeled"],
+  "objective": "journey_time",
+  "operating_mode": "skip_stop",
+  "start_policy": "balanced_reference",
+  "waiting_policy": "no_wait",
+  "total_time_limit_seconds_per_trial": 1800,
+  "sample_interval_seconds": 5,
+  "threads": null,
+  "seed": 0
+}

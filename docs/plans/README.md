@@ -34,6 +34,11 @@ Current plans:
 - `ddd_arc_flow_passenger_benders.md`: research-backed classical, logic-based,
   and Branch-and-Benders passenger decomposition of the complete fixed-K DDD
   movement arc-flow, with shared OO components and diagnostic gates.
+- `ddd_partial_passenger_branch_benders.md`: gated continuation after the
+  standard-cut failure, retaining a compact Passenger core and testing
+  Pareto/core-point and coupling-aware multi-cuts before any persistent
+  Branch-and-Benders callback is built. Its root gate was rejected; see
+  [`../findings/ddd_partial_passenger_benders_root_gate.md`](../findings/ddd_partial_passenger_benders_root_gate.md).
 - `dynamic_discretization_cabin_passenger.md`: exact partial time-space cabin
   and passenger planning through Dynamic Discretization Discovery, with an
   optimistic lower-bound master, exact continuous-time lifting, refinement,
@@ -54,6 +59,9 @@ Current plans:
   Root-CG into Dive-and-Cut-and-Price for validated Skip-Stop incumbents and,
   only when the measured root integrality gap warrants it, exact
   Branch-Price-and-Cut with pricing-compatible branching and conflict cuts.
+- [`../reference/ddd_merge_time_corridor_primal.md`](../reference/ddd_merge_time_corridor_primal.md):
+  implemented primal-only physical merge/time fix-and-optimize neighborhoods
+  on top of certified trajectory Root-CG.
 - `ddd_reservoir_fleet_planning.md`: an ideal warm-up entry reservoir,
   optional one-way cabin dispatch, continuous compact proof pricing,
   fixed-available-fleet bound curves, and exact finite bounded Waiting.
@@ -107,3 +115,8 @@ not duplicated as future work here.
 Implemented pricing-compatible trajectory branch domains, bounded primal
 dives, and their first K=20 gate are maintained in
 [`../reference/ddd_trajectory_branching_and_diving.md`](../reference/ddd_trajectory_branching_and_diving.md).
+
+The implemented merge-aware Root-CG gate, its conditional tree design, and its
+negative K=20/K=39 decision are recorded in
+[`ddd_merge_aware_branch_price_cut.md`](ddd_merge_aware_branch_price_cut.md) and
+[`../findings/ddd_merge_aware_root_gate.md`](../findings/ddd_merge_aware_root_gate.md).

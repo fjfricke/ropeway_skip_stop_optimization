@@ -36,6 +36,8 @@ class DddRootCgTrialConfig:
     diversity_mode: str = "off"
     minimum_diversity_distance: int = 1
     extra_column_time_limit_seconds: float = 10.0
+    compatible_batch_mode: str = "off"
+    compatible_batch_time_limit_seconds: float = 10.0
     reservoir_primal_pricing_time_limit_seconds: float = 0.0
     reservoir_primal_pricing_mode: str = "compact_dispatch_windows"
     reservoir_primal_maximum_cabin_calls_per_round: int = 4
@@ -119,6 +121,8 @@ class DddRootCgTrialRunner:
             diversity_mode=config.diversity_mode,
             minimum_diversity_distance=config.minimum_diversity_distance,
             extra_column_time_limit=config.extra_column_time_limit_seconds,
+            compatible_batch_mode=config.compatible_batch_mode,
+            compatible_batch_time_limit=config.compatible_batch_time_limit_seconds,
             oip_primal_pricing_time_limit=0.0,
             reservoir_primal_pricing_time_limit=(
                 config.reservoir_primal_pricing_time_limit_seconds

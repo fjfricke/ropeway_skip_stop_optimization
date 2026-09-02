@@ -189,7 +189,9 @@ def format_ddd_iteration_progress(
             (
                 f"splits={iteration.time_split_count}:"
                 f"{iteration.trajectory_time_split_count}t/"
-                f"{iteration.resource_time_split_count}r:{split}"
+                f"{iteration.resource_time_split_count}r/"
+                f"{iteration.waiting_split_count}w:"
+                f"{iteration.waiting_interval_count}wi:{split}"
             ),
             f"time={iteration.round_seconds:.2f}s",
         )
@@ -204,6 +206,8 @@ class DddTerminalProgress:
     _bar: Any | None = field(init=False, default=None)
     _master_incumbent: float | None = field(init=False, default=None)
     _master_best_bound: float | None = field(init=False, default=None)
+    _waiting_interval_count: int = field(init=False, default=0)
+    _waiting_split_total: int = field(init=False, default=0)
 
     def __enter__(self) -> DddTerminalProgress:
         if self.enabled:
@@ -237,6 +241,8 @@ class DddTerminalProgress:
         if round_finished:
             if event.iteration is None:
                 raise ValueError("finished DDD round lacks iteration metrics")
+            self._waiting_interval_count = event.iteration.waiting_interval_count
+            self._waiting_split_total += event.iteration.waiting_split_count
         if event.stage is DddNetworkTimeRefinementProgressStage.MASTER_PROGRESS:
             master = event.master_progress
             if master is None:
@@ -260,6 +266,8 @@ class DddTerminalProgress:
                 stage=stage,
                 master_incumbent=self._master_incumbent,
                 master_best_bound=self._master_best_bound,
+                waiting_interval_count=self._waiting_interval_count,
+                waiting_split_total=self._waiting_split_total,
             ),
             refresh=False,
         )
@@ -281,6 +289,8 @@ def _format_fixed_live_progress(
     stage: str,
     master_incumbent: float | None,
     master_best_bound: float | None,
+    waiting_interval_count: int | None = None,
+    waiting_split_total: int | None = None,
 ) -> str:
     lower_bound = event.global_lower_bound
     if master_best_bound is not None:
@@ -290,6 +300,14 @@ def _format_fixed_live_progress(
             else max(lower_bound, master_best_bound)
         )
     gap = _relative_gap(lower_bound, event.global_upper_bound)
+    if waiting_split_total is None:
+        waiting_split_total = (
+            0 if event.iteration is None else event.iteration.waiting_split_count
+        )
+    if waiting_interval_count is None:
+        waiting_interval_count = (
+            0 if event.iteration is None else event.iteration.waiting_interval_count
+        )
     return " ".join(
         (
             f"S={_short_stage(stage):<4}",
@@ -297,6 +315,8 @@ def _format_fixed_live_progress(
             f"UB={_format_fixed_number(event.global_upper_bound)}",
             f"INC={_format_fixed_number(master_incumbent)}",
             f"GAP={_format_fixed_percent(gap)}",
+            f"W={waiting_interval_count:03d}/+{waiting_split_total:03d}",
+            f"LEFT={_format_fixed_duration(event.remaining_budget_seconds)}",
         )
     )
 
@@ -311,6 +331,12 @@ def _format_fixed_percent(value: float | None, *, width: int = 7) -> str:
     if value is None:
         return "-".rjust(width)
     return f"{100.0 * value:.2f}%".rjust(width)
+
+
+def _format_fixed_duration(value: float | None, *, width: int = 7) -> str:
+    if value is None:
+        return "-".rjust(width)
+    return f"{max(0.0, value):.1f}s".rjust(width)
 
 
 def _short_stage(stage: str) -> str:

@@ -20,11 +20,17 @@ from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generation import (
     DddTrajectoryWaitingDomain,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_master_rows import (
+    DddTrajectoryMasterRow,
+    DddTrajectoryMasterRowKind,
+    DddTrajectoryMasterRowScope,
+)
 
 
 class DddTrajectoryConflictRowMode(StrEnum):
     PAIR_ONLY = "pair_only"
     RESOURCE_WINDOWS_WITH_PAIR_FALLBACK = "resource_windows_with_pair_fallback"
+    MERGE_AWARE_RESOURCE_WINDOWS = "merge_aware_resource_windows"
 
 
 @dataclass(frozen=True, order=True)
@@ -109,6 +115,30 @@ class DddTrajectoryResourceWindowRow:
     def coefficient_by_option_id(self) -> dict[str, int]:
         return dict(self.coefficients)
 
+    @property
+    def scope(self) -> DddTrajectoryMasterRowScope:
+        return DddTrajectoryMasterRowScope.UNIVERSAL
+
+    @property
+    def master_row(self) -> DddTrajectoryMasterRow:
+        row = DddTrajectoryMasterRow(
+            id=self.id,
+            kind=DddTrajectoryMasterRowKind.RESOURCE_WINDOW,
+            scope=self.scope,
+            right_hand_side=float(self.window.capacity),
+            coefficients=tuple(
+                (option_id, float(coefficient))
+                for option_id, coefficient in self.coefficients
+            ),
+            provenance=(
+                ("anchor_tick", str(self.window.anchor_tick)),
+                ("resource_id", self.window.resource_id),
+                ("waiting_domain", self.window.waiting_domain.value),
+            ),
+        )
+        row.validate()
+        return row
+
 
 @dataclass(frozen=True)
 class DddTrajectoryResourceWindowSeparationResult:
@@ -162,10 +192,9 @@ class DddTrajectoryResourceWindowIndex:
         window.validate()
         coefficients = []
         for option_id, intervals in self.intervals_by_option_id.items():
-            coefficient = sum(
-                interval.resource_id == window.resource_id
-                and interval.contains(window.anchor_tick)
-                for interval in intervals
+            coefficient = _resource_window_coefficient_from_intervals(
+                window,
+                intervals,
             )
             if coefficient > 1 and window.capacity == 1:
                 raise ValueError(
@@ -191,6 +220,40 @@ class DddTrajectoryResourceWindowIndex:
         return tuple(
             sorted(
                 (self.build_row(window) for window in windows), key=lambda row: row.id
+            )
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class DddTrajectoryResourceWindowCoefficientOracle:
+    movement_problem: DddMovementProblem
+    windows: tuple[DddTrajectoryResourceWindow, ...]
+
+    def __post_init__(self) -> None:
+        self.movement_problem.validate()
+        if tuple(sorted(set(self.windows))) != self.windows:
+            raise ValueError("trajectory coefficient windows must be sorted and unique")
+        for window in self.windows:
+            window.validate()
+            if window.resource_id not in self.movement_problem.resources_by_id:
+                raise ValueError("trajectory coefficient window resource is unknown")
+
+    def coefficient(
+        self,
+        row_id: str,
+        trajectory: DddReferenceTrajectory,
+    ) -> float:
+        window_by_id = {window.id: window for window in self.windows}
+        window = window_by_id.get(row_id)
+        if window is None:
+            raise KeyError(f"unknown trajectory resource-window row: {row_id}")
+        return float(
+            _resource_window_coefficient_from_intervals(
+                window,
+                ddd_trajectory_resource_intervals(
+                    trajectory,
+                    self.movement_problem,
+                ),
             )
         )
 
@@ -317,9 +380,18 @@ def separate_ddd_trajectory_resource_windows(
     existing_windows: tuple[DddTrajectoryResourceWindow, ...] = (),
     tolerance: float = 1e-9,
     waiting_domain: DddTrajectoryWaitingDomain = DddTrajectoryWaitingDomain.NO_WAIT,
+    included_resource_ids: frozenset[str] | None = None,
 ) -> DddTrajectoryResourceWindowSeparationResult:
     if tolerance < 0 or not math.isfinite(tolerance):
         raise ValueError("trajectory resource-window tolerance is invalid")
+    if included_resource_ids is not None:
+        unknown_resources = included_resource_ids - set(
+            movement_problem.resources_by_id
+        )
+        if unknown_resources:
+            raise ValueError(
+                "trajectory resource-window filter contains unknown resources"
+            )
     unknown = set(option_values_by_id) - set(trajectory_by_option_id)
     if unknown:
         raise ValueError("trajectory resource-window values contain unknown options")
@@ -334,6 +406,11 @@ def separate_ddd_trajectory_resource_windows(
         for interval in ddd_trajectory_resource_intervals(
             trajectory_by_option_id[option_id], movement_problem
         ):
+            if (
+                included_resource_ids is not None
+                and interval.resource_id not in included_resource_ids
+            ):
+                continue
             by_resource.setdefault(interval.resource_id, []).append((interval, value))
             positive_interval_count += 1
 
@@ -373,6 +450,17 @@ def separate_ddd_trajectory_resource_windows(
         violating_window_count=violating_window_count,
         maximum_violation=maximum_violation,
         positive_interval_count=positive_interval_count,
+    )
+
+
+def _resource_window_coefficient_from_intervals(
+    window: DddTrajectoryResourceWindow,
+    intervals: tuple[DddTrajectoryResourceInterval, ...],
+) -> int:
+    return sum(
+        interval.resource_id == window.resource_id
+        and interval.contains(window.anchor_tick)
+        for interval in intervals
     )
 
 

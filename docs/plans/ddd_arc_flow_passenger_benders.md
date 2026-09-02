@@ -2,6 +2,13 @@
 
 Status: **recourse and outer-loop reference implemented; standard LP cuts rejected as production path**
 
+The narrowly scoped follow-up experiment is specified in
+[`ddd_partial_passenger_branch_benders.md`](ddd_partial_passenger_branch_benders.md).
+It retained selected Passenger/capacity structure and required a strong `K=20`
+root-cut gate before any Branch-and-Benders callback. That gate failed, so the
+callback path was not implemented; see
+[`../findings/ddd_partial_passenger_benders_root_gate.md`](../findings/ddd_partial_passenger_benders_root_gate.md).
+
 ## Implementation checkpoint (2026-08-25)
 
 The first two decision gates now have executable implementations:

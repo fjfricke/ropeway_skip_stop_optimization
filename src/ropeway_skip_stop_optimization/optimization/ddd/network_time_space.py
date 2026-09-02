@@ -16,6 +16,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.aggregate_support import (
 )
 from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddMovementProblem,
+    DddRouteDecision,
     DddRouteOption,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.network_model import (
@@ -27,6 +28,8 @@ from ropeway_skip_stop_optimization.optimization.ddd.network_model import (
 )
 from ropeway_skip_stop_optimization.optimization.ddd.resource_time import (
     DddAnonymousResourceRow,
+    DddBoundedTickDelay,
+    DddResourceTimingAssumption,
     DddTimedResourceUsageWindow,
     build_ddd_mandatory_resource_rows,
     ddd_feasible_source_interval,
@@ -45,10 +48,19 @@ from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
     DddTimeDiscretization,
     DddTimePartition,
     DddTimeSpaceObjective,
+    DddWaitingDiscretization,
+    DddWaitingInterval,
+    DddWaitingPartition,
     ddd_partial_arc_is_compatible,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
     ddd_seconds_to_tick,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generation import (
+    DddTrajectoryWaitingDomain,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_problem import (
+    DddTrajectoryWaitingPolicy,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.timed_flow_cover import (
     DddCpSatTimedFlowSupport,
@@ -152,13 +164,61 @@ class DddNetworkTimeProblem:
     movement_problem: DddMovementProblem
     discretization: DddTimeDiscretization
     objective: DddNetworkTimeObjective
+    waiting_policy: DddTrajectoryWaitingPolicy = DddTrajectoryWaitingPolicy()
+    waiting_discretization: DddWaitingDiscretization = DddWaitingDiscretization()
 
     def validate(self) -> None:
         self.movement_problem.validate()
         self.discretization.validate()
+        self.waiting_policy.validate(self.movement_problem.core)
+        self.waiting_discretization.validate()
+        expected_waiting_stations = {
+            station_id
+            for station_id, maximum in (
+                self.waiting_policy.maximum_wait_seconds_by_station_id
+            )
+            if maximum > 0
+        }
+        actual_waiting_stations = set(
+            self.waiting_discretization.by_station_id
+        )
+        if self.waiting_policy.domain is DddTrajectoryWaitingDomain.NO_WAIT:
+            if actual_waiting_stations:
+                raise ValueError(
+                    "DDD no-wait problem cannot contain waiting partitions"
+                )
+        elif expected_waiting_stations != actual_waiting_stations:
+            raise ValueError(
+                "DDD bounded-wait policy and waiting partitions differ"
+            )
+        if self.waiting_policy.step_seconds is not None:
+            expected_step_tick = ddd_seconds_to_tick(
+                self.waiting_policy.step_seconds
+            )
+            for partition in self.waiting_discretization.partitions:
+                if partition.step_tick != expected_step_tick:
+                    raise ValueError(
+                        "DDD waiting partition uses another time step"
+                    )
+                expected_maximum_step = int(
+                    round(
+                        self.waiting_policy.maximum_wait_seconds(
+                            partition.station_id
+                        )
+                        / self.waiting_policy.step_seconds
+                    )
+                )
+                if partition.maximum_step != expected_maximum_step:
+                    raise ValueError(
+                        "DDD waiting partition maximum differs from policy"
+                    )
         operational_end = self.movement_problem.operational_end_tick
         required_sentinel_lower_bound = operational_end + max(
-            option.duration_tick for option in self.movement_problem.route_options
+            option.duration_tick
+            + ddd_seconds_to_tick(
+                self.waiting_policy.maximum_wait_seconds(option.station_id)
+            )
+            for option in self.movement_problem.route_options
         )
         target_state_ids = {
             option.to_state_id for option in self.movement_problem.route_options
@@ -192,9 +252,67 @@ class DddNetworkTimeProblem:
             movement_problem=self.movement_problem,
             discretization=discretization,
             objective=self.objective,
+            waiting_policy=self.waiting_policy,
+            waiting_discretization=self.waiting_discretization,
         )
         result.validate()
         return result
+
+    def with_waiting_discretization(
+        self,
+        waiting_discretization: DddWaitingDiscretization,
+    ) -> DddNetworkTimeProblem:
+        result = DddNetworkTimeProblem(
+            movement_problem=self.movement_problem,
+            discretization=self.discretization,
+            objective=self.objective,
+            waiting_policy=self.waiting_policy,
+            waiting_discretization=waiting_discretization,
+        )
+        result.validate()
+        return result
+
+    @property
+    def refinement_fingerprint(self) -> str:
+        return (
+            f"time::{self.discretization.fingerprint}||"
+            f"wait::{self.waiting_discretization.fingerprint}"
+        )
+
+
+def build_ddd_initial_waiting_discretization(
+    movement: DddMovementProblem,
+    waiting_policy: DddTrajectoryWaitingPolicy,
+) -> DddWaitingDiscretization:
+    """Build ``{0} U [step, maximum]`` for every waiting station."""
+
+    movement.validate()
+    waiting_policy.validate(movement.core)
+    if waiting_policy.domain is DddTrajectoryWaitingDomain.NO_WAIT:
+        return DddWaitingDiscretization()
+    assert waiting_policy.step_seconds is not None
+    step_tick = ddd_seconds_to_tick(waiting_policy.step_seconds)
+    partitions = []
+    for station_id, maximum_seconds in (
+        waiting_policy.maximum_wait_seconds_by_station_id
+    ):
+        maximum_step = int(round(maximum_seconds / waiting_policy.step_seconds))
+        boundaries = (
+            (0, 1)
+            if maximum_step == 0
+            else (0, 1, maximum_step + 1)
+        )
+        partitions.append(
+            DddWaitingPartition(
+                station_id=station_id,
+                maximum_step=maximum_step,
+                step_tick=step_tick,
+                boundaries_steps=boundaries,
+            )
+        )
+    result = DddWaitingDiscretization(tuple(partitions))
+    result.validate()
+    return result
 
 
 def build_ddd_layer_state_earliest_arrival_ticks(
@@ -275,6 +393,11 @@ class DddLayeredTimeNetworkBuilder:
         init=False,
         repr=False,
     )
+    _waiting_fingerprint: str | None = field(
+        default=None,
+        init=False,
+        repr=False,
+    )
     _cells_by_partition_key: dict[
         tuple[str, tuple[int, ...]], tuple[DddTimeCell, ...]
     ] = field(default_factory=dict, init=False, repr=False)
@@ -312,6 +435,13 @@ class DddLayeredTimeNetworkBuilder:
         }
         removed_state_ids = set(self._partition_key_by_state_id) - set(partition_keys)
         invalidated_state_ids = changed_state_ids | removed_state_ids
+        waiting_changed = (
+            self._waiting_fingerprint
+            != problem.waiting_discretization.fingerprint
+        )
+        if waiting_changed:
+            self._compatible_targets_by_key.clear()
+            self._waiting_fingerprint = problem.waiting_discretization.fingerprint
         if invalidated_state_ids:
             self._compatible_targets_by_key = {
                 key: value
@@ -348,6 +478,40 @@ class DddLayeredTimeNetworkBuilder:
         structurally_clipped_cell_count = 0
         cells_by_layer_state: dict[tuple[int, str], tuple[DddTimeCell, ...]] = {}
 
+        def waiting_intervals(
+            option: DddRouteOption,
+        ) -> tuple[DddWaitingInterval, ...]:
+            intervals = problem.waiting_discretization.intervals_for_station(
+                option.station_id
+            )
+            if (
+                option.decision is DddRouteDecision.SKIP
+                or option.platform_exit_offset_seconds is None
+            ):
+                return tuple(
+                    interval
+                    for interval in intervals
+                    if interval.minimum_wait_tick == 0
+                    and interval.maximum_wait_tick == 0
+                )
+            return intervals
+
+        def minimum_waiting_source_tick(
+            option: DddRouteOption,
+            waiting_interval: DddWaitingInterval,
+        ) -> int | None:
+            if waiting_interval.maximum_wait_tick == 0:
+                return None
+            if option.platform_exit_offset_seconds is None:
+                return movement.operational_end_tick + 1
+            return max(
+                0,
+                ddd_seconds_to_tick(
+                    problem.waiting_policy.earliest_wait_time_seconds
+                    - option.platform_exit_offset_seconds
+                ),
+            )
+
         def target_cells(
             *,
             layer_index: int,
@@ -378,6 +542,7 @@ class DddLayeredTimeNetworkBuilder:
             source_cell: DddTimeCell | None,
             fixed_source_time: float | None,
             option: DddRouteOption,
+            waiting_interval: DddWaitingInterval,
             target_layer_index: int,
         ) -> tuple[DddTimeCell, ...]:
             nonlocal transition_cache_hits, transition_cache_misses
@@ -408,6 +573,7 @@ class DddLayeredTimeNetworkBuilder:
                 source_key,
                 option.id,
                 option.duration_tick,
+                waiting_interval,
                 target_cell_key,
                 movement.operational_end_tick,
             )
@@ -426,6 +592,24 @@ class DddLayeredTimeNetworkBuilder:
                     option=option,
                     operational_end_seconds=movement.operational_end_seconds,
                     tolerance_seconds=self.tolerance_seconds,
+                    minimum_wait_tick=waiting_interval.minimum_wait_tick,
+                    maximum_wait_tick=waiting_interval.maximum_wait_tick,
+                    wait_step_tick=waiting_interval.step_tick,
+                )
+                and (
+                    (minimum_source := minimum_waiting_source_tick(
+                        option,
+                        waiting_interval,
+                    ))
+                    is None
+                    or (
+                        fixed_source_time is not None
+                        and ddd_seconds_to_tick(fixed_source_time) >= minimum_source
+                    )
+                    or (
+                        source_cell is not None
+                        and source_cell.upper_tick > minimum_source
+                    )
                 )
             )
             self._compatible_targets_by_key[cache_key] = result
@@ -438,6 +622,7 @@ class DddLayeredTimeNetworkBuilder:
             fixed_source_tick: int | None,
             target_cell: DddTimeCell,
             option: DddRouteOption,
+            waiting_interval: DddWaitingInterval,
         ) -> tuple[DddTimedResourceUsageWindow, ...]:
             nonlocal resource_usage_window_count
             nonlocal horizon_optional_resource_usage_count
@@ -447,6 +632,12 @@ class DddLayeredTimeNetworkBuilder:
                 target_cell=target_cell,
                 duration_tick=option.duration_tick,
                 operational_end_tick=movement.operational_end_tick,
+                minimum_wait_tick=waiting_interval.minimum_wait_tick,
+                maximum_wait_tick=waiting_interval.maximum_wait_tick,
+                minimum_source_tick=minimum_waiting_source_tick(
+                    option,
+                    waiting_interval,
+                ),
             )
             if source_interval is None:
                 raise RuntimeError(
@@ -460,6 +651,23 @@ class DddLayeredTimeNetworkBuilder:
                     resource=resources_by_id[usage.resource_id],
                     usage=usage,
                     usage_index=usage_index,
+                    follower_enter_delay=DddBoundedTickDelay(
+                        usage.follower_enter_wait_coefficient
+                        * waiting_interval.minimum_wait_tick,
+                        usage.follower_enter_wait_coefficient
+                        * waiting_interval.maximum_wait_tick,
+                    ),
+                    leader_clear_delay=DddBoundedTickDelay(
+                        usage.leader_clear_wait_coefficient
+                        * waiting_interval.minimum_wait_tick,
+                        usage.leader_clear_wait_coefficient
+                        * waiting_interval.maximum_wait_tick,
+                    ),
+                    timing_assumption=(
+                        DddResourceTimingAssumption.NO_WAIT
+                        if waiting_interval.maximum_wait_tick == 0
+                        else DddResourceTimingAssumption.BOUNDED_WAIT_ENVELOPE
+                    ),
                 )
                 if window.latest_follower_enter_tick <= movement.operational_end_tick:
                     result.append(window)
@@ -479,39 +687,47 @@ class DddLayeredTimeNetworkBuilder:
 
         for start in sorted(movement.starts, key=lambda item: item.cabin_id):
             for option in options_by_state.get(start.state_id, ()):
-                for target_cell in compatible_targets(
-                    source_cell=None,
-                    fixed_source_time=start.time_seconds,
-                    option=option,
-                    target_layer_index=1,
-                ):
-                    node = DddLayeredTimeNode(1, option.to_state_id, target_cell)
-                    add_node(node)
-                    partial_arc = DddPartialTimedArc(
-                        visit_index=0,
-                        route_option_id=option.id,
-                        from_state_id=option.from_state_id,
-                        to_state_id=option.to_state_id,
-                        source_cell_id=None,
-                        target_cell=target_cell,
-                    )
-                    arc_id = f"source::{start.cabin_id}::{partial_arc.id}"
-                    arcs_by_id[arc_id] = DddLayeredTimeArc(
-                        id=arc_id,
-                        kind=DddLayeredTimeArcKind.SOURCE,
-                        source_node_id=None,
-                        target_node_id=node.id,
-                        cabin_id=start.cabin_id,
-                        partial_arc=partial_arc,
-                        lower_bound_cost=route_costs[option.id],
-                        resource_windows=resource_windows(
-                            arc_id=arc_id,
-                            source_cell=None,
-                            fixed_source_tick=start.time_tick,
+                for waiting_interval in waiting_intervals(option):
+                    for target_cell in compatible_targets(
+                        source_cell=None,
+                        fixed_source_time=start.time_seconds,
+                        option=option,
+                        waiting_interval=waiting_interval,
+                        target_layer_index=1,
+                    ):
+                        node = DddLayeredTimeNode(1, option.to_state_id, target_cell)
+                        add_node(node)
+                        partial_arc = DddPartialTimedArc(
+                            visit_index=0,
+                            route_option_id=option.id,
+                            from_state_id=option.from_state_id,
+                            to_state_id=option.to_state_id,
+                            source_cell_id=None,
                             target_cell=target_cell,
-                            option=option,
-                        ),
-                    )
+                            waiting_interval=(
+                                None
+                                if waiting_interval.maximum_wait_tick == 0
+                                else waiting_interval
+                            ),
+                        )
+                        arc_id = f"source::{start.cabin_id}::{partial_arc.id}"
+                        arcs_by_id[arc_id] = DddLayeredTimeArc(
+                            id=arc_id,
+                            kind=DddLayeredTimeArcKind.SOURCE,
+                            source_node_id=None,
+                            target_node_id=node.id,
+                            cabin_id=start.cabin_id,
+                            partial_arc=partial_arc,
+                            lower_bound_cost=route_costs[option.id],
+                            resource_windows=resource_windows(
+                                arc_id=arc_id,
+                                source_cell=None,
+                                fixed_source_tick=start.time_tick,
+                                target_cell=target_cell,
+                                option=option,
+                                waiting_interval=waiting_interval,
+                            ),
+                        )
 
         for layer_index in range(1, max_layer + 1):
             layer_node_ids = tuple(sorted(reachable_by_layer.get(layer_index, ())))
@@ -534,43 +750,53 @@ class DddLayeredTimeNetworkBuilder:
                 if layer_index >= max_layer:
                     continue
                 for option in options_by_state.get(node.state_id, ()):
-                    for target_cell in compatible_targets(
-                        source_cell=node.cell,
-                        fixed_source_time=None,
-                        option=option,
-                        target_layer_index=layer_index + 1,
-                    ):
-                        target = DddLayeredTimeNode(
-                            layer_index + 1,
-                            option.to_state_id,
-                            target_cell,
-                        )
-                        add_node(target)
-                        partial_arc = DddPartialTimedArc(
-                            visit_index=layer_index,
-                            route_option_id=option.id,
-                            from_state_id=option.from_state_id,
-                            to_state_id=option.to_state_id,
-                            source_cell_id=node.cell.id,
-                            target_cell=target_cell,
-                        )
-                        arc_id = f"movement::{node.id}::{partial_arc.id}::{target.id}"
-                        arcs_by_id[arc_id] = DddLayeredTimeArc(
-                            id=arc_id,
-                            kind=DddLayeredTimeArcKind.MOVEMENT,
-                            source_node_id=node.id,
-                            target_node_id=target.id,
-                            cabin_id=None,
-                            partial_arc=partial_arc,
-                            lower_bound_cost=route_costs[option.id],
-                            resource_windows=resource_windows(
-                                arc_id=arc_id,
-                                source_cell=node.cell,
-                                fixed_source_tick=None,
+                    for waiting_interval in waiting_intervals(option):
+                        for target_cell in compatible_targets(
+                            source_cell=node.cell,
+                            fixed_source_time=None,
+                            option=option,
+                            waiting_interval=waiting_interval,
+                            target_layer_index=layer_index + 1,
+                        ):
+                            target = DddLayeredTimeNode(
+                                layer_index + 1,
+                                option.to_state_id,
+                                target_cell,
+                            )
+                            add_node(target)
+                            partial_arc = DddPartialTimedArc(
+                                visit_index=layer_index,
+                                route_option_id=option.id,
+                                from_state_id=option.from_state_id,
+                                to_state_id=option.to_state_id,
+                                source_cell_id=node.cell.id,
                                 target_cell=target_cell,
-                                option=option,
-                            ),
-                        )
+                                waiting_interval=(
+                                    None
+                                    if waiting_interval.maximum_wait_tick == 0
+                                    else waiting_interval
+                                ),
+                            )
+                            arc_id = (
+                                f"movement::{node.id}::{partial_arc.id}::{target.id}"
+                            )
+                            arcs_by_id[arc_id] = DddLayeredTimeArc(
+                                id=arc_id,
+                                kind=DddLayeredTimeArcKind.MOVEMENT,
+                                source_node_id=node.id,
+                                target_node_id=target.id,
+                                cabin_id=None,
+                                partial_arc=partial_arc,
+                                lower_bound_cost=route_costs[option.id],
+                                resource_windows=resource_windows(
+                                    arc_id=arc_id,
+                                    source_cell=node.cell,
+                                    fixed_source_tick=None,
+                                    target_cell=target_cell,
+                                    option=option,
+                                    waiting_interval=waiting_interval,
+                                ),
+                            )
 
         result = DddLayeredTimeNetwork(
             nodes=tuple(sorted(nodes_by_id.values(), key=lambda item: item.id)),
@@ -598,6 +824,7 @@ class DddLayeredTimeNetworkBuilder:
 class DddAnonymousFlowStatus(StrEnum):
     OPTIMAL = "optimal"
     INFEASIBLE = "infeasible"
+    TIME_LIMIT = "time_limit"
 
 
 @dataclass(frozen=True)
@@ -890,6 +1117,7 @@ class DddAnonymousFlowMaster:
         passenger_problem: DddPassengerMasterProblem | None = None,
         fixed_start_movement_problem: DddMovementProblem | None = None,
         progress_callback: Callable[[DddAnonymousMasterProgress], None] | None = None,
+        time_limit_seconds: float | None = None,
     ) -> DddAnonymousFlowResult:
         network.validate()
         if self.integrality_tolerance <= 0:
@@ -902,6 +1130,10 @@ class DddAnonymousFlowMaster:
             raise ValueError(
                 "DDD master diagnostic times must be unique and increasing"
             )
+        if time_limit_seconds is not None and (
+            not math.isfinite(time_limit_seconds) or time_limit_seconds <= 0
+        ):
+            raise ValueError("DDD master time limit must be finite and positive")
         build_started = perf_counter()
         model = gp.Model("ddd_anonymous_flow")
         model.Params.OutputFlag = int(self.output_flag)
@@ -1029,6 +1261,11 @@ class DddAnonymousFlowMaster:
         model.ModelSense = GRB.MINIMIZE
         model.update()
         model_build_seconds = perf_counter() - build_started
+        if time_limit_seconds is not None:
+            model.Params.TimeLimit = max(
+                1e-3,
+                time_limit_seconds - model_build_seconds,
+            )
         incumbent_improvements: list[DddAnonymousMasterIncumbent] = []
         progress_snapshots: list[DddAnonymousMasterProgress] = []
         pending_snapshot_seconds = list(self.diagnostic_snapshot_seconds)
@@ -1149,6 +1386,59 @@ class DddAnonymousFlowMaster:
                 fixed_flow_constraint_count=fixed_flow_constraint_count,
                 solver_status_code=int(model.Status),
                 termination_reason="infeasible",
+                model_build_seconds=model_build_seconds,
+                optimize_seconds=optimize_seconds,
+                solution_count=solution_count,
+                explored_node_count=float(model.NodeCount),
+                open_node_count=float(getattr(model, "OpenNodeCount", 0.0)),
+                simplex_iteration_count=float(model.IterCount),
+                absolute_gap=absolute_gap,
+                relative_gap=relative_gap,
+                time_to_first_incumbent_seconds=(
+                    incumbent_improvements[0].elapsed_seconds
+                    if incumbent_improvements
+                    else None
+                ),
+                incumbent_improvements=tuple(incumbent_improvements),
+                progress_snapshots=tuple(progress_snapshots),
+            )
+        if model.Status == GRB.TIME_LIMIT:
+            return DddAnonymousFlowResult(
+                status=DddAnonymousFlowStatus.TIME_LIMIT,
+                objective_value=objective_value,
+                best_bound=best_bound,
+                arc_values=(),
+                prefix_arc_values=(),
+                variable_count=model.NumVars,
+                constraint_count=model.NumConstrs,
+                prefix_variable_count=len(prefix_variables),
+                conflict_constraint_count=len(cuts),
+                tracked_prefix_cabin_count=tracked_prefix_cabin_count,
+                warm_start_arc_variable_count=warm_start_arc_variable_count,
+                warm_start_prefix_variable_count=warm_start_prefix_variable_count,
+                warm_start_projected_cabin_count=(
+                    warm_start.projected_cabin_count if warm_start else 0
+                ),
+                warm_start_complete_cabin_count=(
+                    warm_start.complete_cabin_count if warm_start else 0
+                ),
+                resource_constraint_count=len(all_resource_rows),
+                mandatory_resource_constraint_count=len(mandatory_resource_rows),
+                additional_resource_constraint_count=len(resource_rows),
+                aggregate_support_constraint_count=(
+                    len(aggregate_support_cuts) + len(aggregate_distance_cuts)
+                ),
+                aggregate_threshold_variable_count=len(aggregate_threshold_variables),
+                timed_flow_cover_constraint_count=len(timed_flow_cover_cuts),
+                timed_flow_threshold_variable_count=len(
+                    timed_flow_threshold_variables
+                ),
+                fixed_start_structural_constraint_count=(
+                    fixed_start_structural_constraint_count
+                ),
+                fixed_flow_constraint_count=fixed_flow_constraint_count,
+                solver_status_code=int(model.Status),
+                termination_reason="time_limit",
                 model_build_seconds=model_build_seconds,
                 optimize_seconds=optimize_seconds,
                 solution_count=solution_count,
@@ -1541,9 +1831,11 @@ class DddAnonymousFlowWarmStartProjector:
             current_tick = start.time_tick
             current_node_id: str | None = None
             projected_arc_ids: list[str] = []
-            for visit_index, option_id in enumerate(path.route_option_ids):
+            for visit_index, (option_id, partial_arc) in enumerate(
+                zip(path.route_option_ids, path.arcs, strict=True)
+            ):
                 option = options_by_id[option_id]
-                current_tick += option.duration_tick
+                current_tick += option.duration_tick + partial_arc.minimum_wait_tick
                 candidates = (
                     source_arcs_by_cabin.get(path.cabin_id, ())
                     if visit_index == 0
@@ -1556,6 +1848,18 @@ class DddAnonymousFlowWarmStartProjector:
                     and arc.partial_arc.visit_index == visit_index
                     and arc.partial_arc.route_option_id == option_id
                     and arc.partial_arc.target_cell.contains_tick(current_tick)
+                    and (
+                        (
+                            arc.partial_arc.waiting_interval is None
+                            and partial_arc.minimum_wait_tick == 0
+                        )
+                        or (
+                            arc.partial_arc.waiting_interval is not None
+                            and arc.partial_arc.waiting_interval.contains_wait_tick(
+                                partial_arc.minimum_wait_tick
+                            )
+                        )
+                    )
                 )
                 if len(matches) != 1:
                     break
@@ -1659,6 +1963,9 @@ class DddRecoveredScheduleFlowProjector:
         starts_by_cabin = {
             start.cabin_id: start for start in problem.movement_problem.starts
         }
+        options_by_id = {
+            option.id: option for option in problem.movement_problem.route_options
+        }
         source_arcs_by_cabin: dict[int, list[DddLayeredTimeArc]] = {}
         outgoing_by_node: dict[str, list[DddLayeredTimeArc]] = {}
         for arc in network.arcs:
@@ -1678,13 +1985,20 @@ class DddRecoveredScheduleFlowProjector:
             ):
                 raise ValueError("DDD recovered schedule start is inconsistent")
             current_node_id: str | None = None
-            for visit_index, (option_id, target_event) in enumerate(
+            for visit_index, (option_id, source_event, target_event) in enumerate(
                 zip(
                     schedule.route_option_ids,
+                    schedule.events[:-1],
                     schedule.events[1:],
                     strict=True,
                 )
             ):
+                option = options_by_id[option_id]
+                wait_tick = (
+                    target_event.time_tick
+                    - source_event.time_tick
+                    - option.duration_tick
+                )
                 candidates = (
                     source_arcs_by_cabin.get(schedule.cabin_id, ())
                     if visit_index == 0
@@ -1698,6 +2012,18 @@ class DddRecoveredScheduleFlowProjector:
                     and arc.partial_arc.route_option_id == option_id
                     and arc.partial_arc.target_cell.contains_tick(
                         target_event.time_tick
+                    )
+                    and (
+                        (
+                            arc.partial_arc.waiting_interval is None
+                            and wait_tick == 0
+                        )
+                        or (
+                            arc.partial_arc.waiting_interval is not None
+                            and arc.partial_arc.waiting_interval.contains_wait_tick(
+                                wait_tick
+                            )
+                        )
                     )
                 )
                 if len(matches) != 1:
@@ -2193,6 +2519,7 @@ class DddNetworkPathProblemAdapter:
                 route_option_costs=problem.objective.route_option_costs,
                 terminal_cost=terminal_cost,
             ),
+            waiting_policy=problem.waiting_policy,
         )
         result.validate()
         return result

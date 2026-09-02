@@ -32,6 +32,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_pricing import (
     DddTrajectoryHeuristicPricingSignal,
     build_ddd_trajectory_heuristic_pricing_signal,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_problem import (
+    DddTrajectoryWaitingPolicy,
+)
 from ropeway_skip_stop_optimization.optimization.ean.artifact import EanBuildArtifact
 from ropeway_skip_stop_optimization.optimization.ean.builders.passenger_builder import (
     EanPassengerCandidateBuildResult,
@@ -160,6 +163,9 @@ class DddEanPassengerPrimalEvaluator:
     optimization_config: EanOptimizationConfig = field(
         default_factory=EanOptimizationConfig
     )
+    waiting_policy: DddTrajectoryWaitingPolicy = field(
+        default_factory=DddTrajectoryWaitingPolicy
+    )
     _passenger_build: EanPassengerCandidateBuildResult | None = field(
         init=False,
         default=None,
@@ -231,7 +237,9 @@ class DddEanPassengerPrimalEvaluator:
     ) -> DddPrimalEvaluationResult:
         self.validate_problem(problem)
         total_started = perf_counter()
-        movement_plan = DddReferenceToEanMovementPlanAdapter().build(
+        movement_plan = DddReferenceToEanMovementPlanAdapter(
+            waiting_policy=self.waiting_policy
+        ).build(
             problem=problem.movement_problem,
             solution=solution,
             artifact=self.artifact,

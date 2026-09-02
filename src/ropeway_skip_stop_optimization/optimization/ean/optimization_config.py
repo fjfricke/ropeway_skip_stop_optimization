@@ -8,6 +8,7 @@ from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     ALL_EAN_FORMULATION_SELECTION_NAMES,
     EanBoardTimeFormulation,
     EanFormulationConfig,
+    EanHeadwayOrderFormulation,
     EanHorizonFormulation,
     EanSlotActivationFormulation,
     EanStopSkipTimingFormulation,
@@ -178,6 +179,11 @@ class EanOptimizationConfig:
                 EanBoardTimeFormulation.PROJECTED_JOURNEY_TIME,
             }
         ]
+        headway_order_values = [
+            EanHeadwayOrderFormulation(name)
+            for name in names
+            if name in EanHeadwayOrderFormulation
+        ]
         if len(horizon_values) > 1:
             raise ValueError("select at most one EAN horizon formulation")
         if len(time_bound_values) > 1:
@@ -188,6 +194,8 @@ class EanOptimizationConfig:
             raise ValueError("select at most one EAN slot-activation formulation")
         if len(board_time_values) > 1:
             raise ValueError("select at most one EAN board-time formulation")
+        if len(headway_order_values) > 1:
+            raise ValueError("select at most one EAN headway-order formulation")
 
         formulation = EanFormulationConfig(
             horizon=horizon_values[0] if horizon_values else EanHorizonFormulation.LEGACY,
@@ -210,6 +218,11 @@ class EanOptimizationConfig:
                 board_time_values[0]
                 if board_time_values
                 else EanBoardTimeFormulation.AUTO
+            ),
+            headway_order=(
+                headway_order_values[0]
+                if headway_order_values
+                else EanHeadwayOrderFormulation.PAIRWISE_EAGER
             ),
         )
         optimization_names: list[EanOptimizationName | str] = []
@@ -284,13 +297,14 @@ class EanOptimizationConfig:
         self,
         fleet_mode: EanFleetMode,
     ) -> EanOptimizationConfig:
-        if (
-            self.enable_shared_merge_headway_order
-            and self.enable_diagnostic_relax_merge_headways
-        ):
+        resolved_headway_order = self.resolved_headway_order_formulation()
+        if self.enable_diagnostic_relax_merge_headways and resolved_headway_order in {
+            EanHeadwayOrderFormulation.PAIRWISE_SHARED,
+            EanHeadwayOrderFormulation.PAIRWISE_FIFO,
+        }:
             raise ValueError(
                 "diagnostic_relax_merge_headways cannot be combined with "
-                "shared_merge_headway_order"
+                f"{resolved_headway_order.value}"
             )
         if fleet_mode is EanFleetMode.FIXED_STARTS:
             return self
@@ -323,6 +337,8 @@ class EanOptimizationConfig:
             unsupported.append(
                 EanOptimizationName.SHARED_MERGE_HEADWAY_ORDER.value
             )
+        if self.formulation.headway_order is EanHeadwayOrderFormulation.PAIRWISE_FIFO:
+            unsupported.append(self.formulation.headway_order.value)
         if self.enable_diagnostic_relax_merge_headways:
             unsupported.append(
                 EanOptimizationName.DIAGNOSTIC_RELAX_MERGE_HEADWAYS.value
@@ -375,5 +391,22 @@ class EanOptimizationConfig:
                 self.formulation,
                 horizon=EanHorizonFormulation.EXACT_TIME_ACTIVATION,
                 time_bounds=EanTimeBoundFormulation.INITIAL_PLACEMENT_SAFE,
+                headway_order=EanHeadwayOrderFormulation.PAIRWISE_EAGER,
             ),
         )
+
+    def resolved_headway_order_formulation(self) -> EanHeadwayOrderFormulation:
+        """Resolve the deprecated shared-order Boolean into the new category."""
+
+        configured = self.formulation.headway_order
+        if not self.enable_shared_merge_headway_order:
+            return configured
+        if configured not in {
+            EanHeadwayOrderFormulation.PAIRWISE_EAGER,
+            EanHeadwayOrderFormulation.PAIRWISE_SHARED,
+        }:
+            raise ValueError(
+                "shared_merge_headway_order cannot be combined with "
+                f"{configured.value}"
+            )
+        return EanHeadwayOrderFormulation.PAIRWISE_SHARED

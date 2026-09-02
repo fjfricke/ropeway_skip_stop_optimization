@@ -20,6 +20,8 @@ class GurobiSolverPolicy:
     method: int | None = None
     threads: int | None = None
     mip_focus: int | None = None
+    numeric_focus: int | None = None
+    feasibility_tolerance: float | None = None
 
     def validate(self) -> None:
         if self.mip_gap is not None and not (0 <= self.mip_gap <= 1):
@@ -30,6 +32,14 @@ class GurobiSolverPolicy:
             raise ValueError("threads must be positive when set")
         if self.mip_focus is not None and self.mip_focus not in {0, 1, 2, 3}:
             raise ValueError("mip_focus must be 0, 1, 2, or 3 when set")
+        if self.numeric_focus is not None and self.numeric_focus not in {0, 1, 2, 3}:
+            raise ValueError("numeric_focus must be 0, 1, 2, or 3 when set")
+        if self.feasibility_tolerance is not None and not (
+            1e-9 <= self.feasibility_tolerance <= 1e-2
+        ):
+            raise ValueError(
+                "feasibility_tolerance must lie between 1e-9 and 1e-2"
+            )
 
 
 def gurobi_solver_policy_for_preset(preset: GurobiSolverPolicyPreset | str) -> GurobiSolverPolicy:
@@ -75,3 +85,7 @@ def apply_gurobi_solver_policy(model: Any, policy: GurobiSolverPolicy) -> None:
         model.Params.Threads = policy.threads
     if policy.mip_focus is not None:
         model.Params.MIPFocus = policy.mip_focus
+    if policy.numeric_focus is not None:
+        model.Params.NumericFocus = policy.numeric_focus
+    if policy.feasibility_tolerance is not None:
+        model.Params.FeasibilityTol = policy.feasibility_tolerance

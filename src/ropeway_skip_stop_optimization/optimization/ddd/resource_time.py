@@ -322,16 +322,29 @@ def ddd_feasible_source_interval(
     target_cell: DddTimeCell,
     duration_tick: DddTimeTick,
     operational_end_tick: DddTimeTick,
+    minimum_wait_tick: DddTimeTick = 0,
+    maximum_wait_tick: DddTimeTick = 0,
+    minimum_source_tick: DddTimeTick | None = None,
 ) -> DddTickInterval | None:
     """Return every integer source tick represented by one timed movement arc."""
 
     if duration_tick <= 0:
         raise ValueError("DDD timed resource duration must be positive")
+    if minimum_wait_tick < 0 or maximum_wait_tick < minimum_wait_tick:
+        raise ValueError("DDD timed resource waiting envelope is invalid")
     if fixed_source_tick is not None:
         if source_cell is not None:
             raise ValueError("DDD timed arc cannot have fixed and cell source")
-        if fixed_source_tick > operational_end_tick or not target_cell.contains_tick(
-            fixed_source_tick + duration_tick
+        if (
+            fixed_source_tick > operational_end_tick
+            or (
+                minimum_source_tick is not None
+                and fixed_source_tick < minimum_source_tick
+            )
+            or fixed_source_tick + duration_tick + maximum_wait_tick
+            < target_cell.lower_tick
+            or fixed_source_tick + duration_tick + minimum_wait_tick
+            >= target_cell.upper_tick
         ):
             return None
         return DddTickInterval(fixed_source_tick, fixed_source_tick + 1)
@@ -339,11 +352,12 @@ def ddd_feasible_source_interval(
         raise ValueError("DDD timed arc needs a fixed or cell source")
     lower = max(
         source_cell.lower_tick,
-        target_cell.lower_tick - duration_tick,
+        target_cell.lower_tick - duration_tick - maximum_wait_tick,
+        minimum_source_tick if minimum_source_tick is not None else source_cell.lower_tick,
     )
     upper = min(
         source_cell.upper_tick,
-        target_cell.upper_tick - duration_tick,
+        target_cell.upper_tick - duration_tick - minimum_wait_tick,
         operational_end_tick + 1,
     )
     if lower >= upper:

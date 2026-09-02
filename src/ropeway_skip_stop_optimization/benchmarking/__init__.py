@@ -24,6 +24,20 @@ from ropeway_skip_stop_optimization.benchmarking.ddd_root_cg import (
     DddRootCgTrialResult,
     DddRootCgTrialRunner,
 )
+from ropeway_skip_stop_optimization.benchmarking.ddd_merge_aware_bpc import (
+    DddMergeAwareRootGateConfig,
+    DddMergeAwareRootGateResult,
+    DddMergeAwareRootGateRunner,
+    DddMergeAwareRootVariant,
+)
+from ropeway_skip_stop_optimization.benchmarking.ddd_partial_passenger_benders import (
+    DddPartialPassengerGateConfig,
+    DddPartialPassengerGateResult,
+    DddPartialPassengerGateRunner,
+    DddPartialPassengerGateVariant,
+    DddPartialPassengerGateVariantResult,
+    write_ddd_partial_passenger_gate_result,
+)
 from ropeway_skip_stop_optimization.benchmarking.ean_passenger import (
     BenchmarkRunConfig,
     BenchmarkRunResult,
@@ -54,6 +68,15 @@ __all__ = [
     "DddFleetSweepRunner",
     "DddFleetTrialResult",
     "DddFixedKCampaignConfig",
+    "DddMergeAwareRootGateConfig",
+    "DddMergeAwareRootGateResult",
+    "DddMergeAwareRootGateRunner",
+    "DddMergeAwareRootVariant",
+    "DddPartialPassengerGateConfig",
+    "DddPartialPassengerGateResult",
+    "DddPartialPassengerGateRunner",
+    "DddPartialPassengerGateVariant",
+    "DddPartialPassengerGateVariantResult",
     "DddRootCgTrialConfig",
     "DddRootCgTrialResult",
     "DddRootCgTrialRunner",
@@ -76,4 +99,5 @@ __all__ = [
     "derive_available_fleet_intervals",
     "derive_skip_stop_benefit_interval",
     "run_ean_passenger_benchmark",
+    "write_ddd_partial_passenger_gate_result",
 ]

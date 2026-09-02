@@ -13,6 +13,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.network_refinement_model im
     DddNetworkValidationResult,
     DddNetworkValidationStatus,
     DddTimeSplit,
+    DddWaitingSplit,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
     DddAnonymousFlowResult,
@@ -188,6 +189,7 @@ def build_ddd_round_snapshot(
     resource_window_master_seconds: float = 0.0,
     resource_window_lower_bound_before: float | None = None,
     resource_window_lower_bound_after: float | None = None,
+    waiting_splits: tuple[DddWaitingSplit, ...] = (),
 ) -> DddNetworkTimeRefinementIteration:
     max_visit_by_cabin: dict[int, int] = {}
     for cut in cuts:
@@ -253,6 +255,15 @@ def build_ddd_round_snapshot(
         total_interval_resource_row_count=total_interval_resource_row_count,
         trajectory_time_split_count=trajectory_time_split_count,
         resource_time_split_count=resource_time_split_count,
+        waiting_splits=waiting_splits,
+        waiting_split_count=len(waiting_splits),
+        waiting_interval_count=sum(
+            len(partition.intervals)
+            for partition in problem.waiting_discretization.partitions
+        ),
+        waiting_discretization_fingerprint=(
+            problem.waiting_discretization.fingerprint
+        ),
         cp_sat_status=cp_sat_status,
         cp_sat_seconds=cp_sat_seconds,
         cp_sat_conflict_count=cp_sat_conflict_count,

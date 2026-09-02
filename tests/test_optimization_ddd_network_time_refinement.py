@@ -46,6 +46,9 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddRouteDecision,
     DddRouteOption,
     DddRouteOptionCost,
+    DddResource,
+    DddResourceUsage,
+    DddResourceTimingAssumption,
     DddResourceWindowCutMode,
     DddStrictTimeLiftStatus,
     DddSupportConflictCut,
@@ -57,6 +60,10 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddTimePartition,
     DddTickInterval,
     DddTimedResourceUsageWindow,
+    DddTrajectoryWaitingDomain,
+    DddTrajectoryWaitingPolicy,
+    build_ddd_initial_waiting_discretization,
+    ddd_partial_arc_is_compatible,
     build_ddd_layer_state_earliest_arrival_ticks,
     build_ddd_universal_resource_row,
 )
@@ -93,6 +100,198 @@ def test_layer_state_earliest_times_clip_initial_network_cells() -> None:
     )
 
 
+def test_bounded_waiting_starts_coarse_and_refines_without_enumeration() -> None:
+    movement = DddMovementProblem(
+        scenario_id="coarse_waiting_partition",
+        passenger_service_end_seconds=4.0,
+        operational_end_seconds=4.0,
+        states=(DddMovementState("A"), DddMovementState("B")),
+        starts=(DddFixedStart(0, "A", 0.0, 1),),
+        route_options=(
+            DddRouteOption(
+                id="stop",
+                from_state_id="A",
+                to_state_id="B",
+                station_id="A",
+                decision=DddRouteDecision.STOP,
+                duration_seconds=2.0,
+                platform_entry_offset_seconds=0.0,
+                platform_exit_offset_seconds=0.0,
+                exit_switch_offset_seconds=0.0,
+                resource_usages=(
+                    DddResourceUsage(
+                        resource_id="merge",
+                        leader_clear_offset_seconds=0.0,
+                        follower_enter_offset_seconds=0.0,
+                        leader_clear_wait_coefficient=1,
+                        follower_enter_wait_coefficient=1,
+                    ),
+                ),
+            ),
+        ),
+        resources=(DddResource("merge", 1.0),),
+    )
+    policy = DddTrajectoryWaitingPolicy(
+        domain=DddTrajectoryWaitingDomain.BOUNDED_WAIT,
+        step_seconds=1.0,
+        maximum_wait_seconds_by_station_id=(("A", 3.0),),
+    )
+    waiting = build_ddd_initial_waiting_discretization(movement, policy)
+    assert tuple(
+        (interval.lower_step, interval.upper_step)
+        for interval in waiting.intervals_for_station("A")
+    ) == ((0, 1), (1, 4))
+
+    problem = DddNetworkTimeProblem(
+        movement_problem=movement,
+        discretization=DddTimeDiscretization(
+            (DddTimePartition("B", (0.0, 4.0, 10.0)),)
+        ),
+        objective=DddNetworkTimeObjective(
+            route_option_costs=(DddRouteOptionCost("stop", 0.0),)
+        ),
+        waiting_policy=policy,
+        waiting_discretization=waiting,
+    )
+    network = DddLayeredTimeNetworkBuilder().build(problem)
+    source_arcs = tuple(
+        arc for arc in network.arcs if arc.kind is DddLayeredTimeArcKind.SOURCE
+    )
+    coarse_arcs = tuple(
+        arc
+        for arc in source_arcs
+        if arc.partial_arc is not None
+        and arc.partial_arc.waiting_interval is not None
+    )
+    assert coarse_arcs
+    assert {
+        arc.partial_arc.waiting_interval.id  # type: ignore[union-attr]
+        for arc in coarse_arcs
+    } == {"wait_interval::A::1::4::step::1000000"}
+    coarse_arc = coarse_arcs[0]
+    assert coarse_arc.partial_arc.minimum_wait_tick == 1_000_000
+    assert coarse_arc.partial_arc.maximum_wait_tick == 3_000_000
+    assert coarse_arc.resource_windows[0].timing_assumption is (
+        DddResourceTimingAssumption.BOUNDED_WAIT_ENVELOPE
+    )
+
+    refined = waiting.split(station_id="A", boundary_step=2)
+    assert tuple(
+        (interval.lower_step, interval.upper_step)
+        for interval in refined.intervals_for_station("A")
+    ) == ((0, 1), (1, 2), (2, 4))
+
+
+def test_waiting_compatibility_checks_large_grid_interval_in_constant_form() -> None:
+    option = DddRouteOption(
+        id="move",
+        from_state_id="A",
+        to_state_id="B",
+        station_id="A",
+        decision=DddRouteDecision.STOP,
+        duration_seconds=1.0,
+        platform_entry_offset_seconds=0.0,
+        platform_exit_offset_seconds=0.0,
+        exit_switch_offset_seconds=0.0,
+        resource_usages=(),
+    )
+
+    assert ddd_partial_arc_is_compatible(
+        source_cell=None,
+        fixed_source_time=0.0,
+        target_cell=DddTimeCell("B", 3.0, 3.000001),
+        option=option,
+        operational_end_seconds=10.0,
+        tolerance_seconds=0.0,
+        minimum_wait_tick=0,
+        maximum_wait_tick=1_000_000_000,
+        wait_step_tick=1_000_000,
+    )
+    assert not ddd_partial_arc_is_compatible(
+        source_cell=None,
+        fixed_source_time=0.0,
+        target_cell=DddTimeCell("B", 3.5, 3.500001),
+        option=option,
+        operational_end_seconds=10.0,
+        tolerance_seconds=0.0,
+        minimum_wait_tick=0,
+        maximum_wait_tick=1_000_000_000,
+        wait_step_tick=1_000_000,
+    )
+
+
+def test_network_refinement_discovers_only_the_wait_boundary_needed_by_conflict() -> None:
+    movement = DddMovementProblem(
+        scenario_id="delayed_waiting_refinement",
+        passenger_service_end_seconds=2.0,
+        operational_end_seconds=2.0,
+        states=(DddMovementState("A"), DddMovementState("B")),
+        starts=(
+            DddFixedStart(0, "A", 0.0, 1),
+            DddFixedStart(1, "A", 0.0, 1),
+        ),
+        route_options=(
+            DddRouteOption(
+                id="stop",
+                from_state_id="A",
+                to_state_id="B",
+                station_id="A",
+                decision=DddRouteDecision.STOP,
+                duration_seconds=3.0,
+                platform_entry_offset_seconds=0.0,
+                platform_exit_offset_seconds=0.0,
+                exit_switch_offset_seconds=0.0,
+                resource_usages=(
+                    DddResourceUsage(
+                        resource_id="merge",
+                        leader_clear_offset_seconds=0.0,
+                        follower_enter_offset_seconds=0.0,
+                        leader_clear_wait_coefficient=1,
+                        follower_enter_wait_coefficient=1,
+                    ),
+                ),
+            ),
+        ),
+        resources=(DddResource("merge", 2.0),),
+    )
+    policy = DddTrajectoryWaitingPolicy(
+        domain=DddTrajectoryWaitingDomain.BOUNDED_WAIT,
+        step_seconds=1.0,
+        maximum_wait_seconds_by_station_id=(("A", 2.0),),
+    )
+    problem = DddNetworkTimeProblem(
+        movement_problem=movement,
+        discretization=DddTimeDiscretization(
+            (DddTimePartition("B", (0.0, 2.0, 8.0)),)
+        ),
+        objective=DddNetworkTimeObjective(
+            route_option_costs=(DddRouteOptionCost("stop", 0.0),)
+        ),
+        waiting_policy=policy,
+        waiting_discretization=build_ddd_initial_waiting_discretization(
+            movement,
+            policy,
+        ),
+    )
+
+    result = DddNetworkTimeRefinementSolver(
+        max_iterations=5,
+        use_cp_sat_primal_oracle=False,
+    ).solve(problem)
+
+    assert result.status is DddNetworkTimeRefinementStatus.OPTIMAL
+    assert any(iteration.waiting_split_count for iteration in result.iterations)
+    assert result.final_waiting_discretization.by_station_id[
+        "A"
+    ].boundaries_steps == (0, 1, 2, 3)
+    waits = sorted(
+        visit.wait_seconds
+        for trajectory in result.reference_solution.trajectories  # type: ignore[union-attr]
+        for visit in trajectory.visits
+    )
+    assert waits == [0.0, 2.0]
+
+
 def test_network_builder_can_disable_structural_earliest_times() -> None:
     base = build_three_station_network_time_refinement_probe()
     movement = base.movement_problem
@@ -124,6 +323,46 @@ def test_network_builder_can_disable_structural_earliest_times() -> None:
         node.cell.lower_tick for node in legacy.nodes
     )
     assert any(node not in strengthened.nodes for node in legacy.nodes)
+
+
+def test_refinement_shared_budget_can_expire_before_first_master() -> None:
+    problem = build_three_station_network_time_refinement_probe()
+
+    result = DddNetworkTimeRefinementSolver(
+        total_time_limit_seconds=1e-9,
+        use_cp_sat_primal_oracle=False,
+    ).solve(problem)
+
+    assert result.status is (
+        DddNetworkTimeRefinementStatus.TIME_LIMIT_WITH_CERTIFIED_INTERVAL
+    )
+    assert result.global_lower_bound is None
+    assert result.global_upper_bound is None
+    assert result.iterations == ()
+
+
+def test_refinement_rejects_invalid_shared_budget() -> None:
+    problem = build_three_station_network_time_refinement_probe()
+
+    with pytest.raises(ValueError, match="total time limit"):
+        DddNetworkTimeRefinementSolver(total_time_limit_seconds=0.0).solve(problem)
+
+
+def test_refinement_preserves_validated_initial_primal_seed() -> None:
+    problem = build_three_station_network_time_refinement_probe()
+    baseline = DddNetworkTimeRefinementSolver().solve(problem)
+    assert baseline.schedules
+
+    seeded = DddNetworkTimeRefinementSolver(
+        total_time_limit_seconds=1e-9,
+        use_cp_sat_primal_oracle=False,
+    ).solve(problem, initial_schedules=baseline.schedules)
+
+    assert seeded.status is (
+        DddNetworkTimeRefinementStatus.TIME_LIMIT_WITH_CERTIFIED_INTERVAL
+    )
+    assert seeded.schedules == baseline.schedules
+    assert seeded.global_upper_bound == pytest.approx(baseline.global_upper_bound)
 
 
 def test_physical_network_builder_creates_sparse_reachable_layer_graph() -> None:
@@ -1014,7 +1253,7 @@ def test_network_refinement_emits_terminal_progress_data() -> None:
     assert "prefix=0c/0v/d0" in rendered
     assert "conflicts=0/+0/0" in rendered
     assert "resource_rows=" in rendered
-    assert "splits=0:0t/0r:none" in rendered
+    assert "splits=0:0t/0r/0w:0wi:none" in rendered
     assert "cp=" in rendered
     assert "master=optimal/" in rendered
     master_events = [

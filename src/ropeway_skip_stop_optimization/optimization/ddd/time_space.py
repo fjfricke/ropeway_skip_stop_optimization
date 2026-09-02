@@ -9,10 +9,14 @@ from ropeway_skip_stop_optimization.optimization.ddd.models import (
     DddRouteOption,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
+    DDD_TIME_TICKS_PER_SECOND,
     DddTimeTick,
     ddd_quantize_time_seconds,
     ddd_seconds_to_tick,
     ddd_tick_to_seconds,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_problem import (
+    DddTrajectoryWaitingPolicy,
 )
 
 
@@ -248,6 +252,186 @@ class DddTimeDiscretization:
         return result
 
 
+@dataclass(frozen=True, order=True)
+class DddWaitingInterval:
+    """A nonempty interval of discrete waiting-step indices.
+
+    ``upper_step`` is exclusive.  Keeping the partition in step indices avoids
+    tolerance-sensitive floating-point boundaries while still allowing the
+    physical tick values to be recovered exactly.
+    """
+
+    station_id: str
+    lower_step: int
+    upper_step: int
+    step_tick: DddTimeTick
+
+    def validate(self) -> None:
+        if not self.station_id.strip():
+            raise ValueError("DDD waiting interval station_id must be nonempty")
+        if self.lower_step < 0 or self.lower_step >= self.upper_step:
+            raise ValueError("DDD waiting interval step range is invalid")
+        if self.step_tick <= 0:
+            raise ValueError("DDD waiting interval step tick must be positive")
+
+    @property
+    def minimum_wait_tick(self) -> DddTimeTick:
+        self.validate()
+        return self.lower_step * self.step_tick
+
+    @property
+    def maximum_wait_tick(self) -> DddTimeTick:
+        self.validate()
+        return (self.upper_step - 1) * self.step_tick
+
+    @property
+    def is_singleton(self) -> bool:
+        return self.upper_step == self.lower_step + 1
+
+    @property
+    def id(self) -> str:
+        return (
+            f"wait_interval::{self.station_id}::{self.lower_step}::"
+            f"{self.upper_step}::step::{self.step_tick}"
+        )
+
+    def contains_wait_tick(self, wait_tick: DddTimeTick) -> bool:
+        if wait_tick < 0 or wait_tick % self.step_tick:
+            return False
+        step = wait_tick // self.step_tick
+        return self.lower_step <= step < self.upper_step
+
+
+@dataclass(frozen=True)
+class DddWaitingPartition:
+    station_id: str
+    maximum_step: int
+    step_tick: DddTimeTick
+    boundaries_steps: tuple[int, ...]
+
+    def validate(self) -> None:
+        if not self.station_id.strip() or self.maximum_step <= 0:
+            raise ValueError("DDD waiting partition identity is invalid")
+        if self.step_tick <= 0:
+            raise ValueError("DDD waiting partition step tick must be positive")
+        if (
+            len(self.boundaries_steps) < 2
+            or self.boundaries_steps[0] != 0
+            or self.boundaries_steps[-1] != self.maximum_step + 1
+            or any(
+                left >= right
+                for left, right in zip(
+                    self.boundaries_steps[:-1],
+                    self.boundaries_steps[1:],
+                    strict=True,
+                )
+            )
+        ):
+            raise ValueError("DDD waiting partition boundaries are invalid")
+
+    @property
+    def intervals(self) -> tuple[DddWaitingInterval, ...]:
+        self.validate()
+        return tuple(
+            DddWaitingInterval(
+                station_id=self.station_id,
+                lower_step=lower,
+                upper_step=upper,
+                step_tick=self.step_tick,
+            )
+            for lower, upper in zip(
+                self.boundaries_steps[:-1],
+                self.boundaries_steps[1:],
+                strict=True,
+            )
+        )
+
+    def split(self, boundary_step: int) -> DddWaitingPartition:
+        self.validate()
+        if boundary_step in self.boundaries_steps:
+            raise DddTimeBoundaryError(
+                f"DDD waiting boundary already exists at step {boundary_step}"
+            )
+        if not 0 < boundary_step < self.maximum_step + 1:
+            raise DddTimeBoundaryError(
+                f"DDD waiting boundary {boundary_step} lies outside partition"
+            )
+        result = DddWaitingPartition(
+            station_id=self.station_id,
+            maximum_step=self.maximum_step,
+            step_tick=self.step_tick,
+            boundaries_steps=tuple(
+                sorted((*self.boundaries_steps, boundary_step))
+            ),
+        )
+        result.validate()
+        return result
+
+
+@dataclass(frozen=True)
+class DddWaitingDiscretization:
+    partitions: tuple[DddWaitingPartition, ...] = ()
+
+    def validate(self) -> None:
+        station_ids: set[str] = set()
+        for partition in self.partitions:
+            partition.validate()
+            if partition.station_id in station_ids:
+                raise ValueError(
+                    f"duplicate DDD waiting partition: {partition.station_id}"
+                )
+            station_ids.add(partition.station_id)
+
+    @property
+    def by_station_id(self) -> dict[str, DddWaitingPartition]:
+        return {partition.station_id: partition for partition in self.partitions}
+
+    @property
+    def fingerprint(self) -> str:
+        return "||".join(
+            f"{item.station_id}:{item.step_tick}:"
+            + ",".join(str(value) for value in item.boundaries_steps)
+            for item in sorted(self.partitions, key=lambda value: value.station_id)
+        )
+
+    def intervals_for_station(
+        self,
+        station_id: str,
+    ) -> tuple[DddWaitingInterval, ...]:
+        partition = self.by_station_id.get(station_id)
+        if partition is None:
+            return (
+                DddWaitingInterval(
+                    station_id=station_id,
+                    lower_step=0,
+                    upper_step=1,
+                    step_tick=DDD_TIME_TICKS_PER_SECOND,
+                ),
+            )
+        return partition.intervals
+
+    def split(
+        self,
+        *,
+        station_id: str,
+        boundary_step: int,
+    ) -> DddWaitingDiscretization:
+        partition = self.by_station_id.get(station_id)
+        if partition is None:
+            raise DddTimeBoundaryError(
+                f"missing DDD waiting partition for station {station_id!r}"
+            )
+        replacement = partition.split(boundary_step)
+        result = DddWaitingDiscretization(
+            tuple(
+                replacement if item.station_id == station_id else item
+                for item in self.partitions
+            )
+        )
+        result.validate()
+        return result
+
+
 @dataclass(frozen=True)
 class DddRouteOptionCost:
     route_option_id: str
@@ -371,10 +555,12 @@ class DddPartialTimeProblem:
     terminal_state_id: str
     discretization: DddTimeDiscretization
     objective: DddTimeSpaceObjective
+    waiting_policy: DddTrajectoryWaitingPolicy = DddTrajectoryWaitingPolicy()
 
     def validate(self) -> None:
         self.movement_problem.validate()
         self.discretization.validate()
+        self.waiting_policy.validate(self.movement_problem.core)
         if len(self.movement_problem.starts) != 1:
             raise ValueError("Phase-0 partial time problem requires exactly one start")
         if self.movement_problem.resources:
@@ -400,6 +586,7 @@ class DddPartialTimeProblem:
             terminal_state_id=self.terminal_state_id,
             discretization=discretization,
             objective=self.objective,
+            waiting_policy=self.waiting_policy,
         )
         result.validate()
         return result
@@ -413,13 +600,36 @@ class DddPartialTimedArc:
     to_state_id: str
     source_cell_id: str | None
     target_cell: DddTimeCell
+    waiting_interval: DddWaitingInterval | None = None
 
     @property
     def id(self) -> str:
         source = self.source_cell_id or "fixed_start"
-        return (
+        base = (
             f"partial_arc::v{self.visit_index}::{self.route_option_id}::"
             f"{source}::{self.target_cell.id}"
+        )
+        if self.waiting_interval is None or (
+            self.waiting_interval.minimum_wait_tick == 0
+            and self.waiting_interval.maximum_wait_tick == 0
+        ):
+            return base
+        return f"{base}::{self.waiting_interval.id}"
+
+    @property
+    def minimum_wait_tick(self) -> DddTimeTick:
+        return (
+            0
+            if self.waiting_interval is None
+            else self.waiting_interval.minimum_wait_tick
+        )
+
+    @property
+    def maximum_wait_tick(self) -> DddTimeTick:
+        return (
+            0
+            if self.waiting_interval is None
+            else self.waiting_interval.maximum_wait_tick
         )
 
 
@@ -558,30 +768,47 @@ def ddd_partial_arc_is_compatible(
     option: DddRouteOption,
     operational_end_seconds: float,
     tolerance_seconds: float,
+    minimum_wait_tick: DddTimeTick = 0,
+    maximum_wait_tick: DddTimeTick = 0,
+    wait_step_tick: DddTimeTick = 1,
 ) -> bool:
-    duration = option.duration_tick
+    if (
+        minimum_wait_tick < 0
+        or maximum_wait_tick < minimum_wait_tick
+        or wait_step_tick <= 0
+        or minimum_wait_tick % wait_step_tick
+        or maximum_wait_tick % wait_step_tick
+    ):
+        raise ValueError("DDD partial arc waiting interval is invalid")
     horizon = ddd_seconds_to_tick(operational_end_seconds)
     if fixed_source_time is not None:
-        source_tick = ddd_seconds_to_tick(fixed_source_time)
-        if source_tick > horizon:
+        source_lower = source_upper = ddd_seconds_to_tick(fixed_source_time)
+        if source_lower > horizon:
             return False
-        return target_cell.contains_tick(source_tick + duration)
-    if source_cell is None:
-        raise ValueError("DDD partial arc needs a source cell or fixed source time")
-    if source_cell.contains_tick(horizon) and target_cell.contains_tick(
-        horizon + duration
-    ):
-        # Route entry at exactly H is active even though the interval below is
-        # open at its operational-horizon truncation.
-        return True
-    source_lower = source_cell.lower_tick
-    source_upper = min(source_cell.upper_tick, horizon)
-    compatible_lower = max(
-        source_lower,
-        target_cell.lower_tick - duration,
+    else:
+        if source_cell is None:
+            raise ValueError(
+                "DDD partial arc needs a source cell or fixed source time"
+            )
+        source_lower = source_cell.lower_tick
+        source_upper = min(source_cell.upper_tick - 1, horizon)
+        if source_lower > source_upper:
+            return False
+
+    # There is a source tick s and a grid wait w iff
+    #   target.lower <= s + duration + w <= target.upper - 1.
+    # Eliminating s yields one closed interval for w.  Testing whether that
+    # interval contains a grid multiple is constant-time; no waiting values
+    # are enumerated even when the physical cap is large.
+    feasible_wait_lower = max(
+        minimum_wait_tick,
+        target_cell.lower_tick - option.duration_tick - source_upper,
     )
-    compatible_upper = min(
-        source_upper,
-        target_cell.upper_tick - duration,
+    feasible_wait_upper = min(
+        maximum_wait_tick,
+        target_cell.upper_tick - 1 - option.duration_tick - source_lower,
     )
-    return compatible_lower < compatible_upper
+    first_grid_wait = (
+        -(-feasible_wait_lower // wait_step_tick) * wait_step_tick
+    )
+    return first_grid_wait <= feasible_wait_upper

@@ -21,8 +21,15 @@ from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_movement_master im
     DddArcFlowMovementMasterBuilder,
     build_ddd_arc_flow_movement_values,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_network import (
+    DddArcFlowBuildTimeLimitError,
+    check_ddd_arc_flow_build_deadline,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_preparation import (
     DddArcFlowProblemPreparer,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_resource_separation import (
+    DddArcFlowSelectedResourceCliqueSeparator,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.fixed_k import (
     DddFixedKTrajectoryProblem,
@@ -42,6 +49,7 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.fixed_movement_p
 
 class DddArcFlowResourceRowMode(StrEnum):
     EAGER_MAXIMAL_CLIQUES = "eager_maximal_cliques"
+    DELAYED_SELECTED_CLIQUES = "delayed_selected_cliques"
 
 
 class DddFixedKArcFlowStatus(StrEnum):
@@ -143,7 +151,7 @@ class DddFixedKArcFlowResult:
 DddFixedKArcFlowProgressHook = Callable[[DddFixedKArcFlowProgress], None]
 
 
-class _ArcFlowProgressHeartbeat:
+class DddArcFlowProgressHeartbeat:
     """Publish the latest safe snapshot even while Gurobi stays in one phase."""
 
     def __init__(
@@ -234,7 +242,7 @@ class DddFixedKArcFlowOptimizer:
                 else root_cg_lower_bound
             ),
         )
-        heartbeat = _ArcFlowProgressHeartbeat(
+        heartbeat = DddArcFlowProgressHeartbeat(
             hook=progress_hook,
             initial=DddFixedKArcFlowProgress(
                 elapsed_seconds=0.0,
@@ -354,10 +362,54 @@ class DddFixedKArcFlowOptimizer:
                 )
             )
 
-        prepared = DddArcFlowProblemPreparer().build(
-            problem,
-            phase_hook=update_phase,
-        )
+        try:
+            prepared = DddArcFlowProblemPreparer().build(
+                problem,
+                phase_hook=update_phase,
+                build_labeled_resource_cliques=(
+                    self.config.resource_row_mode
+                    is DddArcFlowResourceRowMode.EAGER_MAXIMAL_CLIQUES
+                ),
+                deadline_monotonic=started + self.config.time_limit_seconds,
+            )
+        except DddArcFlowBuildTimeLimitError as error:
+            total = perf_counter() - started
+            return DddFixedKArcFlowResult(
+                status=(
+                    DddFixedKArcFlowStatus.TIME_LIMIT_WITH_CERTIFIED_INTERVAL
+                    if primal_seed is not None
+                    else DddFixedKArcFlowStatus.UNKNOWN_NO_INCUMBENT
+                ),
+                problem_fingerprint=problem.fingerprint,
+                objective_value=external_upper_bound,
+                solver_best_bound=None,
+                root_cg_lower_bound=root_cg_lower_bound,
+                certified_lower_bound=certified_bound(),
+                validated_upper_bound=external_upper_bound,
+                relative_gap=_relative_gap(
+                    certified_bound(), external_upper_bound
+                ),
+                solution=(None if primal_seed is None else primal_seed.solution),
+                solver_status=int(GRB.TIME_LIMIT),
+                solution_count=0,
+                node_count=0.0,
+                movement_variable_count=0,
+                passenger_variable_count=0,
+                movement_constraint_count=0,
+                passenger_constraint_count=0,
+                resource_row_count=0,
+                linear_constraint_count=0,
+                network_build_seconds=total,
+                model_build_seconds=0.0,
+                solve_seconds=0.0,
+                total_seconds=total,
+                time_to_first_incumbent_seconds=(
+                    0.0 if primal_seed is not None else None
+                ),
+                seed_kind=(None if primal_seed is None else primal_seed.provenance),
+                primal_seed_objective_value=external_upper_bound,
+                detail=str(error),
+            )
         movement_variable_count = len(prepared.arcs)
         network_build_seconds = prepared.network_build_seconds
         update_phase("model_variables")
@@ -375,6 +427,10 @@ class DddFixedKArcFlowOptimizer:
         movement_master = DddArcFlowMovementMasterBuilder().build(
             model=model,
             prepared=prepared,
+            add_eager_resource_rows=(
+                self.config.resource_row_mode
+                is DddArcFlowResourceRowMode.EAGER_MAXIMAL_CLIQUES
+            ),
         )
         route = movement_master.route_by_arc_id
         movement_variable_count = movement_master.movement_variable_count
@@ -382,7 +438,52 @@ class DddFixedKArcFlowOptimizer:
         update_phase("model_resource_rows")
         resource_rows = movement_master.resource_row_count
         update_phase("model_passengers")
-        passenger_domain = DddArcFlowPassengerDomainBuilder().build(prepared)
+        try:
+            check_ddd_arc_flow_build_deadline(
+                started + self.config.time_limit_seconds
+            )
+            passenger_domain = DddArcFlowPassengerDomainBuilder().build(
+                prepared,
+                deadline_monotonic=started + self.config.time_limit_seconds,
+            )
+        except DddArcFlowBuildTimeLimitError as error:
+            total = perf_counter() - started
+            return DddFixedKArcFlowResult(
+                status=(
+                    DddFixedKArcFlowStatus.TIME_LIMIT_WITH_CERTIFIED_INTERVAL
+                    if primal_seed is not None
+                    else DddFixedKArcFlowStatus.UNKNOWN_NO_INCUMBENT
+                ),
+                problem_fingerprint=problem.fingerprint,
+                objective_value=external_upper_bound,
+                solver_best_bound=None,
+                root_cg_lower_bound=root_cg_lower_bound,
+                certified_lower_bound=certified_bound(),
+                validated_upper_bound=external_upper_bound,
+                relative_gap=_relative_gap(
+                    certified_bound(), external_upper_bound
+                ),
+                solution=(None if primal_seed is None else primal_seed.solution),
+                solver_status=int(GRB.TIME_LIMIT),
+                solution_count=0,
+                node_count=0.0,
+                movement_variable_count=movement_variable_count,
+                passenger_variable_count=0,
+                movement_constraint_count=movement_constraint_count,
+                passenger_constraint_count=0,
+                resource_row_count=resource_rows,
+                linear_constraint_count=int(model.NumConstrs),
+                network_build_seconds=network_build_seconds,
+                model_build_seconds=perf_counter() - model_started,
+                solve_seconds=0.0,
+                total_seconds=total,
+                time_to_first_incumbent_seconds=(
+                    0.0 if primal_seed is not None else None
+                ),
+                seed_kind=(None if primal_seed is None else primal_seed.provenance),
+                primal_seed_objective_value=external_upper_bound,
+                detail=str(error),
+            )
         passenger_model = DddArcFlowPassengerModelBuilder().build_integrated(
             model=model,
             domain=passenger_domain,
@@ -419,6 +520,14 @@ class DddFixedKArcFlowOptimizer:
                 name="validated_primal_cutoff",
             )
         model.update()
+        delayed_separator = (
+            DddArcFlowSelectedResourceCliqueSeparator(prepared)
+            if self.config.resource_row_mode
+            is DddArcFlowResourceRowMode.DELAYED_SELECTED_CLIQUES
+            else None
+        )
+        if delayed_separator is not None:
+            model.Params.LazyConstraints = 1
         model_build_seconds = perf_counter() - model_started
         update_phase("presolve")
 
@@ -428,13 +537,50 @@ class DddFixedKArcFlowOptimizer:
         latest_bound: float | None = None
         latest_node_count = 0.0
         latest_solution_count = 0
+        delayed_separation_error: str | None = None
+        route_items = tuple(route.items())
+        route_variables = tuple(variable for _, variable in route_items)
 
         def callback(callback_model: gp.Model, where: int) -> None:
             nonlocal first_incumbent, last_sample_seconds
             nonlocal latest_bound, latest_incumbent
             nonlocal latest_node_count, latest_solution_count
-            if where == GRB.Callback.MIPSOL and first_incumbent is None:
-                first_incumbent = perf_counter() - started
+            nonlocal resource_rows, delayed_separation_error
+            if where == GRB.Callback.MIPSOL:
+                if delayed_separator is not None:
+                    selected_arc_ids = frozenset(
+                        arc_id
+                        for (arc_id, _), value in zip(
+                            route_items,
+                            callback_model.cbGetSolution(route_variables),
+                            strict=True,
+                        )
+                        if value > 0.5
+                    )
+                    separation = delayed_separator.separate(selected_arc_ids)
+                    if separation.duplicate_violation_count:
+                        delayed_separation_error = (
+                            "an integer candidate violates an already materialized "
+                            "resource clique"
+                        )
+                        callback_model.terminate()
+                        return
+                    for clique in separation.new_violations:
+                        callback_model.cbLazy(
+                            gp.quicksum(
+                                coefficient * route[arc_id]
+                                for arc_id, coefficient in clique.coefficients
+                            )
+                            <= 1
+                        )
+                    if separation.new_violations:
+                        delayed_separator.mark_materialized(
+                            separation.new_violations
+                        )
+                        resource_rows = delayed_separator.materialized_row_count
+                        return
+                if first_incumbent is None:
+                    first_incumbent = perf_counter() - started
             supported = {
                 GRB.Callback.PRESOLVE,
                 GRB.Callback.SIMPLEX,
@@ -561,12 +707,21 @@ class DddFixedKArcFlowOptimizer:
         )
         detail: str | None = None
         status = DddFixedKArcFlowStatus.UNKNOWN_NO_INCUMBENT
-        if model.SolCount > 0:
+        if delayed_separation_error is not None:
+            status = DddFixedKArcFlowStatus.INTERNAL_CERTIFICATE_ERROR
+            detail = delayed_separation_error
+        elif model.SolCount > 0:
             try:
                 solver_solution = movement_master.extract_solution(
                     boundary_occurrences=problem.boundary_context.resource_occurrences,
                 )
-                validate_ddd_reference_solution(prepared.movement, solver_solution)
+                validate_ddd_reference_solution(
+                    prepared.movement,
+                    solver_solution,
+                    waiting_policy=(
+                        problem.resolved_trajectory_problem.waiting_policy
+                    ),
+                )
                 self._validate_passenger_solution(
                     problem=problem,
                     passenger_model=passenger_model,
@@ -583,11 +738,12 @@ class DddFixedKArcFlowOptimizer:
                 ):
                     objective = solver_objective
                     solution = solver_solution
-                status = (
-                    DddFixedKArcFlowStatus.INTEGER_OPTIMAL
-                    if model.Status == GRB.OPTIMAL
-                    else DddFixedKArcFlowStatus.TIME_LIMIT_WITH_CERTIFIED_INTERVAL
-                )
+                if delayed_separation_error is None:
+                    status = (
+                        DddFixedKArcFlowStatus.INTEGER_OPTIMAL
+                        if model.Status == GRB.OPTIMAL
+                        else DddFixedKArcFlowStatus.TIME_LIMIT_WITH_CERTIFIED_INTERVAL
+                    )
         elif model.Status == GRB.INFEASIBLE:
             if primal_seed is None:
                 status = DddFixedKArcFlowStatus.MOVEMENT_INFEASIBLE

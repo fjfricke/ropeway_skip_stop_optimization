@@ -261,6 +261,7 @@ class DddArcFlowPassengerRecourseModel:
         self,
         movement_values: Mapping[str, float],
         *,
+        capacity_rhs_offsets: Mapping[str, float] | None = None,
         time_limit_seconds: float | None = None,
         tightness_tolerance: float = 1e-5,
     ) -> DddArcFlowPassengerRecourseResult:
@@ -282,7 +283,18 @@ class DddArcFlowPassengerRecourseModel:
             for value in movement_values.values()
         ):
             raise ValueError("Passenger recourse Movement values must lie in [0, 1]")
-        movement_signature = ddd_movement_vector_signature(movement_values)
+        offsets = {} if capacity_rhs_offsets is None else dict(capacity_rhs_offsets)
+        unknown_offsets = offsets.keys() - self.capacity_constraint_by_id.keys()
+        if unknown_offsets:
+            raise ValueError(
+                "Passenger recourse capacity offsets reference unknown rows: "
+                f"{sorted(unknown_offsets)[:3]}"
+            )
+        if any(not math.isfinite(value) or value < -1e-8 for value in offsets.values()):
+            raise ValueError(
+                "Passenger recourse capacity offsets must be finite and nonnegative"
+            )
+        movement_signature = _recourse_vector_signature(movement_values, offsets)
         self.evaluation_count += 1
         cached = self._optimal_cache.get(movement_signature)
         if cached is not None:
@@ -299,6 +311,7 @@ class DddArcFlowPassengerRecourseModel:
         for row in self.domain.capacity_rows:
             self.capacity_constraint_by_id[row.id].RHS = (
                 row.movement_coefficient * movement_values[row.arc_id]
+                - offsets.get(row.id, 0.0)
             )
         if time_limit_seconds is not None:
             self.model.Params.TimeLimit = time_limit_seconds
@@ -324,6 +337,7 @@ class DddArcFlowPassengerRecourseModel:
             self.assignment_domain is EanPassengerAssignmentDomain.LP_RELAXATION
             and self.model.Status == GRB.OPTIMAL
             and objective is not None
+            and not offsets
         ):
             cut = self._dual_cut(movement_values, objective)
             if not math.isclose(
@@ -382,3 +396,20 @@ class DddArcFlowPassengerRecourseModel:
                 movement_values
             ),
         )
+
+
+def _recourse_vector_signature(
+    movement_values: Mapping[str, float],
+    capacity_rhs_offsets: Mapping[str, float],
+) -> str:
+    if not capacity_rhs_offsets:
+        return ddd_movement_vector_signature(movement_values)
+    return ddd_movement_vector_signature(
+        {
+            **movement_values,
+            **{
+                f"capacity_offset::{row_id}": value
+                for row_id, value in capacity_rhs_offsets.items()
+            },
+        }
+    )

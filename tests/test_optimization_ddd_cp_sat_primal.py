@@ -18,6 +18,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddCpSatLocalExplainabilityClass,
     DddCpSatLocalResourceAnalyzer,
     DddCpSatFixedSupport,
+    DddCpSatFixedRouteDecision,
     DddCpSatPrimalStatus,
     DddCpSatMasterCoupling,
     DddCpSatPassengerObjectiveEvent,
@@ -38,9 +39,12 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddTimeDiscretization,
     DddTimePartition,
     DddTimedFlowCoverCut,
+    DddTrajectoryWaitingDomain,
+    DddTrajectoryWaitingPolicy,
     build_ddd_cabin_path_core_cut,
     build_ddd_cp_sat_local_explainability_report,
     build_ddd_cp_sat_timed_flow_support,
+    build_ddd_initial_waiting_discretization,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.network_refinement import (
     DddNetworkValidationStatus,
@@ -64,6 +68,94 @@ def test_cp_sat_primal_oracle_finds_valid_combined_schedule() -> None:
         tolerance_seconds=1e-9,
     )
     assert validation.status is DddNetworkValidationStatus.FEASIBLE
+
+
+def test_cp_sat_primal_oracle_uses_bounded_waiting_to_clear_resource() -> None:
+    movement = DddMovementProblem(
+        scenario_id="cp_sat_bounded_waiting",
+        passenger_service_end_seconds=1.0,
+        operational_end_seconds=1.0,
+        states=(DddMovementState("A"), DddMovementState("B")),
+        starts=(
+            DddFixedStart(0, "A", 0.0, 1),
+            DddFixedStart(1, "A", 0.0, 1),
+        ),
+        route_options=(
+            DddRouteOption(
+                id="stop",
+                from_state_id="A",
+                to_state_id="B",
+                station_id="A",
+                decision=DddRouteDecision.STOP,
+                duration_seconds=2.0,
+                platform_entry_offset_seconds=0.0,
+                platform_exit_offset_seconds=0.0,
+                exit_switch_offset_seconds=0.0,
+                resource_usages=(
+                    DddResourceUsage(
+                        resource_id="merge",
+                        leader_clear_offset_seconds=0.0,
+                        follower_enter_offset_seconds=0.0,
+                        leader_clear_wait_coefficient=1,
+                        follower_enter_wait_coefficient=1,
+                    ),
+                ),
+            ),
+        ),
+        resources=(DddResource("merge", 1.0),),
+    )
+    no_wait_problem = DddNetworkTimeProblem(
+        movement_problem=movement,
+        discretization=DddTimeDiscretization(
+                (DddTimePartition("B", (0.0, 1.0, 5.0)),)
+        ),
+        objective=DddNetworkTimeObjective(
+            route_option_costs=(DddRouteOptionCost("stop", 0.0),)
+        ),
+    )
+    assert (
+        DddCpSatPrimalOracle(time_limit_seconds=2.0, num_workers=1)
+        .solve(no_wait_problem)
+        .status
+        is DddCpSatPrimalStatus.INFEASIBLE
+    )
+
+    waiting_policy = DddTrajectoryWaitingPolicy(
+        domain=DddTrajectoryWaitingDomain.BOUNDED_WAIT,
+        step_seconds=1.0,
+        maximum_wait_seconds_by_station_id=(("A", 1.0),),
+    )
+    waiting_problem = replace(
+        no_wait_problem,
+        waiting_policy=waiting_policy,
+        waiting_discretization=build_ddd_initial_waiting_discretization(
+            movement,
+            waiting_policy,
+        ),
+    )
+    waiting_problem.validate()
+
+    result = DddCpSatPrimalOracle(
+        time_limit_seconds=2.0,
+        num_workers=1,
+    ).solve(waiting_problem)
+
+    assert result.status is DddCpSatPrimalStatus.FEASIBLE
+    waits = sorted(
+        schedule.events[1].time_seconds
+        - schedule.events[0].time_seconds
+        - 2.0
+        for schedule in result.schedules
+    )
+    assert waits == [0.0, 1.0]
+    assert (
+        _validate_reference_solution(
+            waiting_problem,
+            result.schedules,
+            tolerance_seconds=1e-9,
+        ).status
+        is DddNetworkValidationStatus.FEASIBLE
+    )
 
 
 def test_cp_sat_primal_pool_excludes_previous_route_patterns() -> None:
@@ -97,6 +189,48 @@ def test_cp_sat_primal_pool_excludes_previous_route_patterns() -> None:
             tolerance_seconds=1e-9,
         )
         assert validation.status is DddNetworkValidationStatus.FEASIBLE
+
+
+def test_cp_sat_primal_fixes_noncontiguous_route_decisions() -> None:
+    problem = build_three_station_network_combined_probe()
+    initial = DddCpSatPrimalOracle(
+        time_limit_seconds=2.0,
+        num_workers=1,
+    ).solve(problem)
+    assert initial.schedules
+    hinted = initial.schedules
+    fixed = tuple(
+        sorted(
+            DddCpSatFixedRouteDecision(
+                cabin_id=schedule.cabin_id,
+                visit_index=visit_index,
+                route_option_id=schedule.route_option_ids[visit_index],
+            )
+            for schedule in hinted
+            for visit_index in range(0, len(schedule.route_option_ids), 2)
+        )
+    )
+
+    result = DddCpSatPrimalOracle(
+        time_limit_seconds=2.0,
+        num_workers=1,
+    ).solve(
+        problem,
+        hint_schedules=hinted,
+        fixed_route_decisions=fixed,
+    )
+
+    assert result.status is DddCpSatPrimalStatus.FEASIBLE
+    actual = {
+        (schedule.cabin_id, visit_index): route_option_id
+        for schedule in result.schedules
+        for visit_index, route_option_id in enumerate(schedule.route_option_ids)
+    }
+    assert all(
+        actual[fixed_item.cabin_id, fixed_item.visit_index]
+        == fixed_item.route_option_id
+        for fixed_item in fixed
+    )
 
 
 def test_cp_sat_passenger_pricing_prefers_available_direct_ride() -> None:
@@ -497,7 +631,7 @@ def test_cp_sat_fixed_support_returns_valid_aggregate_infeasibility_core() -> No
         paths,
         cabin_fixed.cabin_path_infeasible_core,
     )
-    assert cabin_path_cut.provenance == "exact_cp_sat_no_wait_cabin_path_core"
+    assert cabin_path_cut.provenance == "exact_cp_sat_cabin_path_core"
     assert cabin_path_cut.right_hand_side == len(cabin_path_cut.literals) - 1
     assert {literal.cabin_id for literal in cabin_path_cut.literals} == {0, 1}
     assert all(literal.visit_index == 0 for literal in cabin_path_cut.literals)
@@ -525,7 +659,7 @@ def test_cp_sat_fixed_support_returns_valid_aggregate_infeasibility_core() -> No
     assert integrated_prefix.iterations[0].cp_sat_cabin_path_cut_literal_count == 2
     assert integrated_prefix.iterations[0].added_cabin_path_core_cut_ids
     assert any(
-        cut.provenance == "exact_cp_sat_no_wait_cabin_path_core"
+        cut.provenance == "exact_cp_sat_cabin_path_core"
         for cut in integrated_prefix.conflict_cuts
     )
 

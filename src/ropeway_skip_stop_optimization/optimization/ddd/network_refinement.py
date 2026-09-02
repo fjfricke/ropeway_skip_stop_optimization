@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 from time import perf_counter
 
@@ -9,6 +9,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.aggregate_support import (
     DddAggregateSupportDistanceCut,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_primal import (
+    DddCpSatPrimalOracle,
     DddCpSatPrimalResult,
     DddCpSatPrimalStatus,
 )
@@ -46,6 +47,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_slot import (
     DddTrajectoryColumnPool,
     DddTrajectorySlotPoolResult,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generation import (
+    DddTrajectoryWaitingDomain,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_passenger_lp import (
     DddTrajectoryPassengerLpResult,
 )
@@ -70,6 +74,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.reference import (
     validate_ddd_reference_solution,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.support_master import (
+    DDD_CP_SAT_CABIN_PATH_CORE_PROVENANCES,
     DddSupportConflictCut,
     DddSupportSelection,
 )
@@ -78,6 +83,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.time_refinement import (
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
     DddTimeDiscretization,
+    DddWaitingDiscretization,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.timed_flow_cover import (
     DddTimedFlowCoverCut,
@@ -106,7 +112,9 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
         progress_callback: DddNetworkTimeRefinementProgressCallback | None = None,
         primal_evaluator: DddPrimalEvaluator | None = None,
         passenger_master_problem: DddPassengerMasterProblem | None = None,
+        initial_schedules: tuple[DddRecoveredSchedule, ...] = (),
     ) -> DddNetworkTimeRefinementResult:
+        solve_started = perf_counter()
         self.validate_solve_context(
             problem,
             primal_evaluator=primal_evaluator,
@@ -154,7 +162,6 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
         universal_resource_row_ids: set[str] = set()
         interval_resource_row_ids: set[str] = set()
         previous_paths = ()
-        solve_started = perf_counter()
         bootstrap_result = None
         bootstrap_objective: float | None = None
         trajectory_column_pool = DddTrajectoryColumnPool()
@@ -167,6 +174,58 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
         last_trajectory_pool_fingerprint: str | None = None
         latest_trajectory_pool_result: DddTrajectorySlotPoolResult | None = None
         latest_trajectory_pool_lp_result: DddTrajectoryPassengerLpResult | None = None
+
+        def remaining_budget() -> float | None:
+            if self.total_time_limit_seconds is None:
+                return None
+            return max(
+                0.0,
+                self.total_time_limit_seconds - (perf_counter() - solve_started),
+            )
+
+        def bounded_oracle(
+            oracle: DddCpSatPrimalOracle,
+        ) -> DddCpSatPrimalOracle:
+            remaining = remaining_budget()
+            if remaining is None:
+                return oracle
+            return replace(
+                oracle,
+                time_limit_seconds=max(
+                    1e-3,
+                    min(getattr(oracle, "time_limit_seconds"), remaining),
+                ),
+            )
+
+        def time_limit_result() -> DddNetworkTimeRefinementResult:
+            return _result(
+                status=(
+                    DddNetworkTimeRefinementStatus.TIME_LIMIT_WITH_CERTIFIED_INTERVAL
+                ),
+                schedules=best_schedules,
+                reference_solution=best_reference,
+                lower_bound=lower_bound,
+                upper_bound=upper_bound,
+                iterations=iterations,
+                discretization=current.discretization,
+                waiting_discretization=current.waiting_discretization,
+                cuts=cuts,
+                primal_evaluation=best_primal_evaluation,
+                aggregate_support_cuts=aggregate_support_cuts,
+                aggregate_distance_cuts=aggregate_distance_cuts,
+                timed_flow_cover_cuts=timed_flow_cover_cuts,
+                bootstrap_result=bootstrap_result,
+                bootstrap_objective=bootstrap_objective,
+            )
+
+        def budget_exhausted() -> bool:
+            remaining = remaining_budget()
+            return remaining is not None and remaining <= 0
+
+        def positive_remaining_budget() -> float | None:
+            remaining = remaining_budget()
+            return None if remaining is None else max(1e-3, remaining)
+
         def emit(
             stage: DddNetworkTimeRefinementProgressStage,
             round_index: int,
@@ -186,6 +245,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                     round_index=round_index,
                     max_iterations=self.max_iterations,
                     total_elapsed_seconds=perf_counter() - solve_started,
+                    remaining_budget_seconds=remaining_budget(),
                     iteration=iteration,
                     candidate_index=candidate_index,
                     candidate_limit=candidate_limit,
@@ -207,9 +267,35 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                 iteration=iteration,
             )
 
+        if initial_schedules:
+            initial_validation = _validate_reference_solution(
+                current,
+                initial_schedules,
+                tolerance_seconds=self.tolerance_seconds,
+            )
+            if initial_validation.solution is None:
+                raise ValueError(
+                    "DDD initial primal schedules are incompatible with the "
+                    f"current problem: {initial_validation.detail}"
+                )
+            primal_tracker.consider_candidate(
+                current,
+                initial_schedules,
+                initial_validation.solution,
+                require_movement_plan=False,
+                time_limit_seconds=positive_remaining_budget(),
+            )
+            upper_bound = primal_tracker.upper_bound
+            best_schedules = primal_tracker.best_schedules
+            best_reference = primal_tracker.best_reference
+            best_primal_evaluation = primal_tracker.best_evaluation
+
+        if budget_exhausted():
+            return time_limit_result()
+
         bootstrap_phase = bootstrap_phase_solver.solve(
             problem=current,
-            oracle=cp_sat_oracle,
+            oracle=bounded_oracle(cp_sat_oracle),
             validate_candidate=lambda schedules: _validate_reference_solution(
                 current,
                 schedules,
@@ -221,6 +307,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                     schedules,
                     solution,
                     require_movement_plan=False,
+                    time_limit_seconds=positive_remaining_budget(),
                 )
             ),
             on_started=lambda: emit(
@@ -251,6 +338,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                 upper_bound=math.inf,
                 iterations=iterations,
                 discretization=current.discretization,
+                waiting_discretization=current.waiting_discretization,
                 cuts=cuts,
                 aggregate_support_cuts=aggregate_support_cuts,
                 aggregate_distance_cuts=aggregate_distance_cuts,
@@ -266,6 +354,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                 upper_bound=math.inf,
                 iterations=iterations,
                 discretization=current.discretization,
+                waiting_discretization=current.waiting_discretization,
                 cuts=cuts,
                 aggregate_support_cuts=aggregate_support_cuts,
                 aggregate_distance_cuts=aggregate_distance_cuts,
@@ -274,6 +363,8 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
             )
 
         for round_index in range(1, self.max_iterations + 1):
+            if budget_exhausted():
+                return time_limit_result()
             round_started = perf_counter()
             primal_round_state = DddPrimalRoundState()
             primal_evaluation_status = primal_round_state.status
@@ -336,6 +427,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                         candidate_elapsed_seconds=state.evaluation_seconds,
                         primal_best_objective=best_objective,
                     ),
+                    time_limit_seconds=positive_remaining_budget(),
                 )
                 sync_primal_state()
 
@@ -343,9 +435,9 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                 DddNetworkTimeRefinementProgressStage.ROUND_STARTED,
                 round_index,
             )
-            if active_resource_row_fingerprint != current.discretization.fingerprint:
+            if active_resource_row_fingerprint != current.refinement_fingerprint:
                 active_resource_rows.clear()
-                active_resource_row_fingerprint = current.discretization.fingerprint
+                active_resource_row_fingerprint = current.refinement_fingerprint
             network_started = perf_counter()
             builder = (
                 shared_builder
@@ -372,6 +464,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                     upper_bound=upper_bound,
                     iterations=iterations,
                     discretization=current.discretization,
+                    waiting_discretization=current.waiting_discretization,
                     cuts=cuts,
                     primal_evaluation=best_primal_evaluation,
                     aggregate_support_cuts=aggregate_support_cuts,
@@ -428,6 +521,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                     DddNetworkTimeRefinementProgressStage.RESOURCE_WINDOW_SEPARATION_FINISHED,
                     round_index,
                 ),
+                time_limit_seconds=positive_remaining_budget(),
             )
             flow = master_phase.flow
             active_resource_rows = list(master_phase.active_resource_rows)
@@ -466,6 +560,10 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
             resource_window_lower_bound_after = (
                 master_phase.resource_window_lower_bound_after
             )
+            if flow.status is DddAnonymousFlowStatus.TIME_LIMIT:
+                if flow.best_bound is not None:
+                    lower_bound = max(lower_bound, flow.best_bound)
+                return time_limit_result()
             if flow.status is DddAnonymousFlowStatus.INFEASIBLE:
                 record_iteration(
                     build_ddd_round_snapshot(
@@ -615,6 +713,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                     upper_bound=upper_bound,
                     iterations=iterations,
                     discretization=current.discretization,
+                    waiting_discretization=current.waiting_discretization,
                     cuts=cuts,
                     primal_evaluation=best_primal_evaluation,
                     aggregate_support_cuts=aggregate_support_cuts,
@@ -684,6 +783,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                     DddNetworkTimeRefinementProgressStage.PRIMAL_ORACLE_FINISHED,
                     round_index,
                 ),
+                remaining_time_seconds=remaining_budget,
             )
             cp_sat_status = cp_sat_round.status
             cp_sat_seconds = cp_sat_round.seconds
@@ -735,6 +835,8 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
             cp_sat_nearest_distance_lower_bound = (
                 cp_sat_round.nearest_distance_lower_bound
             )
+            if budget_exhausted():
+                return time_limit_result()
             if cp_sat_round.invalid_candidate:
                 return _result(
                     status=DddNetworkTimeRefinementStatus.INVALID_INTERNAL,
@@ -744,6 +846,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                     upper_bound=upper_bound,
                     iterations=iterations,
                     discretization=current.discretization,
+                    waiting_discretization=current.waiting_discretization,
                     cuts=cuts,
                     primal_evaluation=best_primal_evaluation,
                     aggregate_support_cuts=aggregate_support_cuts,
@@ -776,6 +879,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                     ),
                     iterations=iterations,
                     discretization=current.discretization,
+                    waiting_discretization=current.waiting_discretization,
                     cuts=cuts,
                     aggregate_support_cuts=aggregate_support_cuts,
                     aggregate_distance_cuts=aggregate_distance_cuts,
@@ -1029,6 +1133,11 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                 validation=cell_lift_validation,
                 initial_time_splits=time_splits,
                 refined_discretization=refined_discretization,
+                waiting_discretization=current.waiting_discretization,
+                bounded_waiting=(
+                    current.waiting_policy.domain
+                    is DddTrajectoryWaitingDomain.BOUNDED_WAIT
+                ),
                 active_resource_rows=tuple(active_resource_rows),
                 existing_prefix_cuts=tuple(cuts),
                 existing_prefix_cut_ids=frozenset(cut_ids),
@@ -1036,6 +1145,10 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
             time_splits = resource_conflict_phase.time_splits
             refined_discretization = (
                 resource_conflict_phase.refined_discretization
+            )
+            waiting_splits = resource_conflict_phase.waiting_splits
+            refined_waiting_discretization = (
+                resource_conflict_phase.refined_waiting_discretization
             )
             resource_time_split_count = (
                 resource_conflict_phase.resource_time_split_count
@@ -1054,6 +1167,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                     upper_bound=upper_bound,
                     iterations=iterations,
                     discretization=current.discretization,
+                    waiting_discretization=current.waiting_discretization,
                     cuts=cuts,
                     primal_evaluation=best_primal_evaluation,
                     aggregate_support_cuts=aggregate_support_cuts,
@@ -1080,6 +1194,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                     upper_bound=upper_bound,
                     iterations=iterations,
                     discretization=current.discretization,
+                    waiting_discretization=current.waiting_discretization,
                     cuts=cuts,
                     primal_evaluation=best_primal_evaluation,
                     aggregate_support_cuts=aggregate_support_cuts,
@@ -1194,6 +1309,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                     upper_bound=upper_bound,
                     iterations=iterations,
                     discretization=current.discretization,
+                    waiting_discretization=current.waiting_discretization,
                     cuts=cuts,
                     primal_evaluation=best_primal_evaluation,
                     aggregate_support_cuts=aggregate_support_cuts,
@@ -1291,7 +1407,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                     added_cabin_path_core_cut_ids=tuple(
                         cut.id
                         for cut in new_cuts
-                        if cut.provenance == "exact_cp_sat_no_wait_cabin_path_core"
+                        if cut.provenance in DDD_CP_SAT_CABIN_PATH_CORE_PROVENANCES
                     ),
                     primal_evaluation_status=primal_evaluation_status,
                     primal_evaluation_count=primal_evaluation_count,
@@ -1404,6 +1520,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                     resource_window_lower_bound_after=(
                         resource_window_lower_bound_after
                     ),
+                    waiting_splits=waiting_splits,
                     **ddd_master_diagnostic_kwargs(flow),
                 )
             )
@@ -1411,7 +1528,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                 cp_sat_exact_infeasible=cp_sat_exact_infeasible,
                 has_incumbent=best_reference is not None,
                 refinement_stalled=refinement_stalled_detail is not None,
-                time_split_count=len(time_splits),
+                time_split_count=len(time_splits) + len(waiting_splits),
                 new_prefix_cut_count=len(new_cuts),
                 new_resource_row_count=len(new_resource_rows),
                 new_aggregate_support_cut_count=len(new_aggregate_support_cuts),
@@ -1430,6 +1547,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                     upper_bound=termination.upper_bound,
                     iterations=iterations,
                     discretization=current.discretization,
+                    waiting_discretization=current.waiting_discretization,
                     cuts=cuts,
                     primal_evaluation=(
                         None
@@ -1444,6 +1562,10 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
                 )
             if time_splits:
                 current = current.with_discretization(refined_discretization)
+            if waiting_splits:
+                current = current.with_waiting_discretization(
+                    refined_waiting_discretization
+                )
 
         return _result(
             status=(
@@ -1457,6 +1579,7 @@ class DddNetworkTimeRefinementSolver(DddNetworkTimeRefinementConfig):
             upper_bound=upper_bound,
             iterations=iterations,
             discretization=current.discretization,
+            waiting_discretization=current.waiting_discretization,
             cuts=cuts,
             primal_evaluation=best_primal_evaluation,
             aggregate_support_cuts=aggregate_support_cuts,
@@ -1493,6 +1616,11 @@ def _validate_reference_solution(
                         problem.movement_problem.operational_end_seconds
                     ),
                     tolerance_seconds=tolerance_seconds,
+                    wait_seconds=(
+                        schedule.events[visit_index + 1].time_seconds
+                        - schedule.events[visit_index].time_seconds
+                        - options_by_id[option_id].duration_seconds
+                    ),
                 )
                 for visit_index, option_id in enumerate(schedule.route_option_ids)
             )
@@ -1507,6 +1635,7 @@ def _validate_reference_solution(
             problem.movement_problem,
             solution,
             tolerance_seconds=tolerance_seconds,
+            waiting_policy=problem.waiting_policy,
         )
     except KeyError as error:
         return DddNetworkValidationResult(
@@ -1569,6 +1698,7 @@ def _result(
     upper_bound: float,
     iterations: list[DddNetworkTimeRefinementIteration],
     discretization: DddTimeDiscretization,
+    waiting_discretization: DddWaitingDiscretization,
     cuts: list[DddSupportConflictCut],
     primal_evaluation: DddPrimalEvaluationResult | None = None,
     aggregate_support_cuts: list[DddAggregateSupportCut] | None = None,
@@ -1594,6 +1724,7 @@ def _result(
         iterations=tuple(iterations),
         final_discretization=discretization,
         conflict_cuts=tuple(cuts),
+        final_waiting_discretization=waiting_discretization,
         primal_evaluation=primal_evaluation,
         aggregate_support_cuts=tuple(aggregate_support_cuts or ()),
         aggregate_distance_cuts=tuple(aggregate_distance_cuts or ()),

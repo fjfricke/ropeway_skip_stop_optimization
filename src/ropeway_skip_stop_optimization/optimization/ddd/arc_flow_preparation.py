@@ -33,6 +33,7 @@ class DddPreparedArcFlowProblem:
     arcs: tuple[DddCabinTimeExpandedArc, ...]
     resource_cliques: tuple[DddArcFlowResourceClique, ...]
     network_build_seconds: float
+    labeled_resource_cliques_complete: bool = True
 
     @property
     def arc_by_id(self) -> dict[str, DddCabinTimeExpandedArc]:
@@ -73,6 +74,8 @@ class DddArcFlowProblemPreparer:
         problem: DddFixedKTrajectoryProblem,
         *,
         phase_hook: DddArcFlowPreparationPhaseHook | None = None,
+        build_labeled_resource_cliques: bool = True,
+        deadline_monotonic: float | None = None,
     ) -> DddPreparedArcFlowProblem:
         problem.validate()
         started = perf_counter()
@@ -90,12 +93,20 @@ class DddArcFlowProblemPreparer:
                 start,
                 waiting_policy=resolved.waiting_policy,
                 boundary_intervals=boundary_intervals,
+                deadline_monotonic=deadline_monotonic,
             )
             for start in movement.starts
         )
         if phase_hook is not None:
             phase_hook("resource_index_build")
-        resource_cliques = build_ddd_arc_flow_resource_cliques(networks)
+        resource_cliques = (
+            build_ddd_arc_flow_resource_cliques(
+                networks,
+                deadline_monotonic=deadline_monotonic,
+            )
+            if build_labeled_resource_cliques
+            else ()
+        )
         prepared = DddPreparedArcFlowProblem(
             problem=problem,
             movement=movement,
@@ -104,6 +115,7 @@ class DddArcFlowProblemPreparer:
             arcs=tuple(arc for network in networks for arc in network.arcs),
             resource_cliques=resource_cliques,
             network_build_seconds=perf_counter() - started,
+            labeled_resource_cliques_complete=build_labeled_resource_cliques,
         )
         prepared.validate()
         return prepared

@@ -113,6 +113,7 @@ class DddFixedKPrimalSeedFactory:
             time_limit_seconds=self.passenger_time_limit_seconds,
             mip_gap=0.0,
             threads=self.threads,
+            waiting_policy=self.problem.resolved_trajectory_problem.waiting_policy,
         ).evaluate(self.network_problem, solution)
         if (
             evaluation.status is not DddPrimalEvaluationStatus.FEASIBLE

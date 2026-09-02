@@ -18,11 +18,17 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddExhaustiveTrajectoryMasterBuilder,
     DddTrajectoryBoundStatus,
     DddTrajectoryConflictRowMode,
+    DddTrajectoryCompatibleBatchMode,
     DddTrajectoryCoordinatedPrimalGenerator,
     DddTrajectoryDiversityMode,
     DddTrajectoryFactorizedLpOptimizer,
     DddTrajectoryFactorizedMipReferenceOptimizer,
     DddTrajectoryMasterDualMode,
+    DddTrajectoryNeighborhoodPrimalOptimizer,
+    DddTrajectoryNeighborhoodSelector,
+    DddTrajectoryMergeCorridorPrimalOptimizer,
+    DddTrajectoryMergeCorridorSelector,
+    DddTrajectoryMergeDomainBuilder,
     DddTrajectoryPricingFormulation,
     DddTrajectoryExactRootColumnGenerationSolver,
     DddTrajectoryExactNoWaitPricingOracle,
@@ -40,6 +46,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     enumerate_ddd_trajectory_resource_windows,
     find_ddd_reference_conflicts,
     validate_ddd_reference_solution,
+    build_ddd_all_stop_seed_trajectories,
     read_ddd_trajectory_root_cg_checkpoint,
     write_ddd_trajectory_root_cg_checkpoint,
 )
@@ -777,6 +784,74 @@ def test_extra_diverse_columns_do_not_change_root_certificate() -> None:
     assert diverse.iterations[0].extra_pricing_call_count == 6
 
 
+def test_compatible_batch_admission_preserves_exact_root_certificate() -> None:
+    problem, artifact, passenger_build = _physical_problem()
+    baseline = DddTrajectoryExactRootColumnGenerationSolver(
+        max_iterations=20,
+        pricing_time_limit_seconds=10.0,
+        columns_per_cabin_per_round=3,
+    ).solve(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+    )
+    compatible = DddTrajectoryExactRootColumnGenerationSolver(
+        max_iterations=40,
+        pricing_time_limit_seconds=10.0,
+        columns_per_cabin_per_round=3,
+        compatible_batch_mode=(
+            DddTrajectoryCompatibleBatchMode.MAXIMUM_COMPATIBLE
+        ),
+        compatible_batch_time_limit_seconds=5.0,
+    ).solve(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+    )
+
+    assert baseline.root_lp_certified
+    assert compatible.root_lp_certified
+    assert compatible.certified_lower_bound == pytest.approx(
+        baseline.certified_lower_bound
+    )
+    assert compatible.best_upper_bound == pytest.approx(baseline.best_upper_bound)
+    assert any(
+        iteration.compatible_batch_status is not None
+        for iteration in compatible.iterations
+    )
+
+
+def test_merge_aware_resource_rows_preserve_tiny_integer_result() -> None:
+    problem, artifact, passenger_build = _physical_problem()
+    baseline = DddTrajectoryExactRootColumnGenerationSolver(
+        max_iterations=20,
+        pricing_time_limit_seconds=10.0,
+    ).solve(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+    )
+    merge_aware = DddTrajectoryExactRootColumnGenerationSolver(
+        max_iterations=30,
+        pricing_time_limit_seconds=10.0,
+        conflict_row_mode=DddTrajectoryConflictRowMode.MERGE_AWARE_RESOURCE_WINDOWS,
+    ).solve(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+    )
+
+    assert merge_aware.root_lp_certified
+    assert merge_aware.certified_lower_bound == pytest.approx(
+        baseline.certified_lower_bound
+    )
+    assert merge_aware.best_upper_bound == pytest.approx(baseline.best_upper_bound)
+
+
 def test_coordinated_primal_returns_complete_validated_schedule_batches() -> None:
     problem, artifact, passenger_build = _physical_problem()
     exhaustive = DddExhaustiveTrajectoryMasterBuilder().build(
@@ -813,6 +888,27 @@ def test_coordinated_primal_returns_complete_validated_schedule_batches() -> Non
             DddReferenceSolution(batch),
         )
 
+    repeated = DddTrajectoryCoordinatedPrimalGenerator(
+        time_limit_seconds=2.0,
+        num_workers=1,
+        max_candidate_count=1,
+        maximum_preference_count=12,
+    ).generate(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+        lp_result=lp,
+        waiting_policy=EanArtifactToDddMovementProblemAdapter().build_waiting_policy(
+            artifact,
+            core=problem.movement_problem.core,
+        ),
+        hint_trajectories=generated.trajectory_batches[0],
+        excluded_schedules=(generated.schedule_batches[0],),
+        exclude_hint_schedule=True,
+    )
+    assert repeated.solver_status_name
+
 
 def test_coordinated_primal_does_not_change_the_root_certificate() -> None:
     problem, artifact, passenger_build = _physical_problem()
@@ -847,3 +943,305 @@ def test_coordinated_primal_does_not_change_the_root_certificate() -> None:
         iteration.primal_pricing_call_count > 0
         for iteration in coordinated.iterations
     )
+
+
+def test_fractional_cabin_neighborhood_is_deterministic_and_partitions_fleet() -> None:
+    problem, artifact, passenger_build = _physical_problem()
+    exhaustive = DddExhaustiveTrajectoryMasterBuilder().build(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+    )
+    lp = DddTrajectoryFactorizedLpOptimizer().solve(exhaustive.master_problem)
+    incumbent = build_ddd_all_stop_seed_trajectories(problem.movement_problem)
+    incumbent_ids = tuple(
+        option.id
+        for option in exhaustive.master_problem.options
+        for trajectory in incumbent
+        if option.cabin_id == trajectory.cabin_id
+        and exhaustive.reference_trajectory_by_option_id[option.id]
+        == trajectory
+    )
+    selector = DddTrajectoryNeighborhoodSelector(cabin_counts=(2,))
+
+    first = selector.select(
+        cabin_ids=(0, 1, 2),
+        lp_result=lp,
+        trajectory_by_option_id=exhaustive.reference_trajectory_by_option_id,
+        incumbent_option_ids=incumbent_ids,
+        neighborhood_index=1,
+    )
+    second = selector.select(
+        cabin_ids=(0, 1, 2),
+        lp_result=lp,
+        trajectory_by_option_id=exhaustive.reference_trajectory_by_option_id,
+        incumbent_option_ids=incumbent_ids,
+        neighborhood_index=1,
+    )
+
+    assert first == second
+    assert len(first.released_cabin_ids) == 2
+    assert len(first.fixed_cabin_ids) == 1
+    first.validate((0, 1, 2))
+
+
+def test_merge_corridor_is_deterministic_and_releases_many_cabins_locally() -> None:
+    problem, artifact, passenger_build = _physical_problem()
+    exhaustive = DddExhaustiveTrajectoryMasterBuilder().build(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+    )
+    lp = DddTrajectoryFactorizedLpOptimizer().solve(exhaustive.master_problem)
+    incumbent = build_ddd_all_stop_seed_trajectories(problem.movement_problem)
+    selector = DddTrajectoryMergeCorridorSelector(
+        window_widths_seconds=(10_000.0,),
+        upstream_visit_count=0,
+        downstream_visit_count=0,
+        minimum_occurrence_count=2,
+    )
+    domain = DddTrajectoryMergeDomainBuilder().build(
+        problem.movement_problem.core
+    )
+
+    first = selector.select(
+        merge_domain=domain,
+        lp_result=lp,
+        trajectory_by_option_id=exhaustive.reference_trajectory_by_option_id,
+        incumbent_trajectories=incumbent,
+        neighborhood_index=1,
+    )
+    second = selector.select(
+        merge_domain=domain,
+        lp_result=lp,
+        trajectory_by_option_id=exhaustive.reference_trajectory_by_option_id,
+        incumbent_trajectories=incumbent,
+        neighborhood_index=1,
+    )
+
+    assert first == second
+    assert len(first.released_cabin_ids) > 1
+    assert first.merge_occurrence_count >= 2
+    assert first.fixed_route_decisions
+    first.validate(incumbent)
+
+
+def test_merge_corridor_primal_preserves_every_fixed_route_decision() -> None:
+    problem, artifact, passenger_build = _physical_problem()
+    exhaustive = DddExhaustiveTrajectoryMasterBuilder().build(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+    )
+    lp = DddTrajectoryFactorizedLpOptimizer().solve(exhaustive.master_problem)
+    incumbent = build_ddd_all_stop_seed_trajectories(problem.movement_problem)
+    corridor = DddTrajectoryMergeCorridorSelector(
+        window_widths_seconds=(10_000.0,),
+        upstream_visit_count=0,
+        downstream_visit_count=0,
+        minimum_occurrence_count=2,
+    ).select(
+        merge_domain=DddTrajectoryMergeDomainBuilder().build(
+            problem.movement_problem.core
+        ),
+        lp_result=lp,
+        trajectory_by_option_id=exhaustive.reference_trajectory_by_option_id,
+        incumbent_trajectories=incumbent,
+        neighborhood_index=1,
+    )
+
+    result = DddTrajectoryMergeCorridorPrimalOptimizer(
+        time_limit_seconds=10.0,
+        num_workers=1,
+        maximum_preference_count=12,
+    ).optimize(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+        lp_result=lp,
+        waiting_policy=EanArtifactToDddMovementProblemAdapter().build_waiting_policy(
+            artifact,
+            core=problem.movement_problem.core,
+        ),
+        incumbent_trajectories=incumbent,
+        corridor=corridor,
+    )
+
+    assert result.coordinated.trajectory_batches
+    candidate = {
+        (trajectory.cabin_id, visit.visit_index): visit.route_option_id
+        for trajectory in result.coordinated.trajectory_batches[0]
+        for visit in trajectory.visits
+    }
+    assert all(
+        candidate[item.cabin_id, item.visit_index] == item.route_option_id
+        for item in corridor.fixed_route_decisions
+    )
+
+
+def test_neighborhood_primal_preserves_fixed_cabin_route() -> None:
+    problem, artifact, passenger_build = _physical_problem()
+    exhaustive = DddExhaustiveTrajectoryMasterBuilder().build(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+    )
+    lp = DddTrajectoryFactorizedLpOptimizer().solve(exhaustive.master_problem)
+    incumbent = build_ddd_all_stop_seed_trajectories(problem.movement_problem)
+    incumbent_ids = tuple(
+        option.id
+        for option in exhaustive.master_problem.options
+        for trajectory in incumbent
+        if option.cabin_id == trajectory.cabin_id
+        and exhaustive.reference_trajectory_by_option_id[option.id]
+        == trajectory
+    )
+    neighborhood = DddTrajectoryNeighborhoodSelector(cabin_counts=(2,)).select(
+        cabin_ids=(0, 1, 2),
+        lp_result=lp,
+        trajectory_by_option_id=exhaustive.reference_trajectory_by_option_id,
+        incumbent_option_ids=incumbent_ids,
+        neighborhood_index=1,
+    )
+
+    result = DddTrajectoryNeighborhoodPrimalOptimizer(
+        time_limit_seconds=10.0,
+        num_workers=1,
+        max_candidate_count=1,
+        maximum_preference_count=12,
+    ).optimize(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+        lp_result=lp,
+        waiting_policy=EanArtifactToDddMovementProblemAdapter().build_waiting_policy(
+            artifact,
+            core=problem.movement_problem.core,
+        ),
+        incumbent_trajectories=incumbent,
+        neighborhood=neighborhood,
+    )
+
+    assert result.coordinated.trajectory_batches
+    candidate_by_cabin = {
+        trajectory.cabin_id: trajectory
+        for trajectory in result.coordinated.trajectory_batches[0]
+    }
+    incumbent_by_cabin = {
+        trajectory.cabin_id: trajectory for trajectory in incumbent
+    }
+    for cabin_id in neighborhood.fixed_cabin_ids:
+        assert candidate_by_cabin[cabin_id].support_signature == (
+            incumbent_by_cabin[cabin_id].support_signature
+        )
+    validate_ddd_reference_solution(
+        problem.movement_problem,
+        DddReferenceSolution(result.coordinated.trajectory_batches[0]),
+    )
+
+
+def test_neighborhood_primal_preserves_root_certificate_and_forces_mip() -> None:
+    problem, artifact, passenger_build = _physical_problem()
+    baseline = DddTrajectoryExactRootColumnGenerationSolver(
+        max_iterations=20,
+        pricing_time_limit_seconds=10.0,
+    ).solve(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+    )
+    neighborhood = DddTrajectoryExactRootColumnGenerationSolver(
+        max_iterations=20,
+        pricing_time_limit_seconds=10.0,
+        restricted_mip_interval=100,
+        neighborhood_primal_time_limit_seconds=5.0,
+        neighborhood_primal_interval=100,
+        neighborhood_primal_cabin_counts=(2,),
+        neighborhood_primal_workers=1,
+        neighborhood_primal_candidate_count=1,
+        neighborhood_primal_maximum_preference_count=12,
+    ).solve(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+    )
+
+    assert neighborhood.root_lp_certified
+    assert neighborhood.certified_lower_bound == pytest.approx(
+        baseline.certified_lower_bound
+    )
+    lns_iterations = [
+        iteration
+        for iteration in neighborhood.iterations
+        if iteration.neighborhood_primal_status is not None
+    ]
+    assert lns_iterations
+    assert lns_iterations[0].neighborhood_primal_released_cabin_count == 2
+    if lns_iterations[0].neighborhood_primal_candidate_count:
+        assert lns_iterations[0].primal_package_upper_bound is not None
+        assert lns_iterations[0].primal_package_solution_count > 0
+        following = neighborhood.iterations[
+            neighborhood.iterations.index(lns_iterations[0]) + 1
+        ]
+        assert following.restricted_mip_ran
+
+
+def test_merge_corridor_primal_preserves_root_certificate_and_forces_mip() -> None:
+    problem, artifact, passenger_build = _physical_problem()
+    baseline = DddTrajectoryExactRootColumnGenerationSolver(
+        max_iterations=20,
+        pricing_time_limit_seconds=10.0,
+    ).solve(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+    )
+    corridor_result = DddTrajectoryExactRootColumnGenerationSolver(
+        max_iterations=20,
+        pricing_time_limit_seconds=10.0,
+        restricted_mip_interval=100,
+        merge_corridor_primal_time_limit_seconds=5.0,
+        merge_corridor_primal_interval=100,
+        merge_corridor_window_widths_seconds=(10_000.0,),
+        merge_corridor_upstream_visit_count=0,
+        merge_corridor_downstream_visit_count=0,
+        merge_corridor_minimum_occurrence_count=2,
+        merge_corridor_primal_workers=1,
+        merge_corridor_primal_candidate_count=1,
+        merge_corridor_primal_maximum_preference_count=12,
+    ).solve(
+        problem=problem,
+        artifact=artifact,
+        passenger_build=passenger_build,
+        objective=EanPassengerObjective.JOURNEY_TIME,
+    )
+
+    assert corridor_result.root_lp_certified
+    assert corridor_result.certified_lower_bound == pytest.approx(
+        baseline.certified_lower_bound
+    )
+    corridor_iterations = [
+        iteration
+        for iteration in corridor_result.iterations
+        if iteration.merge_corridor_primal_status is not None
+    ]
+    assert corridor_iterations
+    first = corridor_iterations[0]
+    assert first.merge_corridor_released_cabin_count > 1
+    assert first.merge_corridor_released_decision_count > 0
+    assert first.merge_corridor_fixed_decision_count > 0
+    if first.merge_corridor_primal_candidate_count:
+        assert first.primal_package_upper_bound is not None
+        following = corridor_result.iterations[
+            corridor_result.iterations.index(first) + 1
+        ]
+        assert following.restricted_mip_ran

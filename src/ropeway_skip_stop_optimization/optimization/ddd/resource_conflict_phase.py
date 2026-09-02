@@ -8,6 +8,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.lifting import (
 from ropeway_skip_stop_optimization.optimization.ddd.network_refinement_model import (
     DddNetworkValidationResult,
     DddTimeSplit,
+    DddWaitingSplit,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.network_time_space import (
     DddLayeredTimeArc,
@@ -32,6 +33,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
     DddPartialTimedArc,
     DddPartialTimedPath,
     DddTimeDiscretization,
+    DddWaitingDiscretization,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
     ddd_seconds_to_tick,
@@ -48,10 +50,19 @@ class DddResourceConflictPhaseResult:
     new_prefix_cuts: tuple[DddSupportConflictCut, ...]
     prefix_budget_exhausted: bool
     invalid_missing_support: bool
+    waiting_splits: tuple[DddWaitingSplit, ...] = ()
+    refined_waiting_discretization: DddWaitingDiscretization = (
+        DddWaitingDiscretization()
+    )
 
     @property
     def has_refinement(self) -> bool:
-        return bool(self.time_splits or self.new_prefix_cuts or self.new_resource_rows)
+        return bool(
+            self.time_splits
+            or self.waiting_splits
+            or self.new_prefix_cuts
+            or self.new_resource_rows
+        )
 
 
 @dataclass(frozen=True)
@@ -89,6 +100,10 @@ class DddResourceConflictPhaseSolver:
         active_resource_rows: tuple[DddAnonymousResourceRow, ...],
         existing_prefix_cuts: tuple[DddSupportConflictCut, ...],
         existing_prefix_cut_ids: frozenset[str],
+        waiting_discretization: DddWaitingDiscretization = (
+            DddWaitingDiscretization()
+        ),
+        bounded_waiting: bool = False,
     ) -> DddResourceConflictPhaseResult:
         selected_arc_by_visit = (
             build_ddd_selected_arc_by_visit(network, paths)
@@ -129,10 +144,44 @@ class DddResourceConflictPhaseSolver:
             if conflict_index not in covered_conflict_indices
         )
 
+        waiting_split_proofs = (
+            build_ddd_waiting_conflict_split_proofs(
+                network,
+                paths,
+                uncovered_conflicts,
+                validation.support_selection,
+                selected_arc_by_visit=selected_arc_by_visit,
+            )
+            if bounded_waiting
+            else ()
+        )
+        selected_waiting_split_proofs = waiting_split_proofs[
+            : self.max_time_splits
+        ]
+        waiting_splits = tuple(
+            split for split, _conflict_indices in selected_waiting_split_proofs
+        )
+        for split in waiting_splits:
+            split.validate()
+            waiting_discretization = waiting_discretization.split(
+                station_id=split.station_id,
+                boundary_step=split.boundary_step,
+            )
+        waiting_refined_conflict_indices = {
+            conflict_index
+            for _split, conflict_indices in selected_waiting_split_proofs
+            for conflict_index in conflict_indices
+        }
+        conflicts_after_waiting = tuple(
+            conflict
+            for conflict_index, conflict in enumerate(uncovered_conflicts)
+            if conflict_index not in waiting_refined_conflict_indices
+        )
+
         resource_conflict_splits = build_ddd_resource_conflict_splits(
             network,
             paths,
-            uncovered_conflicts,
+            conflicts_after_waiting,
             validation.support_selection,
             selected_arc_by_visit=selected_arc_by_visit,
         )
@@ -164,6 +213,8 @@ class DddResourceConflictPhaseSolver:
             return DddResourceConflictPhaseResult(
                 time_splits=time_splits,
                 refined_discretization=refined_discretization,
+                waiting_splits=waiting_splits,
+                refined_waiting_discretization=waiting_discretization,
                 resource_time_split_count=resource_time_split_count,
                 new_resource_rows=new_resource_rows,
                 new_prefix_cuts=(),
@@ -172,7 +223,11 @@ class DddResourceConflictPhaseSolver:
             )
 
         candidate_cuts: tuple[DddSupportConflictCut, ...] = ()
-        if uncovered_conflicts and not resource_conflict_splits:
+        if (
+            conflicts_after_waiting
+            and not resource_conflict_splits
+            and not bounded_waiting
+        ):
             assert validation.support_selection is not None
             candidate_cuts = (
                 validation.cuts
@@ -200,12 +255,74 @@ class DddResourceConflictPhaseSolver:
         return DddResourceConflictPhaseResult(
             time_splits=time_splits,
             refined_discretization=refined_discretization,
+            waiting_splits=waiting_splits,
+            refined_waiting_discretization=waiting_discretization,
             resource_time_split_count=resource_time_split_count,
             new_resource_rows=new_resource_rows,
             new_prefix_cuts=new_prefix_cuts,
             prefix_budget_exhausted=prefix_budget_exhausted,
             invalid_missing_support=False,
         )
+
+
+def build_ddd_waiting_conflict_split_proofs(
+    network: DddLayeredTimeNetwork,
+    paths: tuple[DddPartialTimedPath, ...],
+    conflicts: tuple[DddReferenceConflict, ...],
+    selection: DddSupportSelection | None,
+    *,
+    selected_arc_by_visit: dict[tuple[int, int], DddLayeredTimeArc] | None = None,
+) -> tuple[tuple[DddWaitingSplit, tuple[int, ...]], ...]:
+    """Isolate exact waits used by a conflicting optimistic lift.
+
+    A waiting split only partitions the represented domain and therefore never
+    removes a feasible exact timetable.  It is deliberately preferred over a
+    route-prefix no-good, which would be invalid while another wait remains
+    available for the same Stop/Skip support.
+    """
+
+    if not conflicts or selection is None:
+        return ()
+    if selected_arc_by_visit is None:
+        selected_arc_by_visit = build_ddd_selected_arc_by_visit(network, paths)
+    visit_by_key = {
+        (trajectory.cabin_id, visit.visit_index): visit
+        for trajectory in selection.trajectories
+        for visit in trajectory.visits
+    }
+    conflict_indices_by_split: dict[DddWaitingSplit, set[int]] = {}
+    for conflict_index, conflict in enumerate(conflicts):
+        for cabin_id, visit_index in (
+            (conflict.first_cabin_id, conflict.first_visit_index),
+            (conflict.second_cabin_id, conflict.second_visit_index),
+        ):
+            arc = selected_arc_by_visit.get((cabin_id, visit_index))
+            visit = visit_by_key.get((cabin_id, visit_index))
+            if arc is None or arc.partial_arc is None or visit is None:
+                continue
+            interval = arc.partial_arc.waiting_interval
+            if interval is None or interval.is_singleton:
+                continue
+            wait_tick = ddd_seconds_to_tick(visit.wait_seconds)
+            if not interval.contains_wait_tick(wait_tick):
+                raise RuntimeError(
+                    "DDD exact lift wait lies outside its optimistic interval"
+                )
+            wait_step = wait_tick // interval.step_tick
+            for boundary_step in (wait_step, wait_step + 1):
+                if not interval.lower_step < boundary_step < interval.upper_step:
+                    continue
+                split = DddWaitingSplit(
+                    station_id=interval.station_id,
+                    boundary_step=boundary_step,
+                )
+                conflict_indices_by_split.setdefault(split, set()).add(
+                    conflict_index
+                )
+    return tuple(
+        (split, tuple(sorted(indices)))
+        for split, indices in sorted(conflict_indices_by_split.items())
+    )
 
 
 def build_ddd_universal_resource_rows_for_conflicts(
@@ -355,17 +472,31 @@ def build_ddd_resource_conflict_splits(
         )
         for first_window in first_windows:
             for second_window in second_windows:
+                if any(
+                    delay.minimum_tick != delay.maximum_tick
+                    for delay in (
+                        first_window.follower_enter_delay,
+                        first_window.leader_clear_delay,
+                        second_window.follower_enter_delay,
+                        second_window.leader_clear_delay,
+                    )
+                ):
+                    continue
                 second_boundary_tick = (
                     first_source_tick
                     + first_window.leader_clear_offset_tick
+                    + first_window.leader_clear_delay.minimum_tick
                     + first_window.headway_tick
                     - second_window.follower_enter_offset_tick
+                    - second_window.follower_enter_delay.minimum_tick
                 )
                 first_boundary_tick = (
                     second_source_tick
                     + second_window.leader_clear_offset_tick
+                    + second_window.leader_clear_delay.minimum_tick
                     + second_window.headway_tick
                     - first_window.follower_enter_offset_tick
+                    - first_window.follower_enter_delay.minimum_tick
                 )
                 for arc, window, boundary_tick in (
                     (second_arc, second_window, second_boundary_tick),

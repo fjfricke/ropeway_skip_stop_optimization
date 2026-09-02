@@ -71,7 +71,11 @@ class DddFixedKSeedCoordinator:
         try:
             all_stop = build_ddd_all_stop_seed_trajectories(movement)
             solution = _with_boundary_occurrences(all_stop, boundary_occurrences)
-            validate_ddd_reference_solution(movement, solution)
+            validate_ddd_reference_solution(
+                movement,
+                solution,
+                waiting_policy=problem.waiting_policy,
+            )
         except ValueError:
             pass
         else:
@@ -127,13 +131,18 @@ class DddFixedKSeedCoordinator:
                 solution = ddd_reference_solution_from_recovered_schedules(
                     movement,
                     schedules,
+                    waiting_policy=problem.waiting_policy,
                 )
                 if boundary_occurrences:
                     solution = _with_boundary_occurrences(
                         solution.trajectories,
                         boundary_occurrences,
                     )
-                    validate_ddd_reference_solution(movement, solution)
+                    validate_ddd_reference_solution(
+                        movement,
+                        solution,
+                        waiting_policy=problem.waiting_policy,
+                    )
                 objective = evaluate(solution) if evaluate is not None else None
                 validated.append((objective, solution))
         except ValueError as error:

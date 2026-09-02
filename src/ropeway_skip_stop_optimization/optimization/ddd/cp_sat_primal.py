@@ -34,6 +34,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.timed_flow_cover import (
     DddTimedFlowThresholdLiteral,
     DddTimedFlowTimingScope,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generation import (
+    DddTrajectoryWaitingDomain,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
     DddPartialTimedPath,
 )
@@ -55,6 +58,23 @@ class DddCpSatPrimalStatus(StrEnum):
 class DddCpSatPassengerObjectiveEvent(StrEnum):
     BOARDING = "boarding"
     ALIGHTING = "alighting"
+
+
+@dataclass(frozen=True, order=True)
+class DddCpSatFixedCabinRoute:
+    """Exact route prefix fixed for one cabin during a CP-SAT neighborhood."""
+
+    cabin_id: int
+    route_option_ids: tuple[str, ...]
+
+
+@dataclass(frozen=True, order=True)
+class DddCpSatFixedRouteDecision:
+    """One arbitrary cabin/visit route literal fixed in a CP neighborhood."""
+
+    cabin_id: int
+    visit_index: int
+    route_option_id: str
 
 
 @dataclass(frozen=True)
@@ -113,6 +133,8 @@ class DddCpSatPrimalResult:
     timed_flow_support: DddCpSatTimedFlowSupport | None = None
     timed_flow_infeasible_core: tuple[DddTimedFlowThresholdLiteral, ...] = ()
     fixed_cabin_paths: tuple[DddPartialTimedPath, ...] = ()
+    fixed_cabin_routes: tuple[DddCpSatFixedCabinRoute, ...] = ()
+    fixed_route_decisions: tuple[DddCpSatFixedRouteDecision, ...] = ()
     cabin_path_infeasible_core: tuple[DddSupportLiteral, ...] = ()
     distance_center: tuple[DddAggregateRouteCountLiteral, ...] = ()
     support_distance_primal: int | None = None
@@ -131,10 +153,9 @@ DddCpSatCandidateCallback = Callable[[int, float], None]
 class DddCpSatPrimalOracle:
     """Exact fixed-start movement scheduler over all deterministic route choices.
 
-    Version one uses zero waiting. The formulation already separates route
-    selection, integer event times, and optional resource intervals so bounded
-    waiting can later enter through the transition and occurrence expressions
-    without changing the master/oracle contract.
+    Waiting is represented by one integer step variable per active visit.  The
+    route selection controls its station-specific upper bound; resource entry
+    and clearing expressions use the physical waiting coefficients.
     """
 
     time_limit_seconds: float = 2.0
@@ -153,6 +174,8 @@ class DddCpSatPrimalOracle:
         timed_flow_support: DddCpSatTimedFlowSupport | None = None,
         nearest_support: DddCpSatFixedSupport | None = None,
         fixed_cabin_paths: tuple[DddPartialTimedPath, ...] = (),
+        fixed_cabin_routes: tuple[DddCpSatFixedCabinRoute, ...] = (),
+        fixed_route_decisions: tuple[DddCpSatFixedRouteDecision, ...] = (),
         enabled_resource_ids: tuple[str, ...] | None = None,
         excluded_schedules: tuple[tuple[DddRecoveredSchedule, ...], ...] = (),
         passenger_ride_preferences: tuple[DddCpSatPassengerRidePreference, ...] = (),
@@ -166,6 +189,13 @@ class DddCpSatPrimalOracle:
             nearest_support.validate()
         if timed_flow_support is not None:
             timed_flow_support.validate()
+            if (
+                problem.waiting_policy.domain
+                is DddTrajectoryWaitingDomain.BOUNDED_WAIT
+            ):
+                raise ValueError(
+                    "DDD timed-flow support is not yet proof-safe with waiting"
+                )
             if any(
                 item.region.timing_scope is not DddTimedFlowTimingScope.NO_WAIT
                 for item in timed_flow_support.arc_flows
@@ -173,7 +203,25 @@ class DddCpSatPrimalOracle:
                 raise ValueError(
                     "DDD CP-SAT v1 only supports no-wait timed-flow proofs"
                 )
+        if sum(
+            bool(item)
+            for item in (
+                fixed_cabin_paths,
+                fixed_cabin_routes,
+                fixed_route_decisions,
+            )
+        ) > 1:
+            raise ValueError(
+                "DDD fixed cabin paths, routes, and route decisions are mutually "
+                "exclusive"
+            )
         _validate_fixed_cabin_paths(problem, fixed_cabin_paths)
+        _validate_fixed_cabin_routes(problem, fixed_cabin_routes)
+        _validate_fixed_route_decisions(problem, fixed_route_decisions)
+        effective_fixed_cabin_routes = fixed_cabin_routes or tuple(
+            DddCpSatFixedCabinRoute(path.cabin_id, path.route_option_ids)
+            for path in fixed_cabin_paths
+        )
         _validate_excluded_schedules(problem, excluded_schedules)
         for preference in passenger_ride_preferences:
             preference.validate()
@@ -183,13 +231,14 @@ class DddCpSatPrimalOracle:
                 fixed_support is not None,
                 timed_flow_support is not None,
                 nearest_support is not None,
-                bool(fixed_cabin_paths),
+                bool(effective_fixed_cabin_routes),
+                bool(fixed_route_decisions),
             )
         )
         if selected_support_modes > 1:
             raise ValueError(
-                "fixed aggregate, timed-flow, nearest, and fixed cabin-path "
-                "CP-SAT support are mutually exclusive"
+                "fixed aggregate, timed-flow, nearest, fixed cabin-path, and fixed "
+                "route-decision CP-SAT support are mutually exclusive"
             )
         if passenger_ride_preferences and nearest_support is not None:
             raise ValueError(
@@ -206,6 +255,12 @@ class DddCpSatPrimalOracle:
 
         started = perf_counter()
         movement = problem.movement_problem
+        waiting_policy = problem.waiting_policy
+        waiting_step_tick = (
+            1
+            if waiting_policy.step_seconds is None
+            else ddd_seconds_to_tick(waiting_policy.step_seconds)
+        )
         if enabled_resource_ids is not None:
             if not enabled_resource_ids:
                 raise ValueError("DDD CP-SAT enabled resource set must not be empty")
@@ -226,9 +281,16 @@ class DddCpSatPrimalOracle:
         )
         model = cp_model.CpModel()
         max_completion_tick = movement.operational_end_tick + max(
-            option.duration_tick for option in movement.route_options
+            option.duration_tick
+            + ddd_seconds_to_tick(
+                waiting_policy.maximum_wait_seconds(option.station_id)
+            )
+            for option in movement.route_options
         )
-        hint_by_cabin = {path.cabin_id: path for path in hint_schedules}
+        hint_schedule_by_cabin = {
+            schedule.cabin_id: schedule for schedule in hint_schedules
+        }
+        hint_by_cabin = dict(hint_schedule_by_cabin)
         hint_by_cabin.update({path.cabin_id: path for path in hint_paths})
         time_by_cabin: dict[int, list[cp_model.IntVar]] = {}
         active_by_cabin: dict[int, list[cp_model.IntVar]] = {}
@@ -299,8 +361,18 @@ class DddCpSatPrimalOracle:
                 if start.cabin_id in hint_by_cabin
                 else ()
             )
+            hinted_events = (
+                hint_schedule_by_cabin[start.cabin_id].events
+                if start.cabin_id in hint_schedule_by_cabin
+                else ()
+            )
+            for visit_index, event in enumerate(hinted_events):
+                if visit_index < len(event_times):
+                    model.add_hint(event_times[visit_index], event.time_tick)
             for visit_index, options in enumerate(options_by_visit):
                 selections = []
+                maximum_wait_steps_by_option: dict[str, int] = {}
+                maximum_wait_steps = 0
                 for option in options:
                     selected = model.new_bool_var(
                         f"route[{start.cabin_id},{visit_index},{option.id}]"
@@ -309,22 +381,86 @@ class DddCpSatPrimalOracle:
                         selected
                     )
                     selections.append(selected)
+                    maximum_wait_tick = ddd_seconds_to_tick(
+                        waiting_policy.maximum_wait_seconds(option.station_id)
+                    )
+                    if (
+                        option.decision is DddRouteDecision.SKIP
+                        or option.platform_exit_offset_seconds is None
+                    ):
+                        maximum_wait_tick = 0
+                    maximum_wait_step = maximum_wait_tick // waiting_step_tick
+                    maximum_wait_steps_by_option[option.id] = maximum_wait_step
+                    maximum_wait_steps = max(
+                        maximum_wait_steps,
+                        maximum_wait_step,
+                    )
                     if visit_index < len(hinted_route_ids):
                         model.add_hint(
                             selected,
                             int(hinted_route_ids[visit_index] == option.id),
                         )
+                model.add(sum(selections) == active[visit_index])
+                wait_steps = model.new_int_var(
+                    0,
+                    maximum_wait_steps,
+                    f"wait_steps[{start.cabin_id},{visit_index}]",
+                )
+                model.add(
+                    wait_steps
+                    <= sum(
+                        maximum_wait_steps_by_option[option.id]
+                        * selection_by_key[
+                            (start.cabin_id, visit_index, option.id)
+                        ]
+                        for option in options
+                    )
+                )
+                if maximum_wait_steps:
+                    wait_positive = model.new_bool_var(
+                        f"wait_positive[{start.cabin_id},{visit_index}]"
+                    )
+                    model.add(wait_steps >= 1).only_enforce_if(wait_positive)
+                    model.add(wait_steps == 0).only_enforce_if(
+                        wait_positive.Not()
+                    )
+                    for option in options:
+                        if maximum_wait_steps_by_option[option.id] <= 0:
+                            continue
+                        assert option.platform_exit_offset_seconds is not None
+                        model.add(
+                            event_times[visit_index]
+                            + ddd_seconds_to_tick(
+                                option.platform_exit_offset_seconds
+                            )
+                            >= ddd_seconds_to_tick(
+                                waiting_policy.earliest_wait_time_seconds
+                            )
+                        ).only_enforce_if(
+                            [
+                                selection_by_key[
+                                    (start.cabin_id, visit_index, option.id)
+                                ],
+                                wait_positive,
+                            ]
+                        )
+                for option in options:
                     _add_resource_intervals(
                         model=model,
                         movement=movement,
                         cabin_id=start.cabin_id,
                         visit_index=visit_index,
                         event_time=event_times[visit_index],
-                        selected=selected,
+                        wait_steps=wait_steps,
+                        maximum_wait_steps=maximum_wait_steps,
+                        waiting_step_tick=waiting_step_tick,
+                        max_completion_tick=max_completion_tick,
+                        selected=selection_by_key[
+                            (start.cabin_id, visit_index, option.id)
+                        ],
                         option=option,
                         intervals_by_resource=resource_intervals,
                     )
-                model.add(sum(selections) == active[visit_index])
                 model.add(
                     event_times[visit_index + 1]
                     == event_times[visit_index]
@@ -333,6 +469,7 @@ class DddCpSatPrimalOracle:
                         * selection_by_key[(start.cabin_id, visit_index, option.id)]
                         for option in options
                     )
+                    + waiting_step_tick * wait_steps
                 )
 
             time_by_cabin[start.cabin_id] = event_times
@@ -370,11 +507,17 @@ class DddCpSatPrimalOracle:
                 timed_flow_support=timed_flow_support,
             )
         cabin_path_literal_by_assumption_index: dict[int, DddSupportLiteral] = {}
-        if fixed_cabin_paths:
+        if effective_fixed_cabin_routes:
             cabin_path_literal_by_assumption_index = _fix_cabin_route_prefixes(
                 model=model,
                 selection_by_key=selection_by_key,
-                fixed_cabin_paths=fixed_cabin_paths,
+                fixed_cabin_routes=effective_fixed_cabin_routes,
+            )
+        if fixed_route_decisions:
+            _fix_route_decisions(
+                model=model,
+                selection_by_key=selection_by_key,
+                fixed_route_decisions=fixed_route_decisions,
             )
         _exclude_route_patterns(
             model=model,
@@ -500,7 +643,7 @@ class DddCpSatPrimalOracle:
                         key=lambda item: item.sort_key,
                     )
                 )
-            elif fixed_cabin_paths:
+            elif effective_fixed_cabin_routes:
                 core_indices = solver.sufficient_assumptions_for_infeasibility()
                 cabin_path_infeasible_core = tuple(
                     sorted(
@@ -524,6 +667,8 @@ class DddCpSatPrimalOracle:
             timed_flow_support=timed_flow_support,
             timed_flow_infeasible_core=timed_flow_infeasible_core,
             fixed_cabin_paths=fixed_cabin_paths,
+            fixed_cabin_routes=fixed_cabin_routes,
+            fixed_route_decisions=fixed_route_decisions,
             cabin_path_infeasible_core=cabin_path_infeasible_core,
             distance_center=distance_center,
             support_distance_primal=support_distance_primal,
@@ -673,11 +818,113 @@ def _validate_fixed_cabin_paths(
             )
 
 
+def _validate_fixed_cabin_routes(
+    problem: DddNetworkTimeProblem,
+    fixed_cabin_routes: tuple[DddCpSatFixedCabinRoute, ...],
+) -> None:
+    if not fixed_cabin_routes:
+        return
+    starts_by_cabin = {
+        start.cabin_id: start for start in problem.movement_problem.starts
+    }
+    cabin_ids = tuple(item.cabin_id for item in fixed_cabin_routes)
+    if len(set(cabin_ids)) != len(cabin_ids):
+        raise ValueError("DDD fixed cabin routes must have unique cabin ids")
+    unknown_cabin_ids = set(cabin_ids) - starts_by_cabin.keys()
+    if unknown_cabin_ids:
+        raise ValueError(
+            "DDD fixed cabin routes reference unknown cabins: "
+            f"{sorted(unknown_cabin_ids)}"
+        )
+    for fixed in fixed_cabin_routes:
+        if not fixed.route_option_ids:
+            raise ValueError("DDD fixed cabin route must contain at least one route")
+        start = starts_by_cabin[fixed.cabin_id]
+        _, options_by_visit = _deterministic_visit_structure(
+            problem.movement_problem,
+            start.state_id,
+            start.max_visit_count,
+        )
+        if len(fixed.route_option_ids) > len(options_by_visit):
+            raise ValueError(
+                f"DDD fixed cabin route {fixed.cabin_id} exceeds its visit horizon"
+            )
+        for visit_index, route_option_id in enumerate(fixed.route_option_ids):
+            if route_option_id not in {
+                option.id for option in options_by_visit[visit_index]
+            }:
+                raise ValueError(
+                    "DDD fixed cabin route is not a valid prefix: "
+                    f"cabin={fixed.cabin_id}, visit={visit_index}, "
+                    f"route={route_option_id}"
+                )
+
+
+def _validate_fixed_route_decisions(
+    problem: DddNetworkTimeProblem,
+    fixed_route_decisions: tuple[DddCpSatFixedRouteDecision, ...],
+) -> None:
+    if not fixed_route_decisions:
+        return
+    if tuple(sorted(fixed_route_decisions)) != fixed_route_decisions:
+        raise ValueError("DDD fixed route decisions must be sorted")
+    positions = tuple(
+        (item.cabin_id, item.visit_index) for item in fixed_route_decisions
+    )
+    if len(set(positions)) != len(positions):
+        raise ValueError("DDD fixed route decisions must have unique positions")
+    starts_by_cabin = {
+        start.cabin_id: start for start in problem.movement_problem.starts
+    }
+    for fixed in fixed_route_decisions:
+        start = starts_by_cabin.get(fixed.cabin_id)
+        if start is None:
+            raise ValueError(
+                "DDD fixed route decision references an unknown cabin: "
+                f"{fixed.cabin_id}"
+            )
+        if fixed.visit_index < 0 or fixed.visit_index >= start.max_visit_count:
+            raise ValueError(
+                "DDD fixed route decision visit exceeds its horizon: "
+                f"cabin={fixed.cabin_id}, visit={fixed.visit_index}"
+            )
+        _, options_by_visit = _deterministic_visit_structure(
+            problem.movement_problem,
+            start.state_id,
+            start.max_visit_count,
+        )
+        if fixed.route_option_id not in {
+            option.id for option in options_by_visit[fixed.visit_index]
+        }:
+            raise ValueError(
+                "DDD fixed route decision is invalid: "
+                f"cabin={fixed.cabin_id}, visit={fixed.visit_index}, "
+                f"route={fixed.route_option_id}"
+            )
+
+
+def _fix_route_decisions(
+    *,
+    model: cp_model.CpModel,
+    selection_by_key: dict[tuple[int, int, str], cp_model.IntVar],
+    fixed_route_decisions: tuple[DddCpSatFixedRouteDecision, ...],
+) -> None:
+    """Fix sparse route literals directly; this is a primal-only restriction."""
+
+    for fixed in fixed_route_decisions:
+        selected = selection_by_key.get(
+            (fixed.cabin_id, fixed.visit_index, fixed.route_option_id)
+        )
+        if selected is None:
+            raise ValueError("DDD fixed route decision has no CP-SAT variable")
+        model.add(selected == 1)
+
+
 def _fix_cabin_route_prefixes(
     *,
     model: cp_model.CpModel,
     selection_by_key: dict[tuple[int, int, str], cp_model.IntVar],
-    fixed_cabin_paths: tuple[DddPartialTimedPath, ...],
+    fixed_cabin_routes: tuple[DddCpSatFixedCabinRoute, ...],
 ) -> dict[int, DddSupportLiteral]:
     """Add one assumption for every route literal in the cabin paths.
 
@@ -687,13 +934,13 @@ def _fix_cabin_route_prefixes(
     """
 
     literal_by_index: dict[int, DddSupportLiteral] = {}
-    for path in sorted(fixed_cabin_paths, key=lambda item: item.cabin_id):
-        for visit_index, route_option_id in enumerate(path.route_option_ids):
+    for fixed in sorted(fixed_cabin_routes, key=lambda item: item.cabin_id):
+        for visit_index, route_option_id in enumerate(fixed.route_option_ids):
             assumption = model.new_bool_var(
-                f"cabin_path_assumption[{path.cabin_id},{visit_index}]"
+                f"cabin_path_assumption[{fixed.cabin_id},{visit_index}]"
             )
             selected = selection_by_key.get(
-                (path.cabin_id, visit_index, route_option_id)
+                (fixed.cabin_id, visit_index, route_option_id)
             )
             if selected is None:
                 model.add(0 == 1).only_enforce_if(assumption)
@@ -701,7 +948,7 @@ def _fix_cabin_route_prefixes(
                 model.add(selected == 1).only_enforce_if(assumption)
             model.add_assumption(assumption)
             literal_by_index[assumption.Index()] = DddSupportLiteral(
-                cabin_id=path.cabin_id,
+                cabin_id=fixed.cabin_id,
                 visit_index=visit_index,
                 route_option_id=route_option_id,
             )
@@ -987,6 +1234,10 @@ def _add_resource_intervals(
     cabin_id: int,
     visit_index: int,
     event_time: cp_model.IntVar,
+    wait_steps: cp_model.IntVar,
+    maximum_wait_steps: int,
+    waiting_step_tick: int,
+    max_completion_tick: int,
     selected: cp_model.IntVar,
     option: DddRouteOption,
     intervals_by_resource: dict[str, list[cp_model.IntervalVar]],
@@ -995,15 +1246,95 @@ def _add_resource_intervals(
         if usage.resource_id not in intervals_by_resource:
             continue
         resource = movement.resources_by_id[usage.resource_id]
-        size_tick = (
+        base_size_tick = (
             usage.leader_clear_offset_tick
             - usage.follower_enter_offset_tick
             + usage.separation_after_tick(resource.minimum_headway_tick)
         )
-        if size_tick <= 0:
+        wait_size_coefficient = (
+            usage.leader_clear_wait_coefficient
+            - usage.follower_enter_wait_coefficient
+        ) * waiting_step_tick
+        if base_size_tick <= 0:
             raise ValueError("DDD CP-SAT resource interval must have positive size")
-        entry = event_time + usage.follower_enter_offset_tick
-        if usage.follower_enter_offset_tick == 0:
+        entry_expression = (
+            event_time
+            + usage.follower_enter_offset_tick
+            + usage.follower_enter_wait_coefficient
+            * waiting_step_tick
+            * wait_steps
+        )
+        end_expression = (
+            event_time
+            + usage.leader_clear_offset_tick
+            + usage.leader_clear_wait_coefficient
+            * waiting_step_tick
+            * wait_steps
+            + usage.separation_after_tick(resource.minimum_headway_tick)
+        )
+        size_expression = base_size_tick + wait_size_coefficient * wait_steps
+        entry_wait_coefficient = (
+            usage.follower_enter_wait_coefficient * waiting_step_tick
+        )
+        end_wait_coefficient = (
+            usage.leader_clear_wait_coefficient * waiting_step_tick
+        )
+        entry = model.new_int_var(
+            min(
+                usage.follower_enter_offset_tick,
+                usage.follower_enter_offset_tick
+                + entry_wait_coefficient * maximum_wait_steps,
+            ),
+            max_completion_tick
+            + max(
+                usage.follower_enter_offset_tick,
+                usage.follower_enter_offset_tick
+                + entry_wait_coefficient * maximum_wait_steps,
+            ),
+            f"resource_entry[{usage.resource_id},{cabin_id},{visit_index},{usage_index}]",
+        )
+        end = model.new_int_var(
+            min(
+                usage.leader_clear_offset_tick
+                + usage.separation_after_tick(resource.minimum_headway_tick),
+                usage.leader_clear_offset_tick
+                + end_wait_coefficient * maximum_wait_steps
+                + usage.separation_after_tick(resource.minimum_headway_tick),
+            ),
+            max_completion_tick
+            + max(
+                usage.leader_clear_offset_tick
+                + usage.separation_after_tick(resource.minimum_headway_tick),
+                usage.leader_clear_offset_tick
+                + end_wait_coefficient * maximum_wait_steps
+                + usage.separation_after_tick(resource.minimum_headway_tick),
+            ),
+            f"resource_end[{usage.resource_id},{cabin_id},{visit_index},{usage_index}]",
+        )
+        minimum_size = min(
+            base_size_tick,
+            base_size_tick + wait_size_coefficient * maximum_wait_steps,
+        )
+        maximum_size = max(
+            base_size_tick,
+            base_size_tick + wait_size_coefficient * maximum_wait_steps,
+        )
+        if minimum_size <= 0:
+            raise ValueError(
+                "DDD CP-SAT resource interval must remain positive for every wait"
+            )
+        size = model.new_int_var(
+            minimum_size,
+            maximum_size,
+            f"resource_size[{usage.resource_id},{cabin_id},{visit_index},{usage_index}]",
+        )
+        model.add(entry == entry_expression)
+        model.add(end == end_expression)
+        model.add(size == size_expression)
+        if (
+            usage.follower_enter_offset_tick == 0
+            and usage.follower_enter_wait_coefficient == 0
+        ):
             present = selected
         else:
             present = model.new_bool_var(
@@ -1014,9 +1345,10 @@ def _add_resource_intervals(
             model.add(entry >= movement.operational_end_tick + 1).only_enforce_if(
                 [selected, present.Not()]
             )
-        interval = model.new_optional_fixed_size_interval_var(
+        interval = model.new_optional_interval_var(
             entry,
-            size_tick,
+            size,
+            end,
             present,
             f"resource[{usage.resource_id},{cabin_id},{visit_index},{usage_index}]",
         )

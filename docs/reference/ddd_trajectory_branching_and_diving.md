@@ -96,6 +96,11 @@ primal mechanism. The next Gate-2 experiment must combine the root certificate
 with a complete fixed-K arc-flow incumbent or a real cabin/corridor
 fix-and-optimize neighborhood before any full Branch-Price tree is built.
 
+The physical neighborhood is implemented and specified in
+[`ddd_merge_time_corridor_primal.md`](ddd_merge_time_corridor_primal.md). It
+fixes arbitrary route decisions outside one merge/time corridor while retaining
+global CP-SAT resource feasibility and exact Passenger package evaluation.
+
 ## Five-Station K=39 boundary gate
 
 Boundary-aware Root-CG was run on the first exact fleet size above the analytic
@@ -202,6 +207,48 @@ dual: at $K=39$, where no all-stop seed exists, the ten-minute integer gaps were
 is retained as a primal-only component, but the next gate increases package
 frequency and tests package-level fix-and-optimize before implementing a full
 Branch-Price tree.
+
+## Fractional cabin-cohort fix-and-optimize
+
+The first package-level neighborhood is implemented by
+`DddTrajectoryNeighborhoodPrimalOptimizer`. It reuses the complete CP-SAT
+movement oracle rather than introducing a second scheduling model. A
+deterministic selector releases a configured number of cabins with the most
+root-LP mass outside their current incumbent trajectory; all other cabins have
+their complete route-option sequence fixed.
+
+For No-Wait and fixed starts this is a genuine trajectory fix: route sequence
+and start determine the event times. CP-SAT jointly repairs the released
+cohort against every fixed cabin and every resource. The current implementation
+therefore rejects bounded Waiting instead of incorrectly treating a route-only
+fix as a fixed timed trajectory.
+
+Every returned fleet package passes complete movement and headway validation.
+It has primal-only provenance and cannot affect the reduced-cost certificate.
+Before admission, a dedicated fixed-movement Passenger MIP containing exactly
+that one trajectory per cabin evaluates the package. Every feasible Passenger
+solution is immediately a valid upper bound; optimality of this small package
+MIP is not required for validity. The package is then admitted to the global
+trajectory pool and forces a Restricted MIP in the following round, even when
+its individual trajectories were already present but their combination had
+not yet been evaluated. That larger MIP may combine columns from multiple
+packages and lower the upper bound again.
+
+CLI controls are:
+
+- `--neighborhood-primal-time-limit`;
+- `--neighborhood-primal-interval`;
+- repeated `--neighborhood-primal-cabin-count` values;
+- `--neighborhood-primal-workers`;
+- `--neighborhood-primal-candidates`;
+- `--neighborhood-primal-max-preferences`.
+
+The default remains disabled. The first quantitative gate compares cohort
+sizes 4, 8, and 12 at K=20 and K=39 against the coordinated-global CP baseline.
+Station/resource-time corridor release is not yet implemented.
+
+The completed gate is reported in
+[`../findings/ddd_fractional_cabin_neighborhood_gate.md`](../findings/ddd_fractional_cabin_neighborhood_gate.md).
 
 ## Test coverage
 

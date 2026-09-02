@@ -79,6 +79,7 @@ class DddArcFlowMovementMaster:
                         option=options[arc.option_id],
                         operational_end_seconds=movement.operational_end_seconds,
                         tolerance_seconds=0.0,
+                        wait_seconds=ddd_tick_to_seconds(arc.wait_tick),
                     )
                 )
             trajectories.append(
@@ -110,8 +111,16 @@ class DddArcFlowMovementMasterBuilder:
         model: gp.Model,
         prepared: DddPreparedArcFlowProblem,
         variable_type: str = GRB.BINARY,
+        add_eager_resource_rows: bool = True,
     ) -> DddArcFlowMovementMaster:
         prepared.validate()
+        if (
+            add_eager_resource_rows
+            and not prepared.labeled_resource_cliques_complete
+        ):
+            raise ValueError(
+                "labeled Movement master requires complete labeled resource cliques"
+            )
         if variable_type not in {GRB.BINARY, GRB.CONTINUOUS}:
             raise ValueError("Movement master variable type is invalid")
         route = {
@@ -128,10 +137,10 @@ class DddArcFlowMovementMasterBuilder:
             prepared,
             route,
         )
-        resource_rows = self._add_resource_rows(
-            model,
-            prepared,
-            route,
+        resource_rows = (
+            self._add_resource_rows(model, prepared, route)
+            if add_eager_resource_rows
+            else 0
         )
         return DddArcFlowMovementMaster(
             prepared=prepared,
@@ -213,7 +222,11 @@ def build_ddd_arc_flow_movement_values(
     """Project one complete reference solution onto every Movement arc."""
 
     prepared.validate()
-    validate_ddd_reference_solution(prepared.movement, solution)
+    validate_ddd_reference_solution(
+        prepared.movement,
+        solution,
+        waiting_policy=prepared.problem.resolved_trajectory_problem.waiting_policy,
+    )
     trajectory_by_cabin = {
         trajectory.cabin_id: trajectory for trajectory in solution.trajectories
     }
@@ -240,6 +253,7 @@ def build_ddd_arc_flow_movement_values(
                     if arc.option_id == visit.route_option_id
                     and arc.source_tick
                     == ddd_seconds_to_tick(visit.switch_time_seconds)
+                    and arc.wait_tick == ddd_seconds_to_tick(visit.wait_seconds)
                 )
             else:
                 matching = tuple(arc for arc in candidates if arc.option_id is None)

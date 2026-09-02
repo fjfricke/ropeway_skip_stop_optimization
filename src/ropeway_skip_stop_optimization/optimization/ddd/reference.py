@@ -454,6 +454,7 @@ def ddd_reference_solution_from_recovered_schedules(
     schedules: tuple["DddRecoveredSchedule", ...],
     *,
     tolerance_seconds: float = 1e-9,
+    waiting_policy: DddTrajectoryWaitingPolicy | None = None,
 ) -> DddReferenceSolution:
     """Convert one complete CP-SAT schedule batch into validated trajectories."""
 
@@ -474,6 +475,11 @@ def ddd_reference_solution_from_recovered_schedules(
                 option=options_by_id[option_id],
                 operational_end_seconds=problem.operational_end_seconds,
                 tolerance_seconds=tolerance_seconds,
+                wait_seconds=(
+                    schedule.events[visit_index + 1].time_seconds
+                    - schedule.events[visit_index].time_seconds
+                    - options_by_id[option_id].duration_seconds
+                ),
             )
             for visit_index, option_id in enumerate(schedule.route_option_ids)
         )
@@ -485,6 +491,7 @@ def ddd_reference_solution_from_recovered_schedules(
         problem,
         solution,
         tolerance_seconds=tolerance_seconds,
+        waiting_policy=waiting_policy,
     )
     return solution
 

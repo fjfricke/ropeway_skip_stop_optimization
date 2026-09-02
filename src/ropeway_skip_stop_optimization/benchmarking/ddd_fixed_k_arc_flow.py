@@ -17,6 +17,7 @@ from ropeway_skip_stop_optimization.optimization.headway_resource_reduction impo
     HeadwayResourceReductionMode,
 )
 from ropeway_skip_stop_optimization.optimization.ddd import (
+    DddArcFlowResourceRowMode,
     DddFixedKArcFlowOptimizer,
     DddFixedKArcFlowProgress,
     DddFixedKArcFlowResult,
@@ -45,6 +46,7 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
     CanonicalFixedKRopeCabinStartBuilder,
+    EanConfig,
     EanCabinStart,
     EanCabinStartKind,
     EanFleetCardinalityMode,
@@ -56,6 +58,8 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     ExplicitEanCabinStartBuilder,
     NetworkEanBuildArtifactBuilder,
     SparseHeadwayPairBuilder,
+    HeadwayCheckpointKind,
+    StationWaitingMode,
     analyze_all_stop_start_capacity,
 )
 
@@ -83,8 +87,14 @@ class DddFixedKArcFlowRunConfig:
     output_flag: bool = False
     root_cg_result_path: Path | None = None
     primal_seed_checkpoint_path: Path | None = None
+    primal_seed_result_path: Path | None = None
     seed_passenger_time_limit_seconds: float = 60.0
     formulation: DddFixedKArcFlowFormulation = DddFixedKArcFlowFormulation.LABELED
+    waiting_headway_multiplier: float = 0.0
+    waiting_step_seconds: float = 1.0
+    resource_row_mode: DddArcFlowResourceRowMode = (
+        DddArcFlowResourceRowMode.EAGER_MAXIMAL_CLIQUES
+    )
 
     def validate(self) -> None:
         if not self.example_id or self.cabin_count <= 0:
@@ -97,6 +107,16 @@ class DddFixedKArcFlowRunConfig:
             raise ValueError("arc-flow run start policy is invalid")
         if not isinstance(self.formulation, DddFixedKArcFlowFormulation):
             raise ValueError("arc-flow run formulation is invalid")
+        if not isinstance(self.resource_row_mode, DddArcFlowResourceRowMode):
+            raise ValueError("arc-flow resource-row mode is invalid")
+        if (
+            self.formulation is DddFixedKArcFlowFormulation.EXACT_ANONYMOUS
+            and self.resource_row_mode
+            is not DddArcFlowResourceRowMode.EAGER_MAXIMAL_CLIQUES
+        ):
+            raise ValueError(
+                "delayed selected cliques are available only for labeled arc-flow"
+            )
         if (
             self.total_time_limit_seconds <= 0
             or self.cp_seed_time_limit_seconds < 0
@@ -112,6 +132,13 @@ class DddFixedKArcFlowRunConfig:
             raise ValueError("arc-flow MIP gap must lie in [0, 1]")
         if self.mip_focus not in range(4) or self.seed < 0:
             raise ValueError("arc-flow solver controls are invalid")
+        if (
+            not math.isfinite(self.waiting_headway_multiplier)
+            or self.waiting_headway_multiplier < 0
+            or not math.isfinite(self.waiting_step_seconds)
+            or self.waiting_step_seconds <= 0
+        ):
+            raise ValueError("arc-flow waiting controls are invalid")
 
 
 @dataclass(frozen=True, slots=True)
@@ -138,6 +165,13 @@ class DddFixedKArcFlowRunResult:
     start_layout_maximum_service_gap_seconds: float | None = None
     start_layout_seconds: float = 0.0
     start_layout_objective_proven: bool | None = None
+    waiting_headway_multiplier: float = 0.0
+    waiting_reference_headway_seconds_by_station_id: tuple[
+        tuple[str, float], ...
+    ] = ()
+    resource_row_mode: DddArcFlowResourceRowMode = (
+        DddArcFlowResourceRowMode.EAGER_MAXIMAL_CLIQUES
+    )
 
     def to_payload(self) -> dict[str, object]:
         raw = asdict(self.solve_result)
@@ -154,6 +188,7 @@ class DddFixedKArcFlowRunResult:
                 "operating_mode": self.problem.operating_mode.value,
                 "objective": self.problem.objective.value,
                 "formulation": self.formulation.value,
+                "resource_row_mode": self.resource_row_mode.value,
                 "start_policy": self.problem.start_policy.value,
                 "start_layout_kind": self.start_layout_kind,
                 "all_stop_maximum_cabin_count": (self.all_stop_maximum_cabin_count),
@@ -176,6 +211,21 @@ class DddFixedKArcFlowRunResult:
                 ),
                 "start_layout_seconds": self.start_layout_seconds,
                 "start_layout_objective_proven": (self.start_layout_objective_proven),
+                "waiting_headway_multiplier": self.waiting_headway_multiplier,
+                "waiting_policy": {
+                    "domain": (
+                        self.problem.resolved_trajectory_problem.waiting_policy.domain.value
+                    ),
+                    "step_seconds": (
+                        self.problem.resolved_trajectory_problem.waiting_policy.step_seconds
+                    ),
+                    "reference_headway_seconds_by_station_id": dict(
+                        self.waiting_reference_headway_seconds_by_station_id
+                    ),
+                    "maximum_wait_seconds_by_station_id": dict(
+                        self.problem.resolved_trajectory_problem.waiting_policy.maximum_wait_seconds_by_station_id
+                    ),
+                },
                 "setup_seconds": self.setup_seconds,
                 "seed_status": self.seed_status,
                 "seed_seconds": self.seed_seconds,
@@ -191,6 +241,9 @@ class DddFixedKArcFlowRunResult:
                         "route_option_ids": list(trajectory.support_signature),
                         "switch_times_seconds": [
                             visit.switch_time_seconds for visit in trajectory.visits
+                        ],
+                        "wait_seconds": [
+                            visit.wait_seconds for visit in trajectory.visits
                         ],
                     }
                     for trajectory in (
@@ -220,6 +273,9 @@ class DddPreparedFixedKArcFlowRun:
     start_layout_seconds: float = 0.0
     start_layout_objective_proven: bool | None = None
     seed_trajectories: tuple[DddReferenceTrajectory, ...] = ()
+    waiting_reference_headway_seconds_by_station_id: tuple[
+        tuple[str, float], ...
+    ] = ()
 
 
 class DddAnalyticAllStopInfeasible(ValueError):
@@ -230,6 +286,86 @@ class DddAnalyticAllStopInfeasible(ValueError):
             "exact-K all-stop is analytically infeasible: "
             f"K={cabin_count} > K_max_AS={maximum_cabin_count}"
         )
+
+
+def _headway_scaled_waiting_config(
+    *,
+    scenario: Scenario,
+    builder: NetworkEanBuildArtifactBuilder,
+    ean_config: EanConfig,
+    multiplier: float,
+    step_seconds: float,
+) -> tuple[EanConfig, tuple[tuple[str, float], ...]]:
+    """Derive station wait caps from local exit-merge headways.
+
+    The requested multiplier is rounded upward to the configured DDD time grid,
+    so a nominal policy such as ``0.5 h`` is never made smaller by
+    discretization.
+    """
+
+    no_wait_config = replace(
+        ean_config,
+        station_configs=tuple(
+            replace(
+                station,
+                waiting_mode=StationWaitingMode.NO_WAITING,
+                fifo_capacity=None,
+                max_wait_seconds=None,
+            )
+            for station in ean_config.station_configs
+        ),
+    )
+    probe = replace(
+        builder,
+        start_builder=EvenlySpacedAllStopCabinStartBuilder(1),
+    ).build(scenario, no_wait_config)
+    headway_by_station: dict[str, float] = {}
+    for checkpoint in probe.headway_checkpoints:
+        if checkpoint.kind is not HeadwayCheckpointKind.EXIT_SWITCH:
+            continue
+        headway = probe.headway_rule_for_checkpoint(checkpoint).maximum_seconds
+        headway_by_station[checkpoint.station_id] = max(
+            headway,
+            headway_by_station.get(checkpoint.station_id, 0.0),
+        )
+    missing = tuple(
+        sorted(
+            {station.station_id for station in ean_config.station_configs}
+            - set(headway_by_station)
+        )
+    )
+    if missing:
+        raise ValueError(
+            "headway-scaled waiting needs one exit-switch headway per station: "
+            f"{missing}"
+        )
+    reference = tuple(sorted(headway_by_station.items()))
+    if multiplier == 0:
+        return no_wait_config, reference
+    maximum_by_station = {
+        station_id: max(
+            step_seconds,
+            math.ceil(
+                multiplier * headway / step_seconds - 1e-12
+            )
+            * step_seconds,
+        )
+        for station_id, headway in reference
+    }
+    result = replace(
+        ean_config,
+        station_configs=tuple(
+            replace(
+                station,
+                waiting_mode=StationWaitingMode.END_OF_PLATFORM_WAIT,
+                fifo_capacity=None,
+                max_wait_seconds=maximum_by_station[station.station_id],
+            )
+            for station in ean_config.station_configs
+        ),
+    )
+    result.validate()
+    return result, reference
 
 
 def build_ddd_fixed_k_arc_flow_problem(
@@ -258,6 +394,13 @@ def prepare_ddd_fixed_k_arc_flow_run(
         ),
         headway_pair_builder=SparseHeadwayPairBuilder(),
     )
+    ean_config, waiting_reference_headways = _headway_scaled_waiting_config(
+        scenario=scenario,
+        builder=builder,
+        ean_config=ean_config,
+        multiplier=config.waiting_headway_multiplier,
+        step_seconds=config.waiting_step_seconds,
+    )
 
     if config.start_policy is DddFixedKStartPolicy.CANONICAL_ROPE:
         artifact = replace(
@@ -275,6 +418,9 @@ def prepare_ddd_fixed_k_arc_flow_run(
             problem=problem,
             all_stop_maximum_cabin_count=None,
             start_layout_kind="canonical_rope",
+            waiting_reference_headway_seconds_by_station_id=(
+                waiting_reference_headways
+            ),
         )
     if config.start_policy is not DddFixedKStartPolicy.BALANCED_REFERENCE:
         raise ValueError(
@@ -305,6 +451,9 @@ def prepare_ddd_fixed_k_arc_flow_run(
             start_layout_cycle_seconds=analysis.cycle_seconds,
             start_layout_bottleneck_headway_seconds=(analysis.limiting_headway_seconds),
             start_layout_service_station_count=len(artifact.timings),
+            waiting_reference_headway_seconds_by_station_id=(
+                waiting_reference_headways
+            ),
         )
     if config.operating_mode is DddFixedKOperatingMode.ALL_STOP:
         raise DddAnalyticAllStopInfeasible(
@@ -312,12 +461,18 @@ def prepare_ddd_fixed_k_arc_flow_run(
             maximum_cabin_count=analysis.maximum_cabin_count,
         )
 
-    return _prepare_periodic_balanced_skip_stop_problem(
+    prepared = _prepare_periodic_balanced_skip_stop_problem(
         config=config,
         scenario=scenario,
         ean_config=ean_config,
         builder=builder,
         all_stop_maximum_cabin_count=analysis.maximum_cabin_count,
+    )
+    return replace(
+        prepared,
+        waiting_reference_headway_seconds_by_station_id=(
+            waiting_reference_headways
+        ),
     )
 
 
@@ -329,7 +484,9 @@ def _fixed_k_problem_from_artifact(
     boundary_context: DddFixedKBoundaryContext,
 ) -> DddFixedKTrajectoryProblem:
     trajectory_problem = (
-        EanArtifactToDddMovementProblemAdapter().build_trajectory_problem(artifact)
+        EanArtifactToDddMovementProblemAdapter(
+            waiting_step_seconds=config.waiting_step_seconds
+        ).build_trajectory_problem(artifact)
     )
     result = DddFixedKTrajectoryProblem(
         trajectory_problem=trajectory_problem,
@@ -361,9 +518,9 @@ def _prepare_periodic_balanced_skip_stop_problem(
         ),
         headway_resource_reduction_mode=HeadwayResourceReductionMode.DISABLED,
     ).build(scenario, ean_config)
-    oip_problem = EanArtifactToDddMovementProblemAdapter().build_trajectory_problem(
-        oip_artifact
-    )
+    oip_problem = EanArtifactToDddMovementProblemAdapter(
+        waiting_step_seconds=config.waiting_step_seconds
+    ).build_trajectory_problem(oip_artifact)
     balanced = DddBalancedReferenceStartBuilder(
         time_limit_seconds=min(
             config.start_layout_time_limit_seconds,
@@ -380,6 +537,7 @@ def _prepare_periodic_balanced_skip_stop_problem(
             oip_artifact=oip_artifact,
             oip_seed=oip_seed,
             oip_trajectories=oip_trajectories,
+            waiting_step_seconds=config.waiting_step_seconds,
         )
     )
     fixed_artifact = replace(
@@ -422,6 +580,7 @@ def _fixed_snapshot_from_oip_seed(
     oip_artifact,
     oip_seed,
     oip_trajectories: tuple[DddReferenceTrajectory, ...],
+    waiting_step_seconds: float = 1.0,
 ) -> tuple[
     tuple[EanCabinStart, ...],
     DddFixedKBoundaryContext,
@@ -438,7 +597,9 @@ def _fixed_snapshot_from_oip_seed(
     retained_visit_index_by_cabin: dict[int, int] = {}
     boundary_occurrences: dict[tuple[object, ...], DddReferenceResourceOccurrence] = {}
     resources = (
-        EanArtifactToDddMovementProblemAdapter()
+        EanArtifactToDddMovementProblemAdapter(
+            waiting_step_seconds=waiting_step_seconds
+        )
         .build_trajectory_problem(oip_artifact)
         .movement_core.resources_by_id
     )
@@ -565,14 +726,121 @@ def _fixed_seed_from_oip_trajectories(
     return solution.trajectories
 
 
+def _load_ddd_fixed_k_arc_flow_result_seed(
+    path: Path,
+    *,
+    problem: DddFixedKTrajectoryProblem,
+) -> tuple[tuple[DddReferenceTrajectory, ...], float | None]:
+    """Load one complete earlier arc-flow timetable across waiting domains."""
+
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    expected_metadata = {
+        "example_id": problem.artifact.scenario_id,
+        "exact_active_cabin_count": problem.fleet_cardinality,
+        "operating_mode": problem.operating_mode.value,
+        "start_policy": problem.start_policy.value,
+        "objective": problem.objective.value,
+    }
+    for key, expected in expected_metadata.items():
+        if payload.get(key) != expected:
+            raise ValueError(f"arc-flow primal seed has incompatible {key}")
+    raw_supports = payload.get("trajectory_supports")
+    if not isinstance(raw_supports, list) or not raw_supports:
+        raise ValueError("arc-flow primal seed contains no trajectory supports")
+    movement = problem.resolved_trajectory_problem.structural_movement_problem
+    starts = {start.cabin_id: start for start in movement.starts}
+    options = {option.id: option for option in movement.route_options}
+    trajectories: list[DddReferenceTrajectory] = []
+    for raw in raw_supports:
+        cabin_id = int(raw["cabin_id"])
+        route_option_ids = tuple(str(item) for item in raw["route_option_ids"])
+        switch_times = tuple(float(item) for item in raw["switch_times_seconds"])
+        waits = tuple(float(item) for item in raw["wait_seconds"])
+        if not (
+            len(route_option_ids) == len(switch_times) == len(waits)
+            and route_option_ids
+        ):
+            raise ValueError("arc-flow primal-seed support dimensions differ")
+        try:
+            start = starts[cabin_id]
+            visits = tuple(
+                build_ddd_reference_visit(
+                    start=start,
+                    visit_index=visit_index,
+                    switch_time_seconds=switch_time,
+                    option=options[option_id],
+                    operational_end_seconds=movement.operational_end_seconds,
+                    tolerance_seconds=1e-9,
+                    wait_seconds=wait_seconds,
+                )
+                for visit_index, (option_id, switch_time, wait_seconds) in enumerate(
+                    zip(route_option_ids, switch_times, waits, strict=True)
+                )
+            )
+        except KeyError as error:
+            raise ValueError(
+                "arc-flow primal seed references an unknown cabin or route"
+            ) from error
+        trajectories.append(DddReferenceTrajectory(cabin_id, visits))
+    result = tuple(sorted(trajectories, key=lambda item: item.cabin_id))
+    validate_ddd_reference_solution(
+        movement,
+        DddReferenceSolution(result),
+        waiting_policy=problem.resolved_trajectory_problem.waiting_policy,
+    )
+    expected_cabins = problem.resolved_trajectory_problem.cabin_ids
+    if tuple(item.cabin_id for item in result) != expected_cabins:
+        raise ValueError("arc-flow primal seed does not contain every cabin exactly once")
+    raw_upper_bound = payload.get("validated_upper_bound")
+    upper_bound = (
+        float(raw_upper_bound) if isinstance(raw_upper_bound, (int, float)) else None
+    )
+    return result, upper_bound
+
+
+def _validate_prepared_run_compatibility(
+    config: DddFixedKArcFlowRunConfig,
+    prepared: DddPreparedFixedKArcFlowRun,
+) -> None:
+    problem = prepared.problem
+    mismatches: list[str] = []
+    if prepared.scenario.id != config.example_id:
+        mismatches.append(
+            f"scenario {prepared.scenario.id!r} != {config.example_id!r}"
+        )
+    if problem.fleet_cardinality != config.cabin_count:
+        mismatches.append(
+            f"K {problem.fleet_cardinality} != {config.cabin_count}"
+        )
+    if problem.operating_mode is not config.operating_mode:
+        mismatches.append(
+            f"mode {problem.operating_mode.value!r} != {config.operating_mode.value!r}"
+        )
+    if problem.objective is not config.objective:
+        mismatches.append(
+            f"objective {problem.objective.value!r} != {config.objective.value!r}"
+        )
+    if problem.start_policy is not config.start_policy:
+        mismatches.append(
+            f"start policy {problem.start_policy.value!r} != {config.start_policy.value!r}"
+        )
+    if mismatches:
+        raise ValueError(
+            "prepared fixed-K run is incompatible with solve config: "
+            + "; ".join(mismatches)
+        )
+
+
 def run_ddd_fixed_k_arc_flow(
     config: DddFixedKArcFlowRunConfig,
     *,
     progress_hook: Callable[[DddFixedKArcFlowProgress], None] | None = None,
+    prepared_run: DddPreparedFixedKArcFlowRun | None = None,
 ) -> DddFixedKArcFlowRunResult:
     config.validate()
     started = perf_counter()
-    prepared = prepare_ddd_fixed_k_arc_flow_run(config)
+    prepared = prepared_run or prepare_ddd_fixed_k_arc_flow_run(config)
+    _validate_prepared_run_compatibility(config, prepared)
     scenario, problem = prepared.scenario, prepared.problem
     setup_seconds = perf_counter() - started
     movement = problem.resolved_trajectory_problem.structural_movement_problem
@@ -618,6 +886,16 @@ def run_ddd_fixed_k_arc_flow(
         seed_candidates.append(
             ("root_cg_checkpoint", checkpoint_trajectories, checkpoint_upper_bound)
         )
+    if config.primal_seed_result_path is not None:
+        result_trajectories, result_upper_bound = (
+            _load_ddd_fixed_k_arc_flow_result_seed(
+                config.primal_seed_result_path,
+                problem=problem,
+            )
+        )
+        seed_candidates.append(
+            ("arc_flow_result", result_trajectories, result_upper_bound)
+        )
 
     primal_seed: DddFixedKPrimalSeed | None = None
     seed_evaluation_started = perf_counter()
@@ -645,7 +923,7 @@ def run_ddd_fixed_k_arc_flow(
             and candidate.objective_value > expected_upper_bound + 1e-4
         ):
             raise RuntimeError(
-                "re-evaluated Root-CG seed is worse than its stored validated UB"
+                "re-evaluated external seed is worse than its stored validated UB"
             )
         if (
             primal_seed is None
@@ -676,6 +954,7 @@ def run_ddd_fixed_k_arc_flow(
         seed=config.seed,
         mip_focus=config.mip_focus,
         output_flag=config.output_flag,
+        resource_row_mode=config.resource_row_mode,
     )
     if config.formulation is DddFixedKArcFlowFormulation.EXACT_ANONYMOUS:
         solve_result = DddExactAnonymousArcFlowOptimizer(solve_config).solve(
@@ -706,6 +985,7 @@ def run_ddd_fixed_k_arc_flow(
             time_limit_seconds=remaining,
             mip_gap=0.0,
             threads=1,
+            waiting_policy=problem.resolved_trajectory_problem.waiting_policy,
         ).evaluate(network_problem, solve_result.solution)
         validation_seconds = perf_counter() - validation_started
         validation_status = evaluation.status.value
@@ -797,6 +1077,11 @@ def run_ddd_fixed_k_arc_flow(
         ),
         start_layout_seconds=prepared.start_layout_seconds,
         start_layout_objective_proven=(prepared.start_layout_objective_proven),
+        waiting_headway_multiplier=config.waiting_headway_multiplier,
+        waiting_reference_headway_seconds_by_station_id=(
+            prepared.waiting_reference_headway_seconds_by_station_id
+        ),
+        resource_row_mode=config.resource_row_mode,
     )
 
 

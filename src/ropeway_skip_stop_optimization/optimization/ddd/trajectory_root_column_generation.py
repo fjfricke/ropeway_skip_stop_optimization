@@ -37,6 +37,16 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generatio
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_coordinated_primal import (
     DddTrajectoryCoordinatedPrimalGenerator,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_neighborhood_primal import (
+    DddTrajectoryMergeCorridorPrimalOptimizer,
+    DddTrajectoryMergeCorridorSelector,
+    DddTrajectoryNeighborhoodPrimalOptimizer,
+    DddTrajectoryNeighborhoodSelector,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_compatible_batch import (
+    DddTrajectoryCompatibilityBatchOptimizer,
+    DddTrajectoryPricedCandidate,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_branching import (
     DddTrajectoryBranchCandidateEvaluator,
     DddTrajectoryBranchDomain,
@@ -60,6 +70,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_problem import (
     DddTrajectoryProblem,
     DddTrajectoryWaitingPolicy,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
+    ddd_tick_to_seconds,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_reservoir import (
     DDD_RESERVOIR_TIME_TOLERANCE_SECONDS,
     DddReservoirFleetPlan,
@@ -77,6 +90,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_oip import (
     build_ddd_oip_reference_trajectory,
     ddd_oip_trajectories_from_ean_seed,
     validate_ddd_oip_reference_trajectory,
+)
+from ropeway_skip_stop_optimization.optimization.ddd.trajectory_merge_domain import (
+    DddTrajectoryMergeDomainBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_exhaustive_reference import (
     DddTrajectoryReferenceMasterBuildResult,
@@ -149,6 +165,11 @@ class DddTrajectoryDiversityMode(StrEnum):
     OFF = "off"
     RESOURCE_WINDOWS = "resource_windows"
     STOP_SKIP = "stop_skip"
+
+
+class DddTrajectoryCompatibleBatchMode(StrEnum):
+    OFF = "off"
+    MAXIMUM_COMPATIBLE = "maximum_compatible"
 
 
 class DddReservoirPrimalPricingMode(StrEnum):
@@ -245,6 +266,32 @@ class DddTrajectoryRootCgIteration:
     best_branch_visit_index: int | None = None
     best_branch_true_mass: float | None = None
     best_branch_false_mass: float | None = None
+    compatible_batch_status: str | None = None
+    compatible_batch_candidate_count: int = 0
+    compatible_batch_selected_count: int = 0
+    compatible_batch_conflict_pair_count: int = 0
+    compatible_batch_reduced_cost: float | None = None
+    compatible_batch_seconds: float = 0.0
+    neighborhood_primal_status: str | None = None
+    neighborhood_primal_id: str | None = None
+    neighborhood_primal_released_cabin_count: int = 0
+    neighborhood_primal_fixed_cabin_count: int = 0
+    neighborhood_primal_candidate_count: int = 0
+    neighborhood_primal_seconds: float = 0.0
+    merge_corridor_primal_status: str | None = None
+    merge_corridor_primal_id: str | None = None
+    merge_corridor_family_id: str | None = None
+    merge_corridor_window_start_seconds: float | None = None
+    merge_corridor_window_end_seconds: float | None = None
+    merge_corridor_released_cabin_count: int = 0
+    merge_corridor_released_decision_count: int = 0
+    merge_corridor_fixed_decision_count: int = 0
+    merge_corridor_occurrence_count: int = 0
+    merge_corridor_primal_candidate_count: int = 0
+    merge_corridor_primal_seconds: float = 0.0
+    primal_package_upper_bound: float | None = None
+    primal_package_evaluation_seconds: float = 0.0
+    primal_package_solution_count: int = 0
 
 
 @dataclass(frozen=True)
@@ -313,6 +360,7 @@ class _DddTrajectoryRootCgRun:
     coordinated_schedule_batches: list[tuple[DddRecoveredSchedule, ...]] = field(
         default_factory=list
     )
+    force_restricted_mip: bool = False
 
 
 @dataclass(frozen=True)
@@ -350,9 +398,37 @@ class _DddTrajectoryPricingRound:
         tuple[DddReferenceTrajectory, ...], ...
     ] = ()
     coordinated_schedule_batches: tuple[tuple[DddRecoveredSchedule, ...], ...] = ()
+    neighborhood_primal_status: str | None = None
+    neighborhood_primal_id: str | None = None
+    neighborhood_primal_released_cabin_count: int = 0
+    neighborhood_primal_fixed_cabin_count: int = 0
+    neighborhood_primal_candidate_count: int = 0
+    neighborhood_primal_seconds: float = 0.0
+    merge_corridor_primal_status: str | None = None
+    merge_corridor_primal_id: str | None = None
+    merge_corridor_family_id: str | None = None
+    merge_corridor_window_start_seconds: float | None = None
+    merge_corridor_window_end_seconds: float | None = None
+    merge_corridor_released_cabin_count: int = 0
+    merge_corridor_released_decision_count: int = 0
+    merge_corridor_fixed_decision_count: int = 0
+    merge_corridor_occurrence_count: int = 0
+    merge_corridor_primal_candidate_count: int = 0
+    merge_corridor_primal_seconds: float = 0.0
+    primal_package_upper_bound: float | None = None
+    primal_package_option_ids: tuple[str, ...] = ()
+    primal_package_ride_values_by_id: tuple[tuple[str, float], ...] = ()
+    primal_package_evaluation_seconds: float = 0.0
+    primal_package_solution_count: int = 0
     maximum_tier_seconds: float = 0.0
     retry_count: int = 0
     unresolved_count: int = 0
+    compatible_batch_status: str | None = None
+    compatible_batch_candidate_count: int = 0
+    compatible_batch_selected_count: int = 0
+    compatible_batch_conflict_pair_count: int = 0
+    compatible_batch_reduced_cost: float | None = None
+    compatible_batch_seconds: float = 0.0
 
 
 class _DddTrajectoryRootCgAbort(RuntimeError):
@@ -395,11 +471,35 @@ class DddTrajectoryExactRootColumnGenerationSolver:
     diversity_mode: DddTrajectoryDiversityMode = DddTrajectoryDiversityMode.OFF
     minimum_diversity_distance: int = 1
     extra_column_time_limit_seconds: float = 10.0
+    compatible_batch_mode: DddTrajectoryCompatibleBatchMode = (
+        DddTrajectoryCompatibleBatchMode.OFF
+    )
+    compatible_batch_time_limit_seconds: float = 10.0
     coordinated_primal_time_limit_seconds: float = 0.0
     coordinated_primal_interval: int = 1
     coordinated_primal_workers: int = 8
     coordinated_primal_candidate_count: int = 1
     coordinated_primal_maximum_preference_count: int = 2_000
+    neighborhood_primal_time_limit_seconds: float = 0.0
+    neighborhood_primal_interval: int = 5
+    neighborhood_primal_cabin_counts: tuple[int, ...] = (4, 8, 12)
+    neighborhood_primal_workers: int = 8
+    neighborhood_primal_candidate_count: int = 1
+    neighborhood_primal_maximum_preference_count: int = 2_000
+    merge_corridor_primal_time_limit_seconds: float = 0.0
+    merge_corridor_primal_interval: int = 5
+    merge_corridor_window_widths_seconds: tuple[float, ...] = (
+        120.0,
+        240.0,
+        480.0,
+    )
+    merge_corridor_upstream_visit_count: int = 1
+    merge_corridor_downstream_visit_count: int = 1
+    merge_corridor_minimum_occurrence_count: int = 2
+    merge_corridor_primal_workers: int = 8
+    merge_corridor_primal_candidate_count: int = 1
+    merge_corridor_primal_maximum_preference_count: int = 2_000
+    primal_package_evaluation_time_limit_seconds: float = 30.0
     oip_primal_pricing_time_limit_seconds: float = 0.0
     reservoir_primal_pricing_time_limit_seconds: float = 0.0
     reservoir_primal_pricing_mode: DddReservoirPrimalPricingMode = (
@@ -590,6 +690,11 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 added, diverse_added = self._add_priced_columns(
                     run=run,
                     pricing_round=pricing_round,
+                )
+                self._validate_bound_invariants(
+                    run=run,
+                    restricted_lp_value=master_round.lp.objective_value,
+                    stage=f"round {round_index} primal package",
                 )
                 iteration = self._build_iteration(
                     round_index=round_index,
@@ -1035,6 +1140,16 @@ class DddTrajectoryExactRootColumnGenerationSolver:
         separation_seconds = 0.0
         added_window_count = 0
         resource_windows = run.resource_windows
+        included_resource_ids = None
+        if (
+            self.conflict_row_mode
+            is DddTrajectoryConflictRowMode.MERGE_AWARE_RESOURCE_WINDOWS
+        ):
+            included_resource_ids = frozenset(
+                DddTrajectoryMergeDomainBuilder()
+                .build(trajectory_problem.movement_core)
+                .protected_resource_ids
+            )
         for resource_round in range(self.max_resource_window_rounds + 1):
             lp = DddTrajectoryFactorizedLpOptimizer(
                 output_flag=self.output_flag,
@@ -1060,6 +1175,7 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 option_values_by_id=lp.option_values_by_id,
                 existing_windows=resource_windows,
                 tolerance=self.pricing_tolerance,
+                included_resource_ids=included_resource_ids,
             )
             separation_seconds += perf_counter() - separation_started
             if not separation.new_windows:
@@ -1094,6 +1210,7 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             self.restricted_mip_interval == 1
             or (round_index - 1) % self.restricted_mip_interval == 0
             or run.upper_bound is None
+            or run.force_restricted_mip
         )
         mip_limit = self._clamped_time_limit(
             self.restricted_mip_time_limit_seconds,
@@ -1121,6 +1238,8 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 best_bound=None,
             )
         )
+        if run_mip:
+            run.force_restricted_mip = False
         return _DddTrajectoryRestrictedMasterRound(
             reference_master=reference_master,
             lp=lp,
@@ -1530,6 +1649,23 @@ class DddTrajectoryExactRootColumnGenerationSolver:
         coordinated_schedule_batches: tuple[tuple[DddRecoveredSchedule, ...], ...] = ()
         coordinated_status: tuple[tuple[str, int], ...] = ()
         coordinated_details: tuple[str, ...] = ()
+        neighborhood_primal_status: str | None = None
+        neighborhood_primal_id: str | None = None
+        neighborhood_primal_released_cabin_count = 0
+        neighborhood_primal_fixed_cabin_count = 0
+        neighborhood_primal_candidate_count = 0
+        neighborhood_primal_seconds = 0.0
+        merge_corridor_primal_status: str | None = None
+        merge_corridor_primal_id: str | None = None
+        merge_corridor_family_id: str | None = None
+        merge_corridor_window_start_seconds: float | None = None
+        merge_corridor_window_end_seconds: float | None = None
+        merge_corridor_released_cabin_count = 0
+        merge_corridor_released_decision_count = 0
+        merge_corridor_fixed_decision_count = 0
+        merge_corridor_occurrence_count = 0
+        merge_corridor_primal_candidate_count = 0
+        merge_corridor_primal_seconds = 0.0
         run_coordinated_primal = (
             self.coordinated_primal_time_limit_seconds > 0
             and isinstance(
@@ -1588,6 +1724,395 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                         ).id
                         if option_id not in run.trajectory_by_id:
                             primal_candidate_option_ids.add(option_id)
+        run_neighborhood_primal = (
+            self.neighborhood_primal_time_limit_seconds > 0
+            and isinstance(
+                trajectory_problem.start_domain,
+                DddFixedTrajectoryStartDomain,
+            )
+            and trajectory_problem.waiting_policy.domain
+            is DddTrajectoryWaitingDomain.NO_WAIT
+            and not run.branch_domain.decisions
+            and len(run.incumbent_option_ids) == len(cabin_ids)
+            and (round_index - 1) % self.neighborhood_primal_interval == 0
+        )
+        if run_neighborhood_primal:
+            global_remaining = (
+                None
+                if remaining_budget_seconds is None
+                else remaining_budget_seconds - (perf_counter() - pricing_started)
+            )
+            neighborhood_limit = self._clamped_time_limit(
+                self.neighborhood_primal_time_limit_seconds,
+                global_remaining,
+            )
+            if neighborhood_limit is not None and neighborhood_limit > 1e-6:
+                neighborhood_index = 1 + sum(
+                    iteration.neighborhood_primal_status is not None
+                    for iteration in run.iterations
+                )
+                neighborhood = DddTrajectoryNeighborhoodSelector(
+                    cabin_counts=self.neighborhood_primal_cabin_counts,
+                    tolerance=self.pricing_tolerance,
+                ).select(
+                    cabin_ids=cabin_ids,
+                    lp_result=master_round.lp,
+                    trajectory_by_option_id=(
+                        master_round.reference_master.reference_trajectory_by_option_id
+                    ),
+                    incumbent_option_ids=run.incumbent_option_ids,
+                    neighborhood_index=neighborhood_index,
+                )
+                neighborhood_result = DddTrajectoryNeighborhoodPrimalOptimizer(
+                    time_limit_seconds=neighborhood_limit,
+                    num_workers=self.neighborhood_primal_workers,
+                    max_candidate_count=self.neighborhood_primal_candidate_count,
+                    maximum_preference_count=(
+                        self.neighborhood_primal_maximum_preference_count
+                    ),
+                ).optimize(
+                    problem=problem,
+                    artifact=artifact,
+                    passenger_build=passenger_build,
+                    objective=objective,
+                    lp_result=master_round.lp,
+                    waiting_policy=trajectory_problem.waiting_policy,
+                    incumbent_trajectories=tuple(
+                        run.trajectory_by_id[option_id]
+                        for option_id in run.incumbent_option_ids
+                    ),
+                    neighborhood=neighborhood,
+                    boundary_occurrences=run.boundary_occurrences,
+                    excluded_schedules=tuple(run.coordinated_schedule_batches),
+                )
+                neighborhood_coordinated = neighborhood_result.coordinated
+                primal_call_count += 1
+                primal_seconds += neighborhood_coordinated.wall_seconds
+                neighborhood_primal_status = (
+                    neighborhood_coordinated.status.value
+                )
+                neighborhood_primal_id = neighborhood.id
+                neighborhood_primal_released_cabin_count = len(
+                    neighborhood.released_cabin_ids
+                )
+                neighborhood_primal_fixed_cabin_count = len(
+                    neighborhood.fixed_cabin_ids
+                )
+                neighborhood_primal_candidate_count = len(
+                    neighborhood_coordinated.trajectory_batches
+                )
+                neighborhood_primal_seconds = neighborhood_coordinated.wall_seconds
+                coordinated_trajectory_batches = (
+                    *coordinated_trajectory_batches,
+                    *neighborhood_coordinated.trajectory_batches,
+                )
+                coordinated_schedule_batches = (
+                    *coordinated_schedule_batches,
+                    *neighborhood_coordinated.schedule_batches,
+                )
+                coordinated_status = (
+                    *coordinated_status,
+                    (f"neighborhood:{neighborhood_coordinated.status.value}", 1),
+                )
+                if neighborhood_coordinated.detail is not None:
+                    coordinated_details = (
+                        *coordinated_details,
+                        neighborhood_coordinated.detail,
+                    )
+                for batch in neighborhood_coordinated.trajectory_batches:
+                    for trajectory in batch:
+                        option_id = ddd_trajectory_column(
+                            trajectory,
+                            instance_fingerprint=run.instance_fingerprint,
+                        ).id
+                        if option_id not in run.trajectory_by_id:
+                            primal_candidate_option_ids.add(option_id)
+        run_merge_corridor_primal = (
+            self.merge_corridor_primal_time_limit_seconds > 0
+            and isinstance(
+                trajectory_problem.start_domain,
+                DddFixedTrajectoryStartDomain,
+            )
+            and trajectory_problem.waiting_policy.domain
+            is DddTrajectoryWaitingDomain.NO_WAIT
+            and not run.branch_domain.decisions
+            and len(run.incumbent_option_ids) == len(cabin_ids)
+            and (round_index - 1) % self.merge_corridor_primal_interval == 0
+        )
+        if run_merge_corridor_primal:
+            global_remaining = (
+                None
+                if remaining_budget_seconds is None
+                else remaining_budget_seconds - (perf_counter() - pricing_started)
+            )
+            corridor_limit = self._clamped_time_limit(
+                self.merge_corridor_primal_time_limit_seconds,
+                global_remaining,
+            )
+            if corridor_limit is not None and corridor_limit > 1e-6:
+                corridor_index = 1 + sum(
+                    iteration.merge_corridor_primal_status is not None
+                    for iteration in run.iterations
+                )
+                incumbent_trajectories = tuple(
+                    run.trajectory_by_id[option_id]
+                    for option_id in run.incumbent_option_ids
+                )
+                try:
+                    corridor = DddTrajectoryMergeCorridorSelector(
+                        window_widths_seconds=(
+                            self.merge_corridor_window_widths_seconds
+                        ),
+                        upstream_visit_count=(
+                            self.merge_corridor_upstream_visit_count
+                        ),
+                        downstream_visit_count=(
+                            self.merge_corridor_downstream_visit_count
+                        ),
+                        minimum_occurrence_count=(
+                            self.merge_corridor_minimum_occurrence_count
+                        ),
+                        tolerance=self.pricing_tolerance,
+                    ).select(
+                        merge_domain=DddTrajectoryMergeDomainBuilder().build(
+                            problem.movement_problem.core
+                        ),
+                        lp_result=master_round.lp,
+                        trajectory_by_option_id=(
+                            master_round.reference_master.reference_trajectory_by_option_id
+                        ),
+                        incumbent_trajectories=incumbent_trajectories,
+                        neighborhood_index=corridor_index,
+                    )
+                except ValueError as error:
+                    merge_corridor_primal_status = "not_applicable"
+                    coordinated_details = (
+                        *coordinated_details,
+                        f"merge corridor not applicable: {error}",
+                    )
+                else:
+                    corridor_result = DddTrajectoryMergeCorridorPrimalOptimizer(
+                        time_limit_seconds=corridor_limit,
+                        num_workers=self.merge_corridor_primal_workers,
+                        max_candidate_count=(
+                            self.merge_corridor_primal_candidate_count
+                        ),
+                        maximum_preference_count=(
+                            self.merge_corridor_primal_maximum_preference_count
+                        ),
+                    ).optimize(
+                        problem=problem,
+                        artifact=artifact,
+                        passenger_build=passenger_build,
+                        objective=objective,
+                        lp_result=master_round.lp,
+                        waiting_policy=trajectory_problem.waiting_policy,
+                        incumbent_trajectories=incumbent_trajectories,
+                        corridor=corridor,
+                        boundary_occurrences=run.boundary_occurrences,
+                        excluded_schedules=tuple(run.coordinated_schedule_batches),
+                    )
+                    corridor_coordinated = corridor_result.coordinated
+                    primal_call_count += 1
+                    primal_seconds += corridor_coordinated.wall_seconds
+                    merge_corridor_primal_status = corridor_coordinated.status.value
+                    merge_corridor_primal_id = corridor.id
+                    merge_corridor_family_id = corridor.family_id
+                    merge_corridor_window_start_seconds = ddd_tick_to_seconds(
+                        corridor.window_start_tick
+                    )
+                    merge_corridor_window_end_seconds = ddd_tick_to_seconds(
+                        corridor.window_end_tick
+                    )
+                    merge_corridor_released_cabin_count = len(
+                        corridor.released_cabin_ids
+                    )
+                    merge_corridor_released_decision_count = len(
+                        corridor.released_positions
+                    )
+                    merge_corridor_fixed_decision_count = len(
+                        corridor.fixed_route_decisions
+                    )
+                    merge_corridor_occurrence_count = (
+                        corridor.merge_occurrence_count
+                    )
+                    merge_corridor_primal_candidate_count = len(
+                        corridor_coordinated.trajectory_batches
+                    )
+                    merge_corridor_primal_seconds = corridor_coordinated.wall_seconds
+                    coordinated_trajectory_batches = (
+                        *coordinated_trajectory_batches,
+                        *corridor_coordinated.trajectory_batches,
+                    )
+                    coordinated_schedule_batches = (
+                        *coordinated_schedule_batches,
+                        *corridor_coordinated.schedule_batches,
+                    )
+                    coordinated_status = (
+                        *coordinated_status,
+                        (f"merge_corridor:{corridor_coordinated.status.value}", 1),
+                    )
+                    if corridor_coordinated.detail is not None:
+                        coordinated_details = (
+                            *coordinated_details,
+                            corridor_coordinated.detail,
+                        )
+                    for batch in corridor_coordinated.trajectory_batches:
+                        for trajectory in batch:
+                            option_id = ddd_trajectory_column(
+                                trajectory,
+                                instance_fingerprint=run.instance_fingerprint,
+                            ).id
+                            if option_id not in run.trajectory_by_id:
+                                primal_candidate_option_ids.add(option_id)
+        primal_package_upper_bound: float | None = None
+        primal_package_option_ids: tuple[str, ...] = ()
+        primal_package_ride_values_by_id: tuple[tuple[str, float], ...] = ()
+        primal_package_solution_count = 0
+        package_evaluation_started = perf_counter()
+        for batch in coordinated_trajectory_batches:
+            package_solution = DddReferenceSolution(batch)
+            validate_ddd_reference_solution(
+                problem.movement_problem,
+                package_solution,
+                waiting_policy=trajectory_problem.waiting_policy,
+            )
+            package_movement_plan = DddReferenceToEanMovementPlanAdapter(
+                waiting_policy=trajectory_problem.waiting_policy,
+            ).build(
+                problem=problem.movement_problem,
+                solution=package_solution,
+                artifact=artifact,
+            )
+            validate_ean_movement_plan_against_artifact(
+                artifact,
+                package_movement_plan,
+            ).raise_for_errors()
+            package_remaining = (
+                None
+                if remaining_budget_seconds is None
+                else remaining_budget_seconds - (perf_counter() - pricing_started)
+            )
+            package_limit = self._clamped_time_limit(
+                self.primal_package_evaluation_time_limit_seconds,
+                package_remaining,
+            )
+            if package_limit is not None and package_limit <= 1e-6:
+                break
+            package_master = build_ddd_trajectory_reference_master(
+                trajectory_problem=trajectory_problem,
+                artifact=artifact,
+                passenger_build=passenger_build,
+                objective=objective,
+                reference_trajectories=batch,
+                max_incompatibility_pair_checks=(
+                    self.max_incompatibility_pair_checks
+                ),
+                instance_fingerprint=run.instance_fingerprint,
+            )
+            package_remaining = (
+                None
+                if remaining_budget_seconds is None
+                else remaining_budget_seconds - (perf_counter() - pricing_started)
+            )
+            package_limit = self._clamped_time_limit(
+                self.primal_package_evaluation_time_limit_seconds,
+                package_remaining,
+            )
+            if package_limit is not None and package_limit <= 1e-6:
+                break
+            package_mip = DddTrajectoryFactorizedMipReferenceOptimizer(
+                output_flag=self.output_flag,
+                time_limit_seconds=package_limit,
+                mip_focus=self.restricted_mip_focus,
+                threads=self.pricing_threads,
+            ).solve(package_master.master_problem)
+            primal_package_solution_count += package_mip.solution_count
+            selected_package_option_ids = tuple(
+                sorted(
+                    option_id
+                    for option_id, value in package_mip.option_values_by_id.items()
+                    if value >= 0.5
+                )
+            )
+            if package_mip.objective_value is not None and len(
+                selected_package_option_ids
+            ) != len(cabin_ids):
+                raise RuntimeError(
+                    "fixed-movement Passenger package did not select every cabin"
+                )
+            if (
+                package_mip.objective_value is not None
+                and (
+                    primal_package_upper_bound is None
+                    or package_mip.objective_value
+                    < primal_package_upper_bound - self.pricing_tolerance
+                )
+            ):
+                primal_package_upper_bound = package_mip.objective_value
+                primal_package_option_ids = selected_package_option_ids
+                primal_package_ride_values_by_id = tuple(
+                    sorted(
+                        (ride_id, value)
+                        for ride_id, value in package_mip.ride_values_by_id.items()
+                        if value > self.pricing_tolerance
+                    )
+                )
+        primal_package_evaluation_seconds = (
+            perf_counter() - package_evaluation_started
+        )
+        compatible_batch_status: str | None = None
+        compatible_batch_candidate_count = 0
+        compatible_batch_selected_count = 0
+        compatible_batch_conflict_pair_count = 0
+        compatible_batch_reduced_cost: float | None = None
+        compatible_batch_seconds = 0.0
+        if (
+            self.compatible_batch_mode
+            is DddTrajectoryCompatibleBatchMode.MAXIMUM_COMPATIBLE
+            and candidate_results
+        ):
+            proof_result_ids = {id(item) for item in pricing_results}
+            batch_candidates = tuple(
+                DddTrajectoryPricedCandidate(
+                    option_id=result.option_id,
+                    cabin_id=result.cabin_id,
+                    reduced_cost=result.minimum_reduced_cost,
+                    trajectory=result.reference_trajectory,
+                    provenance=(
+                        "proof_pricing"
+                        if id(result) in proof_result_ids
+                        else "secondary_negative_pricing"
+                    ),
+                )
+                for result in candidate_results
+                if result.option_id is not None
+                and result.reference_trajectory is not None
+                and result.minimum_reduced_cost < -self.pricing_tolerance
+            )
+            batch = DddTrajectoryCompatibilityBatchOptimizer(
+                time_limit_seconds=self.compatible_batch_time_limit_seconds,
+                output_flag=self.output_flag,
+                tolerance=self.pricing_tolerance,
+            ).solve(
+                movement_problem=problem.movement_problem,
+                candidates=batch_candidates,
+            )
+            selected_ids = set(batch.selected_option_ids)
+            if batch_candidates and not selected_ids:
+                selected_ids.add(batch_candidates[0].option_id)
+            candidate_results = [
+                result
+                for result in candidate_results
+                if result.option_id in selected_ids
+                or result.option_id in primal_candidate_option_ids
+            ]
+            compatible_batch_status = batch.status.value
+            compatible_batch_candidate_count = batch.candidate_count
+            compatible_batch_selected_count = len(selected_ids)
+            compatible_batch_conflict_pair_count = batch.conflict_pair_count
+            compatible_batch_reduced_cost = batch.selected_reduced_cost
+            compatible_batch_seconds = batch.solve_seconds
         pricing_result_tuple = tuple(pricing_results)
         diagnostics = tuple(
             DddTrajectoryRootCgPricingDiagnostic(
@@ -1707,6 +2232,42 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             ),
             coordinated_trajectory_batches=coordinated_trajectory_batches,
             coordinated_schedule_batches=coordinated_schedule_batches,
+            neighborhood_primal_status=neighborhood_primal_status,
+            neighborhood_primal_id=neighborhood_primal_id,
+            neighborhood_primal_released_cabin_count=(
+                neighborhood_primal_released_cabin_count
+            ),
+            neighborhood_primal_fixed_cabin_count=(
+                neighborhood_primal_fixed_cabin_count
+            ),
+            neighborhood_primal_candidate_count=neighborhood_primal_candidate_count,
+            neighborhood_primal_seconds=neighborhood_primal_seconds,
+            merge_corridor_primal_status=merge_corridor_primal_status,
+            merge_corridor_primal_id=merge_corridor_primal_id,
+            merge_corridor_family_id=merge_corridor_family_id,
+            merge_corridor_window_start_seconds=(
+                merge_corridor_window_start_seconds
+            ),
+            merge_corridor_window_end_seconds=merge_corridor_window_end_seconds,
+            merge_corridor_released_cabin_count=(
+                merge_corridor_released_cabin_count
+            ),
+            merge_corridor_released_decision_count=(
+                merge_corridor_released_decision_count
+            ),
+            merge_corridor_fixed_decision_count=merge_corridor_fixed_decision_count,
+            merge_corridor_occurrence_count=merge_corridor_occurrence_count,
+            merge_corridor_primal_candidate_count=(
+                merge_corridor_primal_candidate_count
+            ),
+            merge_corridor_primal_seconds=merge_corridor_primal_seconds,
+            primal_package_upper_bound=primal_package_upper_bound,
+            primal_package_option_ids=primal_package_option_ids,
+            primal_package_ride_values_by_id=primal_package_ride_values_by_id,
+            primal_package_evaluation_seconds=(
+                primal_package_evaluation_seconds
+            ),
+            primal_package_solution_count=primal_package_solution_count,
             maximum_tier_seconds=maximum_tier_seconds,
             retry_count=retry_count,
             unresolved_count=sum(
@@ -1722,6 +2283,14 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 )
                 for result in pricing_result_tuple
             ),
+            compatible_batch_status=compatible_batch_status,
+            compatible_batch_candidate_count=compatible_batch_candidate_count,
+            compatible_batch_selected_count=compatible_batch_selected_count,
+            compatible_batch_conflict_pair_count=(
+                compatible_batch_conflict_pair_count
+            ),
+            compatible_batch_reduced_cost=compatible_batch_reduced_cost,
+            compatible_batch_seconds=compatible_batch_seconds,
         )
 
     def _solve_fixed_start_proof_pricing_batch(
@@ -2211,6 +2780,7 @@ class DddTrajectoryExactRootColumnGenerationSolver:
     ) -> tuple[int, int]:
         added = 0
         diverse_added = 0
+        primal_package_added = False
         proof_result_ids = {id(item) for item in pricing_round.results}
         for pricing_result in pricing_round.candidate_results:
             if (
@@ -2252,11 +2822,38 @@ class DddTrajectoryExactRootColumnGenerationSolver:
                 run.trajectory_by_id[option_id] = trajectory
                 added += 1
                 diverse_added += 1
+                primal_package_added = True
         run.coordinated_schedule_batches.extend(
             batch
             for batch in pricing_round.coordinated_schedule_batches
             if batch not in run.coordinated_schedule_batches
         )
+        if pricing_round.primal_package_upper_bound is not None:
+            if any(
+                option_id not in run.trajectory_by_id
+                for option_id in pricing_round.primal_package_option_ids
+            ):
+                raise RuntimeError(
+                    "evaluated primal package references a missing trajectory"
+                )
+            if (
+                run.upper_bound is None
+                or pricing_round.primal_package_upper_bound
+                < run.upper_bound - self.pricing_tolerance
+            ):
+                run.upper_bound = pricing_round.primal_package_upper_bound
+                run.incumbent_option_ids = (
+                    pricing_round.primal_package_option_ids
+                )
+                run.incumbent_ride_values_by_id = dict(
+                    pricing_round.primal_package_ride_values_by_id
+                )
+        if primal_package_added or pricing_round.coordinated_trajectory_batches:
+            # Evaluate a newly admitted complete package in the very next
+            # restricted MIP instead of waiting for the regular cadence. The
+            # package can be new even when all of its individual columns were
+            # already present in the pool.
+            run.force_restricted_mip = True
         return added, diverse_added
 
     def _build_iteration(
@@ -2429,6 +3026,68 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             ),
             best_branch_false_mass=(
                 None if best_branch is None else best_branch.false_mass
+            ),
+            compatible_batch_status=pricing_round.compatible_batch_status,
+            compatible_batch_candidate_count=(
+                pricing_round.compatible_batch_candidate_count
+            ),
+            compatible_batch_selected_count=(
+                pricing_round.compatible_batch_selected_count
+            ),
+            compatible_batch_conflict_pair_count=(
+                pricing_round.compatible_batch_conflict_pair_count
+            ),
+            compatible_batch_reduced_cost=(
+                pricing_round.compatible_batch_reduced_cost
+            ),
+            compatible_batch_seconds=pricing_round.compatible_batch_seconds,
+            neighborhood_primal_status=pricing_round.neighborhood_primal_status,
+            neighborhood_primal_id=pricing_round.neighborhood_primal_id,
+            neighborhood_primal_released_cabin_count=(
+                pricing_round.neighborhood_primal_released_cabin_count
+            ),
+            neighborhood_primal_fixed_cabin_count=(
+                pricing_round.neighborhood_primal_fixed_cabin_count
+            ),
+            neighborhood_primal_candidate_count=(
+                pricing_round.neighborhood_primal_candidate_count
+            ),
+            neighborhood_primal_seconds=pricing_round.neighborhood_primal_seconds,
+            merge_corridor_primal_status=(
+                pricing_round.merge_corridor_primal_status
+            ),
+            merge_corridor_primal_id=pricing_round.merge_corridor_primal_id,
+            merge_corridor_family_id=pricing_round.merge_corridor_family_id,
+            merge_corridor_window_start_seconds=(
+                pricing_round.merge_corridor_window_start_seconds
+            ),
+            merge_corridor_window_end_seconds=(
+                pricing_round.merge_corridor_window_end_seconds
+            ),
+            merge_corridor_released_cabin_count=(
+                pricing_round.merge_corridor_released_cabin_count
+            ),
+            merge_corridor_released_decision_count=(
+                pricing_round.merge_corridor_released_decision_count
+            ),
+            merge_corridor_fixed_decision_count=(
+                pricing_round.merge_corridor_fixed_decision_count
+            ),
+            merge_corridor_occurrence_count=(
+                pricing_round.merge_corridor_occurrence_count
+            ),
+            merge_corridor_primal_candidate_count=(
+                pricing_round.merge_corridor_primal_candidate_count
+            ),
+            merge_corridor_primal_seconds=(
+                pricing_round.merge_corridor_primal_seconds
+            ),
+            primal_package_upper_bound=pricing_round.primal_package_upper_bound,
+            primal_package_evaluation_seconds=(
+                pricing_round.primal_package_evaluation_seconds
+            ),
+            primal_package_solution_count=(
+                pricing_round.primal_package_solution_count
             ),
         )
 
@@ -2827,6 +3486,32 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             raise ValueError("trajectory root column batch size must be positive")
         if not isinstance(self.diversity_mode, DddTrajectoryDiversityMode):
             raise ValueError("trajectory root diversity mode is invalid")
+        if not isinstance(
+            self.compatible_batch_mode,
+            DddTrajectoryCompatibleBatchMode,
+        ):
+            raise ValueError("trajectory compatible batch mode is invalid")
+        if (
+            not math.isfinite(self.compatible_batch_time_limit_seconds)
+            or self.compatible_batch_time_limit_seconds <= 0
+        ):
+            raise ValueError("trajectory compatible batch time limit must be positive")
+        if (
+            self.compatible_batch_mode
+            is not DddTrajectoryCompatibleBatchMode.OFF
+            and not isinstance(
+                trajectory_problem.start_domain,
+                DddFixedTrajectoryStartDomain,
+            )
+        ):
+            raise ValueError("trajectory compatible batches require fixed starts")
+        if (
+            self.compatible_batch_mode
+            is not DddTrajectoryCompatibleBatchMode.OFF
+            and trajectory_problem.waiting_policy.domain
+            is not DddTrajectoryWaitingDomain.NO_WAIT
+        ):
+            raise ValueError("trajectory compatible batches currently require No-Wait")
         if self.minimum_diversity_distance <= 0:
             raise ValueError("trajectory root diversity distance must be positive")
         if self.extra_column_time_limit_seconds <= 0 or not math.isfinite(
@@ -2845,6 +3530,82 @@ class DddTrajectoryExactRootColumnGenerationSolver:
             raise ValueError("coordinated primal candidate count must be positive")
         if self.coordinated_primal_maximum_preference_count <= 0:
             raise ValueError("coordinated primal preference limit must be positive")
+        if self.neighborhood_primal_time_limit_seconds < 0 or not math.isfinite(
+            self.neighborhood_primal_time_limit_seconds
+        ):
+            raise ValueError("neighborhood primal time limit is invalid")
+        if self.neighborhood_primal_interval <= 0:
+            raise ValueError("neighborhood primal interval must be positive")
+        if (
+            not self.neighborhood_primal_cabin_counts
+            or any(value <= 0 for value in self.neighborhood_primal_cabin_counts)
+            or tuple(sorted(set(self.neighborhood_primal_cabin_counts)))
+            != self.neighborhood_primal_cabin_counts
+        ):
+            raise ValueError(
+                "neighborhood primal cabin counts must be increasing and positive"
+            )
+        if self.neighborhood_primal_workers <= 0:
+            raise ValueError("neighborhood primal worker count must be positive")
+        if self.neighborhood_primal_candidate_count <= 0:
+            raise ValueError("neighborhood primal candidate count must be positive")
+        if self.neighborhood_primal_maximum_preference_count <= 0:
+            raise ValueError("neighborhood primal preference limit must be positive")
+        if (
+            self.merge_corridor_primal_time_limit_seconds < 0
+            or not math.isfinite(self.merge_corridor_primal_time_limit_seconds)
+        ):
+            raise ValueError("merge corridor primal time limit is invalid")
+        if self.merge_corridor_primal_interval <= 0:
+            raise ValueError("merge corridor primal interval must be positive")
+        if (
+            not self.merge_corridor_window_widths_seconds
+            or any(
+                value <= 0 or not math.isfinite(value)
+                for value in self.merge_corridor_window_widths_seconds
+            )
+            or tuple(sorted(set(self.merge_corridor_window_widths_seconds)))
+            != self.merge_corridor_window_widths_seconds
+        ):
+            raise ValueError(
+                "merge corridor widths must be increasing, finite, and positive"
+            )
+        if (
+            self.merge_corridor_upstream_visit_count < 0
+            or self.merge_corridor_downstream_visit_count < 0
+        ):
+            raise ValueError("merge corridor visit padding must be nonnegative")
+        if self.merge_corridor_minimum_occurrence_count <= 0:
+            raise ValueError("merge corridor occurrence count must be positive")
+        if self.merge_corridor_primal_workers <= 0:
+            raise ValueError("merge corridor worker count must be positive")
+        if self.merge_corridor_primal_candidate_count <= 0:
+            raise ValueError("merge corridor candidate count must be positive")
+        if self.merge_corridor_primal_maximum_preference_count <= 0:
+            raise ValueError("merge corridor preference limit must be positive")
+        if (
+            not math.isfinite(self.primal_package_evaluation_time_limit_seconds)
+            or self.primal_package_evaluation_time_limit_seconds <= 0
+        ):
+            raise ValueError(
+                "primal package Passenger evaluation limit must be positive"
+            )
+        if self.neighborhood_primal_time_limit_seconds > 0 and not is_fixed:
+            raise ValueError("trajectory neighborhoods require fixed starts")
+        if (
+            self.neighborhood_primal_time_limit_seconds > 0
+            and trajectory_problem.waiting_policy.domain
+            is not DddTrajectoryWaitingDomain.NO_WAIT
+        ):
+            raise ValueError("trajectory neighborhoods currently require No-Wait")
+        if self.merge_corridor_primal_time_limit_seconds > 0 and not is_fixed:
+            raise ValueError("merge corridors require fixed starts")
+        if (
+            self.merge_corridor_primal_time_limit_seconds > 0
+            and trajectory_problem.waiting_policy.domain
+            is not DddTrajectoryWaitingDomain.NO_WAIT
+        ):
+            raise ValueError("merge corridors currently require No-Wait")
         if self.oip_primal_pricing_time_limit_seconds < 0 or not math.isfinite(
             self.oip_primal_pricing_time_limit_seconds
         ):

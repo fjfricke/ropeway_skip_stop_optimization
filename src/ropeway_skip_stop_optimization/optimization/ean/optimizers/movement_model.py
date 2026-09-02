@@ -25,6 +25,7 @@ from ropeway_skip_stop_optimization.optimization.ean.build_profile import (
 from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     HORIZON_ACTIVATION_EPSILON_SECONDS,
     EanHorizonFormulation,
+    EanHeadwayOrderFormulation,
     EanStopSkipTimingFormulation,
     EanTimeBoundFormulation,
 )
@@ -45,6 +46,10 @@ from ropeway_skip_stop_optimization.optimization.ean.headway_order_families impo
 )
 from ropeway_skip_stop_optimization.optimization.ean.headway_merge_relaxation import (
     EanDirectMergeHeadwayRelaxationIndex,
+)
+from ropeway_skip_stop_optimization.optimization.ean.merge_pairwise_fifo import (
+    EanPairwiseFifoBuildMetrics,
+    EanPairwiseFifoConstraintBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ean.horizon import (
     add_visit_horizon_activation,
@@ -148,6 +153,9 @@ class EanHeadwayConstraintPool:
     order_family_index: EanHeadwayOrderFamilyIndex | None = None
     materialized_pair_id_set: set[str] = field(default_factory=set)
     order_pair_count_by_key: dict[str, int] = field(default_factory=dict)
+    order_reference_by_pair_id: dict[str, tuple[str, bool]] = field(
+        default_factory=dict
+    )
     diagnostically_omitted_pair_ids: frozenset[str] = frozenset()
     diagnostically_omitted_checkpoint_count: int = 0
     fixed_pair_count: int = 0
@@ -160,6 +168,7 @@ class EanHeadwayConstraintPool:
     matrix_pair_batch_size: int = DEFAULT_HEADWAY_MATRIX_PAIR_BATCH_SIZE
     artifact: EanBuildArtifact | None = None
     stop: dict[VisitKey, Any] = field(default_factory=dict)
+    fifo_build_metrics: EanPairwiseFifoBuildMetrics | None = None
 
     @property
     def materialized_pair_ids(self) -> frozenset[str]:
@@ -284,6 +293,10 @@ class EanHeadwayConstraintPool:
                     order_key,
                     pair_forward_is_order_forward,
                 )
+                self.order_reference_by_pair_id[pair.id] = (
+                    order_key,
+                    pair_forward_is_order_forward,
+                )
                 self.order_pair_count_by_key[order_key] = (
                     self.order_pair_count_by_key.get(order_key, 0) + 1
                 )
@@ -405,6 +418,20 @@ class EanHeadwayConstraintPool:
                 np.asarray(rhs_values, dtype=np.float64),
                 name=names,
             )
+
+    def pair_order_expression(self, pair_id: str) -> Any:
+        """Return one for pair-forward and zero for pair-reverse order."""
+
+        try:
+            order_key, pair_forward_is_order_forward = (
+                self.order_reference_by_pair_id[pair_id]
+            )
+        except KeyError as error:
+            raise ValueError(
+                f"headway pair {pair_id!r} has no disjunctive order variable"
+            ) from error
+        variable = self.headway_order[order_key]
+        return variable if pair_forward_is_order_forward else 1 - variable
 
     def _validate_and_classify_pair(
         self,
@@ -750,8 +777,8 @@ class EanMovementModelBuilder:
             enable_oip_initial_headway_precedence=(
                 optimization_config.enable_oip_initial_headway_precedence
             ),
-            enable_shared_merge_headway_order=(
-                optimization_config.enable_shared_merge_headway_order
+            headway_order_formulation=(
+                optimization_config.resolved_headway_order_formulation()
             ),
             enable_diagnostic_relax_merge_headways=(
                 optimization_config.enable_diagnostic_relax_merge_headways
@@ -835,6 +862,21 @@ class EanMovementModelBuilder:
                 ),
                 singleton_headway_order_family_count=(
                     headway_constraint_pool.singleton_headway_order_family_count
+                ),
+                fifo_constrained_headway_pair_count=(
+                    headway_constraint_pool.fifo_build_metrics.constrained_pair_count
+                    if headway_constraint_pool.fifo_build_metrics is not None
+                    else 0
+                ),
+                fifo_service_row_count=(
+                    headway_constraint_pool.fifo_build_metrics.service_fifo_row_count
+                    if headway_constraint_pool.fifo_build_metrics is not None
+                    else 0
+                ),
+                fifo_skip_row_count=(
+                    headway_constraint_pool.fifo_build_metrics.skip_fifo_row_count
+                    if headway_constraint_pool.fifo_build_metrics is not None
+                    else 0
                 ),
                 diagnostically_omitted_headway_checkpoint_count=(
                     headway_constraint_pool.diagnostically_omitted_checkpoint_count
@@ -1045,7 +1087,7 @@ def _add_headway_constraints(
     horizon_formulation: EanHorizonFormulation,
     enable_fixed_start_headway_precedence: bool,
     enable_oip_initial_headway_precedence: bool,
-    enable_shared_merge_headway_order: bool,
+    headway_order_formulation: EanHeadwayOrderFormulation,
     enable_diagnostic_relax_merge_headways: bool,
     progress_callback: EanBuildProgressCallback | None,
     progress_started: float,
@@ -1109,18 +1151,24 @@ def _add_headway_constraints(
         horizon_formulation=horizon_formulation,
         big_m=big_m,
         headway_order=headway_order,
-        classifier=_headway_classifier(
-            artifact,
-            enable_fixed_start_headway_precedence=(
-                enable_fixed_start_headway_precedence
-            ),
-            enable_oip_initial_headway_precedence=(
-                enable_oip_initial_headway_precedence
-            ),
+        classifier=(
+            None
+            if headway_order_formulation
+            is EanHeadwayOrderFormulation.PAIRWISE_FIFO
+            else _headway_classifier(
+                artifact,
+                enable_fixed_start_headway_precedence=(
+                    enable_fixed_start_headway_precedence
+                ),
+                enable_oip_initial_headway_precedence=(
+                    enable_oip_initial_headway_precedence
+                ),
+            )
         ),
         order_family_index=(
             EanHeadwayOrderFamilyIndex.build(artifact)
-            if enable_shared_merge_headway_order
+            if headway_order_formulation
+            is EanHeadwayOrderFormulation.PAIRWISE_SHARED
             else None
         ),
         progress_callback=progress_callback,
@@ -1148,6 +1196,20 @@ def _add_headway_constraints(
             merge_relaxation_index.checkpoint_ids
         )
     pool.add_pairs(materialized_pairs)
+    if headway_order_formulation is EanHeadwayOrderFormulation.PAIRWISE_FIFO:
+        if merge_relaxation_index is not None:
+            raise ValueError(
+                "Pairwise FIFO cannot use diagnostic merge relaxation"
+            )
+        pool.fifo_build_metrics = EanPairwiseFifoConstraintBuilder().build(
+            model=model,
+            artifact=artifact,
+            headway_pool=pool,
+            switch_time=switch_time,
+            stop=stop,
+            route_active=visit_active,
+            big_m=big_m,
+        )
     if artifact.headway_pair_scope is EanHeadwayPairScope.COMPLETE:
         # Complete models never augment. Drop temporary expression indexes so
         # the long-lived movement model has the same memory shape as before.

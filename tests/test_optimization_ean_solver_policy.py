@@ -42,6 +42,10 @@ def test_gurobi_solver_policy_rejects_invalid_values() -> None:
         GurobiSolverPolicy(time_limit_seconds=0.0).validate()
     with pytest.raises(ValueError, match="mip_focus"):
         GurobiSolverPolicy(mip_focus=4).validate()
+    with pytest.raises(ValueError, match="numeric_focus"):
+        GurobiSolverPolicy(numeric_focus=4).validate()
+    with pytest.raises(ValueError, match="feasibility_tolerance"):
+        GurobiSolverPolicy(feasibility_tolerance=1e-10).validate()
 
 
 def test_ean_passenger_checkpoint_config_rejects_missing_resume_file(tmp_path) -> None:
@@ -62,6 +66,8 @@ def test_apply_gurobi_solver_policy_sets_only_configured_params() -> None:
             time_limit_seconds=60.0,
             method=3,
             mip_focus=1,
+            numeric_focus=3,
+            feasibility_tolerance=1e-9,
         ),
     )
 
@@ -69,6 +75,8 @@ def test_apply_gurobi_solver_policy_sets_only_configured_params() -> None:
     assert model.Params.TimeLimit == 60.0
     assert model.Params.Method == 3
     assert model.Params.MIPFocus == 1
+    assert model.Params.NumericFocus == 3
+    assert model.Params.FeasibilityTol == 1e-9
     assert not hasattr(model.Params, "Threads")
 
 

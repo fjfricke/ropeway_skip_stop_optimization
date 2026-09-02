@@ -37,6 +37,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.time_refinement import (
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_space import (
     DddTimeDiscretization,
+    DddWaitingDiscretization,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.time_ticks import (
     ddd_quantize_time_seconds,
@@ -64,6 +65,7 @@ class DddNetworkTimeRefinementStatus(StrEnum):
     EXACT_INFEASIBLE = "exact_infeasible"
     REFINEMENT_STALLED = "refinement_stalled"
     REFINEMENT_BUDGET_EXHAUSTED = "refinement_budget_exhausted"
+    TIME_LIMIT_WITH_CERTIFIED_INTERVAL = "time_limit_with_certified_interval"
     INVALID_INTERNAL = "invalid_internal"
 
 
@@ -89,6 +91,15 @@ class DddTimeSplit:
             ddd_quantize_time_seconds(self.boundary_seconds),
         )
 
+
+@dataclass(frozen=True, order=True)
+class DddWaitingSplit:
+    station_id: str
+    boundary_step: int
+
+    def validate(self) -> None:
+        if not self.station_id.strip() or self.boundary_step <= 0:
+            raise ValueError("DDD waiting split is invalid")
 
 class DddNetworkTimeRefinementProgressStage(StrEnum):
     PRIMAL_BOOTSTRAP_STARTED = "primal_bootstrap_started"
@@ -116,6 +127,7 @@ class DddNetworkTimeRefinementProgressEvent:
     round_index: int
     max_iterations: int
     total_elapsed_seconds: float
+    remaining_budget_seconds: float | None = None
     iteration: DddNetworkTimeRefinementIteration | None = None
     candidate_index: int | None = None
     candidate_limit: int | None = None
@@ -306,6 +318,10 @@ class DddNetworkTimeRefinementIteration:
     resource_window_master_seconds: float = 0.0
     resource_window_lower_bound_before: float | None = None
     resource_window_lower_bound_after: float | None = None
+    waiting_splits: tuple[DddWaitingSplit, ...] = ()
+    waiting_split_count: int = 0
+    waiting_interval_count: int = 0
+    waiting_discretization_fingerprint: str = ""
 
 
 @dataclass(frozen=True)
@@ -319,6 +335,9 @@ class DddNetworkTimeRefinementResult:
     iterations: tuple[DddNetworkTimeRefinementIteration, ...]
     final_discretization: DddTimeDiscretization
     conflict_cuts: tuple[DddSupportConflictCut, ...]
+    final_waiting_discretization: DddWaitingDiscretization = (
+        DddWaitingDiscretization()
+    )
     primal_evaluation: DddPrimalEvaluationResult | None = None
     aggregate_support_cuts: tuple[DddAggregateSupportCut, ...] = ()
     aggregate_distance_cuts: tuple[DddAggregateSupportDistanceCut, ...] = ()

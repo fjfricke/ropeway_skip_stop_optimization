@@ -18,10 +18,13 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddRouteOptionCost,
     DddTimeDiscretization,
     DddTimePartition,
+    DddTrajectoryWaitingPolicy,
     EanArtifactToDddMovementProblemAdapter,
     DDD_TIME_TICKS_PER_SECOND,
+    ddd_seconds_to_tick,
     ddd_tick_to_seconds,
     estimate_ddd_prefix_formulation_size,
+    build_ddd_initial_waiting_discretization,
 )
 from ropeway_skip_stop_optimization.optimization.ean import (
     AllPairsHeadwayPairBuilder,
@@ -117,13 +120,21 @@ def count_ddd_raw_trajectory_supports(
 
 def build_initial_ddd_network_problem(
     movement: DddMovementProblem,
+    waiting_policy: DddTrajectoryWaitingPolicy | None = None,
 ) -> DddNetworkTimeProblem:
     """Build the deliberately coarse, valid Phase-0 initial discretization."""
 
     movement.validate()
+    resolved_waiting_policy = waiting_policy or DddTrajectoryWaitingPolicy()
     sentinel = ddd_tick_to_seconds(
         movement.operational_end_tick
-        + max(option.duration_tick for option in movement.route_options)
+        + max(
+            option.duration_tick
+            + ddd_seconds_to_tick(
+                resolved_waiting_policy.maximum_wait_seconds(option.station_id)
+            )
+            for option in movement.route_options
+        )
         + DDD_TIME_TICKS_PER_SECOND
     )
     result = DddNetworkTimeProblem(
@@ -142,6 +153,11 @@ def build_initial_ddd_network_problem(
                 DddRouteOptionCost(option.id, 0.0)
                 for option in movement.route_options
             )
+        ),
+        waiting_policy=resolved_waiting_policy,
+        waiting_discretization=build_ddd_initial_waiting_discretization(
+            movement,
+            resolved_waiting_policy,
         ),
     )
     result.validate()

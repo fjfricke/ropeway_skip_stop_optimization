@@ -1,0 +1,18 @@
+{
+  "campaign_id": "five_station_b_half_demand_fixed_k_neighborhood_gate_v2",
+  "label": "Five-station architecture B, half demand: fixed-K cabin-neighborhood gate",
+  "example_id": "five_station_circle_cw_half_skip_no_wait_headway_b_v0",
+  "k_values": [20, 39],
+  "operating_modes": ["skip_stop"],
+  "objective": "journey_time",
+  "start_policy": "balanced_reference",
+  "profile": "screening",
+  "coordinated_primal_time_limit_seconds": 0,
+  "neighborhood_primal_time_limit_seconds": 20,
+  "neighborhood_primal_interval": 3,
+  "neighborhood_primal_cabin_counts": [4, 8, 12],
+  "neighborhood_primal_workers": 8,
+  "neighborhood_primal_candidate_count": 1,
+  "neighborhood_primal_maximum_preference_count": 200,
+  "primal_package_evaluation_time_limit_seconds": 30
+}

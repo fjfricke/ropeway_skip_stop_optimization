@@ -101,13 +101,31 @@ class DddPrimalIncumbentTracker:
         round_state: DddPrimalRoundState | None = None,
         on_evaluated: DddPrimalEvaluationCallback | None = None,
         require_movement_plan: bool = True,
+        time_limit_seconds: float | None = None,
     ) -> DddPrimalCandidateOutcome:
         self._remember(schedules)
-        evaluation = (
-            self.evaluator.evaluate(problem, solution)
-            if self.evaluator is not None
-            else None
+        if time_limit_seconds is not None and time_limit_seconds <= 0:
+            raise ValueError("DDD primal-evaluation time limit must be positive")
+        evaluator = self.evaluator
+        original_time_limit = None
+        has_mutable_time_limit = evaluator is not None and hasattr(
+            evaluator, "time_limit_seconds"
         )
+        if has_mutable_time_limit:
+            original_time_limit = getattr(evaluator, "time_limit_seconds")
+            effective_time_limit = time_limit_seconds
+            if original_time_limit is not None and effective_time_limit is not None:
+                effective_time_limit = min(original_time_limit, effective_time_limit)
+            elif effective_time_limit is None:
+                effective_time_limit = original_time_limit
+            setattr(evaluator, "time_limit_seconds", effective_time_limit)
+        try:
+            evaluation = (
+                evaluator.evaluate(problem, solution) if evaluator is not None else None
+            )
+        finally:
+            if has_mutable_time_limit:
+                setattr(evaluator, "time_limit_seconds", original_time_limit)
         if evaluation is None:
             objective_value: float | None = sum(
                 schedule.objective_value for schedule in schedules

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from enum import StrEnum
 import math
 
@@ -154,6 +154,7 @@ class DddCpSatRoundSolver:
         consume_candidate: DddCpSatCandidateConsumer,
         on_candidate_found: Callable[[int, float], None] | None = None,
         on_finished: Callable[[], None] | None = None,
+        remaining_time_seconds: Callable[[], float | None] | None = None,
     ) -> DddCpSatRoundResult:
         diversification_round = (
             self.diversification_interval > 0
@@ -192,8 +193,22 @@ class DddCpSatRoundSolver:
         cabin_path_candidate_cuts: tuple[DddSupportConflictCut, ...] = ()
         cp_result: DddCpSatPrimalResult | None = None
 
+        def bounded_oracle(oracle: DddCpSatPrimalOracle) -> DddCpSatPrimalOracle:
+            if remaining_time_seconds is None:
+                return oracle
+            remaining = remaining_time_seconds()
+            if remaining is None:
+                return oracle
+            return replace(
+                oracle,
+                time_limit_seconds=max(
+                    1e-3,
+                    min(oracle.time_limit_seconds, remaining),
+                ),
+            )
+
         if self.use_cabin_path_cuts and not diversification_round:
-            cabin_path_result = primal_oracle.solve(
+            cabin_path_result = bounded_oracle(primal_oracle).solve(
                 problem,
                 hint_paths=paths,
                 fixed_cabin_paths=paths,
@@ -233,7 +248,7 @@ class DddCpSatRoundSolver:
                 cp_result = cabin_path_result
 
         if cp_result is None:
-            cp_result = primal_oracle.solve(
+            cp_result = bounded_oracle(primal_oracle).solve(
                 problem,
                 hint_paths=paths,
                 fixed_support=fixed_support if timed_flow_support is None else None,
@@ -330,7 +345,7 @@ class DddCpSatRoundSolver:
                     raise RuntimeError(
                         "DDD rejected support has no aggregate nearest center"
                     )
-                nearest_result = nearest_support_oracle.solve(
+                nearest_result = bounded_oracle(nearest_support_oracle).solve(
                     problem,
                     hint_schedules=best_schedules,
                     nearest_support=fixed_support,

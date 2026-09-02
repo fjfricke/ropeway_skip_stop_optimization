@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 
 from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_primal import (
+    DddCpSatFixedCabinRoute,
+    DddCpSatFixedRouteDecision,
     DddCpSatPrimalOracle,
     DddCpSatPrimalStatus,
 )
@@ -81,6 +83,9 @@ class DddTrajectoryCoordinatedPrimalGenerator:
         boundary_occurrences: tuple[DddReferenceResourceOccurrence, ...] = (),
         excluded_schedules: tuple[tuple[DddRecoveredSchedule, ...], ...] = (),
         hint_trajectories: tuple[DddReferenceTrajectory, ...] = (),
+        fixed_trajectories: tuple[DddReferenceTrajectory, ...] = (),
+        fixed_route_decisions: tuple[DddCpSatFixedRouteDecision, ...] = (),
+        exclude_hint_schedule: bool = False,
     ) -> DddTrajectoryCoordinatedPrimalResult:
         if self.time_limit_seconds <= 0:
             raise ValueError("coordinated primal time limit must be positive")
@@ -99,6 +104,34 @@ class DddTrajectoryCoordinatedPrimalGenerator:
             maximum_preference_count=self.maximum_preference_count,
         )
         preferences = signal.preferences
+        if fixed_trajectories and fixed_route_decisions:
+            raise ValueError(
+                "coordinated primal fixed trajectories and sparse route decisions "
+                "are mutually exclusive"
+            )
+        fixed_routes = tuple(
+            DddCpSatFixedCabinRoute(
+                cabin_id=trajectory.cabin_id,
+                route_option_ids=trajectory.support_signature,
+            )
+            for trajectory in sorted(
+                fixed_trajectories, key=lambda item: item.cabin_id
+            )
+        )
+        hint_schedules = ddd_recovered_schedules_from_reference_trajectories(
+            problem,
+            hint_trajectories,
+        )
+        effective_excluded_schedules = excluded_schedules
+        if (
+            exclude_hint_schedule
+            and hint_schedules
+            and hint_schedules not in effective_excluded_schedules
+        ):
+            effective_excluded_schedules = (
+                *effective_excluded_schedules,
+                hint_schedules,
+            )
         raw = DddCpSatPrimalOracle(
             time_limit_seconds=self.time_limit_seconds,
             num_workers=self.num_workers,
@@ -106,12 +139,11 @@ class DddTrajectoryCoordinatedPrimalGenerator:
             minimum_hamming_distance=self.minimum_hamming_distance,
         ).solve(
             problem,
-            hint_schedules=_recovered_schedules_from_reference_trajectories(
-                problem,
-                hint_trajectories,
-            ),
+            hint_schedules=hint_schedules,
             passenger_ride_preferences=preferences,
-            excluded_schedules=excluded_schedules,
+            fixed_cabin_routes=fixed_routes,
+            fixed_route_decisions=fixed_route_decisions,
+            excluded_schedules=effective_excluded_schedules,
             boundary_occurrences=boundary_occurrences,
         )
         trajectory_batches: list[tuple[DddReferenceTrajectory, ...]] = []
@@ -125,6 +157,7 @@ class DddTrajectoryCoordinatedPrimalGenerator:
                 solution = ddd_reference_solution_from_recovered_schedules(
                     problem.movement_problem,
                     schedules,
+                    waiting_policy=waiting_policy,
                 )
                 if boundary_occurrences:
                     occurrences_by_cabin: dict[
@@ -154,6 +187,14 @@ class DddTrajectoryCoordinatedPrimalGenerator:
                         waiting_policy=waiting_policy,
                     )
                 trajectory_batches.append(solution.trajectories)
+                _validate_fixed_routes_preserved(
+                    fixed_trajectories=fixed_trajectories,
+                    candidate_trajectories=solution.trajectories,
+                )
+                _validate_fixed_route_decisions_preserved(
+                    fixed_route_decisions=fixed_route_decisions,
+                    candidate_trajectories=solution.trajectories,
+                )
         except ValueError as error:
             return DddTrajectoryCoordinatedPrimalResult(
                 status=raw.status,
@@ -178,7 +219,7 @@ class DddTrajectoryCoordinatedPrimalGenerator:
         )
 
 
-def _recovered_schedules_from_reference_trajectories(
+def ddd_recovered_schedules_from_reference_trajectories(
     problem: DddNetworkTimeProblem,
     trajectories: tuple[DddReferenceTrajectory, ...],
 ) -> tuple[DddRecoveredSchedule, ...]:
@@ -223,3 +264,42 @@ def _recovered_schedules_from_reference_trajectories(
             )
         )
     return tuple(schedules)
+
+
+def _validate_fixed_routes_preserved(
+    *,
+    fixed_trajectories: tuple[DddReferenceTrajectory, ...],
+    candidate_trajectories: tuple[DddReferenceTrajectory, ...],
+) -> None:
+    expected_by_cabin = {
+        trajectory.cabin_id: trajectory.support_signature
+        for trajectory in fixed_trajectories
+    }
+    actual_by_cabin = {
+        trajectory.cabin_id: trajectory.support_signature
+        for trajectory in candidate_trajectories
+    }
+    for cabin_id, expected in expected_by_cabin.items():
+        if actual_by_cabin.get(cabin_id) != expected:
+            raise ValueError(
+                "coordinated CP-SAT neighborhood changed fixed cabin route: "
+                f"cabin={cabin_id}"
+            )
+
+
+def _validate_fixed_route_decisions_preserved(
+    *,
+    fixed_route_decisions: tuple[DddCpSatFixedRouteDecision, ...],
+    candidate_trajectories: tuple[DddReferenceTrajectory, ...],
+) -> None:
+    actual = {
+        (trajectory.cabin_id, visit.visit_index): visit.route_option_id
+        for trajectory in candidate_trajectories
+        for visit in trajectory.visits
+    }
+    for fixed in fixed_route_decisions:
+        if actual.get((fixed.cabin_id, fixed.visit_index)) != fixed.route_option_id:
+            raise ValueError(
+                "coordinated CP-SAT neighborhood changed fixed route decision: "
+                f"cabin={fixed.cabin_id}, visit={fixed.visit_index}"
+            )

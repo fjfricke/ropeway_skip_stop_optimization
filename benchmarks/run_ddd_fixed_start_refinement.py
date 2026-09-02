@@ -16,11 +16,16 @@ from ropeway_skip_stop_optimization.benchmarking.ddd_progress import (
 from ropeway_skip_stop_optimization.benchmarking.ddd_scaling import (
     build_initial_ddd_network_problem,
 )
+from ropeway_skip_stop_optimization.benchmarking.ddd_fixed_k_arc_flow import (
+    DddFixedKArcFlowRunConfig,
+    prepare_ddd_fixed_k_arc_flow_run,
+)
 from ropeway_skip_stop_optimization.examples.registry import get_example
 from ropeway_skip_stop_optimization.optimization.ddd import (
     DddAnonymousFlowMaster,
     DddCpSatMasterCoupling,
     DddEanPassengerPrimalEvaluator,
+    DddExactTimedEvent,
     DddLayeredTimeNetworkBuilder,
     DddMovementProblem,
     DddNetworkTimeProblem,
@@ -28,7 +33,10 @@ from ropeway_skip_stop_optimization.optimization.ddd import (
     DddNetworkTimeRefinementProgressStage,
     DddNetworkTimeRefinementSolver,
     DddRecoveredScheduleFlowProjector,
+    DddRecoveredSchedule,
     DddPassengerMasterProblem,
+    DddFixedKOperatingMode,
+    DddFixedKStartPolicy,
     DddResourceWindowCutMode,
     DddTrajectoryOptimizerMode,
     EanArtifactToDddMovementProblemAdapter,
@@ -54,7 +62,46 @@ def main() -> None:
         )
     )
     parser.add_argument("--example", default=DEFAULT_EXAMPLE_ID)
+    parser.add_argument(
+        "--cabins",
+        type=int,
+        help=(
+            "Build a canonical exact-K instance instead of using the example's "
+            "embedded fixed starts."
+        ),
+    )
+    parser.add_argument(
+        "--mode",
+        choices=tuple(item.value for item in DddFixedKOperatingMode),
+        default=DddFixedKOperatingMode.SKIP_STOP.value,
+    )
+    parser.add_argument(
+        "--start-policy",
+        choices=(DddFixedKStartPolicy.CANONICAL_ROPE.value,),
+        default=DddFixedKStartPolicy.CANONICAL_ROPE.value,
+    )
+    parser.add_argument(
+        "--waiting-headway-multiplier",
+        type=float,
+        default=0.0,
+        help=(
+            "Per-station maximum waiting time as a multiple of the local "
+            "exit-merge headway. Waiting remains coarsely represented until "
+            "a conflict requires refinement."
+        ),
+    )
+    parser.add_argument("--waiting-step-seconds", type=float, default=1.0)
     parser.add_argument("--max-iterations", type=int, default=100)
+    parser.add_argument(
+        "--time-limit",
+        type=float,
+        help="Shared solver wall-clock budget in seconds across all DDD phases",
+    )
+    parser.add_argument(
+        "--primal-seed-json",
+        type=Path,
+        help="Previous completed runner JSON whose validated schedules seed this run",
+    )
     parser.add_argument("--max-new-cuts", type=int, default=10_000)
     parser.add_argument("--max-new-time-splits", type=int, default=10_000)
     parser.add_argument(
@@ -196,6 +243,13 @@ def main() -> None:
     args = parser.parse_args()
     if args.progress and args.gurobi_log:
         parser.error("--progress and --gurobi-log cannot be combined")
+    if args.cabins is not None and args.cabins <= 0:
+        parser.error("--cabins must be positive")
+    if args.cabins is None and args.waiting_headway_multiplier:
+        parser.error(
+            "--waiting-headway-multiplier currently requires --cabins so the "
+            "fixed-K preparation owns the waiting semantics"
+        )
     trajectory_mode = DddTrajectoryOptimizerMode(args.trajectory_method)
     trajectory_enabled = (
         args.trajectory_slot_pool
@@ -222,24 +276,59 @@ def main() -> None:
         )
 
     setup_started = perf_counter()
-    example = get_example(args.example)
-    scenario = example.build_scenario()
-    config = example.build_ean_config(scenario)
-    builder = example.build_ean_artifact_builder(scenario, config)
-    if not isinstance(builder, NetworkEanBuildArtifactBuilder):
-        raise ValueError("DDD refinement requires a network EAN builder")
-    if builder.fleet_config.mode is not EanFleetMode.FIXED_STARTS:
-        raise ValueError("DDD refinement requires fixed cabin starts")
-    artifact = replace(
-        builder,
-        headway_pair_builder=SparseHeadwayPairBuilder(),
-    ).build(scenario, config)
-    movement = EanArtifactToDddMovementProblemAdapter().build(artifact)
-    problem = build_initial_ddd_network_problem(movement)
+    if args.cabins is None:
+        example = get_example(args.example)
+        scenario = example.build_scenario()
+        config = example.build_ean_config(scenario)
+        builder = example.build_ean_artifact_builder(scenario, config)
+        if not isinstance(builder, NetworkEanBuildArtifactBuilder):
+            raise ValueError("DDD refinement requires a network EAN builder")
+        if builder.fleet_config.mode is not EanFleetMode.FIXED_STARTS:
+            raise ValueError("DDD refinement requires fixed cabin starts")
+        artifact = replace(
+            builder,
+            headway_pair_builder=SparseHeadwayPairBuilder(),
+        ).build(scenario, config)
+        movement = EanArtifactToDddMovementProblemAdapter().build(artifact)
+        problem = build_initial_ddd_network_problem(movement)
+        boundary_occurrence_count = 0
+    else:
+        prepared = prepare_ddd_fixed_k_arc_flow_run(
+            DddFixedKArcFlowRunConfig(
+                example_id=args.example,
+                cabin_count=args.cabins,
+                operating_mode=DddFixedKOperatingMode(args.mode),
+                objective=(
+                    EanPassengerObjective.JOURNEY_TIME
+                    if args.passenger_objective == "none"
+                    else EanPassengerObjective(args.passenger_objective)
+                ),
+                start_policy=DddFixedKStartPolicy(args.start_policy),
+                waiting_headway_multiplier=args.waiting_headway_multiplier,
+                waiting_step_seconds=args.waiting_step_seconds,
+            )
+        )
+        scenario = prepared.scenario
+        artifact = prepared.problem.artifact
+        trajectory_problem = prepared.problem.resolved_trajectory_problem
+        movement = trajectory_problem.structural_movement_problem
+        problem = build_initial_ddd_network_problem(
+            movement,
+            trajectory_problem.waiting_policy,
+        )
+        boundary_occurrence_count = len(
+            prepared.problem.boundary_context.resource_occurrences
+        )
+        if boundary_occurrence_count:
+            raise ValueError(
+                "delayed-waiting refinement does not yet support a periodic "
+                "balanced boundary context; use canonical_rope starts"
+            )
     setup_seconds = perf_counter() - setup_started
 
     solver = DddNetworkTimeRefinementSolver(
         max_iterations=args.max_iterations,
+        total_time_limit_seconds=args.time_limit,
         output_flag=args.gurobi_log,
         max_new_cuts_per_iteration=args.max_new_cuts,
         max_new_time_splits_per_iteration=args.max_new_time_splits,
@@ -297,6 +386,7 @@ def main() -> None:
             trajectory_pool_max_conflict_rounds=(
                 args.trajectory_slot_max_conflict_rounds
             ),
+            waiting_policy=problem.waiting_policy,
         )
     )
     passenger_master_problem = (
@@ -312,8 +402,19 @@ def main() -> None:
             ),
         )
     )
+    initial_schedules = (
+        ()
+        if args.primal_seed_json is None
+        else _read_primal_seed_schedules(args.primal_seed_json, movement=movement)
+    )
     args.output_dir.mkdir(parents=True, exist_ok=True)
-    output_path = args.output_dir / f"{args.example}.json"
+    run_id = args.example
+    if args.cabins is not None:
+        wait_token = format(args.waiting_headway_multiplier, "g").replace(".", "p")
+        run_id = (
+            f"{args.example}__k{args.cabins}__{args.mode}__wait_{wait_token}h"
+        )
+    output_path = args.output_dir / f"{run_id}.json"
     completed_iterations = []
 
     def handle_progress(event: object) -> None:
@@ -346,6 +447,7 @@ def main() -> None:
             progress_callback=handle_progress,
             primal_evaluator=primal_evaluator,
             passenger_master_problem=passenger_master_problem,
+            initial_schedules=initial_schedules,
         )
     solve_seconds = perf_counter() - solve_started
     fixed_schedule_passenger_diagnostic = (
@@ -367,9 +469,24 @@ def main() -> None:
         "complete": True,
         "generated_at_utc": datetime.now(UTC).isoformat(),
         "example_id": args.example,
+        "run_id": run_id,
         "cabin_count": len(movement.starts),
+        "fixed_k_requested": args.cabins,
+        "operating_mode": args.mode if args.cabins is not None else None,
+        "start_policy": args.start_policy if args.cabins is not None else None,
+        "waiting_headway_multiplier": args.waiting_headway_multiplier,
+        "waiting_step_seconds": args.waiting_step_seconds,
+        "waiting_policy": asdict(problem.waiting_policy),
+        "initial_waiting_discretization_fingerprint": (
+            problem.waiting_discretization.fingerprint
+        ),
+        "boundary_occurrence_count": boundary_occurrence_count,
         "operational_end_seconds": movement.operational_end_seconds,
         "max_iterations": args.max_iterations,
+        "total_time_limit_seconds": args.time_limit,
+        "primal_seed_json": (
+            None if args.primal_seed_json is None else str(args.primal_seed_json)
+        ),
         "max_new_cuts_per_iteration": args.max_new_cuts,
         "max_new_time_splits_per_iteration": args.max_new_time_splits,
         "resource_window_cut_mode": args.resource_window_cuts,
@@ -450,7 +567,11 @@ def main() -> None:
         "cp_sat_bootstrap_candidate_count": (result.cp_sat_bootstrap_candidate_count),
         "cp_sat_bootstrap_objective": result.cp_sat_bootstrap_objective,
         "final_discretization_fingerprint": (result.final_discretization.fingerprint),
+        "final_waiting_discretization_fingerprint": (
+            result.final_waiting_discretization.fingerprint
+        ),
         "schedule_count": len(result.schedules),
+        "schedules": [asdict(schedule) for schedule in result.schedules],
         "primal_evaluation": (
             asdict(result.primal_evaluation)
             if result.primal_evaluation is not None
@@ -609,6 +730,84 @@ def _json_default(value: object) -> object:
     raise TypeError(f"unsupported JSON value: {type(value).__name__}")
 
 
+def _read_primal_seed_schedules(
+    path: Path,
+    *,
+    movement: DddMovementProblem,
+) -> tuple[DddRecoveredSchedule, ...]:
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    raw_schedules = payload.get("schedules")
+    if isinstance(raw_schedules, list) and raw_schedules:
+        schedules = tuple(
+            DddRecoveredSchedule(
+                cabin_id=int(item["cabin_id"]),
+                route_option_ids=tuple(
+                    str(value) for value in item["route_option_ids"]
+                ),
+                events=tuple(
+                    DddExactTimedEvent(
+                        event_index=int(event["event_index"]),
+                        state_id=str(event["state_id"]),
+                        time_seconds=float(event["time_seconds"]),
+                    )
+                    for event in item["events"]
+                ),
+                objective_value=float(item["objective_value"]),
+            )
+            for item in raw_schedules
+        )
+    else:
+        schedules = _schedules_from_exact_trajectory_supports(payload, movement)
+    if tuple(schedule.cabin_id for schedule in schedules) != tuple(
+        sorted(schedule.cabin_id for schedule in schedules)
+    ):
+        raise ValueError("DDD primal-seed schedules are not cabin-sorted")
+    return schedules
+
+
+def _schedules_from_exact_trajectory_supports(
+    payload: dict[str, object],
+    movement: DddMovementProblem,
+) -> tuple[DddRecoveredSchedule, ...]:
+    raw_supports = payload.get("trajectory_supports")
+    if not isinstance(raw_supports, list) or not raw_supports:
+        raise ValueError("DDD primal-seed JSON contains no serialized schedules")
+    starts_by_cabin = {start.cabin_id: start for start in movement.starts}
+    options_by_id = {option.id: option for option in movement.route_options}
+    schedules: list[DddRecoveredSchedule] = []
+    for raw in raw_supports:
+        cabin_id = int(raw["cabin_id"])
+        route_option_ids = tuple(str(value) for value in raw["route_option_ids"])
+        switch_times = tuple(float(value) for value in raw["switch_times_seconds"])
+        waits = tuple(float(value) for value in raw["wait_seconds"])
+        if not route_option_ids or not (
+            len(route_option_ids) == len(switch_times) == len(waits)
+        ):
+            raise ValueError("exact trajectory support dimensions are inconsistent")
+        states = [starts_by_cabin[cabin_id].state_id]
+        states.extend(options_by_id[option_id].to_state_id for option_id in route_option_ids)
+        terminal_time = (
+            switch_times[-1]
+            + options_by_id[route_option_ids[-1]].duration_seconds
+            + waits[-1]
+        )
+        event_times = (*switch_times, terminal_time)
+        schedules.append(
+            DddRecoveredSchedule(
+                cabin_id=cabin_id,
+                route_option_ids=route_option_ids,
+                events=tuple(
+                    DddExactTimedEvent(index, state_id, time_seconds)
+                    for index, (state_id, time_seconds) in enumerate(
+                        zip(states, event_times, strict=True)
+                    )
+                ),
+                objective_value=0.0,
+            )
+        )
+    return tuple(sorted(schedules, key=lambda item: item.cabin_id))
+
+
 def _local_explainability_report(
     iterations: tuple[object, ...] | list[object],
 ) -> dict[str, object] | None:
@@ -640,6 +839,7 @@ def _build_partial_payload(
         "cabin_count": len(getattr(movement, "starts")),
         "operational_end_seconds": getattr(movement, "operational_end_seconds"),
         "max_iterations": args.max_iterations,
+        "total_time_limit_seconds": args.time_limit,
         "passenger_objective": args.passenger_objective,
         "passenger_master_enabled": args.passenger_master,
         "fixed_schedule_passenger_diagnostic_enabled": (

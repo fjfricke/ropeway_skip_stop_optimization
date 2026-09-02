@@ -85,7 +85,11 @@ class DddNetworkMasterPhaseSolver:
         on_master_progress: Callable[[DddAnonymousMasterProgress], None] | None = None,
         on_master_finished: Callable[[], None] | None = None,
         on_separation_finished: Callable[[], None] | None = None,
+        time_limit_seconds: float | None = None,
     ) -> DddNetworkMasterPhaseResult:
+        if time_limit_seconds is not None and time_limit_seconds <= 0:
+            raise ValueError("DDD master-phase time limit must be positive")
+        phase_started = perf_counter()
         active_resource_rows = list(resource_rows)
         added_resource_rows: list[DddAnonymousResourceRow] = []
         resource_windows = tuple(
@@ -119,6 +123,14 @@ class DddNetworkMasterPhaseSolver:
                 passenger_problem=passenger_problem,
                 fixed_start_movement_problem=fixed_start_movement_problem,
                 progress_callback=on_master_progress,
+                time_limit_seconds=(
+                    None
+                    if time_limit_seconds is None
+                    else max(
+                        1e-3,
+                        time_limit_seconds - (perf_counter() - phase_started),
+                    )
+                ),
             )
             current_solve_seconds = perf_counter() - master_started
             solve_seconds += current_solve_seconds
@@ -126,7 +138,10 @@ class DddNetworkMasterPhaseSolver:
                 resource_window_master_seconds += current_solve_seconds
             if on_master_finished is not None:
                 on_master_finished()
-            if flow.status is DddAnonymousFlowStatus.INFEASIBLE:
+            if flow.status in (
+                DddAnonymousFlowStatus.INFEASIBLE,
+                DddAnonymousFlowStatus.TIME_LIMIT,
+            ):
                 break
             if flow.best_bound is None:
                 raise RuntimeError("optimal DDD network flow returned no best bound")

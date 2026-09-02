@@ -122,6 +122,9 @@ class EanMovementBuildMetrics:
     singleton_headway_order_family_count: int = 0
     diagnostically_omitted_headway_checkpoint_count: int = 0
     diagnostically_omitted_headway_pair_count: int = 0
+    fifo_constrained_headway_pair_count: int = 0
+    fifo_service_row_count: int = 0
+    fifo_skip_row_count: int = 0
 
     def validate(self) -> None:
         if min(
@@ -140,6 +143,9 @@ class EanMovementBuildMetrics:
             self.singleton_headway_order_family_count,
             self.diagnostically_omitted_headway_checkpoint_count,
             self.diagnostically_omitted_headway_pair_count,
+            self.fifo_constrained_headway_pair_count,
+            self.fifo_service_row_count,
+            self.fifo_skip_row_count,
         ) < 0:
             raise ValueError("movement headway classification counts must be nonnegative")
 

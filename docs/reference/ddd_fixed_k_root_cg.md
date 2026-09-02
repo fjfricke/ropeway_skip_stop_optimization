@@ -39,6 +39,51 @@ A full root-LP certificate is not an integer-optimality certificate. Integer
 optimality is reported only when a validated upper bound meets the certified
 root lower bound.
 
+## Merge-aware root gate
+
+The optional `merge_aware_resource_windows` mode derives deterministic
+Stop/Skip reconvergence families from the movement network.  A physical
+resource occurrence $o$ owns the exact half-open protected interval
+
+$$
+I_o=[e_o,\ell_o+h_o),
+$$
+
+where $e_o$ is entry, $\ell_o$ is clearance, and $h_o$ is its applicable
+follower separation.  For a resource $r$ and tick $t$, every present and
+future trajectory has the coefficient
+
+$$
+a_p^{r,t}=|\{o\in p:\operatorname{resource}(o)=r,\ t\in I_o\}|,
+$$
+
+and the universal row is $\sum_p a_p^{r,t}\lambda_p\le 1$.  Universal,
+node-universal, and pool-local rows are distinct types; only rows with a
+future-column coefficient oracle may participate in a pricing certificate.
+
+`maximum_compatible` is a deliberately separate primal/column-discovery
+option. It selects a mutually conflict-free subset from finitely many
+negative-reduced-cost candidates. Its objective and status never certify
+omitted columns; exact single-cabin pricing remains the only Root-CG proof
+channel.
+
+The matched experiment runner is:
+
+```bash
+.venv/bin/python benchmarks/run_ddd_merge_aware_bpc.py \
+  --example five_station_circle_cw_half_skip_no_wait_headway_b_v0 \
+  --k 20 \
+  --root-time-limit 900 \
+  --reference-lp-time-limit 900 \
+  --output benchmarks/output/ddd_merge_aware_bpc/k20.json
+```
+
+Reference-LP construction and solution share one deadline. Intermediate JSON
+is written after the reference and every completed variant, so an interrupted
+multi-variant gate retains its completed evidence. The shared fixed-$K$
+preparation time is deducted from every Root-CG variant budget; the complete
+arc-flow reference has its own matched build-and-solve deadline.
+
 ## Runtime safeguards
 
 All setup, seed, LP, MIP, pricing, validation, and polishing time is charged to
