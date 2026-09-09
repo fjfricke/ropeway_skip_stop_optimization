@@ -191,6 +191,16 @@ _EXPORTS_BY_MODULE: dict[str, tuple[str, ...]] = {
         'DddBalancedReferenceStartBuilder',
         'DddBalancedReferenceStartResult',
     ),
+    'ropeway_skip_stop_optimization.optimization.ddd.cp_sat_integrated': (
+        'DddIntegratedCpSatConfig',
+        'DddIntegratedCpSatModel',
+        'DddIntegratedCpSatOptimizer',
+        'DddIntegratedCpSatResult',
+        'build_ddd_integrated_cp_sat',
+    ),
+    'ropeway_skip_stop_optimization.optimization.ddd.cp_sat_passenger': (
+        'DddCpSatCostEncoding',
+    ),
     'ropeway_skip_stop_optimization.optimization.ddd.cp_sat_primal': (
         'DddCpSatFixedCabinRoute',
         'DddCpSatFixedRouteDecision',
@@ -615,6 +625,13 @@ _EXPORT_MODULE_BY_NAME = {
 }
 
 __all__ = [
+    'DddIntegratedCpSatConfig',
+    'DddIntegratedCpSatModel',
+    'DddIntegratedCpSatOptimizer',
+    'DddIntegratedCpSatResult',
+    'DddCpSatCostEncoding',
+    'build_ddd_integrated_cp_sat',
+
     'DDD_TIME_TICKS_PER_SECOND',
     'DDD_TIME_TICK_SECONDS',
     'DddAggregateRouteCount',
