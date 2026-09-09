@@ -2,7 +2,11 @@
 
 ## 1. Ziel und Ausgangsstand
 
-Status: **konkreter Umsetzungsplan; noch nicht implementiert**. Stand: 9. September 2026.
+Status: **erste Version implementiert; erste Gates ausgewertet**. Stand: 9. September 2026.
+
+Die ursprünglichen Anforderungen und Abnahmekriterien bleiben unten nachvollziehbar. Der tatsächliche Stand steht in der [Implementierungsreferenz](../reference/ddd_integrated_cp_sat_passengers.md) und den [Gate-Befunden](../findings/ddd_integrated_cp_sat_gate.md). P0 und P1 sind abgeschlossen; integrierte Passagiere, beide Kostenkodierungen, unabhängige Prüfung, Hints, native Checkpoints und CLI sind vorhanden. K=20 wurde je Kodierung mit fünf Minuten geprüft. Ein einzelner K=39-Produkttest verbesserte in rund zehn Minuten die UB auf 1.272.673,026168; native LB 402.843,295830, Gap 68,35 %. Die unabhängige fixe Passagier-IP-Bewertung bestätigt denselben Wert. 172 Tests sind grün. Der faire Arc-Flow-Vergleich mit gemeinsamem Seed, ein Wiederholungslauf und zusätzliche Demand-Profile bleiben offen; keine längere Kampagne wurde automatisch gestartet.
+
+Modellabgleich am 9. September: Die Mengen-, Kapazitäts- und Journey-Time-Formulierung passt zur bestehenden Fixed-K-No-Wait-Aufgabe. Die Erstfassung war bei Horizonten, Headways, Kandidatendomäne und Vergleichsidentität zu unbestimmt. Die folgenden Präzisierungen sind verbindlicher Teil der Umsetzung; sie sind noch kein Nachweis für einen implementierten CP-Solver.
 
 Ziel ist ein ereignisbasiertes CP-SAT-Modell, das Stop-/Skip-Bewegung und ganzzahlige Passagierzuweisung gemeinsam optimiert. Es soll für dieselbe deklarierte Fixed-K-No-Wait-Domäne wie das vollständige Arc-Flow gültige obere und untere Schranken liefern. Der Leistungsversuch prüft, ob damit bei K=39 schneller bessere Fahrpläne oder ein kleinerer zertifizierter Gap entstehen. Ein Laufzeitvorteil ist eine Hypothese, kein zugesagtes Ergebnis.
 
@@ -14,7 +18,7 @@ Der aktuelle Arbeitsstand wurde vor diesem Plan getrennt gesichert:
 | Thesis `idp_report`, Branch `ddd` | `d5487ed` | Manuskriptstand, mathematische Herleitungen und Solver-Übersicht |
 | Übergeordneter Workspace `idp`, Branch `main` | `7822c6c` | `PROJECT_STATUS.md`, `SOLVER_OVERVIEW.md`, `RESEARCH_CONCEPTS.md` |
 
-Prüfstand des Checkpoints:
+Historischer Prüfstand des Checkpoints (vor der Umsetzung):
 
 - Frontend: `npm run build` erfolgreich.
 - CP-Primal-/Passagierzieltests: 19 bestanden.
@@ -28,7 +32,7 @@ Die ausführliche Ausgangsbewertung steht im [Solver-Overview](/Users/felix/Prog
 
 Die erste Version behandelt ausschließlich:
 
-1. einen gerichteten Ring mit nach jedem Besuch wieder zusammenlaufenden Stop-/Skip-Optionen;
+1. einen gerichteten Ring mit nach jedem Besuch wieder zusammenlaufenden Stop-/Skip-Optionen, genau einer Stop-Option je Zustand und festen Routendauern;
 2. feste Kabinenzahl, feste physikalische Anfangszustände und die vorhandenen Anfangsbelegungen;
 3. No-Wait, einschließlich der bestehenden Service-, Bewegungs- und Horizontabschlussregeln;
 4. direkte Passagierfahrten innerhalb der bestehenden zulässigen Besuchsspanne, ohne Transfers;
@@ -44,10 +48,20 @@ Es wird keine Periodizität vorgegeben. Ein periodischer Seed ist lediglich ein 
 
 | Instanz | Kanonischer Problem-Fingerprint | Referenz |
 |---|---|---|
-| Five-Station B, halbe Nachfrage, K=20, Balanced Reference, No-Wait, Journey Time | `2c53481066e498cc29ec206e717911f55d1ac30296cdc5cb8ac05139b35fbd01` | Bekannter Optimalwert ungefähr 525.730,908; vollständigen gespeicherten Wert verwenden |
+| Five-Station B, Beispiel `five_station_circle_cw_half_skip_no_wait_headway_b_v0`, K=20, Balanced Reference, No-Wait, Journey Time | `2c53481066e498cc29ec206e717911f55d1ac30296cdc5cb8ac05139b35fbd01` | Bekannter Optimalwert ungefähr 525.730,908; vollständigen gespeicherten Wert verwenden |
 | Gleiche Betriebsfamilie, K=39 | `2f82126c06273d2299ab258ca5c5d92acc9d83d829360422f8473c26521cc0f0` | Anonymes Arc-Flow: UB 1.376.000,783, LB 441.919,534 nach etwa 1 h; CP/Root-CG: UB 1.326.950,671, vollständiger Export noch zu beschaffen |
 
 Fingerprint und vollständiger Zielfunktionswert sind beim Laden zu prüfen. Ein K=20-Canonical-Rope-Fall ist nicht dieselbe Instanz. Ein passender globaler Bound darf nur nach bewiesener Domänenübereinstimmung kombiniert werden. Zur Diagnose werden native CP-Bounds und gegebenenfalls externe Bounds getrennt gespeichert.
+
+Die `half`-Basisvariante verwendet ursprünglich jeden zweiten Kabinenstart und 64 statt 128 Personen je OD; „halbe Nachfrage“ ist somit zutreffend. Der Fixed-K-Runner ersetzt ihre Startregel durch die gewählte Fixed-K-Startpolitik, behält aber die Nachfrage bei. Der am 9. September frisch vorbereitete K=20-Fall reproduziert den obigen Fingerprint und enthält 1.280 Personen in 20 OD-Gruppen, alle mit Release 0, Kabinenkapazität 8, fünf Zustände, zehn Routen, zehn Ressourcen und 2.560 strukturelle Fahrtkandidaten. Service- und Bewegungsende liegen hier beide bei 1.200 s; die Besuchsgrenzen sind 36 bzw. 37 je Kabine. Zeitlich verteilte Demand-Profile sind damit noch nicht untersucht.
+
+### 2.2 Genaue Problemidentität und Reichweite
+
+Der bestehende `DddFixedKTrajectoryProblem.fingerprint` enthält unter anderem Starts, Horizonte, Nachfrage und Routen-IDs, jedoch **nicht** Kabinenkapazität, vollständige Routendauern/-Offsets, sämtliche Ressourcenparameter oder die konkrete Fahrtkandidatenliste. Beim Abgleich ließ sich Kapazität oder Kandidatenliste ändern, ohne den Fingerprint zu ändern. Dieser Hash bleibt für historische Ergebnisse erhalten, ist aber allein kein ausreichender Äquivalenznachweis.
+
+Der neue Runner speichert deshalb zusätzlich ein solverunabhängiges `domain_manifest` mit `domain_fingerprint`: vollständige Tick-Routen-/Ressourcendaten, Start- und Anfangsbelegungen, Kapazität, Nachfrage einschließlich Releases, Horizonte, Besuchsgrenzen, zulässige Kandidaten-IDs/-Besuchspaare, Betriebsmodus und Kostenannahmen. `model_fingerprint` identifiziert zusätzlich die konkrete CP-Kodierung. Für historische Bounds ohne Manifest müssen diese Daten aus der jeweiligen Instanz nachvollzogen werden; ein bloßer Hash-Treffer erlaubt noch keine Übernahme.
+
+Der globale Beweisbereich ist **Fixed-K mit genau diesen festen Starts und dieser endlichen Passagier-/Bewegungsdomäne**. Er umfasst weder frei optimierte Anfangslagen noch unbegrenzten Betrieb nach dem Horizont. Bei K=39 liefert die periodische Balanced-Reference-Konstruktion feste Anfangslagen und eine Startlösung; sie verpflichtet spätere Stop-/Skip-Entscheidungen nicht zur Periodizität.
 
 ## 3. Wiederverwendung und Dateiaufteilung
 
@@ -65,14 +79,15 @@ Fingerprint und vollständiger Zielfunktionswert sind beim Laden zu prüfen. Ein
 | Physikalische Prüfung | [reference.py](/Users/felix/Programming/idp/ropeway/ropeway_skip_stop_optimization/src/ropeway_skip_stop_optimization/optimization/ddd/reference.py), [EAN validation.py](/Users/felix/Programming/idp/ropeway/ropeway_skip_stop_optimization/src/ropeway_skip_stop_optimization/optimization/ean/validation.py) | Extrahierte Pläne unabhängig prüfen |
 | Ganzzahlige Zeiten | [time_ticks.py](/Users/felix/Programming/idp/ropeway/ropeway_skip_stop_optimization/src/ropeway_skip_stop_optimization/optimization/ddd/time_ticks.py) | Bereits quantisierte Werte verwenden, keine zusätzliche Rundung |
 
-### 3.2 Geplante neue Dateien
+### 3.2 Geplante und inzwischen angelegte Dateien
 
-Die folgenden Pfade sind geplante Dateien, keine bereits verfügbaren APIs. Alle beziehen sich auf das Software-Repository.
+Die folgenden Dateien wurden angelegt. Zusätzlich wurde die unabhängige Domänen-/Lösungsprüfung in `cp_sat_certificate.py` ausgelagert. Alle Pfade beziehen sich auf das Software-Repository.
 
 | Pfad | Verantwortung |
 |---|---|
 | `src/ropeway_skip_stop_optimization/optimization/ddd/cp_sat_movement.py` | Gemeinsamer Movement-Builder; liefert `CpModel`-Variablen und semantische Ereigniszuordnung ohne Suchsteuerung |
 | `src/ropeway_skip_stop_optimization/optimization/ddd/cp_sat_passenger.py` | Struktureller Passagierindex, Mengenvariablen, Aktivierung, Kapazität, Ausstiegsaggregation und Kostenkodierung |
+| `src/ropeway_skip_stop_optimization/optimization/ddd/cp_sat_certificate.py` | Domänenmanifest, unabhängige Integer-/Physikprüfung und atomare Checkpoints |
 | `src/ropeway_skip_stop_optimization/optimization/ddd/cp_sat_integrated.py` | Konfiguration, eigener Optimierungslauf, Hints, Extraktion, Validierung, Ergebnis und versionierter Checkpoint |
 | `src/ropeway_skip_stop_optimization/benchmarking/ddd_fixed_k_cp_sat.py` | Kanonische Instanzvorbereitung, gemeinsames Zeitbudget, Ergebnisdateien und Vergleichsmetadaten |
 | `benchmarks/run_ddd_fixed_k_cp_sat.py` | CLI für Build-only, festen Fahrplan und vollständige Optimierung |
@@ -95,9 +110,35 @@ Der gemeinsame Builder gibt mindestens folgende Zuordnungen zurück:
 - Zeitunter-/obergrenzen und den sicheren maximalen Besuchsumfang;
 - Daten für Hints und deterministische Rekonstruktion.
 
-Boarding entspricht dem vorhandenen Plattform-Austrittsereignis, Alighting dem Plattform-Eintrittsereignis. Falls mehrere Stop-Routen unterschiedliche Offsets haben, müssen die Ereigniszeiten unter der jeweils ausgewählten Route festgelegt werden. Ein gemeinsamer konstanter Offset ist nur erlaubt, wenn die Gleichheit zuvor geprüft wurde.
+Boarding entspricht dem vorhandenen Plattform-Austrittsereignis, Alighting dem Plattform-Eintrittsereignis. V1 verwendet wie der Arc-Flow-Passagierbuilder `unique_stop_route_option`: genau eine Stop-Option je Zustand, daher eindeutige Offsets. Mehrere Stop-Optionen sind vorerst abzulehnen. Eine spätere Erweiterung braucht routenabhängige Ereigniszeiten und einen eigenen Domänenvergleich.
 
-Die vorhandene Ressourcenabbildung mit halboffenen geschützten Intervallen ist für die unterstützte Domäne zu bestätigen. Vorgängerabhängige Schutzzeiten, Zweig-FIFO, gleichzeitige Mehrfachnutzung und Belegungen über Zeit null bleiben erhalten. Es darf nicht pauschal jede Headway-Matrix durch einen symmetrischen Abstand ersetzt werden. Wenn die Intervallabbildung eine zulässige Variante nicht ausdrücken kann, muss v1 diese Variante ablehnen oder eine nachweislich äquivalente Disjunktion ergänzen.
+### 4.1 Physikalische Route und Reihenfolge
+
+Ein Besuch beginnt am Eingangswechsel der Station. Die Stop-Dauer enthält Fahrt zur Plattform, feste Plattformdurchfahrt, Fahrt zum Ausgangswechsel und Seilfahrt zum nächsten Eingangswechsel. Skip verwendet die Bypassdauer plus dieselbe anschließende Seilfahrt. Alle Zeiten kommen aus dem adaptierten Movement-Core; keine neue freie Fahrzeit oder von der Fahrgastzahl abhängige Haltezeit einführen. No-Wait heißt keine zusätzliche Warteentscheidung; eine Stop-Kabine benötigt weiterhin ihre feste Stationszeit. Routen, die der konfigurierte Stationsmechanismus nicht anbietet, bleiben ausgeschlossen. Im All-Stop-Vergleich ist `resolved_trajectory_problem` mit herausgefilterten Skip-Routen zu verwenden.
+
+Es gibt keine neue globale Reihenfolgebedingung zwischen Kabinen. Auf derselben Route erhalten gleiche feste Offsets unter No-Wait die Reihenfolge. Stop und Skip dürfen sich dagegen über die getrennten Stationszweige relativ überholen; am Zusammenführen gelten die Ressourcenabstände. Insbesondere darf keine aus Kabinen-IDs oder dem Seed übernommene Reihenfolge zulässiges Bypass-Überholen verhindern.
+
+### 4.2 Headways als Schutzintervalle
+
+Das aktuelle physikalische Modell verwendet konstante oder nur vom vorausfahrenden Routentyp abhängige Headways (`ConstantHeadwayRule`, `LeaderBehaviorHeadwayRule` in `models/headway.py`). Der DDD-Adapter legt den jeweiligen Wert in `usage.separation_after_tick(...)` ab. Für jede ausgewählte Ressourcennutzung wird unter No-Wait das halboffene Intervall
+
+`[t[c,v] + follower_enter_offset, t[c,v] + leader_clear_offset + separation_after)`
+
+verwendet. `NoOverlap` verlangt damit genau eine der beiden vorhandenen Abstandsbedingungen: B tritt nach der Freigabe plus Schutzzeit von A ein oder umgekehrt. Die aktuelle Architektur passt zu dieser Abbildung; ein bloßes Ersetzen aller Abstände durch Minimum, Maximum oder einen symmetrischen Mittelwert wäre ein anderes Modell. Beliebige künftig paarabhängige Headway-Matrizen sind durch diese Darstellung nicht automatisch unterstützt.
+
+Die Intervalle sind Schutzzeiten an den vorhandenen Checkpoints, **keine exklusive Reservierung der gesamten Station oder der vollständigen Plattformdurchfahrt**. Beispielsweise hat eine Stop-Route an Station A im K=20-Fall Plattform-Eintritt bei +2,090909 s, Austritt bei +22,090909 s und dort einen Plattform-Eintrittsheadway von 7 s. Die ganze 20-s-Plattformdurchfahrt exklusiv zu sperren würde zulässige Kabinenfolgen entfernen. Sämtliche im Movement-Core vorhandenen Ressourcen werden übernommen; diagnostisches Abschalten einzelner Ressourcen aus dem alten Oracle ist im globalen Modus verboten.
+
+Bei Anfangsbelegungen werden die vorhandenen abgeschnittenen festen Intervalle übernommen: Start `max(0, follower_enter_time)`, Ende `leader_clear_time + separation_after`; leere Intervalle entfallen. `boundary_only`/`boundary_origin`-Sonderfälle aus der Referenzprüfung dürfen nicht still als gewöhnliche Paarbedingungen behandelt werden. Falls solche Fälle auftreten, ist die Äquivalenz zur vorhandenen Ressourcenreduktion separat zu prüfen oder die Variante abzulehnen. Der K=39-Referenzbuilder deaktiviert die Ressourcenreduktion; der K=20-Referenzfall hat keine Boundary-Occurrences.
+
+### 4.3 Zwei Horizonte und vollständige Fortsetzung
+
+Im Folgenden gilt entsprechend `EanConfig`: **T = Serviceende**, **H = Bewegungsende = T + Tail**. Alle Passagierbedingungen und Nichtbedienungskosten verwenden T. Physikalische Aktivierung und Ressourcenbedingungen verwenden H. Dass beide im Referenzfall 1.200 s betragen, darf eine Verwechslung nicht verdecken.
+
+Für v=0,...,N gilt `a[c,v] <=> t[c,v] <= H`, mit festem Start und `a[c,0]=1`, `a[c,N]=0`. Für v<N gilt `sum_o s[c,v,o]=a[c,v]` und `t[c,v+1]=t[c,v]+sum_o duration[o]*s[c,v,o]`. Damit muss eine Kabine jeden vor oder genau bei H begonnenen Besuch vollständig fortsetzen, bis der nächste Besuch nach H liegt; danach bleiben Zeiten in der inaktiven Fortsetzung konstant. Kein freiwilliges Parken, kein künstlicher Depotabschluss, keine Rückkehrpflicht zur Anfangsphase und keine kostenlose Deaktivierung nach dem letzten Fahrgast.
+
+Eine ausgewählte Ressourcennutzung ist genau dann präsent, wenn ihr Eintritt `<= H` liegt. Ihr Schutzende darf H überschreiten und wird nicht abgeschnitten. Nutzungen mit Eintritt `> H` entfallen gemäß dem bestehenden Arc-Flow-/Referenzmodell. Diese Regel wird aus `_add_resource_intervals` übernommen, einschließlich der Äquivalenz des Präsenzliterals; nur `present => selected` wäre unzureichend.
+
+N stammt aus der kanonischen Besuchsdomäne. Zusätzlich ist mit minimalen Routendauern in Ticks zu prüfen, dass selbst die schnellste Fortsetzung bei Index N nach H liegt. Andernfalls Eingabe als unzureichend begrenzt zurückweisen und die kanonische Instanzvorbereitung korrigieren; nicht nur den CP-Besuchsumfang heimlich erweitern. Die Terminalzeitdomäne muss mindestens bis `H + max(duration)` reichen, Ressourcenenden zusätzlich bis zu ihren Offsets und Schutzzeiten.
 
 **Nachweisaufgabe:** Für kleine Instanzen zulässige vollständige Routenbelegungen enumerieren und CP-Feasibility mit der unabhängigen Ressourcenprüfung sowie dem vollständigen Referenzmodell vergleichen. Beide Richtungen prüfen: kein ungültiger Plan akzeptiert und kein gültiger Referenzplan ausgeschlossen. Der sichere Besuchsumfang muss unabhängig von einem Seed alle zulässigen No-Wait-Fortsetzungen abdecken.
 
@@ -115,13 +156,15 @@ Für Nachfragegruppe g seien `d[g]` die Anzahl und `r[g]` die Release-Zeit. Für
 
 Die neue Domäne wird aus Besuchspaaren erzeugt und enthält keine Fahrt-pro-Zeittick-Variablen. Nicht verwendet werden `DddArcFlowPassengerDomainBuilder` und seine zeitexpandierten Passenger-Arcs. Frühe Abschneidung ist nur mit sicheren zeitlichen Untergrenzen zulässig. Besonders an Tick-Grenzen darf Float-Pruning keine im kanonischen Modell mögliche Fahrt entfernen.
 
+Verbindlicher Ausgangspunkt ist die **konkrete vollständige strukturelle Liste** `problem.passenger_build.ride_candidates`, die auch Arc-Flow verwendet. „Vollständig“ bedeutet hier alle Kandidaten dieser deklarierten Domäne, nicht beliebige zusätzliche Mehrumlauffahrten. Bei aktiviertem Single-Ring-Pruning gilt `0 < j-i < len(artifact.circulation_state_ids)`; das sind Eingangswechselbesuche, keine Zeitticks. V1 übernimmt diese Einstellung und verändert sie nicht beiläufig. Eine neu erzeugte oder anders geprunte Liste ist vor dem Zertifikatsvergleich auf Gleichheit bzw. nachgewiesen sichere Entfernung unmöglicher Fahrten zu prüfen. Ein Unterschied zum bestehenden Float-Pruning ist ein zu klärender Domänenbefund. Erweiterungen auf Mehrumlauffahrten brauchen eine gesonderte Modellentscheidung, statt sie pauschal mit der bisherigen Code-Dominanzbegründung auszuschließen.
+
 ### 5.2 Aktivierung
 
 Wenn `used[q]` gilt, müssen gelten:
 
 1. Boarding- und Alighting-Besuch sind aktiv und bedienen die richtige Station mit einer Stop-Route;
-2. `board[q] >= r[g]`;
-3. `board[q] <= H` und `alight[q] <= H`, jeweils nach vorhandener Service-Semantik;
+2. `board[q] >= max(0, r[g])`;
+3. `board[q] <= T` und `alight[q] <= T`, jeweils nach vorhandener Service-Semantik;
 4. `alight[q] >= board[q]`;
 5. i < j, zulässige direkte Besuchsspanne, dieselbe Kabine, keine Transfers.
 
@@ -143,11 +186,13 @@ Die Besuchsspanne ist statisch; deshalb sind diese Kapazitätsbedingungen linear
 
 Nachfragegruppen bleiben getrennt, sobald Release-Zeit, OD oder eine andere relevante Bedingung verschieden ist. Aggregiert werden nur wirklich austauschbare Personen. Die erste Version enthält keine initial bereits onboard befindlichen Passagiere.
 
+Physikalische Vorlaufbelegungen sind keine zusätzlichen Boarding-Angebote. Negative historische Boarding-Ereignisse bleiben wie in `_fixed_movement_ride` ausgeschlossen. Ein Fahrgast darf Zwischenstationen in derselben Kabine sowohl mit Stop als auch mit Skip durchfahren; nur Boarding und Alighting erzwingen einen Stop. Es gibt keine zusätzliche Pflicht zum frühestmöglichen Boarding, keine Passagier-FIFO-Zuweisung und keine Pflicht, jede Nachfrage zu bedienen. Nachfrageanzahl und Kabinenkapazität werden als nichtnegative bzw. positive Ganzzahlen validiert, ohne Rundung aus allgemeinen Floats.
+
 ## 6. Zielfunktion nach Ausstiegsereignissen
 
-Für eine innerhalb des Servicehorizonts freigegebene Person sind die bisherigen Journey-Time-Kosten bei Bedienung `t_alight - r`, bei Nichtbedienung `H - r`. Die Veränderung durch Bedienung ist daher `t_alight - H`.
+Für eine bis zum Serviceende T freigegebene Person sind die bisherigen Journey-Time-Kosten bei Bedienung `t_alight - r`, bei Nichtbedienung `T - r`. Die Veränderung durch Bedienung ist daher `t_alight - T`. Das Bewegungsende H gehört nicht in diese Kostenformel.
 
-Sei e ein konkretes Alighting-Ereignis einer Kabine, mit Zeit `T[e]`. Definiere
+Sei e ein konkretes Alighting-Ereignis einer Kabine, mit Zeit `tau[e]`. Definiere
 
 \[
 A_e=\sum_{q:\operatorname{alight}(q)=e}y_q,
@@ -157,24 +202,26 @@ A_e=\sum_{q:\operatorname{alight}(q)=e}y_q,
 und die konstante Nichtbedienungskostenbasis
 
 \[
-F_0=\sum_g d_g\max(0,H-r_g).
+F_0=\sum_g d_g\max(0,T-r_g).
 \]
 
 Dann lautet das zu minimierende Ziel:
 
 \[
-F=F_0+\sum_e A_e(T_e-H).
+F=F_0+\sum_e A_e(\tau_e-T).
 \]
 
-Gruppen mit Release nach H haben keine bedienbaren Kandidaten und bleiben mit ihrer kanonischen Nichtbedienungsbewertung in der Bilanz. Unterschiedliche Release-Zeiten kürzen sich nur in der Kostendifferenz heraus; in den Boarding-Bedingungen bleiben sie zwingend erhalten.
+Gruppen mit Release nach T haben keine bedienbaren Kandidaten und bleiben mit ihrer kanonischen Nichtbedienungsbewertung in der Bilanz. Unterschiedliche Release-Zeiten kürzen sich nur in der Kostendifferenz heraus; in den Boarding-Bedingungen bleiben sie zwingend erhalten.
+
+Diese Kosten sind ein endlicher Journey-Time-/Backlog-Vergleich und kein lexikografisches „erst alle bedienen“. Eine erst bei T aussteigende Person verbessert das Ziel gegenüber Nichtbedienung nicht. `served_count` und `unserved_count` werden deshalb zusätzlich zum Zielwert berichtet; ein anderes Strafgewicht oder Bedienungsziel wäre eine andere Vergleichsaufgabe. Beim verifizierten K=20-Eingang beträgt F0 genau 1.536.000 Personen-Sekunden, in Ticks 1.536.000.000.000.
 
 Die algebraische Kürzung ist bereits in den vorhandenen Arc-Flow-/Thesis-Herleitungen enthalten. Die zusätzliche Implementierungsentscheidung hier ist, alle zu einem Alighting-Ereignis gehörenden Fahrtmengen **vor** der variablen Zeitkopplung zu aggregieren. Das spart Kostenkopplungen, ohne Nachfragegruppen oder Kapazitätsbeziehungen zu verlieren.
 
 ### 6.1 Zwei äquivalente Kostenkodierungen
 
-**Referenz: direktes Produkt.** Für jedes Ereignis `P[e] = A[e] * T[e]` mit `AddMultiplicationEquality` und Ziel `F0 + sum(P[e] - H*A[e])`. Die Produktdomäne muss alle legalen Werte abdecken. Inaktive Ereignisse haben `A[e]=0`; ihr beliebiger zulässiger Dummy-Zeitwert darf keine zusätzlichen Bedingungen erzeugen.
+**Referenz: direktes Produkt.** Für jedes Ereignis `P[e] = A[e] * tau[e]` mit `AddMultiplicationEquality` und Ziel `F0 + sum(P[e] - T*A[e])`. Die Produktdomäne muss alle legalen Werte abdecken. Inaktive Ereignisse haben `A[e]=0`; ihr beliebiger zulässiger Dummy-Zeitwert darf keine zusätzlichen Bedingungen erzeugen. Insbesondere `tau[e] <= T` nicht pauschal für ungenutzte Stop-Ereignisse erzwingen: physikalische Stopps im Tail bleiben möglich.
 
-**Vergleich: kapazitätsbeschränkte unäre Darstellung.** Für k=1,...,C ein Literal `b[e,k]`, mit `b[e,k] >= b[e,k+1]` und `A[e] = sum_k b[e,k]`. Hilfsvariable `z[e,k]` erfüllt `z=T[e]` bei aktivem Literal, sonst `z=0`. Ziel: `F0 + sum_e,k(z[e,k] - H*b[e,k])`. Damit entstehen höchstens C bedingte Zeitkopplungen je Ausstiegsereignis.
+**Vergleich: kapazitätsbeschränkte unäre Darstellung.** Für k=1,...,C ein Literal `b[e,k]`, mit `b[e,k] >= b[e,k+1]` und `A[e] = sum_k b[e,k]`. Hilfsvariable `z[e,k]` erfüllt `z=tau[e]` bei aktivem Literal, sonst `z=0`. Ziel: `F0 + sum_e,k(z[e,k] - T*b[e,k])`. Damit entstehen höchstens C bedingte Zeitkopplungen je Ausstiegsereignis.
 
 Beide Kodierungen müssen auf kleinen Instanzen exakt dasselbe Optimum liefern. Direkte Produkte dienen als einfache Ausgangsversion. Die unäre Variante wird nur als kontrollierte Alternative getestet; keine große Parametersuche. Kleine Kabinenkapazität motiviert den Vergleich, beweist aber keinen Geschwindigkeitsvorteil.
 
@@ -212,11 +259,11 @@ Solver-Bounds werden mit korrekter Konstante und Skalierung zurückgerechnet. Ei
 
 Geplantes Ergebnis enthält mindestens:
 
-- `problem_fingerprint`, `model_fingerprint`, `proof_scope`, `formulation_version`;
+- `problem_fingerprint`, `domain_manifest`, `domain_fingerprint`, `model_fingerprint`, `proof_scope`, `formulation_version`;
 - `time_ticks_per_second`, `objective`, `objective_constant_tick`, `cost_encoding`;
 - `solver_status`, `termination_reason`, `proven_optimal`, `model_validation_error`;
 - `cp_objective_tick`, `cp_best_bound_tick`, `validated_upper_bound`, `cp_lower_bound`, `combined_lower_bound`, `relative_gap`;
-- vollständigen Bewegungsplan, Fahrtmengen und unbediente Nachfrage;
+- vollständigen Bewegungsplan, Fahrtmengen, `served_count` und `unserved_count` sowie unbediente Nachfrage je Gruppe;
 - `prepare_seconds`, `build_seconds`, `solve_seconds`, `validation_seconds`, `total_wall_seconds`;
 - Modellgrößen, Konflikte, Branches, Worker, Seed, Peak-RSS und Seed-Provenienz;
 - zeitgestempelte UB-/LB-Samples und Checkpointpfad.
@@ -252,7 +299,7 @@ Ein Neustart mit Checkpoint ist ein Warm-Start. Er setzt den vorherigen CP-SAT-S
 | Paket | Konkrete Arbeit | Abnahme / Ergebnis | Grober Aufwand |
 |---|---|---|---|
 | **P0** | Bestehenden Reservoir-Statusfehler in separatem Fix beheben; Statuscode-Zuordnung nach vorhandener Konvention ergänzen | Alle acht Reservoirtests bestehen; sinnvoller Test für Statusausgabe | 1–2 Stunden, sofern kein weiterer Defekt sichtbar wird |
-| **P1** | Gemeinsamen CP-Movement-Builder extrahieren; unveränderte bisherige Heuristik darüber aufbauen | Bestehende CP-Primaltests bestehen; keine Routen-/Zeitsemantik verändert | Etwa ein halber Tag |
+| **P1** | Domänenmanifest und Eingabeprüfungen; gemeinsamen CP-Movement-Builder extrahieren; bisherige Heuristik darüber aufbauen | Bestehende CP-Primaltests bestehen; Horizont-, Headway- und Besuchssemantik aus Abschnitt 4 geprüft | Etwa ein halber bis ein Tag |
 | **P2** | Strukturelle Fahrtmengen, Aktivierung, Kapazität und aggregierte Kosten bauen; Fixed-Movement-Modus | G0: exakte Übereinstimmung mit Passenger-IP auf mehreren festen Plänen | Etwa ein Tag |
 | **P3** | Integrierten Optimierungslauf, Resultat, Hints, Validator und Checkpoint verbinden | G1: vollständige kleine Instanzen und Grenzfälle; korrekte LB-/UB-Semantik | Etwa ein Tag |
 | **P4** | CLI und Build-only; beide Kostenkodierungen begrenzt vergleichen | G2: K=20-Referenz geprüft; Modellgröße und Laufzeit dokumentiert | Etwa ein halber bis ein Tag plus Solverbudget |
@@ -260,19 +307,21 @@ Ein Neustart mit Checkpoint ist ein Warm-Start. Er setzt den vorherigen CP-SAT-S
 
 Gesamteinschätzung: etwa drei bis vier fokussierte Arbeitstage bei problemloser Wiederverwendung. Das ist ein Budgetrahmen für den Versuch, keine Zusage. Nach P2/P3 liegt die erste belastbare Information über Modellgröße und Korrektheit vor. Bei strukturellen Problemen wird der Umfang neu bewertet, statt automatisch bis K=39 weiterzubauen.
 
-P0 ist eine separate Wartung des gesicherten Stands und ändert die mathematische CP-Aufgabe nicht. Die neue CP-Implementierung darf bei einem größeren Reservoir-Folgeproblem unabhängig weiterentwickelt werden; der bekannte Fehler bleibt dann ausdrücklich offen und blockiert nur Reservoir-Läufe.
+P0 ist als separate Wartung in `e252ff2` abgeschlossen und ändert die mathematische CP-Aufgabe nicht. Die gemeinsame Movement-Konstruktion aus P1 liegt in `608b709`. Die zuvor fehlgeschlagene Reservoirregression ist jetzt grün.
 
 ### G0: feste Bewegung und exakte Passagierbewertung
 
-Testfälle: eine OD-Gruppe; mehrere Gruppen mit überlappender Sitzplatznutzung; Aussteigen und Einsteigen am selben Besuch; identische OD mit unterschiedlichen Releases; keine Nachfrage; vollständig unbedienbare Nachfrage; Boarding exakt bei Release; Boarding davor; Alighting exakt H und einen Tick danach; fehlender Stop an einem Fahrtende; ausgeschalteter Kandidat mit sonst unzulässigen Zeitwerten.
+Testfälle: eine OD-Gruppe; mehrere Gruppen mit überlappender Sitzplatznutzung; Aussteigen und Einsteigen am selben Besuch; identische OD mit unterschiedlichen Releases; keine Nachfrage; vollständig unbedienbare Nachfrage; Boarding exakt bei Release; Boarding davor; negative historische Boarding-Zeit; Alighting exakt T und einen Tick danach; fehlender Stop an einem Fahrtende; Skip einer Zwischenstation bei besetzter Kabine; ausgeschalteter Kandidat mit sonst unzulässigen Zeitwerten. Zusätzlich T < H mit ungenutzten Stop-Ereignissen im Tail sowie Release genau T und nach T. Nichtbedienung und Alighting bei T müssen dieselben Kosten haben.
 
 Beide Kostenkodierungen gegen die direkte Summe der ursprünglichen served/unserved-Kosten prüfen. Verschiedene Fahrtzuordnungen mit gleichem Optimum sind zulässig. Das vorhandene Nichtintegralitäts-Gegenbeispiel des Passenger-LP wird als Regression aufgenommen: die CP-Lösung muss ganzzahlig bleiben.
 
 ### G1: freies integriertes Modell
 
-Kleine Instanzen mit wenigen Kabinen und Stopentscheidungen vollständig enumerieren. Zu jeder gültigen Bewegung den Passenger-IP lösen und das globale Minimum mit CP-SAT vergleichen. Zusätzlich Anfangsbelegungen, unterschiedliche Stop-/Skip-Headways, exakte Berührung halboffener Intervalle, mehrere Umläufe und die Terminalfortsetzung testen.
+Kleine Instanzen mit wenigen Kabinen und Stopentscheidungen vollständig enumerieren. Zu jeder gültigen Bewegung den Passenger-IP lösen und das globale Minimum mit CP-SAT sowie vollständigem Arc-Flow vergleichen. Zusätzlich Anfangsbelegungen, unterschiedliche Stop-/Skip-Headways in beiden Reihenfolgen, zulässiges Überholen über den Bypass, gleichzeitig zulässige Plattformdurchfahrten mit Headway-Abstand, exakte Berührung halboffener Intervalle, mehrere Umläufe und die Terminalfortsetzung testen. Die Argumentation der Modelläquivalenz dokumentieren; wenige übereinstimmende Optima allein sind kein allgemeiner Beweis.
 
-Fahrtkandidaten, die in einem Seed nicht genutzt wurden, müssen in einer optimalen Alternativlösung nutzbar bleiben. Ein bewusst inkompatibler Fingerprint wird abgelehnt. `UNKNOWN`, `FEASIBLE`, `OPTIMAL` und feste-Bewegung-Schranken dürfen nicht verwechselt werden. Modellfehler, Budgets und Checkpointunterbrechungen erhalten gezielte Tests.
+Horizonttests: Besuchsbeginn genau H erzwingt seine Route; Ressourceneintritt genau H wird geschützt, bei H+1 Tick entfällt er; Schutzende nach H wird nicht gekappt. Eine zu kleine Besuchsgrenze wird vor dem Solve abgelehnt. Am Betriebsende wird keine zyklische Rückkehr oder All-Stop-Recovery erzwungen.
+
+Fahrtkandidaten, die in einem Seed nicht genutzt wurden, müssen in einer optimalen Alternativlösung nutzbar bleiben. Ein bewusst inkompatibler Fingerprint wird abgelehnt. Auch bei gleichem historischem Fingerprint werden veränderte Kapazität, Routendauer, Headway oder Kandidatenliste durch den Manifestvergleich erkannt. Mehrere Stop-Optionen, variable Routendauern und aktiviertes Waiting werden in v1 explizit abgelehnt. `UNKNOWN`, `FEASIBLE`, `OPTIMAL` und feste-Bewegung-Schranken dürfen nicht verwechselt werden. Modellfehler, Budgets und Checkpointunterbrechungen erhalten gezielte Tests.
 
 ### G2: K=20 und Größenprüfung
 
@@ -321,7 +370,24 @@ Geplante Ergebnisablage: `benchmarks/output/ddd_integrated_cp_sat/<instance>/<ru
 5. `feat(benchmarks): add fixed-k CP-SAT runner` — Build-only, Budgets, persistente Ergebnisse.
 6. `docs(ddd): report integrated CP-SAT gate` — tatsächliche G2/G3-Befunde einschließlich Nullbefunden.
 
-Die Implementierung beginnt erst nach diesem Plan. Vorhandene Solver werden durch den neuen Pfad nicht ersetzt. Ein Codepfad wird erst dann als exakter integrierter Solver bezeichnet, wenn die oben beschriebenen Domänen- und Zertifikatsprüfungen erfüllt sind.
+Die erste Implementierung liegt vor; die vereinbarten kleinen Modellvergleiche wurden durchgeführt. Vorhandene Solver werden durch den neuen Pfad nicht ersetzt. Ein Codepfad wird erst dann als exakter integrierter Solver bezeichnet, wenn die oben beschriebenen Domänen- und Zertifikatsprüfungen erfüllt sind.
+
+## 13. Historischer Nachweisstand des Planreviews vor der Umsetzung
+
+Geprüft wurden Movement-Adapter, vorhandener CP-Oracle, Arc-Flow-Netz und -Passagierdomäne, Headway-Regeln, Fixed-K-Startvorbereitung, Besuchsgenerator, Kandidatenbuilder, Fixed-Movement-Passagiermodell und Kostenfunktionen. Der K=20-Referenzfall wurde ohne Aufbau des zeitexpandierten Netzes frisch vorbereitet; seine oben angegebenen Parameter und der historische Fingerprint stimmen. Die Unvollständigkeit des historischen Fingerprints wurde mit Änderungen an ausschließlich im Speicher gehaltenen Dataclass-Kopien nachgewiesen.
+
+Bestehende Regressionen: **127 bestanden** mit `.venv/bin/python -m pytest -q tests/test_optimization_ddd_cp_sat_primal.py tests/test_optimization_ddd_fixed_k.py tests/test_optimization_ean_passenger_builder.py tests/test_optimization_ean_passenger_objective.py tests/test_optimization_ean_passenger_service.py`. Diese Tests prüfen vorhandene Bausteine; sie ersetzen weder die geplanten G0/G1-Prüfungen des neuen Solvers noch einen K=39-Leistungsversuch. Nur dieser Plan wurde geändert, kein Solvercode und kein historisches Resultat.
+
+Zusätzliche Fundstellen zum Modellabgleich:
+
+- [Horizontdefinition im EAN-Modell](/Users/felix/Programming/idp/ropeway/ropeway_skip_stop_optimization/src/ropeway_skip_stop_optimization/optimization/ean/models.py:145).
+- [Konstante und vorgängerabhängige Headways](/Users/felix/Programming/idp/ropeway/ropeway_skip_stop_optimization/src/ropeway_skip_stop_optimization/models/headway.py:197).
+- [Physikalische Routen und Ressourcen im DDD-Adapter](/Users/felix/Programming/idp/ropeway/ropeway_skip_stop_optimization/src/ropeway_skip_stop_optimization/optimization/ddd/artifact_adapter.py:282).
+- [CP-Schutzintervalle und Horizontaktivierung](/Users/felix/Programming/idp/ropeway/ropeway_skip_stop_optimization/src/ropeway_skip_stop_optimization/optimization/ddd/cp_sat_movement.py:278).
+- [Arc-Flow-Fortsetzung und Ressourcenaktivierung](/Users/felix/Programming/idp/ropeway/ropeway_skip_stop_optimization/src/ropeway_skip_stop_optimization/optimization/ddd/arc_flow_network.py:220).
+- [Kandidaten und Zeitbedingungen im Arc-Flow-Passagiermodell](/Users/felix/Programming/idp/ropeway/ropeway_skip_stop_optimization/src/ropeway_skip_stop_optimization/optimization/ddd/arc_flow_passenger_domain.py:241).
+- [Sichere Besuchszahl aus minimalen Umlaufzeiten](/Users/felix/Programming/idp/ropeway/ropeway_skip_stop_optimization/src/ropeway_skip_stop_optimization/optimization/ean/builders/cyclic_visit_builder.py:212).
+- [Historischer Problem-Fingerprint](/Users/felix/Programming/idp/ropeway/ropeway_skip_stop_optimization/src/ropeway_skip_stop_optimization/optimization/ddd/fixed_k.py:186).
 
 ## Quellen und fachliche Grundlage
 
