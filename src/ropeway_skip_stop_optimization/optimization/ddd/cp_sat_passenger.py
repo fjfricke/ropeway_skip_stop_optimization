@@ -95,7 +95,7 @@ def build_ddd_cp_sat_passengers(
             key = (cabin, visit)
             board_times[key] = built.time_by_cabin[cabin][visit] + ddd_seconds_to_tick(
                 stop.platform_exit_offset_seconds
-            )
+            ) + built.waiting_step_tick * built.wait_steps_by_key[key]
             offset = ddd_seconds_to_tick(stop.platform_entry_offset_seconds)
             alight_time = model.new_int_var(
                 offset, built.max_completion_tick + offset, f"alight_time[{cabin},{visit}]"

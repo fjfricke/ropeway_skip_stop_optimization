@@ -6,6 +6,28 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS_BY_MODULE: dict[str, tuple[str, ...]] = {
+    'ropeway_skip_stop_optimization.optimization.ddd.fixed_k_certificate': (
+        'DddFixedKPrimalValidator',
+        'DddValidatedFixedKPlan',
+        'build_ddd_fixed_k_domain_manifest',
+    ),
+    'ropeway_skip_stop_optimization.optimization.ddd.reservation_models': (
+        'DddReservationInsertionConfig',
+        'DddServiceInsertionIntent',
+        'DddReservationInsertionResult',
+        'DddReservationAttemptStatus',
+    ),
+    'ropeway_skip_stop_optimization.optimization.ddd.reservation_optimizer': (
+        'DddReservationInsertionOptimizer',
+    ),
+    'ropeway_skip_stop_optimization.optimization.ddd.reservation_refinement': (
+        'DddReservationAssignmentRefiner',
+        'DddReservationRefinementResult',
+    ),
+    'ropeway_skip_stop_optimization.optimization.ddd.reservation_checkpoint': (
+        'DddReservationCheckpointAdapter',
+    ),
+
     'ropeway_skip_stop_optimization.optimization.ddd.anonymous_reservoir_network': (
         'DddAnonymousReservoirArc',
         'DddAnonymousReservoirArcKind',
@@ -625,6 +647,18 @@ _EXPORT_MODULE_BY_NAME = {
 }
 
 __all__ = [
+    'DddFixedKPrimalValidator',
+    'DddValidatedFixedKPlan',
+    'build_ddd_fixed_k_domain_manifest',
+    'DddReservationInsertionConfig',
+    'DddServiceInsertionIntent',
+    'DddReservationInsertionResult',
+    'DddReservationAttemptStatus',
+    'DddReservationInsertionOptimizer',
+    'DddReservationCheckpointAdapter',
+    'DddReservationAssignmentRefiner',
+    'DddReservationRefinementResult',
+
     'DddIntegratedCpSatConfig',
     'DddIntegratedCpSatModel',
     'DddIntegratedCpSatOptimizer',

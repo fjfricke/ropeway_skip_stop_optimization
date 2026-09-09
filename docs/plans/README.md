@@ -13,6 +13,19 @@ Each plan must:
 
 Current plans:
 
+- [`reservation_insertion_implementation.md`](reservation_insertion_implementation.md):
+  completed bounded profiling, calendar optimization and optional assignment
+  refinement; records the decision against further ALNS expansion; see the
+  [reference](../reference/ddd_reservation_insertion.md) and
+  [K39 finding](../findings/ddd_reservation_insertion_gate.md).
+- [`reservation_insertion_kernel.md`](reservation_insertion_kernel.md):
+  paper-grounded K39 service insertion, legal exit-wait windows, conflict-driven
+  suffix repair, passenger accounting, and a bounded diagnostic pilot under the
+  accepted finite horizon; broader design beyond the implemented bounded pilot.
+- [`heuristic_and_non_mip_roadmap.md`](heuristic_and_non_mip_roadmap.md):
+  gated reservation/Greedy/Regret/ALNS prototype, and a separate research path
+  for event-based search, decision diagrams, and continuous CBS; includes
+  horizon validation, fair benchmarks, sources, and presentation priorities.
 - `artificial_case_capacity_experiments.md`: versioned artificial line and
   double-ring cases, nested demand generation, certified exact-$K$ and
   available-fleet capacity frontiers, valid flow ceilings, and adaptive

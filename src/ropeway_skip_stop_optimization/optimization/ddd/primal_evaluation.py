@@ -166,6 +166,7 @@ class DddEanPassengerPrimalEvaluator:
     waiting_policy: DddTrajectoryWaitingPolicy = field(
         default_factory=DddTrajectoryWaitingPolicy
     )
+    passenger_candidate_build: EanPassengerCandidateBuildResult | None = None
     _passenger_build: EanPassengerCandidateBuildResult | None = field(
         init=False,
         default=None,
@@ -410,6 +411,8 @@ class DddEanPassengerPrimalEvaluator:
         return DddPrimalPoolEvaluationResult(pool_result, evaluation, lp_result)
 
     def _passenger_candidates(self) -> EanPassengerCandidateBuildResult:
+        if self.passenger_candidate_build is not None:
+            return self.passenger_candidate_build
         if self._passenger_build is None:
             resolved_config = self.optimization_config.resolved_for_fleet_mode(
                 self.artifact.fleet_mode

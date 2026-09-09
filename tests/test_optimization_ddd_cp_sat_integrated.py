@@ -10,7 +10,7 @@ from ropeway_skip_stop_optimization.examples.registry import get_example
 from ropeway_skip_stop_optimization.optimization.ean import (
     EanPassengerObjective, SparseHeadwayPairBuilder, EanPassengerCandidateBuilder,
 )
-from ropeway_skip_stop_optimization.optimization.ean.models import EanCabinStart, EanCabinStartKind, EanDemandGroup
+from ropeway_skip_stop_optimization.optimization.ean.models import EanCabinStart, EanCabinStartKind, EanDemandGroup, StationWaitingMode
 from ropeway_skip_stop_optimization.optimization.ean.builders.fixed_start_builder import ExplicitEanCabinStartBuilder
 from ropeway_skip_stop_optimization.optimization.ean.builders.passenger_builder import EanPassengerCandidateBuildResult, build_ean_ride_candidates
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.fixed_movement_passenger_model import EanFixedMovementPassengerModelBuilder, EanPassengerAssignmentDomain
@@ -32,10 +32,14 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_problem import D
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_column_generation import DddTrajectoryWaitingDomain
 
 
-def tiny_problem(*, horizon=130.0, tail=0.0, capacity=2, starts=(0.0,), groups=None):
+def tiny_problem(*, horizon=130.0, tail=0.0, capacity=2, starts=(0.0,), groups=None, maximum_wait=0.0, waiting_step=1.0):
     example = get_example('five_station_circle_cw_half_skip_no_wait_headway_b_v0')
     scenario = example.build_scenario()
     config = replace(example.build_ean_config(scenario), horizon_seconds=horizon, tail_seconds=tail, cabin_capacity=capacity)
+    if maximum_wait:
+        config = replace(config, station_configs=tuple(replace(s,
+            waiting_mode=StationWaitingMode.END_OF_PLATFORM_WAIT, max_wait_seconds=maximum_wait, fifo_capacity=None)
+            for s in config.station_configs))
     builder = replace(example.build_ean_artifact_builder(scenario, config),
         start_builder=ExplicitEanCabinStartBuilder(tuple(EanCabinStart(i, 'A_entry_cw', EanCabinStartKind.FIXED, t) for i,t in enumerate(starts))),
         headway_pair_builder=SparseHeadwayPairBuilder())
@@ -47,14 +51,14 @@ def tiny_problem(*, horizon=130.0, tail=0.0, capacity=2, starts=(0.0,), groups=N
     )
     passengers = EanPassengerCandidateBuildResult(groups, build_ean_ride_candidates(groups, artifact))
     problem = DddFixedKTrajectoryProblem(
-        EanArtifactToDddMovementProblemAdapter().build_trajectory_problem(artifact), artifact, passengers,
+        EanArtifactToDddMovementProblemAdapter(waiting_step_seconds=waiting_step).build_trajectory_problem(artifact), artifact, passengers,
         EanPassengerObjective.JOURNEY_TIME, DddFixedKOperatingMode.SKIP_STOP, DddFixedKStartPolicy.LEGACY)
     return scenario, problem
 
 
 def fixed_ip(scenario, problem, solution):
     movement = problem.resolved_trajectory_problem.structural_movement_problem
-    plan = DddReferenceToEanMovementPlanAdapter().build(problem=movement, solution=solution, artifact=problem.artifact)
+    plan = DddReferenceToEanMovementPlanAdapter(waiting_policy=problem.resolved_trajectory_problem.waiting_policy).build(problem=movement, solution=solution, artifact=problem.artifact)
     with gp.Model() as model:
         model.Params.OutputFlag=0
         model.Params.Threads=1
@@ -112,10 +116,12 @@ def test_manifest_detects_changes_omitted_from_historical_fingerprint():
     _,problem=tiny_problem()
     manifest=validate_ddd_cp_sat_domain(problem)
     other=replace(problem,artifact=replace(problem.artifact,config=replace(problem.artifact.config,cabin_capacity=3)))
-    assert other.fingerprint==problem.fingerprint
+    assert other.legacy_fingerprint==problem.legacy_fingerprint
+    assert other.fingerprint!=problem.fingerprint
     assert stable_fingerprint(validate_ddd_cp_sat_domain(other))!=stable_fingerprint(manifest)
     other=replace(problem,passenger_build=replace(problem.passenger_build,ride_candidates=problem.passenger_build.ride_candidates[:-1]))
-    assert other.fingerprint==problem.fingerprint
+    assert other.legacy_fingerprint==problem.legacy_fingerprint
+    assert other.fingerprint!=problem.fingerprint
     assert stable_fingerprint(validate_ddd_cp_sat_domain(other))!=stable_fingerprint(manifest)
 
 

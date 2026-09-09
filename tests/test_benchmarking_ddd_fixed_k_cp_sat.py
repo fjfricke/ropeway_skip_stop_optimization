@@ -76,3 +76,45 @@ def test_native_cp_result_can_seed_existing_arc_flow(tmp_path):
     trajectories,upper=_load_ddd_fixed_k_arc_flow_result_seed(tmp_path/'result.json',problem=prepared.problem)
     assert len(trajectories)==2
     assert upper==result['validated_upper_bound']
+
+
+def test_waiting_lift_preserves_k39_snapshot_and_restores_prefix_exit_occupancy():
+    from ropeway_skip_stop_optimization.benchmarking.ddd_fixed_k_arc_flow import (
+        prepare_ddd_fixed_k_arc_flow_run, DddFixedKArcFlowRunConfig)
+    from ropeway_skip_stop_optimization.benchmarking.ddd_cp_sat_waiting import with_exit_waiting
+    from ropeway_skip_stop_optimization.optimization.ddd.fixed_k import DddFixedKOperatingMode, DddFixedKStartPolicy
+    from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_certificate import validate_ddd_cp_sat_incumbent, validate_ddd_cp_sat_domain
+    from ropeway_skip_stop_optimization.optimization.ddd.reference import DddReferenceSolution
+    prepared = prepare_ddd_fixed_k_arc_flow_run(DddFixedKArcFlowRunConfig(EXAMPLE,39,
+        DddFixedKOperatingMode.SKIP_STOP,start_policy=DddFixedKStartPolicy.BALANCED_REFERENCE))
+    lifted = with_exit_waiting(prepared, maximum_seconds=1200,step_seconds=1e-6)
+    a,b = prepared.problem,lifted.problem
+    assert a.artifact.cabin_starts == b.artifact.cabin_starts
+    assert a.passenger_build == b.passenger_build
+    assert a.boundary_context.initial_states == b.boundary_context.initial_states
+    added=set(b.boundary_context.resource_occurrences)-set(a.boundary_context.resource_occurrences)
+    assert len(added)==1
+    occupancy=next(iter(added))
+    assert occupancy.cabin_id==0 and 'platform_exit' in occupancy.resource_id
+    assert occupancy.follower_enter_time_seconds == pytest.approx(7.832536,abs=1e-6)
+    validate_ddd_cp_sat_domain(b)
+    validate_ddd_cp_sat_incumbent(b,DddReferenceSolution(lifted.seed_trajectories),{},provenance='lift regression')
+
+
+def test_runner_supports_microsecond_waiting_grid(tmp_path):
+    # Integration coverage, not a 3-second guarantee to find an incumbent.
+    # The search may legitimately remain UNKNOWN at that short time limit.
+    result = run_ddd_fixed_k_cp_sat(DddFixedKCpSatRunConfig(EXAMPLE,2,tmp_path,
+        maximum_wait_seconds=1200,solver=DddIntegratedCpSatConfig(total_time_limit_seconds=10,num_workers=1)))
+    assert result['incumbent'] is not None
+    assert result['domain_manifest']['waiting_policy']['step_seconds']==1e-6
+    assert result['model_stats']['free_wait_variables'] > 0
+    assert 'wait_ticks' in result['incumbent']['trajectory_supports'][0]
+
+
+def test_waiting_lift_keeps_all_stop_operating_mode(tmp_path):
+    from ropeway_skip_stop_optimization.optimization.ddd.fixed_k import DddFixedKOperatingMode
+    result=run_ddd_fixed_k_cp_sat(DddFixedKCpSatRunConfig(EXAMPLE,2,tmp_path,
+        operating_mode=DddFixedKOperatingMode.ALL_STOP, maximum_wait_seconds=1200,build_only=True))
+    assert result['operating_mode']=='all_stop'
+    assert all(o['decision']=='stop' for o in result['domain_manifest']['movement_core']['route_options'])

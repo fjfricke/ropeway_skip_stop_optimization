@@ -21,6 +21,22 @@ Scenario
 New exact optimization work uses the continuous EAN path directly from the
 physical scenario.
 
+## Reservation insertion diagnostic
+
+The fixed-start reservation pilot composes a resource calendar, exact local
+wait-window arithmetic, bounded joint suffix repair and integer passenger
+assignment. It reuses `DddFixedKTrajectoryProblem`, DDD reference trajectories,
+the EAN adapter and validation. Shared fixed-K certificates now live in
+`fixed_k_certificate.py`; CP-SAT certificate functions retain compatible wrappers.
+The public entry point is `DddReservationInsertionOptimizer`; benchmark and
+checkpoint adapters remain separate from the physical search. The calendar now
+prunes partners using entry ticks and prefix clearance maxima. Optional
+`DddReservationAssignmentRefiner` composes the existing passenger evaluator with
+explicit canonical candidate injection and recertifies every improvement. This is a
+primal-only heuristic, not a new source of global lower bounds. See the
+[implemented contract](ddd_reservation_insertion.md) and
+[K39 pilot results](../findings/ddd_reservation_insertion_gate.md).
+
 ## EAN Construction and Optimization
 
 The EAN builder derives route timing, cabin starts, switch visits and

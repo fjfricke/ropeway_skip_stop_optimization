@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import math
+
 from dataclasses import InitVar, dataclass
 from enum import StrEnum
 from itertools import combinations
@@ -538,11 +540,17 @@ def validate_ddd_reference_trajectory(
             raise ValueError("DDD trajectory references an unknown route option")
         if option.from_state_id != reference_visit.state_id:
             raise ValueError("DDD visit uses a route from another state")
-        allowed_waits = waiting_policy.wait_values_seconds(option.station_id)
-        if not any(
-            abs(reference_visit.wait_seconds - value) <= tolerance_seconds
-            for value in allowed_waits
-        ):
+        # Check grid membership arithmetically: a microsecond grid over a
+        # service horizon must not materialize billions of candidate waits.
+        maximum = waiting_policy.maximum_wait_seconds(option.station_id)
+        step = waiting_policy.step_seconds
+        wait = reference_visit.wait_seconds
+        if not math.isfinite(wait):
+            raise ValueError("DDD visit wait must be finite")
+        grid_value = 0.0 if step is None else round(wait / step) * step
+        if (not math.isfinite(wait) or wait < -tolerance_seconds
+            or wait > maximum + tolerance_seconds
+            or abs(wait - grid_value) > tolerance_seconds):
             raise ValueError("DDD visit wait lies outside the configured domain")
         if (
             option.decision is DddRouteDecision.SKIP

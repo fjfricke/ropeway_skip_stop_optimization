@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 from enum import StrEnum
 from hashlib import sha256
 import json
@@ -110,9 +110,7 @@ class DddFixedKProfileConfig:
     cp_seed_time_limit_seconds: float
 
     @classmethod
-    def for_profile(
-        cls, profile: DddFixedKExperimentProfile
-    ) -> DddFixedKProfileConfig:
+    def for_profile(cls, profile: DddFixedKExperimentProfile) -> DddFixedKProfileConfig:
         if profile is DddFixedKExperimentProfile.SCREENING:
             return cls(600.0, 30, (5.0, 15.0), 3, 15.0, 60.0, 30.0)
         if profile is DddFixedKExperimentProfile.REGULAR:
@@ -181,6 +179,41 @@ class DddFixedKTrajectoryProblem:
 
     @property
     def fingerprint(self) -> str:
+        """Versioned full identity; legacy hashes are never bound certificates."""
+        return sha256(
+            json.dumps(
+                self.certificate_manifest,
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode()
+        ).hexdigest()
+
+    @property
+    def certificate_manifest(self) -> dict:
+        from ..ean.horizon_contract import FINITE_EVENT_ENTRY_CONTRACT
+
+        return {
+            "schema": "fixed_k_problem_v2",
+            "horizon_contract": FINITE_EVENT_ENTRY_CONTRACT,
+            "scenario_id": self.artifact.scenario_id,
+            "fleet_cardinality": self.fleet_cardinality,
+            "operating_mode": self.operating_mode.value,
+            "start_policy": self.start_policy.value,
+            "objective": self.objective.value,
+            "objective_floor": self.objective_floor,
+            "trajectory_problem": asdict(self.resolved_trajectory_problem),
+            "boundary": asdict(self.boundary_context),
+            "cabin_capacity": self.artifact.config.cabin_capacity,
+            "demand_groups": [asdict(g) for g in self.passenger_build.demand_groups],
+            "ride_candidates": [
+                asdict(q) for q in self.passenger_build.ride_candidates
+            ],
+        }
+
+    @property
+    def legacy_fingerprint(self) -> str:
+        """Only for revalidating historical primal plans with a full manifest."""
         resolved = self.resolved_trajectory_problem
         payload = {
             "scenario_id": self.artifact.scenario_id,

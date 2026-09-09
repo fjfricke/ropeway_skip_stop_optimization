@@ -21,6 +21,8 @@ class DddCpSatMovementModel:
     states_by_cabin: dict[int, tuple[str, ...]]
     resource_intervals: dict[str, list[cp_model.IntervalVar]]
     max_completion_tick: int
+    wait_steps_by_key: dict[tuple[int, int], cp_model.IntVar]
+    waiting_step_tick: int
 
 
 def build_ddd_cp_sat_movement(
@@ -57,6 +59,7 @@ def build_ddd_cp_sat_movement(
     }
     hint_by_cabin = dict(hint_schedule_by_cabin)
     hint_by_cabin.update({path.cabin_id: path for path in hint_paths})
+    wait_steps_by_key = {}
     time_by_cabin: dict[int, list[cp_model.IntVar]] = {}
     active_by_cabin: dict[int, list[cp_model.IntVar]] = {}
     selection_by_key: dict[tuple[int, int, str], cp_model.IntVar] = {}
@@ -173,6 +176,7 @@ def build_ddd_cp_sat_movement(
                 maximum_wait_steps,
                 f"wait_steps[{start.cabin_id},{visit_index}]",
             )
+            wait_steps_by_key[start.cabin_id, visit_index] = wait_steps
             model.add(
                 wait_steps
                 <= sum(
@@ -248,7 +252,7 @@ def build_ddd_cp_sat_movement(
 
     return DddCpSatMovementModel(
         model, time_by_cabin, active_by_cabin, selection_by_key,
-        states_by_cabin, resource_intervals, max_completion_tick,
+        states_by_cabin, resource_intervals, max_completion_tick, wait_steps_by_key, waiting_step_tick,
     )
 
 

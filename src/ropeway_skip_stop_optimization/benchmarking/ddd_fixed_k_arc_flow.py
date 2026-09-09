@@ -166,9 +166,7 @@ class DddFixedKArcFlowRunResult:
     start_layout_seconds: float = 0.0
     start_layout_objective_proven: bool | None = None
     waiting_headway_multiplier: float = 0.0
-    waiting_reference_headway_seconds_by_station_id: tuple[
-        tuple[str, float], ...
-    ] = ()
+    waiting_reference_headway_seconds_by_station_id: tuple[tuple[str, float], ...] = ()
     resource_row_mode: DddArcFlowResourceRowMode = (
         DddArcFlowResourceRowMode.EAGER_MAXIMAL_CLIQUES
     )
@@ -184,6 +182,8 @@ class DddFixedKArcFlowRunResult:
         raw.update(
             {
                 "example_id": self.scenario.id,
+                "fixed_k_problem_manifest": self.problem.certificate_manifest,
+                "proof_scope": "FIXED_K_GLOBAL",
                 "exact_active_cabin_count": self.problem.fleet_cardinality,
                 "operating_mode": self.problem.operating_mode.value,
                 "objective": self.problem.objective.value,
@@ -273,9 +273,7 @@ class DddPreparedFixedKArcFlowRun:
     start_layout_seconds: float = 0.0
     start_layout_objective_proven: bool | None = None
     seed_trajectories: tuple[DddReferenceTrajectory, ...] = ()
-    waiting_reference_headway_seconds_by_station_id: tuple[
-        tuple[str, float], ...
-    ] = ()
+    waiting_reference_headway_seconds_by_station_id: tuple[tuple[str, float], ...] = ()
 
 
 class DddAnalyticAllStopInfeasible(ValueError):
@@ -345,10 +343,7 @@ def _headway_scaled_waiting_config(
     maximum_by_station = {
         station_id: max(
             step_seconds,
-            math.ceil(
-                multiplier * headway / step_seconds - 1e-12
-            )
-            * step_seconds,
+            math.ceil(multiplier * headway / step_seconds - 1e-12) * step_seconds,
         )
         for station_id, headway in reference
     }
@@ -470,9 +465,7 @@ def prepare_ddd_fixed_k_arc_flow_run(
     )
     return replace(
         prepared,
-        waiting_reference_headway_seconds_by_station_id=(
-            waiting_reference_headways
-        ),
+        waiting_reference_headway_seconds_by_station_id=(waiting_reference_headways),
     )
 
 
@@ -483,11 +476,9 @@ def _fixed_k_problem_from_artifact(
     artifact,
     boundary_context: DddFixedKBoundaryContext,
 ) -> DddFixedKTrajectoryProblem:
-    trajectory_problem = (
-        EanArtifactToDddMovementProblemAdapter(
-            waiting_step_seconds=config.waiting_step_seconds
-        ).build_trajectory_problem(artifact)
-    )
+    trajectory_problem = EanArtifactToDddMovementProblemAdapter(
+        waiting_step_seconds=config.waiting_step_seconds
+    ).build_trajectory_problem(artifact)
     result = DddFixedKTrajectoryProblem(
         trajectory_problem=trajectory_problem,
         artifact=artifact,
@@ -790,7 +781,9 @@ def _load_ddd_fixed_k_arc_flow_result_seed(
     )
     expected_cabins = problem.resolved_trajectory_problem.cabin_ids
     if tuple(item.cabin_id for item in result) != expected_cabins:
-        raise ValueError("arc-flow primal seed does not contain every cabin exactly once")
+        raise ValueError(
+            "arc-flow primal seed does not contain every cabin exactly once"
+        )
     raw_upper_bound = payload.get("validated_upper_bound")
     upper_bound = (
         float(raw_upper_bound) if isinstance(raw_upper_bound, (int, float)) else None
@@ -805,13 +798,9 @@ def _validate_prepared_run_compatibility(
     problem = prepared.problem
     mismatches: list[str] = []
     if prepared.scenario.id != config.example_id:
-        mismatches.append(
-            f"scenario {prepared.scenario.id!r} != {config.example_id!r}"
-        )
+        mismatches.append(f"scenario {prepared.scenario.id!r} != {config.example_id!r}")
     if problem.fleet_cardinality != config.cabin_count:
-        mismatches.append(
-            f"K {problem.fleet_cardinality} != {config.cabin_count}"
-        )
+        mismatches.append(f"K {problem.fleet_cardinality} != {config.cabin_count}")
     if problem.operating_mode is not config.operating_mode:
         mismatches.append(
             f"mode {problem.operating_mode.value!r} != {config.operating_mode.value!r}"
@@ -937,7 +926,7 @@ def run_ddd_fixed_k_arc_flow(
 
     root_cg_lower_bound = _read_compatible_root_cg_lower_bound(
         config.root_cg_result_path,
-        expected_fingerprint=problem.fingerprint,
+        expected_problem=problem,
     )
     remaining = config.total_time_limit_seconds - (perf_counter() - started)
     if remaining <= 0:
@@ -1099,15 +1088,44 @@ def write_ddd_fixed_k_arc_flow_result(
 def _read_compatible_root_cg_lower_bound(
     path: Path | None,
     *,
-    expected_fingerprint: str,
+    expected_problem: DddFixedKTrajectoryProblem,
 ) -> float | None:
     if path is None:
         return None
     payload = json.loads(path.read_text(encoding="utf-8"))
-    fingerprint = payload.get("fixed_k_problem_fingerprint")
-    if fingerprint != expected_fingerprint:
+    from hashlib import sha256
+
+    if payload.get("certificate_valid") is not True:
+        raise ValueError("Root-CG lower bound requires an explicitly valid certificate")
+    if payload.get("proof_scope") != "FIXED_K_GLOBAL":
+        raise ValueError("Root-CG lower bound has missing or incompatible proof scope")
+    manifest = payload.get("fixed_k_problem_manifest")
+    if not isinstance(manifest, dict) or manifest.get("schema") != "fixed_k_problem_v2":
+        raise ValueError("Legacy Root-CG lower bound lacks a full versioned manifest")
+    fingerprint = sha256(
+        json.dumps(
+            manifest,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode()
+    ).hexdigest()
+    if (
+        fingerprint != expected_problem.fingerprint
+        or payload.get("fixed_k_problem_fingerprint") != fingerprint
+    ):
         raise ValueError("Root-CG result fingerprint differs from arc-flow problem")
+    if payload.get("status") not in {
+        "optimal_root_lp",
+        "integer_optimal",
+        "root_lp_certified_with_integer_gap",
+        "time_limit",
+        "iteration_limit",
+        "time_limit_with_certified_interval",
+        "iteration_limit_with_certified_interval",
+    }:
+        raise ValueError("Root-CG lower bound has an unsupported certificate status")
     value = payload.get("certified_lower_bound")
-    if value is None or not math.isfinite(float(value)):
+    if type(value) not in (int, float) or not math.isfinite(value):
         raise ValueError("Root-CG result has no finite certified lower bound")
     return float(value)

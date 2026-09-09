@@ -10,6 +10,9 @@ from ropeway_skip_stop_optimization.optimization.ean.builders.headway_pair_build
 from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     EanHorizonFormulation,
 )
+from ropeway_skip_stop_optimization.optimization.ean.horizon_contract import (
+    is_within_closed_horizon,
+)
 from ropeway_skip_stop_optimization.optimization.ean.headway_semantics import (
     PLATFORM_EXIT_WAIT_OCCUPANCY_SEMANTICS,
     POINT_HEADWAY_SEMANTICS,
@@ -57,8 +60,13 @@ def separate_all_headway_violations(
     plan: EanMovementPlan,
     *,
     tolerance_seconds: float = 1e-5,
+    include_after_horizon: bool = False,
 ) -> tuple[EanHeadwayViolation, ...]:
-    """Exhaustively separate candidate conflicts without persisting all pairs."""
+    """Separate conflicts, retaining full clearance of resources entered by H.
+
+    ``include_after_horizon`` is a diagnostic of all *exported* occurrences.
+    Even a clean diagnostic does not certify unexported future visits.
+    """
 
     if tolerance_seconds < 0:
         raise ValueError("tolerance_seconds must be nonnegative")
@@ -90,8 +98,10 @@ def separate_all_headway_violations(
                 continue
             if (
                 plan.horizon_formulation is EanHorizonFormulation.EXACT_TIME_ACTIVATION
-                and times.follower_enter_time
-                > artifact.config.operational_end_seconds + tolerance_seconds
+                and not include_after_horizon
+                and not is_within_closed_horizon(
+                    times.follower_enter_time, artifact.config.operational_end_seconds
+                )
             ):
                 continue
             active.append((candidate, times))
@@ -172,9 +182,10 @@ def _candidate_times(
         return _HeadwayTimes(
             leader_clear_time=visit.platform_exit_time_seconds,
             follower_enter_time=(
-                visit.switch_time_seconds
-                + timing.entry_to_platform_entry_seconds
-                + timing.min_platform_entry_to_platform_exit_seconds
+                # Use the validated plan's event arithmetic. DDD exports
+                # rounded offsets; recomputing raw EAN offsets can move an
+                # exactly-on-H wait entry to the other side of H.
+                visit.platform_exit_time_seconds - visit.wait_seconds
             ),
             semantics_label=PLATFORM_EXIT_WAIT_OCCUPANCY_SEMANTICS,
         )

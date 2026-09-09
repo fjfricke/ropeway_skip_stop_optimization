@@ -20,7 +20,10 @@ class EanHorizonFormulation(StrEnum):
     `EXACT_TIME_ACTIVATION` decides from optimized event times which visits and
     checkpoint occurrences belong to the finite operational horizon. A visit
     entering by the horizon remains modeled through its route clearance, while
-    later visits receive no route decision.
+    later visits receive no route decision. Headways include resource entries
+    by the closed horizon and retain their full clearance, but exclude new
+    resource entries after it, even within a selected route. This is a finite
+    event-entry contract, not a certificate of safe indefinite continuation.
     """
 
     LEGACY = "horizon_legacy"

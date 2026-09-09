@@ -11,7 +11,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.fixed_k import DddFixedKSta
 
 
 def main() -> None:
-    parser=argparse.ArgumentParser(description='Integrated exact Fixed-K No-Wait CP-SAT with integer passengers.')
+    parser=argparse.ArgumentParser(allow_abbrev=False, description='Integrated exact Fixed-K CP-SAT with integer passengers.')
     parser.add_argument('--example',required=True)
     parser.add_argument('--cabins','--cabin-count',dest='cabins',type=int,required=True)
     parser.add_argument('--mode',choices=[v.value for v in DddFixedKOperatingMode],default='skip_stop')
@@ -25,6 +25,10 @@ def main() -> None:
     parser.add_argument('--checkpoint',type=Path)
     parser.add_argument('--start-layout-time-limit',type=float,default=120)
     parser.add_argument('--seed-passenger-time-limit',type=float,default=30)
+    parser.add_argument('--maximum-wait-seconds',type=float,default=0,help='End-of-platform wait cap; 0 preserves No-Wait')
+    parser.add_argument('--waiting-step-seconds',type=float,default=0.000001)
+    parser.add_argument('--warmup-seconds',type=float,default=0,
+                        help='Empty optimized operation before demand; shifts releases and horizons together')
     parser.add_argument('--build-only',action='store_true')
     parser.add_argument('--log-search-progress',action='store_true')
     sources=parser.add_mutually_exclusive_group()
@@ -41,7 +45,9 @@ def main() -> None:
         start_layout_time_limit_seconds=args.start_layout_time_limit,
         seed_passenger_time_limit_seconds=args.seed_passenger_time_limit,
         primal_seed_result=args.primal_seed_result,primal_seed_checkpoint=args.primal_seed_checkpoint,
-        resume_checkpoint=args.resume_checkpoint,fixed_movement_result=args.fixed_movement_result,build_only=args.build_only)
+        resume_checkpoint=args.resume_checkpoint,fixed_movement_result=args.fixed_movement_result,build_only=args.build_only,
+        maximum_wait_seconds=args.maximum_wait_seconds,waiting_step_seconds=args.waiting_step_seconds,
+        warmup_seconds=args.warmup_seconds)
     result=run_ddd_fixed_k_cp_sat(config)
     fields=('solver_status','termination_reason','proof_scope','validated_upper_bound','cp_lower_bound','relative_gap','total_wall_seconds','model_stats')
     print(json.dumps({key:result.get(key) for key in fields},indent=2))

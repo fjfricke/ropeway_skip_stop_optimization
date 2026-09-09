@@ -877,9 +877,7 @@ def run_namespace(
         compatible_batch_time_limit_seconds=float(
             getattr(args, "compatible_batch_time_limit", 10.0)
         ),
-        coordinated_primal_time_limit_seconds=(
-            args.coordinated_primal_time_limit
-        ),
+        coordinated_primal_time_limit_seconds=(args.coordinated_primal_time_limit),
         coordinated_primal_interval=args.coordinated_primal_interval,
         coordinated_primal_workers=args.coordinated_primal_workers,
         coordinated_primal_candidate_count=args.coordinated_primal_candidates,
@@ -889,15 +887,10 @@ def run_namespace(
         neighborhood_primal_time_limit_seconds=(
             getattr(args, "neighborhood_primal_time_limit", 0.0)
         ),
-        neighborhood_primal_interval=getattr(
-            args, "neighborhood_primal_interval", 5
-        ),
+        neighborhood_primal_interval=getattr(args, "neighborhood_primal_interval", 5),
         neighborhood_primal_cabin_counts=tuple(
             sorted(
-                set(
-                    getattr(args, "neighborhood_primal_cabin_count", ())
-                    or (4, 8, 12)
-                )
+                set(getattr(args, "neighborhood_primal_cabin_count", ()) or (4, 8, 12))
             )
         ),
         neighborhood_primal_workers=getattr(args, "neighborhood_primal_workers", 8),
@@ -930,9 +923,7 @@ def run_namespace(
         merge_corridor_minimum_occurrence_count=getattr(
             args, "merge_corridor_min_occurrences", 2
         ),
-        merge_corridor_primal_workers=getattr(
-            args, "merge_corridor_primal_workers", 8
-        ),
+        merge_corridor_primal_workers=getattr(args, "merge_corridor_primal_workers", 8),
         merge_corridor_primal_candidate_count=getattr(
             args, "merge_corridor_primal_candidates", 1
         ),
@@ -1164,6 +1155,10 @@ def run_namespace(
         "fixed_k_problem_fingerprint": (
             None if fixed_k_problem is None else fixed_k_problem.fingerprint
         ),
+        "fixed_k_problem_manifest": (
+            None if fixed_k_problem is None else fixed_k_problem.certificate_manifest
+        ),
+        "proof_scope": None if fixed_k_problem is None else "FIXED_K_GLOBAL",
         "seed_status": (None if seed_result is None else seed_result.status.value),
         "seed_cp_sat_seconds": (
             None if seed_result is None else seed_result.cp_sat_seconds
@@ -1182,9 +1177,7 @@ def run_namespace(
         "master_dual_mode": args.master_dual_mode,
         "proof_pricing_mip_focus": args.proof_pricing_mip_focus,
         "extra_pricing_mip_focus": args.extra_pricing_mip_focus,
-        "coordinated_primal_time_limit_seconds": (
-            args.coordinated_primal_time_limit
-        ),
+        "coordinated_primal_time_limit_seconds": (args.coordinated_primal_time_limit),
         "compatible_batch_mode": getattr(
             args,
             "compatible_batch_mode",
@@ -1195,9 +1188,7 @@ def run_namespace(
         ),
         "coordinated_primal_interval": args.coordinated_primal_interval,
         "coordinated_primal_workers": args.coordinated_primal_workers,
-        "coordinated_primal_candidate_count": (
-            args.coordinated_primal_candidates
-        ),
+        "coordinated_primal_candidate_count": (args.coordinated_primal_candidates),
         "coordinated_primal_maximum_preference_count": (
             args.coordinated_primal_max_preferences
         ),
@@ -1209,15 +1200,10 @@ def run_namespace(
         ),
         "neighborhood_primal_cabin_counts": list(
             sorted(
-                set(
-                    getattr(args, "neighborhood_primal_cabin_count", ())
-                    or (4, 8, 12)
-                )
+                set(getattr(args, "neighborhood_primal_cabin_count", ()) or (4, 8, 12))
             )
         ),
-        "neighborhood_primal_workers": getattr(
-            args, "neighborhood_primal_workers", 8
-        ),
+        "neighborhood_primal_workers": getattr(args, "neighborhood_primal_workers", 8),
         "neighborhood_primal_candidate_count": (
             getattr(args, "neighborhood_primal_candidates", 1)
         ),

@@ -54,6 +54,9 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
 from ropeway_skip_stop_optimization.optimization.ean.headway_separator import (
     separate_all_headway_violations,
 )
+from ropeway_skip_stop_optimization.optimization.ean.horizon_contract import (
+    is_within_closed_horizon,
+)
 from ropeway_skip_stop_optimization.optimization.ean.plan import (
     EanCabinTrajectory,
     EanCabinVisit,
@@ -138,6 +141,11 @@ def validate_ean_movement_plan_against_artifact(
             tolerance_seconds,
         )
     _validate_trajectory_chains(plan.trajectories, issues, tolerance_seconds)
+    if (
+        plan.fleet_mode is EanFleetMode.FIXED_STARTS
+        and plan.horizon_formulation is EanHorizonFormulation.EXACT_TIME_ACTIVATION
+    ):
+        _validate_closed_horizon_coverage(plan, starts_by_cabin_id, issues)
     _validate_checkpoint_modes(checkpoint_by_id, station_config_by_id, issues)
     if artifact.headway_pair_scope is EanHeadwayPairScope.SPARSE:
         for violation in separate_all_headway_violations(
@@ -495,7 +503,7 @@ def _validate_visits_against_artifact(
         _validate_visit_decision_and_timing(visit, timing, station_config, issues, tolerance_seconds)
         if (
             horizon_formulation is EanHorizonFormulation.EXACT_TIME_ACTIVATION
-            and visit.switch_time_seconds > model_end_seconds + tolerance_seconds
+            and not is_within_closed_horizon(visit.switch_time_seconds, model_end_seconds)
         ):
             _add_issue(
                 issues,
@@ -653,6 +661,34 @@ def _validate_trajectory_chains(
                 )
 
 
+def _validate_closed_horizon_coverage(
+    plan: EanMovementPlan,
+    starts_by_cabin_id: dict[int, EanCabinStart],
+    issues: list[ValidationIssue],
+) -> None:
+    """An exact fixed-start prefix must not silently drop its last active visit."""
+    for trajectory in plan.trajectories:
+        if trajectory.visits:
+            incomplete = is_within_closed_horizon(
+                trajectory.visits[-1].next_switch_time_seconds, plan.model_end_seconds
+            )
+        else:
+            start = starts_by_cabin_id.get(trajectory.cabin_id)
+            incomplete = (
+                start is not None
+                and start.kind is EanCabinStartKind.FIXED
+                and is_within_closed_horizon(start.time_seconds, plan.model_end_seconds)
+            )
+        if incomplete:
+            _add_issue(
+                issues,
+                "EAN_HORIZON_COVERAGE_MISSING",
+                f"cabin {trajectory.cabin_id} omits a visit entering by the closed horizon",
+                "ean_cabin",
+                trajectory.cabin_id,
+            )
+
+
 def _validate_checkpoint_modes(
     checkpoint_by_id: dict[str, HeadwayCheckpointDefinition],
     station_config_by_id: dict[str, StationEanConfig],
@@ -723,8 +759,8 @@ def _validate_headways(
             continue
         if horizon_formulation is EanHorizonFormulation.EXACT_TIME_ACTIVATION:
             if (
-                first_times.follower_enter_time > model_end_seconds + tolerance_seconds
-                or second_times.follower_enter_time > model_end_seconds + tolerance_seconds
+                not is_within_closed_horizon(first_times.follower_enter_time, model_end_seconds)
+                or not is_within_closed_horizon(second_times.follower_enter_time, model_end_seconds)
             ):
                 continue
         forward_gap = second_times.follower_enter_time - first_times.leader_clear_time
@@ -854,9 +890,7 @@ def _candidate_headway_times(
         if timing is None:
             return None
         wait_entry_time = (
-            visit.switch_time_seconds
-            + timing.entry_to_platform_entry_seconds
-            + timing.min_platform_entry_to_platform_exit_seconds
+            visit.platform_exit_time_seconds - visit.wait_seconds
         )
         return HeadwayTimes(
             leader_clear_time=visit.platform_exit_time_seconds,

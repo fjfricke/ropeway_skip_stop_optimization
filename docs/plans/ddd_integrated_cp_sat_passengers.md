@@ -1,5 +1,7 @@
 # Vollständiger CP-SAT-Solver mit Passagieren
 
+> Aktualisierung nach dem autorisierten Waiting-Test: V2 unterstützt begrenztes Exit-Waiting. Im kontrollierten K39-Laufpaar (je 600 s, gemeinsamer Seed) erreicht Waiting 1.022.076,36 Kosten und 1.104 bediente Personen, No-Wait 1.262.099,94 und 416. Die nativen Gaps betragen 92,52 % bzw. 68,58 %. 259 Tests bestehen. Details und Grenzen: [Waiting-Gate](../findings/ddd_integrated_cp_sat_waiting_gate.md). Die ursprüngliche No-Wait-Erstimplementierung und ihre damaligen Ausschlüsse sind darunter als Entwicklungskontext erhalten.
+
 ## 1. Ziel und Ausgangsstand
 
 Status: **erste Version implementiert; erste Gates ausgewertet**. Stand: 9. September 2026.
