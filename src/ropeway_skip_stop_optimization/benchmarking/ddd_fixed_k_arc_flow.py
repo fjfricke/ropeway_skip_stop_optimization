@@ -975,6 +975,7 @@ def run_ddd_fixed_k_arc_flow(
             mip_gap=0.0,
             threads=1,
             waiting_policy=problem.resolved_trajectory_problem.waiting_policy,
+            passenger_candidate_build=problem.passenger_build,
         ).evaluate(network_problem, solve_result.solution)
         validation_seconds = perf_counter() - validation_started
         validation_status = evaluation.status.value

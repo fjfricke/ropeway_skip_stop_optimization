@@ -22,3 +22,7 @@ Alle Performance-Solves nacheinander in separaten Prozessen. Keine anderen eigen
 - Weitere CP-Zeitdomänen-/Portfolioänderungen erst nach dieser unveränderten Formulierungsbaseline entscheiden.
 
 Ergebnisbericht: `docs/findings/solver_followup_campaign.md`. Lokale Messdateien: `benchmarks/output/solver_followup_20260909/`.
+
+## Zusätzliche aussagekräftige Schrankenprüfung
+
+Beim frischen No-Wait-K39-Lauf die gültige globale LB direkt mit der geprüften K38-All-Stop-UB 399287,271408 vergleichen. Falls LB(K39 No-Wait) darüber liegt, ist auch ohne kleinen K39-Gap bewiesen, dass diese genau fixierte K39-No-Wait-Startdomäne die konkrete K38-All-Stop-Referenz nicht schlagen kann. Das ist kein Satz über andere Anfangspositionen, Waiting oder variable Flottenzahl. Historische LBs geben hierfür einen Hinweis; der neue Lauf soll den Vergleich mit vollständiger aktueller Identität absichern.

@@ -35,3 +35,30 @@ Messdaten und kopierte Originalquellen: `benchmarks/output/solver_followup_20260
 5. Optional anonymes No-Wait-K39-Arc-Flow 1800 s mit passendem CP-No-Wait-Seed.
 
 Abgeschlossene Ergebnisse folgen hier mit klar getrennten Roh-CP-Werten, unabhängiger Assignment-Nachoptimierung und globalen Bounds.
+
+## Abgeschlossener 30-Minuten-Lauf K39 Waiting
+
+Commit der Solverbaseline: `192b9b7`. Unveränderte Produktformulierung, acht Worker, Seed 0, eingefrorener Hint 1007532,083464. Gesamtzeit 1800,517 s. Finale geprüfte Kosten **874705,109680**, **1280 bedient / 0 unbedient**, globale native LB **131762,776090**, Gap **84,94 %**. Die unabhängige feste Passagier-IP bestätigt genau denselben Wert und meldet OPTIMAL für diese Bewegung; kein globaler Optimalitätsbeweis.
+
+Kostenverbesserung gegenüber Seed 13,18 %, gegenüber dem Zustand nach zehn Minuten 4,95 %. Die Physik-/Nachfrage-/Kandidatendomäne ist gegenüber dem früheren K39-Waiting-Fall unverändert. Der stärkere Hint und die längere Zeit sind getrennt von einem Formulierungsgewinn zu interpretieren.
+
+Zeitanteile: Vorbereitung 3,950 s, integrierter Aufbau 1,066 s, Solveraufruf 1795,000 s, abschließende Prüfung/Checkpoint 0,241 s. Callback-Extraktion 4,998 s und Callback-Validierung 10,427 s liegen **innerhalb** des Solveraufrufs; Eventzustellung insgesamt 0,050 s. Modell 51076 Variablen / 106782 Constraints vor Presolve, 27978 Variablen nach Presolve, Suchstart nach 22,10 Solver-s. Peak-RSS 4090,8 MB.
+
+Die zusätzliche unabhängige Nachoptimierung/Prüfung benötigt nach erneuter Instanzvorbereitung etwa 0,98 s; sie gehört nicht zum 1800-s-Hauptbudget.
+
+| Runnerzeit | Beste gemeldete UB | Globale Solver-LB |
+|---|---:|---:|
+| 60 s | 1005329.684 | 0.000 |
+| 120 s | 997888.938 | 50501.851 |
+| 300 s | 993368.027 | 50503.613 |
+| 600 s | 920283.208 | 74872.837 |
+| 900 s | 907548.975 | 94697.996 |
+| 1200 s | 905617.105 | 113344.002 |
+| 1500 s | 883803.910 | 131580.501 |
+| Ende | 874705,110 | 131762,776 |
+
+Zwischenwerte sind Solverberichte; finale Bewegung und Zuweisung wurden unabhängig geprüft. Ergebnisse unter `benchmarks/output/solver_followup_20260909/k39_waiting_1800s_seed0/`.
+
+## Profilintegration geprüft
+
+94 Tests bestehen nach Ergänzung der kleinen Nachfragefallklasse, kanonischer Nachfrageübergabe auch in der Arc-Flow-Abschlussprüfung und Erhalt individueller Nachfrage beim Waiting-Übergang. Dieser Testlauf erfolgte erst nach Ende des langen CP-Laufs. Für die Standardnachfrage bleibt die erzeugte CP-Domäne gleich; die nächsten Wiederholungen müssen denselben vollständigen Domänenhash und dasselbe Modell wie der erste Lauf ausweisen.

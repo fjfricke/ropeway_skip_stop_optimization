@@ -1,5 +1,8 @@
 # Ropeway: Audit der bisherigen Solverläufe und Entscheidungsvorlage
 
+**Nachtrag zur Umsetzung:** Die beschriebenen Legacy-Fingerprint-/LB-Importmängel sind inzwischen in `192b9b7` korrigiert; historische primal gespeicherte Pläne werden über vollständige Manifeste erneut geprüft. Die [Folgekampagne](/Users/felix/Programming/idp/ropeway/ropeway_skip_stop_optimization/docs/findings/solver_followup_campaign.md) dokumentiert Umsetzung und neue Ergebnisse. Die Auditbefunde unten beschreiben den zuvor geprüften Stand.
+
+
 Stand: **9. September 2026**. Bestandsaufnahme des lokalen Ergebnisarchivs und der aktuellen Implementierungen; keine neue Optimierungskampagne. Software-HEAD `d12807a`, Branch `ddd`, mit den bereits vorhandenen uncommitteten CP-/Waiting-/Horizon-/Reservierungsänderungen. Historische Läufe stammen aus unterschiedlichen Codeversionen. Der aktuelle Code erklärt die heutige Implementierung, ersetzt aber keine Rekonstruktion jedes damaligen Checkouts.
 
 **Empfehlung: auf CP-SAT mit Produktkodierung und Exit-Waiting als Hauptentwicklung festlegen; gelabeltes Arc-Flow als exakte No-Wait-Referenz behalten.** Das anonyme Arc-Flow erhält höchstens einen kontrollierten No-Wait-Versuch mit besserem Seed. Gemeinsame Fahrplanprüfung und Integer-Passagiernachoptimierung verbinden diese vorhandenen Bausteine. Kein weiterer Solverzweig und kein Ausbau der Reservierungsheuristik vor der Präsentation.
