@@ -190,6 +190,8 @@ def test_tiny_reservoir_optimizer_returns_a_certified_integer_solution(tmp_path:
         )
     ).solve(problem)
     assert result.status is DddReservoirArcFlowStatus.INTEGER_OPTIMAL
+    assert result.primary_solver_status == "OPTIMAL"
+    assert result.secondary_solver_status == "OPTIMAL"
     assert result.primary_lower_bound == pytest.approx(0.0)
     assert result.primary_upper_bound == pytest.approx(0.0)
     assert result.served_lower_bound == pytest.approx(1.0)

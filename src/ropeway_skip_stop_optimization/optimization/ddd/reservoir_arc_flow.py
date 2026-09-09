@@ -1369,3 +1369,16 @@ def import_ddd_reservoir_incumbent_checkpoint(
     if not semantic:
         raise ValueError("reservoir imported checkpoint has no semantic Passenger seed")
     return selected, semantic
+
+
+def _solver_status_name(status: int) -> str:
+    """Keep native Gurobi termination separate from reservoir certificates."""
+    for name in (
+        "LOADED", "OPTIMAL", "INFEASIBLE", "INF_OR_UNBD", "UNBOUNDED",
+        "CUTOFF", "ITERATION_LIMIT", "NODE_LIMIT", "TIME_LIMIT",
+        "SOLUTION_LIMIT", "INTERRUPTED", "NUMERIC", "SUBOPTIMAL",
+        "INPROGRESS", "USER_OBJ_LIMIT", "WORK_LIMIT", "MEM_LIMIT",
+    ):
+        if status == getattr(GRB, name, None):
+            return name
+    return f"STATUS_{status}"
