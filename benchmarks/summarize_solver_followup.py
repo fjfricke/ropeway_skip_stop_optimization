@@ -64,6 +64,7 @@ def main():
             waiting=config.get("maximum_wait_seconds", 0),
             seed=result.get("random_seed", config.get("solver", {}).get("seed")),
             status=result.get("solver_status", result.get("status")),
+            result_status=result.get("status"),
             proof_scope=result.get("proof_scope"),
             raw_ub=ub,
             post_ip_ub=post_ub,
@@ -71,7 +72,7 @@ def main():
             lb=lb,
             gap=None
             if not finite(lb) or selected is None or selected == 0
-            else (selected - lb) / selected,
+            else max(0.0, selected - lb) / selected,
             served=post.get(
                 "served", metrics.get("served", result.get("served_count"))
             ),
@@ -87,8 +88,16 @@ def main():
             ),
             solve_seconds=result.get("solve_seconds"),
             prepare_seconds=result.get("prepare_seconds"),
+            setup_seconds=result.get("setup_seconds"),
             network_seconds=result.get("network_build_seconds"),
             seed_seconds=result.get("seed_seconds"),
+            validation_seconds=result.get(
+                "validation_seconds", result.get("independent_validation_seconds")
+            ),
+            time_to_first_incumbent_seconds=result.get(
+                "time_to_first_incumbent_seconds"
+            ),
+            node_count=result.get("node_count"),
             post_ip_seconds=post.get("total_seconds", metrics.get("post_ip_seconds")),
             callback_extraction_seconds=result.get("callback_extraction_seconds"),
             callback_validation_seconds=result.get("callback_validation_seconds"),

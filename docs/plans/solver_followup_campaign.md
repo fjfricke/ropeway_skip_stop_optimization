@@ -26,3 +26,15 @@ Ergebnisbericht: `docs/findings/solver_followup_campaign.md`. Lokale Messdateien
 ## Zusätzliche aussagekräftige Schrankenprüfung
 
 Beim frischen No-Wait-K39-Lauf die gültige globale LB direkt mit der geprüften K38-All-Stop-UB 399287,271408 vergleichen. Falls LB(K39 No-Wait) darüber liegt, ist auch ohne kleinen K39-Gap bewiesen, dass diese genau fixierte K39-No-Wait-Startdomäne die konkrete K38-All-Stop-Referenz nicht schlagen kann. Das ist kein Satz über andere Anfangspositionen, Waiting oder variable Flottenzahl. Historische LBs geben hierfür einen Hinweis; der neue Lauf soll den Vergleich mit vollständiger aktueller Identität absichern.
+
+## Ausführungsstand
+
+- [x] Identität und Zertifikatsimport korrigiert, Regressionen bestanden.
+- [x] Baseline einschließlich geprüfter historischer Pläne gesichert (`192b9b7`).
+- [x] K39 Waiting: 1800 s Seed 0 und je 600 s Seeds 1/2, alle nachgeprüft.
+- [x] K38 Waiting aus All-Stop: 600 s, unabhängig nachgeprüft.
+- [x] Zwölf K20-Profilläufe ausgeführt; sechs Paaridentitäten bestätigt, alle Abschlussbewertungen geprüft.
+- [x] Anonymer No-Wait-K39-Lauf 1800 s abschließen und auswerten.
+- [x] Abschließende Tabellen, Rohdatenarchiv und Ergebniscommit.
+
+Die Profilintegration und Ausführungswerkzeuge sind in `cdf6399` gesichert. Die bisherigen Vergleichsergebnisse stehen im verlinkten Findings-Dokument; alle 17 Hauptläufe sind abgeschlossen und nachgeprüft.
