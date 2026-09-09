@@ -1,6 +1,11 @@
 # EAN Fleet Activation and Depot Plan
 
-Status: **future semantic and experimental work**
+Status: **ideal boundary mode implemented; service-period physical depot remains future work**
+
+The implemented anonymous finite-grid boundary formulation is documented in
+[`../reference/ddd_anonymous_reservoir_arc_flow.md`](../reference/ddd_anonymous_reservoir_arc_flow.md).
+It uses no dispatch or recovery during passenger service. The operational
+physical depot described below is intentionally not part of version 1.
 
 ## Goal
 
@@ -132,9 +137,12 @@ physical depot or removed through the exit reservoir by \(D\). For a single
 co-located storage facility, both states represent the same end-of-day stored
 fleet.
 
-Use one common passenger-free movement policy in warm-up and recovery for
-all-stop and skip experiments. It may use deadhead bypasses when the research
-question is passenger-service policy rather than non-revenue operation.
+Use a common passenger-free movement domain in warm-up and recovery for
+all-stop and skip experiments. Version 1 keeps recovery no-wait but permits
+both stop and skip clearing arcs. A hard simultaneous transition to skip-only
+can create a new merge conflict when a follower skips while its leader is
+still completing the final pre-boundary stop; it would incorrectly exclude the
+all-stop reference.
 
 ## Experiment Questions
 

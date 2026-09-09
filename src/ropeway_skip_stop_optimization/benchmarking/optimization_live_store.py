@@ -214,6 +214,10 @@ def reduce_optimization_events(
         elif event.kind is OptimizationEventKind.CG_ROUND_COMPLETED:
             trial["round_index"] = event.round_index
             trial.update(event.payload)
+        elif event.kind is OptimizationEventKind.SOLVER_SAMPLE:
+            # Solver-specific live metrics are additive presentation data.  The
+            # canonical bound fields above remain the only certificate source.
+            trial.update(event.payload)
     campaign["trial_count"] = max(
         int(campaign.get("trial_count", 0)), len(campaign["trials"])
     )

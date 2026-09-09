@@ -24,6 +24,11 @@ from ropeway_skip_stop_optimization.benchmarking.ddd_root_cg import (
     DddRootCgTrialResult,
     DddRootCgTrialRunner,
 )
+from ropeway_skip_stop_optimization.benchmarking.ddd_reservoir_arc_flow import (
+    DddPreparedReservoirArcFlowRun,
+    DddReservoirArcFlowRunConfig,
+    prepare_ddd_reservoir_arc_flow_run,
+)
 from ropeway_skip_stop_optimization.benchmarking.ddd_merge_aware_bpc import (
     DddMergeAwareRootGateConfig,
     DddMergeAwareRootGateResult,
@@ -80,6 +85,8 @@ __all__ = [
     "DddRootCgTrialConfig",
     "DddRootCgTrialResult",
     "DddRootCgTrialRunner",
+    "DddPreparedReservoirArcFlowRun",
+    "DddReservoirArcFlowRunConfig",
     "DispatchCardinality",
     "EanBottleneckCase",
     "EanBottleneckCaseResult",
@@ -99,5 +106,6 @@ __all__ = [
     "derive_available_fleet_intervals",
     "derive_skip_stop_benefit_interval",
     "run_ean_passenger_benchmark",
+    "prepare_ddd_reservoir_arc_flow_run",
     "write_ddd_partial_passenger_gate_result",
 ]

@@ -6,6 +6,13 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS_BY_MODULE: dict[str, tuple[str, ...]] = {
+    'ropeway_skip_stop_optimization.optimization.ddd.anonymous_reservoir_network': (
+        'DddAnonymousReservoirArc',
+        'DddAnonymousReservoirArcKind',
+        'DddAnonymousReservoirNetwork',
+        'DddAnonymousReservoirNetworkBuilder',
+        'DddAnonymousReservoirNode',
+    ),
     'ropeway_skip_stop_optimization.optimization.ddd.arc_flow': (
         'DddArcFlowResourceRowMode',
         'DddFixedKArcFlowOptimizer',
@@ -48,6 +55,33 @@ _EXPORTS_BY_MODULE: dict[str, tuple[str, ...]] = {
         'DddExactAnonymousPassengerEvent',
         'DddExactAnonymousPassengerModel',
         'DddExactAnonymousPassengerModelBuilder',
+    ),
+    'ropeway_skip_stop_optimization.optimization.ddd.reservoir_arc_flow_problem': (
+        'DddReservoirArcFlowProblem',
+        'DddReservoirOperatingMode',
+    ),
+    'ropeway_skip_stop_optimization.optimization.ddd.reservoir_arc_flow': (
+        'DddAnonymousReservoirPath',
+        'DddReservoirAllStopReference',
+        'DddReservoirAllStopReferenceBuilder',
+        'DddReservoirArcFlowOptimizer',
+        'DddReservoirArcFlowProgress',
+        'DddReservoirArcFlowResult',
+        'DddReservoirArcFlowSolveConfig',
+        'DddReservoirArcFlowStatus',
+        'DddReservoirPassengerMetrics',
+        'decompose_ddd_anonymous_reservoir_paths',
+        'import_ddd_reservoir_incumbent_checkpoint',
+        'load_ddd_reservoir_incumbent_checkpoint',
+        'validate_ddd_anonymous_reservoir_selection',
+        'write_ddd_reservoir_incumbent_checkpoint',
+    ),
+    'ropeway_skip_stop_optimization.optimization.ddd.reservoir_passenger': (
+        'DddReservoirPassengerDomain',
+        'DddReservoirPassengerDomainBuilder',
+        'DddReservoirPassengerEvent',
+        'DddReservoirPassengerModel',
+        'DddReservoirPassengerModelBuilder',
     ),
     'ropeway_skip_stop_optimization.optimization.ddd.arc_flow_movement': (
         'DddFixedKMovementArcFlowConfig',
