@@ -6,9 +6,9 @@ Stand: 12.09.2026.
 
 The implementation now constructs and independently validates positive Max50
 R2 plans with variable fleet size and unrestricted legal waiting. It has not
-produced a competitive large-instance incumbent. The best 30-second pilot
-served 296 of 3,074 passengers, compared with 2,496 in the frozen external
-reference plan.
+produced a competitive large-instance incumbent. The best observed pilot
+served 335 of 3,074 passengers, compared with 2,496 in the frozen external
+reference plan. A full five-minute run was worse and served only 195.
 
 | Formulation state | Search | Budget | Best served | Used fleet | Peak RSS | Progress |
 |---|---|---:|---:|---:|---:|---|
@@ -18,6 +18,9 @@ reference plan.
 | lazy singleton whole-trip masks, cubic STN | primal CABS, width 512 | 30 s | 88 | 3 | 3.55 GB | 40, 72, 88 |
 | grouped whole-trip masks, incremental STN | primal CABS, width 512 | 30 s nominal | **200** | 7 | 15.31 GB | 40, 80, 104, 128, 152, 176, 200 |
 | same, discard old layer registries | primal CABS, width 512 | 30 s | **296** | 7 | 1.13 GB | 72, 80, 96, 112, 152, 192, 232, 272, 296 |
+| same, discard old registries | primal CABS, width 512 | stopped at width limit after 79 s | **335** | 10 | 1.23 GB | 296 at 26.6 s, 320 at 37.7 s, 327 at 50.0 s, 335 at 63.8 s |
+| same, discard old registries | primal CABS, width 2,048 | stopped at width limit after 17 s | 112 | 3 | 1.62 GB | last improvement at 9.6 s |
+| same, effectively unbounded width | primal CABS, width up to 65,536 | **300 s** | 195 | 4 | 14.89 GB | 168 at 30.0 s, 195 at 101.0 s; then 199 s without progress |
 | same, 12 workers | primal CAHDBS2, width 512 | completed in 8.55 s | 192 | 4 | 0.88 GB | maximum width reached |
 | same, 12 workers | primal CAHDBS2, width 2,048 | 30 s | 208 | 4 | 3.67 GB | 64, 96, 120, 152, 160, 208 |
 | same formulation, proof-oriented ordering | dual CABS, width 128 | completed in 0.15 s | 28 | 2 | 172 MB | served upper bound 3,074 |
@@ -63,6 +66,16 @@ Twelve workers expanded 4.24 million states at width 2,048, but produced only
 Parallel throughput therefore did not translate into better beam diversity in
 this deterministic pilot. One worker is the current empirical recommendation.
 
+The explicit five-minute test removed the small maximum-width stop by setting
+the cap to 65,536. It expanded 25.31 million states, generated 31.60 million,
+and used 14.89 GB at peak. The incumbent improved to 168 at 30 seconds and 195
+at 101 seconds, then remained unchanged for the final 199 seconds. A separate
+width-512 run reached 335 in 63.8 seconds and stopped at its width limit after
+79 seconds. Thus more time, states, and memory did not yield a monotonically
+better incumbent. Separate native processes can resolve equal-priority states
+differently, and RPID exposes no seed for this search path; maximum beam width
+is therefore not a reproducible quality knob in the current integration.
+
 The corrected proof-oriented run retained the safe global served upper bound of
 3,074 and stopped at its configured maximum beam width. In unserved notation
 that is still only the trivial lower bound zero. It therefore provides no useful
@@ -83,6 +96,8 @@ level needed for the thesis comparison. A long run with the current state
 representation is unlikely to bridge that difference because memory reached
 15.3 GB at only seven used cabins.
 
-Despite the registry improvement, 296 remains far below the reference at the
-same problem scale. CP-SAT or the validated reference therefore remains the
-practical source of large incumbents for the current thesis experiments.
+Even the best observed value of 335 remains far below the 2,496 reference at
+the same problem scale. The five-minute experiment also shows that merely
+raising the width and runtime is not a credible route across that gap. CP-SAT
+or the validated reference therefore remains the practical source of large
+incumbents for the current thesis experiments.
