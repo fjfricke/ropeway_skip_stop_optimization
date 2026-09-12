@@ -556,6 +556,17 @@ damit das Vergleichsziel erreicht: `38 < 125`. Der zweite Seed bleibt für die
 Robustheitsbewertung vorgesehen, ist aber für die logische Gültigkeit dieses
 bereits geprüften Zeugen nicht erforderlich.
 
+Die Seed-1-Wiederholung auf dem sauberen Commit `4f4ab9c` verbesserte weiter
+und erreichte nach rund 89,69 s **S=3.074 / U=0** mit 38 Kabinen. Der finale
+Checkpoint wurde unabhängig gegen die ursprüngliche vollständige Domäne
+bestätigt. Damit ist auch das primäre Bedienungsoptimum für diese konkrete
+Nachfrage trivial erreicht; offen bleibt nur die sekundäre minimale
+Flottenzahl. Gegen den globalen All-Stop-Bound entspricht dies einem
+nachgewiesenen Vorteil von mindestens 125 Personen. Die Umsetzung wechselt
+deshalb von „Incumbent-Gate“ zu Reproduktions- und Übertragbarkeitsprüfung;
+weitere Formulierungsvarianten sind für den R2-Kapazitätsnachweis nicht mehr
+erforderlich.
+
 Physikalische Domäne, neue Vergleichsrestriktionen und Modellencoding erhalten
 getrennte Fingerprints. Modellfingerprint enthält Katalog, T, erlaubte
 Abstandsbereiche, Zielmodus und Präparationsversion. Ergebnisse speichern

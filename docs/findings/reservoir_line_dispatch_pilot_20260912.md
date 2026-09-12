@@ -139,3 +139,39 @@ Der nächste Lauf soll diese Incumbentqualität mit Seed 1 reproduzieren. Für
 die Aussage `U_SS < LB(U_AS*)` genügt bereits der unabhängig validierte Zeuge;
 die Wiederholung bewertet Robustheit und Laufzeit, nicht die logische
 Gültigkeit des vorhandenen Nachweises.
+
+## Seed-1-Wiederholung: vollständige Bedienung
+
+Die auf dem sauberen Commit `4f4ab9c` ausgeführte Seed-1-Wiederholung ist
+abgeschlossen. Der Runner bestätigte einen unveränderten Arbeitsbaum und nahm
+den U=38-Hint nach 3,14 s an. Danach folgten weitere echte Verbesserungen:
+
+- U=30 bei 34,39 s mit 37 Kabinen;
+- U=22 bei 87,58 s mit 38 Kabinen;
+- **U=0, S=3.074 bei 89,69 s mit 38 Kabinen**.
+
+Der finale Checkpoint liegt in
+`benchmarks/output/reservoir_lines_20260912_exact_r2_k50_small_180s_s1_v1/best.json`.
+Er wurde nach dem Solverlauf erneut unabhängig bestätigt: sämtliche 36
+Nachfragegruppen sind vollständig bedient, alle Ressourcen- und
+Zustandsheadways gelten, alle Kabinen kehren rechtzeitig zurück und die
+Peak-Flotte ist 38. Der Plan verwendet 19 BD- und 19 CE-Linien. 34 Einsätze
+fahren sieben Runden, zwei sechs Runden, einer acht und einer drei; die
+Dispatchspanne reicht von 0 bis 275,610270 s. Peak-RSS war 9,85 GB.
+
+Der Solverstatus bleibt wegen der sekundären Minimierung der Flottenzahl nach
+180 s `FEASIBLE`. Für das primäre Bedienungsziel ist der Wert trotzdem
+offensichtlich optimal: Bei Gesamtnachfrage 3.074 kann kein Plan mehr als
+3.074 Personen bedienen. Die minimal notwendige Flottenzahl ist nicht
+bewiesen.
+
+Der endgültige Vergleich lautet damit:
+
+\[
+S_{SS}=3.074 > 2.949 \ge S_{AS}^*,
+\]
+
+also bedient der Skip-Stop-Zeuge mindestens **125 Personen mehr** als jeder
+All-Stop-Plan in der vollständigen Single-Use-Max50-R2-Domäne. Dies beantwortet
+die Kapazitätsfrage für R2 ohne Waiting-Nutzung und ohne einen globalen
+Skip-Stop-Gap schließen zu müssen.
