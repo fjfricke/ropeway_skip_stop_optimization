@@ -1,6 +1,14 @@
 # Reservoir-DP: symbolische Zeiten und Gruppen-/Haltemuster gemeinsam testen
 
-Stand: 12.09.2026. **Implementierungsplan; noch nicht umgesetzt oder gestartet.**
+Stand: 12.09.2026. **Pilot umgesetzt und mit ersten R2-Läufen geprüft.**
+
+Implementierter Vertrag: [Symbolic reservoir DP](../reference/reservoir_dp.md).
+Erste Messungen: [Reservoir DP pilot: first findings](../findings/reservoir_symbolic_and_pattern_dp_20260912.md).
+
+Aus dem Pilot verbleiben als getrennt zu prüfende Formulierungsschritte eine
+sichere STN-Variablenprojektion, Zoneninklusion als Dominanz und eine ausdrücklich
+approximative FIFO-Ressourcenreihenfolge innerhalb einer Haltemustergruppe. Jeder
+Schritt benötigt Differentialtests gegen den hier dokumentierten exakten Kern.
 
 ## 1. Ziel, Varianten und Abgrenzung
 
@@ -245,21 +253,23 @@ Vergangene Routen und Ride-Mengen stehen im Übergangszeugnis. Nur ihre noch
 relevanten Folgen bleiben im Suchzustand. Vergangene Bedienung ist Suchkosten-
 beitrag und wird nicht zusätzlich als unabhängige Entscheidungsvariable geführt.
 
-Zu Beginn verzweigt eine native DP-Entscheidung über **K=0,...,Kmax**. Danach
-sind Dispatchzeiten aller gewählten Slots symbolisch frei. Dies ist keine
-vorgegebene feste Flotte und kein externer K-Sweep. Native Suchstatistiken müssen
-zeigen, welche K tatsächlich generiert, expandiert und bis zum Ende verfolgt
-werden. K=0 ist zulässig, zählt aber nicht als erfolgreicher Bedienungstest.
+Die umgesetzte DP aktiviert Kabinen **lazy**. Nach jeder vollständigen Rückkehr
+wählt CABS zwischen Beenden mit dem aktuellen K und Aktivieren des nächsten Slots
+bis Kmax. Dessen Dispatchzeit bleibt symbolisch frei und wird nur zur sicheren
+Symmetriebrechung nach dem vorherigen Dispatch geordnet. Dies ist weder eine
+vorgegebene feste Flotte noch ein externer K-Sweep. Die zuerst getestete
+K=0,...,Kmax-Wurzelverzweigung wurde verworfen, weil sie denselben
+Erstkabinenpräfix bis zu 50-mal duplizierte. K=0 bleibt durch sofortiges Beenden
+zulässig, zählt aber nicht als erfolgreicher Bedienungstest.
 
 Kabinenlabels folgen nur der sortierten Dispatchreihenfolge identischer
 Reservoirkabinen. Die entsprechende Umbenennung wird beim Export vollständig
 auf Rides übertragen. Keine zusätzliche Austauschbarkeitsdominanz aktiver Kabinen.
 
-Besuche werden in einer festen **Konstruktionsreihenfolge** bearbeitet, z.B.
-niedrigster nächster Besuchsindex und dann Kabinen-ID. Diese Reihenfolge setzt
-keine Zeitbedingung zwischen Kabinen. Sie vermeidet eine zusätzliche Suche nach
-dem vermeintlich frühesten symbolischen Ereignis. Ressourcenlisten erlauben
-weiterhin die spätere Einfügung vor schon bearbeiteten Bewegungen.
+Besuche werden in einer festen **Konstruktionsreihenfolge** bearbeitet: eine
+Kabine bis zur Rückkehr, danach der nächste lazy aktivierte Slot. Diese Reihenfolge
+setzt keine Zeitbedingung zwischen Kabinen. Ressourcenlisten erlauben weiterhin
+die spätere Einfügung vor, zwischen oder nach schon bearbeiteten Bewegungen.
 
 ### 6.2 Besuchsentscheidung und Passagiere
 
@@ -309,10 +319,11 @@ Zoneninklusion als zusätzliche Dominanz gehört erst nach separatem Beweis dazu
 und ist nicht Voraussetzung des ersten Vergleichs.
 
 Unbeschränkte Suche auf kleinen Fällen dient dem Äquivalenznachweis. Im Pilot
-verwendet native CABS `keep_all_layers=True`, initiale Breite 64, maximale
-Breite 1024. Der Startwert erlaubt bei Max50 mindestens die Darstellung der
-51 anfänglichen K-Alternativen; er garantiert deren späteren Erhalt nicht.
-Keine eigene Breiten-, K-Quoten- oder Diversitätssteuerung im ersten Paket.
+verwendet native CABS initiale Breite 64 und maximale Breite 1024. Nach direktem
+Vergleich ist `keep_all_layers=False` der Primalstandard: ältere
+Duplikatregister werden freigegeben, ohne Übergänge zu entfernen. Der Modus
+`True` bleibt für Diagnosen auswählbar. Keine eigene Breiten-, K-Quoten- oder
+Diversitätssteuerung im ersten Paket.
 
 **Gate C:** Freie kleine Fälle reproduzieren die enumerierten Kapazitätsoptima;
 historische Reservoirpläne sind durch Übergangsreplay darstellbar. Vollständigkeit
@@ -322,13 +333,17 @@ der diskreten Verzweigung und der Zeitdarstellung wird schriftlich begründet.
 
 ### 7.1 Erste getestete Einschränkung: `whole_trip`
 
-Eine Gruppe besteht aus n in Dispatchreihenfolge aufeinanderfolgenden Slots.
-Die Suche wählt `n=1,...,verbleibende Slots` und eine STOP/SKIP-Maske über alle
-Stationen. Gruppen werden vollständig vor der Besuchskonstruktion zugeordnet;
-die Zeiten bleiben dabei symbolisch offen.
+Eine Gruppe besteht aus in Dispatchreihenfolge aufeinanderfolgenden Slots. Die
+Suche wählt zunächst eine STOP/SKIP-Maske über alle Stationen. Nach jeder
+Kabinenrückkehr entscheidet sie zwischen einem weiteren Slot derselben Gruppe,
+dem Schließen der Gruppe mit anschließender neuer Maskenwahl und dem Beenden der
+Flotte. Die Gruppengröße bleibt so solverbestimmt, ohne alle möglichen Endgrößen
+am Gruppenanfang zu vervielfachen; die Zeiten bleiben symbolisch offen.
 
-- Alle zulässigen Masken werden automatisch erzeugt; bei fünf Stationen höchstens
-  32 einschließlich All-Skip. Keine Vorauswahl nur B–D/C–E oder Top-N nach Profit.
+- Alle Masken, die mindestens eine vorhandene direkte Nachfrage bedienen können,
+  werden automatisch erzeugt; bei fünf Stationen höchstens 32. Masken ohne ein
+  mögliches Origin-Ziel-Paar werden entfernt, weil eine völlig leere aktive
+  Kabine für `unserved` sicher durch einen ungenutzten Slot dominiert wird.
 - Mitglieder teilen lediglich die Maske für ihren gesamten einmaligen Einsatz.
 - Dispatch, Waiting, Passagiermengen und Zahl der Umläufe bleiben je Kabine frei.
 - Gruppen sind keine Züge mit konstantem Abstand und keine physische FIFO-Kette.
