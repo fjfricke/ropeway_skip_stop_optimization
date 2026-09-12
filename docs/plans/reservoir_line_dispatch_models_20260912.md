@@ -483,12 +483,78 @@ Neuer Runner `benchmarks/run_reservoir_lines.py` mit:
     --fixed-cabins <optional-K>
     --time-limit --workers --memory-limit-gib --seed
     --reference-checkpoint --output --build-only
+    --fix-reference-movement
 
 Zunächst nur `dispatch_domains` öffentlich suchfähig; nicht implementierte
 Varianten werden vor Aufbau abgelehnt. Kleine V2-Tests dürfen eine interne
 Test-API verwenden. Neuer Runner verwendet standardmäßig `exact_service`;
 Feasibilitytests und optimistische Ablation setzen ihren Modus ausdrücklich.
 Bestehende Runner und Standards bleiben unverändert.
+
+**Umsetzungspräzisierung (12.09.2026):** V1 darf eine bestehende
+`bounded_wait`-Quelldomäne laden, fixiert aber nachweisbar alle Waitings auf
+null. Das ist nötig, weil der eingefrorene R2-Fall eine Waiting-Policy besitzt,
+sein Referenzplan aber tatsächlich ohne Waiting fährt. Modellfingerprint,
+Statistik und `proof_scope` tragen deshalb ausdrücklich
+`waiting_fixed_to_zero`; jeder Bound gilt nur für das eingeschränkte
+No-Wait-Linienmodell. Ein positives Waiting im Seed bleibt nicht darstellbar.
+OR-Tools 9.15 stellt am gebundenen Proto zwar keine direkte `ByteSize`-Methode
+bereit, kann das Modell aber verlustfrei temporär binär exportieren. V1 misst
+daher die tatsächliche Exportgröße unter `serialized_model_bytes`; der
+Modellfingerprint wird ohne eine speicherintensive vollständige Textkopie aus
+Präparationsfingerprint, Konfiguration und Buildervertrag gebildet.
+
+Das erste reale R2-Größengate ergab beim kleinen Katalog bereits für Kmax=50
+592.900 konditionale Templatepaar-Constraints, 913.585 Constraints insgesamt
+und rund 285 MB Proto-Text in der ersten Diagnose (Aufbau 7,4 s). Eine
+unveränderte Hochrechnung des
+14-Muster-Katalogs läge bei über zwölf Millionen Templatepaar-Constraints.
+Deshalb wird die zuvor nur als Differentialreferenz geplante exakte
+`intervals`-Variante bereits im Pilot öffentlich implementiert: optionale
+Intervalle mit affinem Start `d_k + offset` und je Ressource ein natives
+`NoOverlap`. Separate Ressourcenlisten erhalten Überholungen. Diese Anpassung
+ändert keinen zulässigen Linienfahrplan; kleine Fälle müssen weiterhin exakt
+mit den vorberechneten Delta-Domains übereinstimmen. Der erweiterte Katalog
+wird nur mit bestandenem Modellgrößengate gebaut und nicht als zwölf Millionen
+Zeilen großes Delta-Modell erzwungen.
+
+Das anschließende Kmax=50-Größengate der Intervallkodierung ist bestanden. Der
+kleine Katalog baut 100.950 Variablen, 393.205 Constraints und 72.500 native
+Intervalle bei 26,3 MB Binärproto in rund 2,4 s. Der erweiterte Katalog baut
+400.100 Variablen, 1.613.155 Constraints und 336.750 Intervalle bei 111,5 MB
+Binärproto in rund 11,9 s; gemessene Prozess-RSS rund 1,10 GB. Damit ist er
+groß, aber innerhalb des 24-GiB-Gates. Der erste Suchvergleich verwendet für
+den erweiterten Katalog zwingend `intervals`; `dispatch_domains` bleibt dort
+wegen der prognostizierten zwölf Millionen Paarzeilen gesperrt.
+
+Ein erster, bewusst noch ungesäter Kmax=50-Smoke-Lauf mit kleinem Katalog,
+`intervals` und `exact_service` fand in 30 s keine native Lösung und beendete
+mit `UNKNOWN`; das Modell hatte 100.950 Variablen und 393.205 Constraints.
+Dieser Befund bestätigt die geplante Reihenfolge: zuerst kleine/fixierte
+Machbarkeitsgates und daraus einen darstellbaren vollständigen Hint erzeugen,
+danach die exakte freie Bedienungssuche. Der rohe CP-SAT-Defaultbound `0` bei
+`UNKNOWN` vor einer belastbaren Suchschranke wird nicht exportiert; in diesem
+Fall bleiben Served-Upper-Bound und Unserved-Lower-Bound ausdrücklich `null`.
+
+Auch ein vollständiger K16-Bewegungs-Hint wurde im Kmax=50-Modell innerhalb
+von rund 31 s Presolve nicht erreicht (`integers=0`, `branches=0`, keine
+Callbacklösung). Deshalb erhält der Runner eine explizite
+`--presolve/--no-presolve`-Ablation. Das ist Solverkonfiguration, keine eigene
+Suche und keine Domänenänderung. `presolve=true` bleibt Standard. Der
+No-Presolve-Test übernahm den K16-Hint nach 3,0 s und verbesserte in 30 s bis
+S=1.414. Ein danach erzeugter, physikalisch in 1,7 s bestätigter K32-BD/CE-Hint
+führte in der freien Kmax=50-Suche innerhalb 60 s zu **S=2.682 / U=392**; die
+letzte Verbesserung trat bei rund 47,6 s ein. Damit ist No-Presolve für die
+erste Bestätigung das experimentell empfohlene Profil, ohne den Standard
+automatisch zu ändern. Der globale Line-Domain-Gap blieb dabei weit offen.
+
+Die anschließende 300-s-Bestätigung verbesserte fortlaufend bis
+**S=3.036 / U=38** bei 36 Kabinen; die letzte Verbesserung kam bei rund
+293,35 s. Der ursprüngliche Validator bestätigte den Abschlusscheckpoint.
+Zusammen mit dem bestehenden globalen R2-All-Stop-Bound `U_AS* >= 125` ist
+damit das Vergleichsziel erreicht: `38 < 125`. Der zweite Seed bleibt für die
+Robustheitsbewertung vorgesehen, ist aber für die logische Gültigkeit dieses
+bereits geprüften Zeugen nicht erforderlich.
 
 Physikalische Domäne, neue Vergleichsrestriktionen und Modellencoding erhalten
 getrennte Fingerprints. Modellfingerprint enthält Katalog, T, erlaubte
@@ -507,6 +573,10 @@ Linienmix, Flottengröße, Dispatchspanne, letzter Fortschritt und Status.
 Native Verbesserungen und spätere Passagierbewertungen haben getrennte
 Zeitstempel. Keine günstige Passagierbewertung in die Solverzeit zurückdatieren.
 Checkpoints werden atomar geschrieben; historische Ergebnisse bleiben erhalten.
+`--fix-reference-movement` ist der getrennte Zuordnungsadapter: Er fixiert nur
+den bereits unabhängig validierten Linienfahrplan und optimiert die exakten
+Integer-Beförderungen. Er wird als `FIXED_LINE_MOVEMENT` ausgewiesen und darf
+nicht mit einem globalen Fahrplanbound verwechselt werden.
 
 ## 8. Bestehende Bausteine und Wiederverwendung
 
