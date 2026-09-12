@@ -10,8 +10,8 @@ from typing import Callable
 import gurobipy as gp
 from gurobipy import GRB
 
-from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_passenger_domain import (
-    DddArcFlowPassengerDomainBuilder,
+from .arc_flow_passenger_formulation import (
+    DddArcFlowPassengerFormulationConfig, prepare_arc_flow_passengers,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_passenger_model import (
     DddArcFlowIntegratedPassengerModel,
@@ -74,6 +74,7 @@ class DddFixedKArcFlowSolveConfig:
     )
     certificate_tolerance: float = 1e-5
     progress_interval_seconds: float = 5.0
+    passenger_formulation: DddArcFlowPassengerFormulationConfig = DddArcFlowPassengerFormulationConfig()
 
     def validate(self) -> None:
         if not math.isfinite(self.time_limit_seconds) or self.time_limit_seconds <= 0:
@@ -146,6 +147,13 @@ class DddFixedKArcFlowResult:
     seed_kind: str | None = None
     primal_seed_objective_value: float | None = None
     detail: str | None = None
+    passenger_profile: str = "legacy"
+    model_fingerprint: str | None = None
+    passenger_audit_json: str | None = None
+    passenger_domain_build_seconds: float = 0.0
+    integer_variable_count: int | None = None
+    binary_variable_count: int | None = None
+    nonzero_count: int | None = None
 
 
 DddFixedKArcFlowProgressHook = Callable[[DddFixedKArcFlowProgress], None]
@@ -227,6 +235,7 @@ class DddFixedKArcFlowOptimizer:
         seed_kind: str | None = None,
         root_cg_lower_bound: float | None = None,
         progress_hook: DddFixedKArcFlowProgressHook | None = None,
+        incumbent_hook: Callable | None = None,
     ) -> DddFixedKArcFlowResult:
         self.config.validate()
         problem.validate()
@@ -275,6 +284,7 @@ class DddFixedKArcFlowOptimizer:
                 seed_kind=seed_kind,
                 root_cg_lower_bound=root_cg_lower_bound,
                 progress_hook=heartbeat.update,
+                incumbent_hook=incumbent_hook,
             )
             heartbeat.update(
                 DddFixedKArcFlowProgress(
@@ -298,7 +308,7 @@ class DddFixedKArcFlowOptimizer:
                     phase="solve_complete",
                 )
             )
-            return result
+            return replace(result, passenger_profile=self.config.passenger_formulation.profile)
         finally:
             heartbeat.stop()
 
@@ -311,6 +321,7 @@ class DddFixedKArcFlowOptimizer:
         seed_kind: str | None = None,
         root_cg_lower_bound: float | None = None,
         progress_hook: DddFixedKArcFlowProgressHook | None = None,
+        incumbent_hook: Callable | None = None,
     ) -> DddFixedKArcFlowResult:
         self.config.validate()
         problem.validate()
@@ -438,14 +449,18 @@ class DddFixedKArcFlowOptimizer:
         update_phase("model_resource_rows")
         resource_rows = movement_master.resource_row_count
         update_phase("model_passengers")
+        passenger_started = perf_counter()
         try:
             check_ddd_arc_flow_build_deadline(
                 started + self.config.time_limit_seconds
             )
-            passenger_domain = DddArcFlowPassengerDomainBuilder().build(
+            passenger_encoding = prepare_arc_flow_passengers(
                 prepared,
+                self.config.passenger_formulation,
                 deadline_monotonic=started + self.config.time_limit_seconds,
             )
+            passenger_domain = passenger_encoding.source
+            passenger_domain_build_seconds = perf_counter() - passenger_started
         except DddArcFlowBuildTimeLimitError as error:
             total = perf_counter() - started
             return DddFixedKArcFlowResult(
@@ -489,6 +504,7 @@ class DddFixedKArcFlowOptimizer:
             domain=passenger_domain,
             route_by_arc_id=route,
             assignment_domain=EanPassengerAssignmentDomain.INTEGER,
+            encoding=(passenger_encoding if self.config.passenger_formulation.profile != "legacy" else None),
         )
         passenger_variable_count = passenger_model.variable_count
         passenger_constraint_count = passenger_model.constraint_count
@@ -540,12 +556,15 @@ class DddFixedKArcFlowOptimizer:
         delayed_separation_error: str | None = None
         route_items = tuple(route.items())
         route_variables = tuple(variable for _, variable in route_items)
+        last_emitted_objective = math.inf
+        incumbent_hook_error = None
 
         def callback(callback_model: gp.Model, where: int) -> None:
             nonlocal first_incumbent, last_sample_seconds
             nonlocal latest_bound, latest_incumbent
             nonlocal latest_node_count, latest_solution_count
             nonlocal resource_rows, delayed_separation_error
+            nonlocal last_emitted_objective, incumbent_hook_error
             if where == GRB.Callback.MIPSOL:
                 if delayed_separator is not None:
                     selected_arc_ids = frozenset(
@@ -581,6 +600,27 @@ class DddFixedKArcFlowOptimizer:
                         return
                 if first_incumbent is None:
                     first_incumbent = perf_counter() - started
+                candidate_objective = callback_model.cbGet(GRB.Callback.MIPSOL_OBJ)
+                if incumbent_hook is not None and candidate_objective < last_emitted_objective - self.config.certificate_tolerance:
+                    try:
+                        movement_values = dict(zip(route, callback_model.cbGetSolution(route_variables), strict=True))
+                        raw = dict(zip(passenger_model.variable_by_id, callback_model.cbGetSolution(
+                            list(passenger_model.variable_by_id.values())), strict=True))
+                        canonical = passenger_model.canonical_values(raw, movement_values)
+                        meta = passenger_domain.variable_by_id
+                        counts = {f.candidate_id: sum(canonical[v] for _, v in f.variable_ids_by_arc_id
+                                                     if meta[v].visit_index == f.board_visit_index)
+                                  for f in passenger_domain.flows}
+                        snapshot = movement_master.extract_solution(
+                            values=movement_values,
+                            boundary_occurrences=problem.boundary_context.resource_occurrences,
+                        )
+                        incumbent_hook(snapshot, counts, candidate_objective)
+                        last_emitted_objective = candidate_objective
+                    except Exception as error:
+                        incumbent_hook_error = str(error)
+                        callback_model.terminate()
+                        return
             supported = {
                 GRB.Callback.PRESOLVE,
                 GRB.Callback.SIMPLEX,
@@ -698,6 +738,8 @@ class DddFixedKArcFlowOptimizer:
         )
         model.optimize(callback)
         solve_seconds = perf_counter() - solve_started
+        if incumbent_hook_error is not None:
+            raise RuntimeError(f"Arc-flow incumbent validation hook failed: {incumbent_hook_error}")
 
         solver_bound = _finite_solver_value(float(model.ObjBound))
         solver_objective = float(model.ObjVal) if model.SolCount > 0 else None
@@ -801,6 +843,13 @@ class DddFixedKArcFlowOptimizer:
             seed_kind=seed_kind,
             primal_seed_objective_value=external_upper_bound,
             detail=detail,
+            passenger_profile=self.config.passenger_formulation.profile,
+            model_fingerprint=passenger_encoding.fingerprint,
+            passenger_audit_json=passenger_encoding.audit_json,
+            passenger_domain_build_seconds=passenger_domain_build_seconds,
+            integer_variable_count=int(model.NumIntVars),
+            binary_variable_count=int(model.NumBinVars),
+            nonzero_count=int(model.NumNZs),
         )
 
     @staticmethod
@@ -818,18 +867,19 @@ class DddFixedKArcFlowOptimizer:
         demand = {group.id: 0.0 for group in problem.passenger_build.demand_groups}
         onboard_by_arc_id: dict[str, float] = {}
         variable_by_id = passenger_model.domain.variable_by_id
+        canonical = passenger_model.canonical_values()
         for flow in passenger_model.domain.flows:
             for arc_id, variable_id in flow.variable_ids_by_arc_id:
-                variable = passenger_model.variable_by_id[variable_id]
-                if not math.isclose(variable.X, round(variable.X), abs_tol=1e-5):
+                value = canonical[variable_id]
+                if not math.isclose(value, round(value), abs_tol=1e-5):
                     raise ValueError("arc-flow passenger assignment is fractional")
                 visit_index = variable_by_id[variable_id].visit_index
                 if flow.board_visit_index <= visit_index < flow.alight_visit_index:
                     onboard_by_arc_id[arc_id] = (
-                        onboard_by_arc_id.get(arc_id, 0.0) + variable.X
+                        onboard_by_arc_id.get(arc_id, 0.0) + value
                     )
             boarded = sum(
-                passenger_model.variable_by_id[variable_id].X
+                canonical[variable_id]
                 for _, variable_id in flow.variable_ids_by_arc_id
                 if variable_by_id[variable_id].visit_index
                 == flow.board_visit_index

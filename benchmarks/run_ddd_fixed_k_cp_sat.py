@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from ropeway_skip_stop_optimization.optimization.ddd.cp_formulation import add_formulation_arguments, formulation_from_args
 import json
 from pathlib import Path
 
@@ -36,9 +37,11 @@ def main() -> None:
     sources.add_argument('--primal-seed-checkpoint',type=Path,help='Existing Root-CG checkpoint')
     sources.add_argument('--resume-checkpoint',type=Path,help='Validated native CP-SAT checkpoint (warm start)')
     sources.add_argument('--fixed-movement-result',type=Path,help='Arc-Flow result or native CP checkpoint; diagnostic proof scope')
+    add_formulation_arguments(parser, "cp_sat")
     args=parser.parse_args()
     config=DddFixedKCpSatRunConfig(example_id=args.example,cabin_count=args.cabins,output_dir=args.output_dir,
         solver=DddIntegratedCpSatConfig(total_time_limit_seconds=args.time_limit,num_workers=args.num_workers,
+            formulation=formulation_from_args(args),
             seed=args.seed,cost_encoding=DddCpSatCostEncoding(args.cost_encoding),checkpoint_path=args.checkpoint,
             log_search_progress=args.log_search_progress),
         start_policy=DddFixedKStartPolicy(args.start_policy),operating_mode=DddFixedKOperatingMode(args.mode),

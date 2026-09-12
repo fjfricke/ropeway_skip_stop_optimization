@@ -105,3 +105,26 @@ The runner charges preparation, imports and passenger seed evaluation to the tot
 The new tests compare both encodings with exhaustive route enumeration plus the independent Passenger-IP and complete Arc-Flow on small cases. They exercise release boundaries, service cutoff ticks, shared capacity, seat reuse, overlapping platform passages, bypass overtaking, headway interval contact, resource activity at and after H, unserved demand, hints, fixed scope, checkpoint tampering and fingerprint omissions. Existing CP primal/round, Fixed-K, EAN passenger and Reservoir tests are also run.
 
 A faster K=39 solve or stronger native CP lower bound is an empirical question. Passing these tests and obtaining a compact model does not establish a performance advantage. See the gate findings before launching a larger campaign.
+
+## Experimentelle binäre Reisezeitkosten (11.09.2026)
+
+`DddCpSatCostEncoding.BINARY` beziehungsweise `--cost-encoding binary` ergänzt
+`product` und `unary`. Standard bleibt `product`. Fixed-K und Single-Use-Reservoir
+verwenden denselben Passagierbaustein; Kapazitätsziele erzeugen weiterhin keine
+Reisezeit-Kostenhilfen.
+
+Bei `0 <= n <= Q` erhält jedes Ausstiegsereignis `Q.bit_length()` Boolesche Bits
+mit `n = Summe(2^j * b_j)`. Reifizierte Gleichungen setzen `z_j = t` für aktive
+Bits und andernfalls `z_j = 0`. Der Kostenterm ist exakt
+`Summe(2^j * z_j) - H*n`; Nichtbedienungskonstante, Integer-Mengen und Tickzeiten
+bleiben unverändert. Die ursprüngliche Grenze `n <= Q` verhindert übergroße
+Bitkombinationen auch bei Q ungleich `2^m-1`. Binäre Hilfswerte besitzen eine
+eindeutige Darstellung für jedes zulässige `(n,t)`.
+
+Der vollständige Hintpfad setzt Bits und zugehörige Zeitwerte. `cost_auxiliary_count`
+erfasst je Bit beide Variablen; der Modell-Fingerprint ändert sich, der physikalische
+Fingerprint und historische Ride-IDs nicht.
+
+Der [begrenzte Vergleichsplan](../plans/reservoir_binary_cost_comparison_20260911.md)
+beschreibt Korrektheit und Freigabekriterien. Eine mathematisch äquivalente
+Darstellung ist keine Zusage besserer Suchleistung.

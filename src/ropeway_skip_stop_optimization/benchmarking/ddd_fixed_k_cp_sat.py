@@ -287,6 +287,7 @@ def run_ddd_fixed_k_cp_sat(
             built = build_ddd_integrated_cp_sat(
                 problem,
                 cost_encoding=config.solver.cost_encoding,
+                formulation=config.solver.formulation,
                 fixed_movement=fixed_movement,
                 deadline_monotonic=deadline,
             )

@@ -53,6 +53,7 @@ class DddArcFlowMovementMaster:
         self,
         *,
         boundary_occurrences: tuple[DddReferenceResourceOccurrence, ...] = (),
+        values: dict[str, float] | None = None,
     ) -> DddReferenceSolution:
         movement = self.prepared.movement
         options = {option.id: option for option in movement.route_options}
@@ -66,7 +67,7 @@ class DddArcFlowMovementMaster:
             visits = []
             for arc in network.arcs:
                 if (
-                    self.route_by_arc_id[arc.id].X <= 0.5
+                    (self.route_by_arc_id[arc.id].X if values is None else values[arc.id]) <= 0.5
                     or not arc.source_active
                     or arc.option_id is None
                 ):

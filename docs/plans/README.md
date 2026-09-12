@@ -13,6 +13,10 @@ Each plan must:
 
 Current plans:
 
+- [`reservoir_symbolic_and_pattern_dp_20260912.md`](reservoir_symbolic_and_pattern_dp_20260912.md):
+  planned RPID/CABS pilot with symbolic temporal networks and a shared
+  whole-trip pattern-group variant; optional reservoir fleet, integral
+  passengers, staged correctness gates and a proposed bounded comparison.
 - [`reservation_insertion_implementation.md`](reservation_insertion_implementation.md):
   completed bounded profiling, calendar optimization and optional assignment
   refinement; records the decision against further ALNS expansion; see the

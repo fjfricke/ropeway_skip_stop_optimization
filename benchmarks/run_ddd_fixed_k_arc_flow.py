@@ -4,6 +4,9 @@ import argparse
 import json
 from pathlib import Path
 import sys
+from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_passenger_formulation import (
+    PASSENGER_PROFILES, DddArcFlowPassengerFormulationConfig,
+)
 from time import perf_counter
 
 from ropeway_skip_stop_optimization.benchmarking.ddd_fixed_k_arc_flow import (
@@ -36,6 +39,7 @@ def main() -> None:
     )
     parser.add_argument("--example", required=True)
     parser.add_argument("--cabins", type=int, required=True)
+    parser.add_argument("--passenger-profile", choices=PASSENGER_PROFILES, default="legacy")
     parser.add_argument(
         "--mode",
         choices=tuple(item.value for item in DddFixedKOperatingMode),
@@ -128,15 +132,18 @@ def main() -> None:
         if resource_row_mode is DddArcFlowResourceRowMode.EAGER_MAXIMAL_CLIQUES
         else f"_{resource_row_mode.value}"
     )
+    passenger_suffix = "" if args.passenger_profile == "legacy" else f"_{args.passenger_profile}"
     campaign_id = args.campaign_id or (
         f"{args.example}_arc_flow_{formulation.value}_{mode.value}_k{args.cabins}"
-        f"_wait_{waiting_slug}h{resource_suffix}"
+        f"_wait_{waiting_slug}h{resource_suffix}{passenger_suffix}"
     )
     policy_id = (
         f"arc_flow_{formulation.value}_{mode.value}_wait_{waiting_slug}h"
-        f"{resource_suffix}"
+        f"{resource_suffix}{passenger_suffix}"
     )
     output_path = args.output_dir / campaign_id / "result.json"
+    if args.passenger_profile != "legacy" and output_path.exists():
+        raise FileExistsError(f"Refusing to overwrite passenger experiment: {output_path}")
     store = (
         OptimizationLiveStore(
             OptimizationLivePaths(
@@ -264,6 +271,7 @@ def main() -> None:
                 primal_seed_result_path=args.primal_seed_result,
                 seed_passenger_time_limit_seconds=(args.seed_passenger_time_limit),
                 formulation=formulation,
+                passenger_formulation=DddArcFlowPassengerFormulationConfig.from_profile(args.passenger_profile),
                 waiting_headway_multiplier=args.waiting_headway_multiplier,
                 waiting_step_seconds=args.waiting_step_seconds,
                 resource_row_mode=resource_row_mode,

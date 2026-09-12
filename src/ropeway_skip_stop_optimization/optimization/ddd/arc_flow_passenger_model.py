@@ -11,6 +11,7 @@ from gurobipy import GRB
 from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_passenger_domain import (
     DddArcFlowPassengerDomain,
 )
+from .arc_flow_passenger_formulation import DddPreparedArcFlowPassengers
 from ropeway_skip_stop_optimization.optimization.ddd.passenger_benders_cuts import (
     DddPassengerBendersCut,
     build_ddd_passenger_benders_cut,
@@ -29,14 +30,49 @@ class DddArcFlowIntegratedPassengerModel:
     equality_constraint_by_id: dict[str, gp.Constr]
     demand_constraint_by_id: dict[str, gp.Constr]
     capacity_constraint_by_id: dict[str, gp.Constr]
+    encoding: DddPreparedArcFlowPassengers | None = None
+    ride_variable_by_id: dict[str, gp.Var] = field(default_factory=dict)
+    extra_constraints: tuple[gp.Constr, ...] = ()
+    route_by_arc_id: Mapping[str, gp.Var] = field(default_factory=dict)
 
     @property
     def variable_count(self) -> int:
-        return len(self.variable_by_id)
+        return len(self.variable_by_id) + len(self.ride_variable_by_id)
 
     @property
     def constraint_count(self) -> int:
-        return self.domain.constraint_count
+        return (len(self.link_constraint_by_variable_id) + len(self.equality_constraint_by_id)
+                + len(self.demand_constraint_by_id) + len(self.capacity_constraint_by_id)
+                + len(self.extra_constraints))
+
+    def canonical_values(self, variable_values=None, movement_values=None) -> dict[str, float]:
+        """Reconstruct original ride flows only at an integer Movement solution."""
+        raw = ({key: var.X for key, var in self.variable_by_id.items()}
+               if variable_values is None else variable_values)
+        if self.encoding is None:
+            return raw
+        projection = dict(self.encoding.projection)
+        if not self.encoding.config.destination_flows:
+            return {v.id: raw[projection[v.id]] if v.id in projection else 0.0
+                    for v in self.domain.variables}
+        movement = ({key: var.X for key, var in self.route_by_arc_id.items()}
+                    if movement_values is None else movement_values)
+        metadata = self.domain.variable_by_id
+        values = {}
+        for flow in self.domain.flows:
+            count = sum(raw[projection[v]]
+                        for _, v in flow.variable_ids_by_arc_id
+                        if v in projection and metadata[v].visit_index == flow.board_visit_index)
+            for arc_id, variable_id in flow.variable_ids_by_arc_id:
+                values[variable_id] = (count if variable_id in projection
+                                       and movement[arc_id] > 0.5 else 0.0)
+        # The decomposition must reproduce every shared flow, not just its cost.
+        totals = {key: 0.0 for key in self.variable_by_id}
+        for old, new in projection.items():
+            totals[new] += values[old]
+        if any(abs(totals[key] - value) > 1e-5 for key, value in raw.items()):
+            raise ValueError("destination flow cannot be decomposed into canonical rides")
+        return values
 
     def apply_seed(
         self,
@@ -52,6 +88,8 @@ class DddArcFlowIntegratedPassengerModel:
         }
         if unknown:
             raise ValueError("Passenger seed references a candidate outside the domain")
+        if self.encoding is not None:
+            return self._apply_encoded_seed(ride_counts_by_candidate_id, movement_values_by_arc_id, tolerance)
         variable_by_id = self.domain.variable_by_id
         objective = self.domain.objective_constant
         selected_count_by_flow: dict[str, int] = {}
@@ -72,6 +110,33 @@ class DddArcFlowIntegratedPassengerModel:
             raise ValueError("Passenger seed ride is not supported by the Movement seed")
         return objective
 
+    def _apply_encoded_seed(self, counts, movement, tolerance):
+        projection = dict(self.encoding.projection)
+        values = {key: 0.0 for key in self.variable_by_id}
+        metadata = self.domain.variable_by_id
+        objective = self.domain.objective_constant
+        for flow in self.domain.flows:
+            count = counts.get(flow.candidate_id, 0.0)
+            if count < -tolerance or abs(count - round(count)) > tolerance:
+                raise ValueError("Passenger seed quantities must be nonnegative integers")
+            selected_layers = set()
+            for arc_id, old in flow.variable_ids_by_arc_id:
+                if movement.get(arc_id, 0.0) <= 0.5:
+                    continue
+                if count > tolerance and old not in projection:
+                    raise ValueError("positive seed uses a pruned Passenger arc")
+                selected_layers.add(metadata[old].visit_index)
+                if old in projection:
+                    values[projection[old]] += count
+                    objective += metadata[old].objective_coefficient * count
+            if count > tolerance and selected_layers != set(range(flow.board_visit_index, flow.alight_visit_index + 1)):
+                raise ValueError("positive seed lacks a complete Passenger path")
+            if flow.candidate_id in self.ride_variable_by_id:
+                self.ride_variable_by_id[flow.candidate_id].Start = count
+        for key, value in values.items():
+            self.variable_by_id[key].Start = value
+        return objective
+
 
 @dataclass(frozen=True, slots=True)
 class DddArcFlowPassengerModelBuilder:
@@ -84,22 +149,29 @@ class DddArcFlowPassengerModelBuilder:
         assignment_domain: EanPassengerAssignmentDomain = (
             EanPassengerAssignmentDomain.INTEGER
         ),
+        encoding: DddPreparedArcFlowPassengers | None = None,
     ) -> DddArcFlowIntegratedPassengerModel:
+        source_domain = domain
+        if encoding is not None:
+            domain = encoding.algebra
         variable_type = (
             GRB.INTEGER
             if assignment_domain is EanPassengerAssignmentDomain.INTEGER
             else GRB.CONTINUOUS
         )
+        flow_type = (GRB.CONTINUOUS if encoding is not None and encoding.config.ride_integrality
+                     else variable_type)
         variable_by_id = {
             variable.id: model.addVar(
                 lb=0.0,
                 obj=variable.objective_coefficient,
-                vtype=variable_type,
+                vtype=flow_type,
                 name=variable.id,
             )
             for variable in domain.variables
         }
         model.update()
+        dropped = set() if encoding is None else {key for key, _ in encoding.dropped_links}
         link = {
             variable.id: model.addConstr(
                 variable_by_id[variable.id]
@@ -107,6 +179,7 @@ class DddArcFlowPassengerModelBuilder:
                 name=f"passenger_route[{index}]",
             )
             for index, variable in enumerate(domain.variables)
+            if variable.id not in dropped
         }
         equality = {
             row.id: model.addConstr(
@@ -136,14 +209,38 @@ class DddArcFlowPassengerModelBuilder:
             for row in domain.capacity_rows
         }
         model.ObjCon = domain.objective_constant
+        ride_variables = {}
+        extra = []
+        if encoding is not None:
+            if encoding.config.ride_integrality:
+                metadata = source_domain.variable_by_id
+                projection = dict(encoding.projection)
+                for flow in source_domain.flows:
+                    board_ids = [projection[v] for _, v in flow.variable_ids_by_arc_id
+                                 if v in projection and metadata[v].visit_index == flow.board_visit_index]
+                    if not board_ids:
+                        continue
+                    ride = model.addVar(lb=0.0, vtype=variable_type, name=f"ride_count[{flow.candidate_id}]")
+                    ride_variables[flow.candidate_id] = ride
+                    extra.append(model.addConstr(ride == gp.quicksum(
+                        variable_by_id[v] for v in board_ids
+                    ), name=f"ride_count_link[{flow.candidate_id}]"))
+            for arc_id, ids, capacity_value in encoding.alight_rows:
+                extra.append(model.addConstr(gp.quicksum(variable_by_id[v] for v in ids)
+                                             <= capacity_value * route_by_arc_id[arc_id],
+                                             name=f"alight_capacity[{arc_id}]"))
         model.update()
         return DddArcFlowIntegratedPassengerModel(
-            domain=domain,
+            domain=source_domain,
             variable_by_id=variable_by_id,
             link_constraint_by_variable_id=link,
             equality_constraint_by_id=equality,
             demand_constraint_by_id=demand,
             capacity_constraint_by_id=capacity,
+            encoding=encoding,
+            ride_variable_by_id=ride_variables,
+            extra_constraints=tuple(extra),
+            route_by_arc_id=route_by_arc_id,
         )
 
     def build_recourse(

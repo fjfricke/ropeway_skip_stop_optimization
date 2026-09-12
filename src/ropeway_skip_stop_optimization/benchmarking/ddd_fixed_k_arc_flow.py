@@ -7,6 +7,7 @@ import math
 from pathlib import Path
 from time import perf_counter
 from typing import Callable
+from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_passenger_formulation import DddArcFlowPassengerFormulationConfig
 
 from ropeway_skip_stop_optimization.benchmarking.ddd_scaling import (
     build_initial_ddd_network_problem,
@@ -95,6 +96,7 @@ class DddFixedKArcFlowRunConfig:
     resource_row_mode: DddArcFlowResourceRowMode = (
         DddArcFlowResourceRowMode.EAGER_MAXIMAL_CLIQUES
     )
+    passenger_formulation: DddArcFlowPassengerFormulationConfig = DddArcFlowPassengerFormulationConfig()
 
     def validate(self) -> None:
         if not self.example_id or self.cabin_count <= 0:
@@ -107,6 +109,8 @@ class DddFixedKArcFlowRunConfig:
             raise ValueError("arc-flow run start policy is invalid")
         if not isinstance(self.formulation, DddFixedKArcFlowFormulation):
             raise ValueError("arc-flow run formulation is invalid")
+        if self.formulation is not DddFixedKArcFlowFormulation.LABELED and self.passenger_formulation.profile != "legacy":
+            raise ValueError("passenger profiles are available only for labeled arc-flow")
         if not isinstance(self.resource_row_mode, DddArcFlowResourceRowMode):
             raise ValueError("arc-flow resource-row mode is invalid")
         if (
@@ -937,6 +941,7 @@ def run_ddd_fixed_k_arc_flow(
     )
     solve_budget = max(0.001, remaining - validation_reserve)
     solve_config = DddFixedKArcFlowSolveConfig(
+        passenger_formulation=config.passenger_formulation,
         time_limit_seconds=solve_budget,
         mip_gap=config.mip_gap,
         threads=config.solver_threads,

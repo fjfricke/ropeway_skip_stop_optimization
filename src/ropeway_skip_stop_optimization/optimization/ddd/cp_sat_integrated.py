@@ -9,6 +9,9 @@ from typing import Callable
 
 from ortools.sat.python import cp_model
 
+from .cp_formulation import formulation_identity, DddCpFormulationConfig, prepare_cp_structure, apply_cp_temporal
+from .cp_hint_completion import complete_cp_hints
+
 from .cp_sat_certificate import (
     FORMULATION_VERSION,
     DddCpSatIncumbent,
@@ -39,8 +42,10 @@ class DddIntegratedCpSatConfig:
     checkpoint_path: Path | None = None
     checkpoint_interval_seconds: float = 30.0
     log_search_progress: bool = False
+    formulation: DddCpFormulationConfig = field(default_factory=DddCpFormulationConfig)
 
     def validate(self) -> None:
+        self.formulation.validate()
         if (
             not math.isfinite(self.total_time_limit_seconds)
             or self.total_time_limit_seconds <= 0
@@ -123,7 +128,9 @@ def build_ddd_integrated_cp_sat(
     fixed_movement: DddReferenceSolution | None = None,
     deadline_monotonic: float | None = None,
     domain_manifest: dict | None = None,
+    formulation: DddCpFormulationConfig = DddCpFormulationConfig(),
 ) -> DddIntegratedCpSatModel:
+    formulation.validate()
     manifest = validate_ddd_cp_sat_domain(problem)
     if domain_manifest is not None and stable_fingerprint(
         manifest
@@ -136,7 +143,15 @@ def build_ddd_integrated_cp_sat(
         boundary_occurrences=problem.boundary_context.resource_occurrences,
         waiting_policy=problem.resolved_trajectory_problem.waiting_policy,
         deadline_monotonic=deadline_monotonic,
+        resource_encoding=formulation.resource_encoding,
     )
+    preprocessing_started = perf_counter()
+    prepared = None
+    if not formulation.legacy:
+        prepared = prepare_cp_structure(problem.resolved_trajectory_problem.structural_movement_problem, problem.passenger_build, built.states_by_cabin)
+        if formulation.enabled("temporal"):
+            apply_cp_temporal(built, prepared)
+    preprocessing_seconds = perf_counter() - preprocessing_started
     scope = "FIXED_K_GLOBAL"
     if fixed_movement is not None:
         checked = validate_ddd_cp_sat_incumbent(
@@ -151,6 +166,7 @@ def build_ddd_integrated_cp_sat(
         built,
         cost_encoding=cost_encoding,
         deadline_monotonic=deadline_monotonic,
+        formulation=formulation, prepared=prepared,
     )
     error = built.model.validate()
     if error:
@@ -168,17 +184,20 @@ def build_ddd_integrated_cp_sat(
         "used_literals": len(passengers.used),
         "capacity_constraints": passengers.capacity_row_count,
         "alighting_events": len(passengers.alight_count),
-        "cost_auxiliaries": len(passengers.products) + 2 * len(passengers.unary),
+        "cost_auxiliaries": passengers.cost_auxiliary_count,
         "variables": len(built.model.proto.variables),
         "constraints": len(built.model.proto.constraints),
     }
+    stats["preprocessing_seconds"] = preprocessing_seconds
+    if not formulation.legacy:
+        stats["preprocessing"] = formulation_identity(formulation, prepared)
     return DddIntegratedCpSatModel(
         built,
         passengers,
         manifest,
         scope,
         stable_fingerprint(
-            {"version": FORMULATION_VERSION, "model": str(built.model.proto)}
+            {"version": FORMULATION_VERSION, "model": str(built.model.proto), **formulation_identity(formulation, prepared)}
         ),
         stats,
     )
@@ -212,6 +231,8 @@ class DddIntegratedCpSatResult:
     callback_extraction_seconds: float = 0.0
     callback_validation_seconds: float = 0.0
     progress_delivery_seconds: float = 0.0
+    hint_seconds: float = 0.0
+    model_build_seconds: float = 0.0
 
     @property
     def cp_lower_bound(self) -> float | None:
@@ -436,9 +457,12 @@ class DddIntegratedCpSatOptimizer:
                 fixed_movement=fixed_movement,
                 deadline_monotonic=deadline,
                 domain_manifest=manifest,
+                formulation=self.config.formulation,
             )
         except TimeoutError:
             pass
+        hint_started = perf_counter()
+        model_build_seconds = hint_started - started
         if built is not None and incumbent is not None:
             values, alight_times = _movement_values(
                 problem, built.movement, incumbent.solution
@@ -450,6 +474,9 @@ class DddIntegratedCpSatOptimizer:
             built.passengers.add_hints(
                 problem, built.movement.model, incumbent.ride_counts, alight_times
             )
+        if built is not None and self.config.formulation.enabled("hints"):
+            complete_cp_hints(built.movement.model)
+        hint_seconds = perf_counter() - hint_started
         build_seconds = perf_counter() - started
         if built is not None and perf_counter() < deadline:
             solver = cp_model.CpSolver()
@@ -598,4 +625,5 @@ class DddIntegratedCpSatOptimizer:
             callback_extraction_seconds,
             callback_validation_seconds,
             events.delivery_seconds,
+            hint_seconds, model_build_seconds,
         )

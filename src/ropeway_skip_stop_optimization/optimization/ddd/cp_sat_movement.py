@@ -34,6 +34,7 @@ def build_ddd_cp_sat_movement(
     boundary_occurrences: tuple[DddReferenceResourceOccurrence, ...] = (),
     enabled_resource_ids: tuple[str, ...] | None = None,
     deadline_monotonic: float | None = None,
+    resource_encoding: str = "legacy",
 ) -> DddCpSatMovementModel:
     """Shared physical construction; no objective or search restrictions.
 
@@ -215,6 +216,10 @@ def build_ddd_cp_sat_movement(
                             wait_positive,
                         ]
                     )
+            merged = set()
+            if resource_encoding == "merged_exit":
+                from .cp_resource_variants import add_merged_exit
+                merged = add_merged_exit(model, movement, event_times[visit_index], active[visit_index], wait_steps, waiting_step_tick, options, {o.id: selection_by_key[start.cabin_id, visit_index, o.id] for o in options}, resource_intervals, max_completion_tick, maximum_wait_steps)
             for option in options:
                 _add_resource_intervals(
                     model=model,
@@ -231,6 +236,7 @@ def build_ddd_cp_sat_movement(
                     ],
                     option=option,
                     intervals_by_resource=resource_intervals,
+                    resource_encoding=resource_encoding, excluded_resources=merged,
                 )
             model.add(
                 event_times[visit_index + 1]
@@ -293,9 +299,11 @@ def _add_resource_intervals(
     selected: cp_model.IntVar,
     option: DddRouteOption,
     intervals_by_resource: dict[str, list[cp_model.IntervalVar]],
+    resource_encoding: str = "legacy",
+    excluded_resources=frozenset(),
 ) -> None:
     for usage_index, usage in enumerate(option.resource_usages):
-        if usage.resource_id not in intervals_by_resource:
+        if usage.resource_id in excluded_resources or usage.resource_id not in intervals_by_resource:
             continue
         resource = movement.resources_by_id[usage.resource_id]
         base_size_tick = (
@@ -331,6 +339,10 @@ def _add_resource_intervals(
         end_wait_coefficient = (
             usage.leader_clear_wait_coefficient * waiting_step_tick
         )
+        if resource_encoding != "legacy" and wait_size_coefficient == 0:
+            from .cp_resource_variants import add_compact_interval
+            add_compact_interval(model, movement, entry_expression, base_size_tick, selected, usage, intervals_by_resource, max_completion_tick, maximum_wait_steps, waiting_step_tick)
+            continue
         entry = model.new_int_var(
             min(
                 usage.follower_enter_offset_tick,

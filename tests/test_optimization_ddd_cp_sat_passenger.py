@@ -1,3 +1,4 @@
+from ropeway_skip_stop_optimization.optimization.ddd.cp_formulation import DddCpFormulationConfig, prepare_cp_structure
 from dataclasses import replace
 from itertools import product
 
@@ -45,13 +46,17 @@ def test_two_cabins_preserve_platform_overlap_and_bypass_overtaking(encoding):
 
 @pytest.mark.parametrize('encoding',list(DddCpSatCostEncoding))
 @pytest.mark.parametrize('horizon,expected_served',[(56.272727,1),(56.272726,0)])
-def test_alighting_at_service_cutoff_and_one_tick_after(encoding,horizon,expected_served):
+@pytest.mark.parametrize('profile',['legacy','temporal','strengthened'])
+def test_alighting_at_service_cutoff_and_one_tick_after(encoding,horizon,expected_served,profile):
     _,problem=tiny_problem(horizon=horizon,tail=70,groups=(EanDemandGroup('ab','A','B',0,1),))
     # Keep candidates even if canonical horizon pruning proves them impossible:
     # this exercises the CP guard itself, not just the upstream pruning.
     _,larger=tiny_problem(groups=(EanDemandGroup('ab','A','B',0,1),))
     problem=replace(problem,passenger_build=replace(problem.passenger_build,ride_candidates=larger.passenger_build.ride_candidates))
-    built=build_ddd_integrated_cp_sat(problem,cost_encoding=encoding)
+    built=build_ddd_integrated_cp_sat(problem,cost_encoding=encoding,formulation=DddCpFormulationConfig(profile=profile))
+    if not built.passengers.ride_count:
+        assert not expected_served and profile != "legacy"
+        return
     q=next(iter(built.passengers.ride_count))
     built.movement.model.add(built.passengers.ride_count[q]==1)
     solver=cp_model.CpSolver()
@@ -76,10 +81,11 @@ def _horizon_movement(offset,headway=1.0):
     (2.0,1.0,2.5,cp_model.INFEASIBLE), # entry exactly H is protected beyond H
     (1.0,3.0,2.5,cp_model.INFEASIBLE), # clearing beyond H is not clipped
 ])
-def test_resource_horizon_and_half_open_touch(offset,headway,boundary_start,expected):
+@pytest.mark.parametrize('resource_encoding',['legacy','compact_fixed','merged_exit'])
+def test_resource_horizon_and_half_open_touch(offset,headway,boundary_start,expected,resource_encoding):
     movement=_horizon_movement(offset,headway)
     occurrence=DddReferenceResourceOccurrence('r',99,0,3.0,boundary_start,1.0)
-    built=build_ddd_cp_sat_movement(movement,boundary_occurrences=(occurrence,))
+    built=build_ddd_cp_sat_movement(movement,boundary_occurrences=(occurrence,),resource_encoding=resource_encoding)
     solver=cp_model.CpSolver()
     status=solver.solve(built.model)
     assert status==expected
@@ -98,7 +104,8 @@ def test_independent_validator_rejects_fractional_and_overcapacity_assignment():
 
 
 @pytest.mark.parametrize('encoding',list(DddCpSatCostEncoding))
-def test_passenger_builder_on_existing_odd_cycle_fixture(encoding):
+@pytest.mark.parametrize('profile',['legacy','strengthened'])
+def test_passenger_builder_on_existing_odd_cycle_fixture(encoding,profile):
     # The historical fixture is a legacy EAN artifact without network provenance.
     # Exercise the assignment builder on its fixed visits, not the integrated
     # domain adapter, which correctly requires the modern physical network.
@@ -132,7 +139,8 @@ def test_passenger_builder_on_existing_odd_cycle_fixture(encoding):
         for v in t.visits:
             for decision in DddRouteDecision:
                 built.model.add(built.selection_by_key[t.cabin_id,v.visit_index,f'{v.switch_id}:{decision.value}']==int(v.decision.value==decision.value))
-    assignment=build_ddd_cp_sat_passengers(problem,built,cost_encoding=encoding)
+    prepared = prepare_cp_structure(trajectory.structural_movement_problem,passengers,built.states_by_cabin)
+    assignment=build_ddd_cp_sat_passengers(problem,built,cost_encoding=encoding,formulation=DddCpFormulationConfig(profile=profile),prepared=prepared)
     solver=cp_model.CpSolver()
     assert solver.solve(built.model)==cp_model.OPTIMAL
     with gp.Model() as model:

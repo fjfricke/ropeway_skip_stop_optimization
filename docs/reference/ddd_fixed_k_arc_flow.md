@@ -1,5 +1,10 @@
 # Complete Fixed-K DDD arc-flow solver
 
+Experimental labeled passenger formulations are available through
+`--passenger-profile legacy|reachability|ride_integrality|drop_redundant_links|alight_links|destination_flows`.
+The default is unchanged. See [the isolated A–D implementation and test plan](../plans/arc_flow_passenger_profiles_20260910.md)
+for equivalence arguments, compatibility constraints and the bounded comparison campaign.
+
 The arc-flow solver is the integrated exact alternative to trajectory Root-CG
 for fixed starts and no waiting. It gives Gurobi every cabin path, resource
 interval, and passenger flow in one MILP. A validated incumbent is a global

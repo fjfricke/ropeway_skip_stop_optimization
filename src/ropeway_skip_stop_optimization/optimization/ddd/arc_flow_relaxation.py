@@ -12,8 +12,8 @@ from gurobipy import GRB
 from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_movement_master import (
     DddArcFlowMovementMasterBuilder,
 )
-from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_passenger_domain import (
-    DddArcFlowPassengerDomainBuilder,
+from .arc_flow_passenger_formulation import (
+    DddArcFlowPassengerFormulationConfig, prepare_arc_flow_passengers,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.arc_flow_passenger_model import (
     DddArcFlowPassengerModelBuilder,
@@ -50,6 +50,7 @@ class DddArcFlowRelaxationConfig:
     output_flag: bool = False
     progress_interval_seconds: float = 5.0
     certificate_tolerance: float = 1e-5
+    passenger_formulation: DddArcFlowPassengerFormulationConfig = DddArcFlowPassengerFormulationConfig()
 
     def validate(self) -> None:
         if not math.isfinite(self.time_limit_seconds) or self.time_limit_seconds <= 0:
@@ -104,6 +105,8 @@ class DddArcFlowRelaxationResult:
     total_seconds: float
     method: DddArcFlowRelaxationMethod
     detail: str | None = None
+    passenger_profile: str = "legacy"
+    model_fingerprint: str | None = None
 
 
 @dataclass(slots=True)
@@ -120,7 +123,8 @@ class DddArcFlowRelaxationOptimizer:
         prepared.validate()
         started = perf_counter()
         domain_started = perf_counter()
-        domain = DddArcFlowPassengerDomainBuilder().build(prepared)
+        encoding = prepare_arc_flow_passengers(prepared, self.config.passenger_formulation)
+        domain = encoding.source
         domain_seconds = perf_counter() - domain_started
         self._publish(
             progress_hook,
@@ -150,6 +154,7 @@ class DddArcFlowRelaxationOptimizer:
             domain=domain,
             route_by_arc_id=movement.route_by_arc_id,
             assignment_domain=EanPassengerAssignmentDomain.LP_RELAXATION,
+            encoding=(encoding if self.config.passenger_formulation.profile != "legacy" else None),
         )
         model.ModelSense = GRB.MINIMIZE
         model.update()
@@ -272,6 +277,8 @@ class DddArcFlowRelaxationOptimizer:
             total_seconds=perf_counter() - started,
             method=self.config.method,
             detail=detail,
+            passenger_profile=self.config.passenger_formulation.profile,
+            model_fingerprint=encoding.fingerprint,
         )
 
     def _publish(

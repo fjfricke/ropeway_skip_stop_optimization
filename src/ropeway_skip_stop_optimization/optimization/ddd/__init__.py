@@ -6,6 +6,28 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS_BY_MODULE: dict[str, tuple[str, ...]] = {
+    "ropeway_skip_stop_optimization.optimization.ddd.cp_formulation": (
+        "DddCpFormulationConfig", "DddCpFormulationProfile", "PreparedCpStructure",
+    ),
+    'ropeway_skip_stop_optimization.optimization.ddd.reservoir_ibm_cp': (
+        'DddReservoirIbmCpConfig',
+        'DddReservoirIbmCpOptimizer',
+    ),
+    'ropeway_skip_stop_optimization.optimization.ddd.reservoir_cp_sat': (
+        'DddReservoirCpSatOptimizer',
+        'DddReservoirCpObjective',
+    ),
+    'ropeway_skip_stop_optimization.optimization.ddd.reservoir_cp_sat_problem': (
+        'DddReservoirCpSatProblem',
+    ),
+    'ropeway_skip_stop_optimization.optimization.ddd.reservoir_cp_sat_certificate': (
+        'DddReservoirCpPlan',
+        'DddReservoirCpTrip',
+        'DddReservoirCpMetrics',
+        'validate_reservoir_cp_plan',
+        'read_reservoir_cp_checkpoint',
+        'write_reservoir_cp_checkpoint',
+    ),
     'ropeway_skip_stop_optimization.optimization.ddd.fixed_k_certificate': (
         'DddFixedKPrimalValidator',
         'DddValidatedFixedKPlan',
@@ -647,6 +669,18 @@ _EXPORT_MODULE_BY_NAME = {
 }
 
 __all__ = [
+    "DddCpFormulationConfig", "DddCpFormulationProfile", "PreparedCpStructure",
+    'DddReservoirIbmCpConfig',
+    'DddReservoirIbmCpOptimizer',
+    'DddReservoirCpSatOptimizer',
+    'DddReservoirCpObjective',
+    'DddReservoirCpSatProblem',
+    'DddReservoirCpPlan',
+    'DddReservoirCpTrip',
+    'DddReservoirCpMetrics',
+    'validate_reservoir_cp_plan',
+    'read_reservoir_cp_checkpoint',
+    'write_reservoir_cp_checkpoint',
     'DddFixedKPrimalValidator',
     'DddValidatedFixedKPlan',
     'build_ddd_fixed_k_domain_manifest',

@@ -284,6 +284,8 @@ class DddExactAnonymousArcFlowOptimizer:
         progress_hook: DddExactAnonymousArcFlowProgressHook | None = None,
     ) -> DddExactAnonymousArcFlowResult:
         self.config.validate()
+        if self.config.passenger_formulation.profile != "legacy":
+            raise ValueError("passenger profiles are available only for labeled arc-flow")
         problem.validate()
         if primal_seed is not None:
             primal_seed.validate(problem)
