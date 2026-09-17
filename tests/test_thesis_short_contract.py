@@ -183,6 +183,45 @@ def test_oip_calibrated_case_index_checks_load_ratio_and_reference_hash(tmp_path
         runner.calibrated_cases(index)
 
 
+def test_oip_thesis_suite_forwards_screening_only(tmp_path, monkeypatch):
+    runner = _runner("run_oip_thesis_pattern_campaigns")
+    evidence = []
+    for family in runner.THESIS_FAMILIES:
+        result = tmp_path / f"{family}.json"
+        result.write_text(json.dumps(dict(
+            contract_id=THESIS_CONTRACT_ID,
+            reference_kind=runner.REFERENCE_KIND,
+            family=family,
+            capacity_proven=True,
+            proven_feasible_demand=100,
+            proven_infeasible_demand=101,
+        )))
+        evidence.append(dict(
+            family=family,
+            demand_total=100,
+            load_numerator=1,
+            load_denominator=1,
+            reference_result=result.name,
+            reference_sha256=hashlib.sha256(result.read_bytes()).hexdigest(),
+        ))
+    index = tmp_path / "index.json"
+    index.write_text(json.dumps(dict(
+        contract_id=THESIS_CONTRACT_ID,
+        reference_kind=runner.REFERENCE_KIND,
+        cases=evidence,
+    )))
+    commands = []
+    monkeypatch.setattr(runner.subprocess, "run", lambda command, **kwargs: commands.append(command) or SimpleNamespace(returncode=0))
+    monkeypatch.setattr(sys, "argv", [
+        "runner", "--output", str(tmp_path / "suite"),
+        "--calibrated-cases", str(index), "--build-only", "--screening-only",
+    ])
+    runner.main()
+    assert len(commands) == 3
+    assert all("--screening-only" in command for command in commands)
+    assert all(command[command.index("--k-values") + 1:command.index("--k-values") + 4] == ["40", "50", "62"] for command in commands)
+
+
 def test_fixed_start_calibration_does_not_build_or_report_a_reservoir(tmp_path, monkeypatch):
     runner = _runner("run_thesis_experiment")
     args = runner.parser().parse_args([

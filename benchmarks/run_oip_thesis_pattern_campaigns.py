@@ -158,6 +158,8 @@ def main() -> None:
             "--reference-sha256", str(case["reference_sha256"]),
             "--reference-result", str(case["reference_result"]),
         ]
+        if args.screening_only:
+            command.append("--screening-only")
         if args.build_only:
             command.append("--build-only")
         elif (case_output / "campaign.json").is_file():
@@ -223,6 +225,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--workers", type=int, default=12)
     parser.add_argument("--memory-limit-gib", type=float, default=32)
     parser.add_argument("--build-only", action="store_true")
+    parser.add_argument(
+        "--screening-only",
+        action="store_true",
+        help="Run the fixed-pattern screenings without the optional refinement stage.",
+    )
     parser.add_argument("--resume", action="store_true")
     parser.add_argument("--calibrated-cases", type=Path,
                         help="New-contract reference index; required to start thesis runs")
