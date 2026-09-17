@@ -81,6 +81,7 @@ def validate_reservoir_cp_plan(
         ):
             raise ValueError("reservoir dispatch outside its domain")
         state, time = problem.entry_state_id, dispatch
+        complete_returns = []
         for i, (oid, t, w) in enumerate(
             zip(trip.route_option_ids, trip.switch_ticks, trip.wait_ticks, strict=True)
         ):
@@ -122,6 +123,8 @@ def validate_reservoir_cp_plan(
                 if entry <= core.operational_end_tick:
                     protected[r.id].append((entry, end))
             state, time = o.to_state_id, t + o.duration_tick + w
+            if state == problem.entry_state_id:
+                complete_returns.append(time)
         if (
             state != problem.entry_state_id
             or time != trip.return_tick
@@ -132,6 +135,13 @@ def validate_reservoir_cp_plan(
             raise ValueError(
                 "reservoir trip must return to its port within the horizon"
             )
+        service_end = core.passenger_service_end_tick
+        if ddd_seconds_to_tick(problem.return_start_seconds) >= service_end:
+            eligible_returns = [value for value in complete_returns if value >= service_end]
+            if not eligible_returns or trip.return_tick != eligible_returns[0]:
+                raise ValueError(
+                    "reservoir trip must use its first complete return at or after service end"
+                )
         if (state, time) in node_times:
             raise ValueError("reservoir state-time conflict at return")
         node_times.add((state, time))
@@ -142,6 +152,9 @@ def validate_reservoir_cp_plan(
             if entry < end:
                 raise ValueError("reservoir resource/headway conflict")
             end = clear
+    from .reservoir_boundary import validate_port_separation
+
+    validate_port_separation(problem, plan)
     groups = {g.id: g for g in problem.demand_groups}
     candidates = {q.id: q for q in problem.passenger_build.ride_candidates}
     served, loads, cost = defaultdict(int), defaultdict(int), 0
@@ -228,8 +241,15 @@ def read_reservoir_cp_checkpoint(path: Path, problem):
         or stable_fingerprint(raw.get("domain_manifest")) != problem.fingerprint
     ):
         raise ValueError("reservoir checkpoint fingerprint mismatch")
-    p = raw["plan"]
-    plan = DddReservoirCpPlan(
+    plan = reservoir_cp_plan_from_payload(raw["plan"])
+    if asdict(validate_reservoir_cp_plan(problem, plan)) != raw["metrics"]:
+        raise ValueError("reservoir checkpoint metrics mismatch")
+    return plan
+
+
+def reservoir_cp_plan_from_payload(payload: dict) -> DddReservoirCpPlan:
+    """Decode a plan payload without weakening subsequent domain validation."""
+    return DddReservoirCpPlan(
         tuple(
             DddReservoirCpTrip(
                 t["cabin_id"],
@@ -238,10 +258,42 @@ def read_reservoir_cp_checkpoint(path: Path, problem):
                 tuple(t["wait_ticks"]),
                 t["return_tick"],
             )
-            for t in p["trips"]
+            for t in payload["trips"]
         ),
-        p["ride_counts"],
+        payload["ride_counts"],
     )
-    if asdict(validate_reservoir_cp_plan(problem, plan)) != raw["metrics"]:
-        raise ValueError("reservoir checkpoint metrics mismatch")
+
+
+def read_reservoir_cp_checkpoint_for_fleet_resize(path: Path, problem):
+    """Read a checkpoint when only the available-fleet cap has changed.
+
+    The stored domain is authenticated by its original fingerprint.  Every
+    other manifest field must be byte-for-byte equal, and the unchanged plan
+    is independently validated against the target domain.  This permits both
+    expansion and contraction, provided all used cabin IDs fit in the target.
+    """
+    raw = json.loads(path.read_text())
+    source_manifest = raw.get("domain_manifest")
+    if (
+        raw.get("schema") != SCHEMA
+        or not isinstance(source_manifest, dict)
+        or stable_fingerprint(source_manifest) != raw.get("problem_fingerprint")
+    ):
+        raise ValueError("invalid reservoir checkpoint source domain")
+    target_manifest = problem.manifest
+    source_without_cap = dict(source_manifest)
+    target_without_cap = dict(target_manifest)
+    source_cap = source_without_cap.pop("available_fleet_count", None)
+    target_cap = target_without_cap.pop("available_fleet_count", None)
+    if (
+        type(source_cap) is not int
+        or type(target_cap) is not int
+        or stable_fingerprint(source_without_cap)
+        != stable_fingerprint(target_without_cap)
+    ):
+        raise ValueError("checkpoint differs by more than the available-fleet cap")
+    plan = reservoir_cp_plan_from_payload(raw["plan"])
+    metrics = validate_reservoir_cp_plan(problem, plan)
+    if asdict(metrics) != raw.get("metrics"):
+        raise ValueError("fleet-resized checkpoint metrics mismatch")
     return plan

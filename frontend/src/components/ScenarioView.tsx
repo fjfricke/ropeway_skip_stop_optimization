@@ -5,7 +5,7 @@ import { InspectorPanel } from "./InspectorPanel";
 import { NetworkSvg } from "./NetworkSvg";
 import { ParametersPanel } from "./ParametersPanel";
 import { useNetworkPanelContentHeight } from "./useNetworkPanelContentHeight";
-import { layoutForScenario } from "../scenarioLayout";
+import { isCircularScenario, layoutForScenario } from "../scenarioLayout";
 import type { ArcColorMode, DiscreteOverlayMode, DiscreteViewerToggles, ScenarioDisplayMode, ViewerToggles } from "./viewerTypes";
 import type { DiscreteScenario, Scenario, Selection } from "../types";
 
@@ -47,7 +47,7 @@ export function ScenarioView({
     .filter((station) => station.kind === "terminal" || station.kind === "service")
     .map((station) => station.id)
     .join("-");
-  const isCircleScenario = scenario.scenario_id.startsWith("five_station_circle_cw");
+  const isCircleScenario = isCircularScenario(scenario);
 
   return (
     <section className="workspace">

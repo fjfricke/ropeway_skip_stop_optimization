@@ -36,7 +36,10 @@ def line_patterns(
         if g.count and g.origin_station_id != g.destination_station_id
     }
     masks: set[frozenset[str]] = {all_stops}
-    if profile is ReservoirLineCatalogProfile.SMALL:
+    if profile in (
+        ReservoirLineCatalogProfile.SMALL,
+        ReservoirLineCatalogProfile.OD_ENDPOINTS_V1,
+    ):
         masks.update(demanded_pairs)
     else:
         # Single-station masks cannot carry a direct OD passenger. Retain every

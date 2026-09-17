@@ -178,6 +178,8 @@ class EanFixedMovementPassengerModelBuilder:
         assignment_domain: EanPassengerAssignmentDomain,
         grb: Any,
         gp: Any,
+        require_full_service: bool = False,
+        lexicographic_unserved_first: bool = False,
     ) -> EanFixedMovementPassengerModel:
         if scenario.id != artifact.scenario_id:
             raise ValueError(
@@ -245,6 +247,9 @@ class EanFixedMovementPassengerModelBuilder:
             )
             for group in filtered_build.demand_groups
         }
+        if require_full_service:
+            for constraint in demand_constraints.values():
+                constraint.Sense = grb.EQUAL
         capacity_constraints: dict[tuple[int, int], Any] = {}
         for trajectory in movement_plan.trajectories:
             cabin_rides = rides_by_cabin_id.get(trajectory.cabin_id, [])
@@ -280,10 +285,17 @@ class EanFixedMovementPassengerModelBuilder:
                 objective_terms.append(
                     (served_cost - unserved_cost) * ride_count[ride.candidate.id]
                 )
-        model.setObjective(
-            objective_constant + gp.quicksum(objective_terms),
-            grb.MINIMIZE,
-        )
+        secondary = objective_constant + gp.quicksum(objective_terms)
+        if lexicographic_unserved_first:
+            total_demand = sum(group.count for group in filtered_build.demand_groups)
+            served = gp.quicksum(ride_count.values())
+            weight = total_demand * artifact.config.horizon_seconds + 1.0
+            model.setObjective(
+                weight * (total_demand - served) + secondary,
+                grb.MINIMIZE,
+            )
+        else:
+            model.setObjective(secondary, grb.MINIMIZE)
         model.update()
         return EanFixedMovementPassengerModel(
             model=model,

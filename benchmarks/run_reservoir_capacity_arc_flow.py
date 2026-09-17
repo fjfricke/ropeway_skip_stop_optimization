@@ -1,6 +1,7 @@
 """Supervised, scoped reservoir capacity pilot (old runners stay unchanged)."""
 
 import argparse
+from ropeway_skip_stop_optimization.optimization.ddd.reservoir_boundary import add_boundary_arguments, apply_boundary_arguments
 from dataclasses import asdict, replace
 import json
 from pathlib import Path
@@ -100,11 +101,13 @@ def parser():
     p.add_argument("--build-only", action="store_true")
     p.add_argument("--deadline-unix", type=float)
     p.add_argument("--_worker", action="store_true", help=argparse.SUPPRESS)
+    add_boundary_arguments(p)
     return p
 
 
 def inputs(a):
     formulation_config(a)
+    derived_policy = None
     if a.reference:
         domain, seed = load_reference(a.reference)
         p = domain.problem
@@ -149,6 +152,8 @@ def inputs(a):
             DddReservoirCpSatProblem.from_arc_flow(physical.problem),
             dispatch_step_seconds=a.dispatch_step_seconds,
         )
+        derived_policy = physical.headway_policy
+        p = apply_boundary_arguments(p, a, derived_policy=derived_policy)
         seed = all_stop_reservoir_movement(p, physical.problem) or DddReservoirCpPlan(
             (), {}
         )
@@ -160,6 +165,7 @@ def inputs(a):
         )
 
         p = replace(p, demand_groups=NestedDemand(p.demand_groups).groups(a.demand))
+    p = apply_boundary_arguments(p, a, derived_policy=derived_policy)
     p.validate()
     validate_reservoir_cp_plan(p, seed)
     if (

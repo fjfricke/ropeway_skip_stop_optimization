@@ -58,6 +58,7 @@ class EanFleetConfig:
 
 
 class HeadwayCheckpointKind(Enum):
+    ENTRY_SWITCH = "entry_switch"
     PLATFORM_ENTRY = "platform_entry"
     PLATFORM_EXIT = "platform_exit"
     EXIT_SWITCH = "exit_switch"

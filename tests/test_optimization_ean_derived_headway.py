@@ -106,6 +106,19 @@ def test_service_mechanism_reuses_exit_order_family() -> None:
     )
 
 
+def test_architecture_b_applies_stop_leader_protection_at_entry_and_exit() -> None:
+    artifact = _two_cabin_architecture_b_artifact()
+    checkpoints = {item.id: item for item in artifact.headway_checkpoints}
+    entry = checkpoints["entry_switch::S0_entry_cw"]
+    exit_checkpoint = checkpoints["exit_switch::S0_entry_cw"]
+    entry_rule = artifact.headway_rule_for_checkpoint(entry)
+    exit_rule = artifact.headway_rule_for_checkpoint(exit_checkpoint)
+
+    assert isinstance(entry_rule, LeaderBehaviorHeadwayRule)
+    assert entry_rule == exit_rule
+    assert entry.applies_to_serve and entry.applies_to_skip
+
+
 def test_bypass_leader_can_be_feasible_when_service_leader_is_not() -> None:
     artifact = _two_cabin_architecture_b_artifact()
     checkpoint = next(

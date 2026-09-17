@@ -150,6 +150,7 @@ class DddArcFlowPassengerModelBuilder:
             EanPassengerAssignmentDomain.INTEGER
         ),
         encoding: DddPreparedArcFlowPassengers | None = None,
+        require_full_service: bool = False,
     ) -> DddArcFlowIntegratedPassengerModel:
         source_domain = domain
         if encoding is not None:
@@ -195,6 +196,9 @@ class DddArcFlowPassengerModelBuilder:
         demand = {
             row.id: model.addConstr(
                 gp.quicksum(variable_by_id[item] for item in row.variable_ids)
+                == row.right_hand_side
+                if require_full_service
+                else gp.quicksum(variable_by_id[item] for item in row.variable_ids)
                 <= row.right_hand_side,
                 name=row.id,
             )

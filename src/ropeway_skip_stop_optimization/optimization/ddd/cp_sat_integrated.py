@@ -24,6 +24,7 @@ from .cp_sat_certificate import (
 from .cp_sat_movement import DddCpSatMovementModel, build_ddd_cp_sat_movement
 from .cp_sat_passenger import (
     DddCpSatCostEncoding,
+    DddCpSatPassengerEncoding,
     DddCpSatPassengerModel,
     build_ddd_cp_sat_passengers,
 )
@@ -39,9 +40,11 @@ class DddIntegratedCpSatConfig:
     num_workers: int = 1
     seed: int = 0
     cost_encoding: DddCpSatCostEncoding = DddCpSatCostEncoding.PRODUCT
+    passenger_encoding: DddCpSatPassengerEncoding = DddCpSatPassengerEncoding.GROUPS
     checkpoint_path: Path | None = None
     checkpoint_interval_seconds: float = 30.0
     log_search_progress: bool = False
+    route_search_priority: bool = False
     formulation: DddCpFormulationConfig = field(default_factory=DddCpFormulationConfig)
 
     def validate(self) -> None:
@@ -60,6 +63,10 @@ class DddIntegratedCpSatConfig:
             raise ValueError("CP-SAT workers/seed are invalid")
         if not isinstance(self.cost_encoding, DddCpSatCostEncoding):
             raise ValueError("CP-SAT cost encoding is invalid")
+        if not isinstance(self.passenger_encoding, DddCpSatPassengerEncoding):
+            raise ValueError("CP-SAT passenger encoding is invalid")
+        if type(self.route_search_priority) is not bool:
+            raise ValueError("CP-SAT route search priority must be boolean")
         if (
             not math.isfinite(self.checkpoint_interval_seconds)
             or self.checkpoint_interval_seconds <= 0
@@ -422,6 +429,8 @@ class DddIntegratedCpSatOptimizer:
         event_callback: Callable[[dict], None] | None = None,
     ) -> DddIntegratedCpSatResult:
         self.config.validate()
+        if self.config.passenger_encoding is not DddCpSatPassengerEncoding.GROUPS:
+            raise ValueError("OD-inventory passengers currently require the reservoir CP-SAT model")
         started = perf_counter()
         deadline = started + self.config.total_time_limit_seconds
         manifest = validate_ddd_cp_sat_domain(problem)

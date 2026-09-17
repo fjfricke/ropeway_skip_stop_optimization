@@ -2,6 +2,13 @@
 
 Stand: 12.09.2026. **Planungsstand; keine Implementierung oder Kampagne durch dieses Dokument gestartet.**
 
+**Vertragsrevision vom 13.09.2026:** Die Rundenzahl ist keine freie
+Entscheidung mehr. Alle eingesetzten Kabinen verlassen das Reservoir bis zum
+Beginn der Personenbedienung und fahren ihr gewähltes Haltemuster danach
+durchgehend. Die Rückkehr erfolgt an der ersten Mustergrenze am oder nach der
+Bedienungsdeadline. Eine interne Aufteilung nach Rundenzahl darf nur noch die
+Dispatchdomain partitionieren; sie darf keine frühe Herausnahme ermöglichen.
+
 ## 1. Ziel und Entscheidung
 
 Wir wollen nachfragegeeignete, physikalisch gültige Skip-Stop-Fahrpläne für eine
@@ -25,16 +32,25 @@ Erfolg wird an unabhängig gültiger Passagierbedienung gemessen. Eine kleinere
 Darstellung, hohe optimistische Bewertung oder ein schnelles leeres Ergebnis
 sind allein kein Erfolg. Ein globales Skip-Stop-Optimum wird nicht vorausgesetzt.
 
+Alle Kapazitätsergebnisse werden verbindlich nach
+[`all_stop_no_wait_capacity_baseline.md`](../reference/all_stop_no_wait_capacity_baseline.md)
+gegen das phasenoptimierte, vollständig gefüllte All-Stop-No-Wait-System mit
+exakter freier Passagierzuweisung verglichen. Ein historischer Fahrplan mit
+fester Phase ist nur ein Zwischenwert. Ein zusätzlicher globaler Bound für
+eine größere All-Stop-Domäne wird separat ausgewiesen und ersetzt diese
+betriebliche Referenz nicht.
+
 ## 2. Gemeinsamer Betriebsvertrag
 
 - Bestehender gerichteter Fünf-Stationen-Ring, unveränderte Geometrie,
   Ressourcen und Sicherheitsabstände.
 - Maximal 50 identische Kabinen; Single-Use-Reservoir, keine Wiedereinsätze.
 - Eingesetzte Kabinen bilden ein Präfix. Für K > 0:
-  `0 = d[0] < d[1] < ... < d[K-1] <= T`.
-- T ist eine **vorab festgelegte Instanzgröße**, für All-Stop und Skip-Stop
-  identisch. Es ist weder Solvervariable noch von der gewählten ersten Linie
-  oder deren Waiting abhängig.
+  `0 <= d[0] < d[1] < ... < d[K-1] <= T`.
+- T ist Beginn der Personenbedienung und eine **vorab festgelegte
+  Instanzgröße**, für All-Stop und Skip-Stop identisch. Es ist weder
+  Solvervariable noch von der gewählten ersten Linie oder deren Waiting
+  abhängig. Vor T dürfen keine modellierten Passagiere einsteigen.
 - Kein erfundener numerischer T-Standard: Der Runner verlangt T explizit.
   Als dokumentierte Referenz für die Wahl kann eine vorab berechnete
   No-Wait-Umlaufdauer dienen. Der konkrete Wert wird vor einem Vergleich
@@ -42,11 +58,15 @@ sind allein kein Erfolg. Ein globales Skip-Stop-Optimum wird nicht vorausgesetzt
 - Die strikte Dispatchreihenfolge entspricht mindestens einem zulässigen Tick;
   zusätzliche physikalische Headways folgen ausschließlich aus der Domäne.
   Sie gilt nicht als globale physische Reihenfolge an allen Stationen.
-- Nachfragefreigaben bleiben auf der bestehenden absoluten Zeitachse.
-  `d[0]=0` wird nicht durch Verschieben der Nachfrage künstlich hergestellt.
+- Nachfragefreigaben bleiben auf der bestehenden absoluten Zeitachse. Der freie
+  erste Dispatch `d[0]` bestimmt deshalb die Phase des Kabinenstroms am
+  Servicebeginn. Er ist keine Symmetrievariable, die auf null fixiert werden
+  dürfte.
 - Zunächst No-Wait. Die spätere Waiting-Stufe verwendet den vollständigen
   bisherigen Waitingvertrag einschließlich Freigabephase und Schrittweite.
-- Rechtzeitige Rückkehr und letzter Zustandsknoten bleiben enthalten.
+- Jede eingesetzte Kabine fährt ab ihrem Dispatch ohne Unterbrechung durch alle
+  Runden, die vor der Bedienungsdeadline beginnen. Rechtzeitige Rückkehr und
+  letzter Zustandsknoten bleiben enthalten.
   Ressourcenbetritt genau am Horizont zählt; Schutzzeiten werden nicht gekappt.
 - Ganzzahlige direkte Passagiere, keine zusätzlichen Runden oder Umstiege.
   Ausstieg am Ziel vor dessen Exit-Waiting, Einstieg am tatsächlichen
@@ -66,21 +86,22 @@ Ein leerer Plan erfüllt keinen positiven Machbarkeitsgate.
 
 ## 3. Linienkatalog statt freier Besuchsentscheidungen
 
-Eine unveränderliche `LineTemplate` beschreibt einen vollständigen Einsatz:
+Ein unveränderliches Haltemuster beschreibt die wiederholte Bewegung:
 
 - stabile Linien-ID und zugrunde liegendes Haltemuster;
 - Start am bestehenden Reservoirport;
-- konkrete Route je Besuch, Besuchszustände und Rückkehrbesuch;
+- konkrete Route je Besuch und Besuchszustände einer Runde;
 - No-Wait-Zeitversätze aller Ereignisse;
 - Plattform-Ein-/Ausstiegsversätze;
 - geschützte Ressourcennutzungen und Zustandsbelegungen;
 - kanonisch zulässige direkte Beförderungsabschnitte;
-- zulässiger Dispatchbereich und Nachweise für Ausschlüsse.
+- Nachweise für interne Unzulässigkeit.
 
-Eine Stationsmaske alleine ist noch kein Einsatz: Unterschiedliche Anzahlen
-vollständiger Umläufe werden als unterschiedliche Templates derselben Linie
-geführt. Der Katalog erzeugt die zeitlich relevanten Rückkehrbesuche aus der
-Domäne; es gibt keine versteckte willkürliche Ein-Umlauf-Beschränkung.
+Die vollständige Einsatzdauer folgt aus Muster und Dispatch. Intern darf die
+Implementierung unterschiedliche Anzahlen vollständiger Runden als
+Domainklassen führen. Deren Dispatchbereiche sind disjunkt und erzwingen, dass
+die letzte Runde die erste Rückkehrmöglichkeit am oder nach der
+Bedienungsdeadline erreicht. Die Rundenzahl bleibt dadurch abgeleitet.
 
 Erster Katalogtyp: feste Stationsmengen pro Einsatz. Für R2 All-Stop, B+D und
 C+E als kleiner Diagnosekatalog. Der erweiterte R2-Katalog enthält alle 14
@@ -133,7 +154,7 @@ als Testreferenz dienen, soll aber nicht der neue Produktionsbuilder werden.
 
 ### V3: begrenzte Zeit-/Pfadalternativen
 
-Pro Linie, Einsatzlänge und angebotener Dispatchzeit entsteht ein exakter
+Pro Linie, abgeleiteter Einsatzlänge und angebotener Dispatchzeit entsteht ein exakter
 No-Wait-Pfad. Bewegungsketten können zu Auswahlvariablen kontrahiert werden,
 solange sämtliche Ressourcenbelegungen und Passagierinzidenzen erhalten bleiben.
 Linienidentität darf an gemeinsamen Knoten nicht verloren gehen.
@@ -151,11 +172,14 @@ Für Template p und Ereignis i gilt exakt:
 
     t[k,i] = d[k] + offset[p,i].
 
-Für eine Rückkehr mit Versatz L[p] schneiden wir den Dispatchbereich mit
-`return_start - L[p] <= d[k] <= operational_end - L[p]` sowie [0,T] und dem
-bestehenden Dispatchraster. Alle weiteren absoluten Vertragsgrenzen gehen
-ebenfalls in die zulässige Domain ein. Leere Domains deaktivieren nur diese
-No-Wait-Alternative. Für die erste eingesetzte Kabine muss null enthalten sein.
+Hat Muster p die Rundendauer c[p] und enthält eine interne Domainklasse j
+Runden, muss ihr Dispatch zusätzlich
+`d[k] + (j-1)c[p] < service_end <= d[k] + jc[p]` erfüllen. Damit ist die
+Rückkehr nach j Runden die erste Mustergrenze am oder nach der
+Bedienungsdeadline. Dieser Bereich wird mit
+`return_start - jc[p] <= d[k] <= operational_end - jc[p]`, [0,T] und dem
+bestehenden Dispatchraster geschnitten. Leere Domains entfallen. Für die erste
+eingesetzte Kabine muss null enthalten sein.
 
 Selbstkonflikte der Nutzungen innerhalb eines Templates werden unabhängig
 geprüft. Schutzintervalle können über Bewegungsenden hinausreichen und dürfen
@@ -196,9 +220,12 @@ Partitionierung oder vorläufige Ablehnung dieser Geometrie zugunsten V2.
 ### 5.3 Solvermodell
 
 - `used[k]` mit `used[k+1] <= used[k]`.
-- `choose[k,p]`, Summe über p gleich `used[k]`.
+- `choose[k,p,j]`, Summe über alle Muster und ihre disjunkten, durch Dispatch
+  bestimmten Rundenzahlklassen gleich `used[k]`. Der Index j ist eine
+  Encodingklasse und keine Entscheidung zur frühen Rückkehr.
 - `d[k]` in Integer-Ticks, für inaktive Slots kanonisch null.
-- `d[0]=0` bei aktiver Flotte.
+- `d[0]` bleibt bei aktiver Flotte innerhalb `[0,T]` frei und bildet die
+  optimierte globale Phase; bei leerer Flotte ist der Wert kanonisch null.
 - Bedingte strikte Reihenfolge und [0,T] für aktive Slots.
 - Gewähltes Template impliziert seine erlaubte Dispatchdomain.
 - Für i < j und gewählte Templates p,q:
@@ -427,7 +454,7 @@ Inaktive Slots dürfen keine Domains oder Pair-Constraints aktivieren.
 Linien-/Dispatchbelegungen wie V2 und ursprünglicher physikalischer Prüfer.
 Keine bloße Übereinstimmung eines einzigen Optimalwerts.
 
-Zusätzlich K=0/1/Kmax, erste Abfahrt null, d=T, d=T+1, Dispatchraster,
+Zusätzlich K=0/1/Kmax, erste Abfahrt null und positiv, d=T, d=T+1, Dispatchraster,
 eine nur durch Überholung fahrbare Kombination und eine beweisbar nicht
 fahrbare Kombination. Modellinvalidität, Timeout und Speicherabbruch dürfen
 keinen Unzulässigkeitsbeweis erzeugen.

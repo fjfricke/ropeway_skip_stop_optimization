@@ -3,12 +3,27 @@
 Stand: 12.09.2026. Maßgeblicher Plan:
 [`reservoir_line_dispatch_models_20260912.md`](../plans/reservoir_line_dispatch_models_20260912.md).
 
+> **Scope note (13.09.2026):** The results below use the former pilot contract,
+> in which the solver could select an early prefix of rounds and return before
+> the service deadline and fixed the first dispatch at zero. The current line model instead dispatches the fleet
+> before service and keeps every deployed cabin in continuous operation through
+> the service deadline while optimizing the first dispatch within the warm-up.
+> The values below remain historical evidence for the
+> former restricted domain and must not be reported as results of the revised
+> line model.
+
+Verbindliche betriebliche Vergleichsreferenz:
+[`all_stop_no_wait_capacity_baseline.md`](../reference/all_stop_no_wait_capacity_baseline.md).
+Jeder Kapazitätsbefund muss zusätzlich gegen das phasenoptimierte, vollständig
+gefüllte All-Stop-No-Wait-System mit exakt optimierter Passagierzuweisung
+ausgewiesen werden.
+
 ## Implementierter Stand
 
 Der neue Pfad modelliert vollständige, wiederholte Haltemuster als
 No-Wait-Einsatztemplates. CP-SAT entscheidet nativ über optionale Kabinen,
 Template beziehungsweise Rundenzahl, streng geordnete Dispatchzeiten und
-ganzzahlige Beförderungsmengen. Der erste Dispatch liegt bei null; alle
+ganzzahlige Beförderungsmengen. Im damaligen Pilot lag der erste Dispatch bei null; alle
 Dispatches liegen in einem expliziten gemeinsamen Fenster. Einstieg wird an
 der tatsächlichen Plattformausfahrt, Ausstieg an der Plattformankunft und jede
 Freigabe in Integer-Mikrosekunden gekoppelt. Exportierte Lösungen durchlaufen
@@ -55,8 +70,11 @@ Intervallalternative.
 ## Erste R2-Ergebnisse
 
 Quelle ist der unveränderte R2-Fall mit 3.074 Personen. Der historische Plan
-bediente 2.496 Personen mit 38 Kabinen. Er ist kein direkter Hint für den neuen
-Vertrag, weil sein erster Dispatch bei 29,090910 s statt null liegt.
+bediente 2.496 Personen mit 38 Kabinen. Der damalige Pilot konnte ihn wegen
+seines ersten Dispatchs bei 29,090910 s statt null nicht direkt als Hint nutzen.
+Diese Einschränkung gilt im aktuellen Modell nicht mehr.
+Die 2.496 sind das exakte Passagieroptimum dieser festen Bewegung, aber noch
+nicht das Maximum über die freie All-Stop-Phase.
 
 Reine Timingtests mit dem kleinen Katalog:
 
@@ -175,3 +193,10 @@ also bedient der Skip-Stop-Zeuge mindestens **125 Personen mehr** als jeder
 All-Stop-Plan in der vollständigen Single-Use-Max50-R2-Domäne. Dies beantwortet
 die Kapazitätsfrage für R2 ohne Waiting-Nutzung und ohne einen globalen
 Skip-Stop-Gap schließen zu müssen.
+
+Zusätzlich bleibt der projektweit vorgeschriebene betriebliche Vergleich gegen
+die phasenoptimierte, gesättigte All-Stop-No-Wait-Referenz offen. Der stärkere
+globale Bound macht den vorhandenen Vorteil bereits logisch unabhängig von
+diesem noch ausstehenden Sweep; für konsistente Thesis-Tabellen muss
+`S_AS_phase` dennoch berechnet und berichtet werden. Der historische Wert
+S=2.496 darf bis dahin nur als Fixphasenwert bezeichnet werden.

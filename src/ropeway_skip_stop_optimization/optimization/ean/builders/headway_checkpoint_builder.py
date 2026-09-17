@@ -166,6 +166,7 @@ class PolicyHeadwayCheckpointBuilder(HeadwayCheckpointBuilder):
 
 def _checkpoint_kind(kind: DerivedHeadwayResourceKind) -> HeadwayCheckpointKind:
     return {
+        DerivedHeadwayResourceKind.ENTRY_SWITCH: HeadwayCheckpointKind.ENTRY_SWITCH,
         DerivedHeadwayResourceKind.PLATFORM_ENTRY: HeadwayCheckpointKind.PLATFORM_ENTRY,
         DerivedHeadwayResourceKind.PLATFORM_EXIT: HeadwayCheckpointKind.PLATFORM_EXIT,
         DerivedHeadwayResourceKind.EXIT_SWITCH: HeadwayCheckpointKind.EXIT_SWITCH,

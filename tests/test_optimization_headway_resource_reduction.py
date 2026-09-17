@@ -72,15 +72,15 @@ def test_five_station_b_exact_reduction_has_expected_artifact_counts() -> None:
         scenario, config
     )
 
-    assert len(artifact.headway_checkpoints) == 10
-    assert len(artifact.headway_candidates) == 2_738
-    assert len(artifact.headway_pairs) == 373_466
+    assert len(artifact.headway_checkpoints) == 15
+    assert len(artifact.headway_candidates) == 4_107
+    assert len(artifact.headway_pairs) == 560_199
     assert artifact.effective_headway_policy is not None
     assert len(artifact.effective_headway_policy.dominance_certificates) == 5
     assert artifact.build_metrics is not None
-    assert artifact.build_metrics.original_checkpoint_count == 15
-    assert artifact.build_metrics.original_candidate_count == 4_107
-    assert artifact.build_metrics.original_pair_count == 560_199
+    assert artifact.build_metrics.original_checkpoint_count == 20
+    assert artifact.build_metrics.original_candidate_count == 5_476
+    assert artifact.build_metrics.original_pair_count == 746_932
     assert artifact.build_metrics.dominated_pair_count == 186_733
     assert all(
         certificate.slack_seconds == 1.0

@@ -177,11 +177,13 @@ class FiveStationCircleCwFullSkipWaitHeadwayBExample(
         )
 
 
-def _with_architecture_b_headways(
+def with_architecture_b_headways(
     scenario: Scenario,
     *,
     scenario_id: str,
+    direction: str = "cw",
 ) -> Scenario:
+    station_ids = tuple(station.id for station in scenario.stations)
     return replace(
         scenario,
         id=scenario_id,
@@ -189,19 +191,25 @@ def _with_architecture_b_headways(
             physical=_physical_parameters(),
             station_mechanisms=tuple(
                 StationMechanismAssignment(
-                    exit_switch_id=f"{station}_exit_cw",
+                    exit_switch_id=f"{station}_exit_{direction}",
                     design=DefaultBypassStopOnFaultDesign(
                         mechanical_service_cycle_seconds=6.0,
-                        service_resource_id=f"service_attachment::{station}::cw",
+                        service_resource_id=(
+                            f"service_attachment::{station}::{direction}"
+                        ),
                     ),
                 )
-                for station in ("A", "B", "C", "D", "E")
+                for station in station_ids
             ),
             provenance=(
                 _architecture_provenance(ArtificialHeadwayArchitecture.B),
             ),
         ),
     )
+
+
+# Private compatibility name retained for older imports and historical tests.
+_with_architecture_b_headways = with_architecture_b_headways
 
 
 def build_six_station_ring_headway_scenario(

@@ -7,8 +7,10 @@ from ..cp_sat_certificate import stable_fingerprint
 from ..models import DddRouteDecision
 from ..reservoir_cp_sat_problem import DddReservoirCpSatProblem
 from ..time_ticks import ddd_seconds_to_tick
+from ..reservoir_boundary import state_protection_tick
 from .catalog import LinePattern, line_patterns, option_for_pattern
 from .config import ReservoirLineConfig
+from .config import ReservoirLinePreparation, ReservoirLineVariant
 from .dispatch_domains import (
     TickInterval,
     complement_closed,
@@ -67,6 +69,7 @@ class PreparedLineProblem:
     model_fingerprint: str
     maximum_cabins: int
     dispatch_window_end_tick: int
+    service_start_tick: int
     dispatch_step_tick: int
     templates: tuple[LineTemplate, ...]
     pair_domains: tuple[TemplatePairDomain, ...]
@@ -149,6 +152,10 @@ def _template(
         raise AssertionError("complete line template did not return to reservoir")
     events.append((state, now))
 
+    if now % laps:
+        raise AssertionError("recurring line pattern has inconsistent lap durations")
+    cycle_tick = now // laps
+
     # A single cabin must not collide with itself; this is independent of dispatch.
     by_resource: dict[str, list[RelativeResourceInterval]] = defaultdict(list)
     for interval in protected:
@@ -159,17 +166,28 @@ def _template(
             if interval.start_tick < previous_end:
                 return None
             previous_end = max(previous_end, interval.end_tick)
-    seen_events = set()
-    for event in events:
-        if event in seen_events:
+    last_clear = {}
+    for state, time in events:
+        if time < last_clear.get(state, -1):
             return None
-        seen_events.add(event)
+        last_clear[state] = time + state_protection_tick(problem, state)
 
-    minimum = max(0, ddd_seconds_to_tick(problem.return_start_seconds) - now)
+    # A deployed cabin circulates continuously throughout passenger service.
+    # This lap count is therefore implied by dispatch: the selected return is
+    # the first pattern boundary at or after the service deadline.  The strict
+    # upper condition prevents choosing an earlier return while another whole
+    # round could still begin before the deadline.
+    service_end = core.passenger_service_end_tick
+    minimum = max(
+        0,
+        ddd_seconds_to_tick(problem.return_start_seconds) - now,
+        service_end - now,
+    )
     maximum = min(
         window_end_tick,
         ddd_seconds_to_tick(problem.dispatch_end_seconds),
         core.operational_end_tick - now,
+        service_end - (laps - 1) * cycle_tick - 1,
     )
     if minimum > maximum:
         return None
@@ -188,7 +206,7 @@ def _template(
     )
 
 
-def _pair_domain(first: LineTemplate, second: LineTemplate, maximum_delta: int):
+def _pair_domain(first: LineTemplate, second: LineTemplate, maximum_delta: int, problem=None):
     forbidden: list[tuple[int, int]] = []
     by_first: dict[str, list[RelativeResourceInterval]] = defaultdict(list)
     by_second: dict[str, list[RelativeResourceInterval]] = defaultdict(list)
@@ -212,7 +230,8 @@ def _pair_domain(first: LineTemplate, second: LineTemplate, maximum_delta: int):
     for state in first_events.keys() & second_events.keys():
         for a in first_events[state]:
             for b in second_events[state]:
-                forbidden.append((a - b, a - b))
+                h = state_protection_tick(problem, state) if problem is not None else 1
+                forbidden.append((a - b - h + 1, a - b + h - 1))
     allowed = complement_closed(forbidden, 1, maximum_delta)
     clipped = []
     for interval in merge_closed(forbidden):
@@ -224,13 +243,47 @@ def _pair_domain(first: LineTemplate, second: LineTemplate, maximum_delta: int):
     return TemplatePairDomain(first.id, second.id, allowed, clipped_forbidden)
 
 
+def _validate_pattern_prefixes(templates: tuple[LineTemplate, ...]) -> None:
+    """Prove the structural prefix property used by compact formulations."""
+    by_pattern: dict[str, list[LineTemplate]] = defaultdict(list)
+    for template in templates:
+        by_pattern[template.pattern_id].append(template)
+    for pattern_id, values in by_pattern.items():
+        longest = max(values, key=lambda item: item.laps)
+        for template in values:
+            visit_count = len(template.visits)
+            expected_resources = tuple(
+                item
+                for item in longest.resource_intervals
+                if item.visit_index < visit_count
+            )
+            if template.route_option_ids != longest.route_option_ids[:visit_count]:
+                raise ValueError(
+                    f"line templates for pattern {pattern_id!r} do not share a route prefix"
+                )
+            if template.visits != longest.visits[:visit_count]:
+                raise ValueError(
+                    f"line templates for pattern {pattern_id!r} do not share a visit prefix"
+                )
+            if template.resource_intervals != expected_resources:
+                raise ValueError(
+                    f"line templates for pattern {pattern_id!r} do not share a resource prefix"
+                )
+            if template.state_event_offsets != longest.state_event_offsets[
+                : len(template.state_event_offsets)
+            ]:
+                raise ValueError(
+                    f"line templates for pattern {pattern_id!r} do not share a state prefix"
+                )
+
+
 def prepare_line_problem(
     problem: DddReservoirCpSatProblem, config: ReservoirLineConfig
 ) -> PreparedLineProblem:
     problem.validate()
     config.validate(problem.available_fleet_count)
     if ddd_seconds_to_tick(problem.dispatch_start_seconds) != 0:
-        raise ValueError("reservoir line v1 requires first dispatch domain to start at zero")
+        raise ValueError("reservoir line dispatch domain must have lower bound zero")
     # A bounded-wait source domain is accepted because zero waiting is always a
     # legal member of it. The prepared/model fingerprints and reported proof
     # scope explicitly identify that V1 fixes every wait to zero.
@@ -238,6 +291,8 @@ def prepare_line_problem(
     end = config.dispatch_window_end_tick
     if end > ddd_seconds_to_tick(problem.dispatch_end_seconds):
         raise ValueError("line dispatch window exceeds the reservoir dispatch domain")
+    if end >= problem.resolved_core.passenger_service_end_tick:
+        raise ValueError("line dispatch phase must end before the service deadline")
     maximum_cabins = (
         problem.available_fleet_count
         if config.maximum_cabins is None
@@ -258,24 +313,33 @@ def prepare_line_problem(
     )
     if not templates:
         raise ValueError("line catalog has no complete dispatch-return template")
-    if not any(t.minimum_dispatch_tick == 0 for t in templates):
-        raise ValueError("line catalog cannot dispatch its first cabin at zero")
+    _validate_pattern_prefixes(templates)
 
-    pair_domains = tuple(
-        _pair_domain(first, second, end)
-        for first in templates
-        for second in templates
+    prepare_pairs = not (
+        config.preparation is ReservoirLinePreparation.ENCODING_SPECIFIC
+        and config.variant is ReservoirLineVariant.INTERVALS
+    )
+    pair_domains = (
+        tuple(
+            _pair_domain(first, second, end, problem)
+            for first in templates
+            for second in templates
+        )
+        if prepare_pairs
+        else ()
     )
     interval_count = sum(len(item.allowed_delta) for item in pair_domains)
     manifest = {
-        "version": "reservoir_line_preparation_v1",
+        "version": "reservoir_line_preparation_v4_free_phase",
         "problem_fingerprint": problem.fingerprint,
         "maximum_cabins": maximum_cabins,
         "dispatch_window_end_tick": end,
+        "service_start_tick": config.service_start_tick,
         "dispatch_step_tick": step,
         "catalog_profile": config.catalog_profile.value,
         "source_waiting_domain": problem.waiting_policy.domain.value,
         "waiting_fixed_to_zero": True,
+        "preparation_mode": config.preparation.value,
         "templates": [
             {
                 **asdict(item),
@@ -290,6 +354,7 @@ def prepare_line_problem(
         stable_fingerprint(manifest),
         maximum_cabins,
         end,
+        config.service_start_tick,
         step,
         templates,
         pair_domains,
@@ -297,11 +362,15 @@ def prepare_line_problem(
             "patterns": len(patterns),
             "source_waiting_domain": problem.waiting_policy.domain.value,
             "waiting_fixed_to_zero": True,
+            "lifecycle_contract": "free_phase_dispatch_then_continuous_service_v1",
             "templates": len(templates),
             "template_resource_intervals": sum(
                 len(item.resource_intervals) for item in templates
             ),
             "template_pairs": len(pair_domains),
+            "potential_template_pairs": len(templates) ** 2,
+            "pair_domains_materialized": prepare_pairs,
+            "preparation_mode": config.preparation.value,
             "allowed_delta_intervals": interval_count,
         },
     )

@@ -6,6 +6,7 @@ import json
 import os
 import signal
 import subprocess
+import sys
 import time
 from dataclasses import replace
 
@@ -207,6 +208,30 @@ def _signal_owned_process_tree(process, sig):
     process.send_signal(sig)
 
 
+def _macos_memory_free_percent() -> float | None:
+    """Return Apple's pressure-aware free percentage when the command exists."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        completed = subprocess.run(
+            ["memory_pressure", "-Q"],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=1,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    for line in completed.stdout.splitlines():
+        prefix = "System-wide memory free percentage:"
+        if line.startswith(prefix):
+            try:
+                return float(line.removeprefix(prefix).strip().removesuffix("%"))
+            except ValueError:
+                return None
+    return None
+
+
 def supervise(
     command,
     output,
@@ -216,6 +241,7 @@ def supervise(
     global_deadline=None,
     checkpoint_callback=None,
     env=None,
+    system_memory_pressure_seconds=None,
 ):
     """Hard civil/awake deadlines and RSS for the complete isolated process tree."""
     import psutil
@@ -223,6 +249,12 @@ def supervise(
     started, civil = time.monotonic(), time.time()
     deadline = min(civil + seconds, global_deadline or float("inf"))
     peak, cpu, threads = 0, {}, 0
+    minimum_available = None
+    minimum_pressure_free_percent = None
+    initial_swap = psutil.swap_memory().used
+    peak_swap = initial_swap
+    critical_since = None
+    next_pressure_sample = 0.0
     reason, last_checkpoint = None, None
     with (output / "process.log").open("w") as stream:
         process = subprocess.Popen(
@@ -264,6 +296,32 @@ def supervise(
             except psutil.Error:
                 pass
             elapsed = time.monotonic() - started
+            memory = psutil.virtual_memory()
+            swap = psutil.swap_memory().used
+            peak_swap = max(peak_swap, swap)
+            minimum_available = (
+                memory.available
+                if minimum_available is None
+                else min(minimum_available, memory.available)
+            )
+            if system_memory_pressure_seconds is not None and elapsed >= next_pressure_sample:
+                pressure_free = _macos_memory_free_percent()
+                next_pressure_sample = elapsed + 1.0
+                if pressure_free is not None:
+                    minimum_pressure_free_percent = (
+                        pressure_free
+                        if minimum_pressure_free_percent is None
+                        else min(minimum_pressure_free_percent, pressure_free)
+                    )
+                critical = (
+                    pressure_free is not None and pressure_free <= 5.0
+                ) or memory.available <= max(512 * 1024**2, int(memory.total * 0.02))
+                if critical:
+                    critical_since = critical_since or elapsed
+                    if elapsed - critical_since >= system_memory_pressure_seconds:
+                        reason = "SYSTEM_MEMORY_PRESSURE"
+                else:
+                    critical_since = None
             civil_elapsed = time.time() - civil
             if civil_elapsed - elapsed > 5:
                 reason = "SUSPEND_DETECTED"
@@ -286,6 +344,12 @@ def supervise(
         "peak_process_tree_rss_bytes": peak,
         "sampled_process_tree_cpu_seconds": sum(cpu.values()),
         "peak_sampled_thread_count": threads,
+        "minimum_system_available_bytes": minimum_available,
+        "minimum_macos_memory_free_percent": minimum_pressure_free_percent,
+        "initial_swap_used_bytes": initial_swap,
+        "peak_swap_used_bytes": peak_swap,
+        "final_swap_used_bytes": psutil.swap_memory().used,
+        "system_memory_pressure_grace_seconds": system_memory_pressure_seconds,
     }
     atomic_json(output / "supervisor.json", metrics)
     return metrics

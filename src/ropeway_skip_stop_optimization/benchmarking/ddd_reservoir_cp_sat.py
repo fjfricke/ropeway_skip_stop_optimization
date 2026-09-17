@@ -42,6 +42,8 @@ class DddReservoirCpSatRunConfig:
     dispatch_step_seconds: float = 0.000001
     seed_time_limit_seconds: float = 10.0
     resume_checkpoint: Path | None = None
+    reservoir_port_policy: str | None = None
+    port_headway_evidence: Path | None = None
 
 
 def all_stop_reservoir_movement(problem, source):
@@ -51,6 +53,10 @@ def all_stop_reservoir_movement(problem, source):
     if not count or cycle is None:
         return None
     first = max(0, source.warmup_seconds - cycle)
+    if problem.boundary_policy is not None:
+        count = min(count, ddd_seconds_to_tick(cycle) // problem.boundary_policy.headway_tick)
+        if count == 0:
+            return None
     spacing = cycle / count
     trips = []
     for k in range(count):
@@ -118,6 +124,9 @@ def run_ddd_reservoir_cp_sat(config: DddReservoirCpSatRunConfig):
         DddReservoirCpSatProblem.from_arc_flow(prepared.problem),
         dispatch_step_seconds=config.dispatch_step_seconds,
     )
+    from ..optimization.ddd.reservoir_boundary import apply_boundary_arguments
+
+    problem = apply_boundary_arguments(problem, config, derived_policy=getattr(prepared, "headway_policy", None))
     problem.validate()
     prepare_seconds = perf_counter() - started
     atomic_json(config.output_dir / "domain.json", problem.manifest)

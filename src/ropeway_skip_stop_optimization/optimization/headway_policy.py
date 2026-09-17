@@ -298,6 +298,18 @@ class PhysicalHeadwayPolicyBuilder:
 
             resources.append(
                 DerivedHeadwayResource(
+                    id=f"entry_switch::{state_id}",
+                    state_id=state_id,
+                    exit_switch_id=timing.exit_switch_id,
+                    station_id=timing.station_id,
+                    kind=DerivedHeadwayResourceKind.ENTRY_SWITCH,
+                    rule_id=exit_rule_id,
+                    applies_to_service=True,
+                    applies_to_bypass=bool(bypass_options),
+                )
+            )
+            resources.append(
+                DerivedHeadwayResource(
                     id=f"exit_switch::{state_id}",
                     state_id=state_id,
                     exit_switch_id=timing.exit_switch_id,

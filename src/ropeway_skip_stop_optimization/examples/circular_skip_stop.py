@@ -56,7 +56,12 @@ class CircularSkipStopSpec:
     rope_speed_m_per_s: float = 5.0
     platform_speed_m_per_s: float = 0.5
     rope_segment_length_m: float = 150.0
+    rope_segment_lengths_m: tuple[float, ...] | None = None
+    approach_fast_length_m: float = 5.0
+    brake_length_m: float = 3.0
     platform_length_m: float = 10.0
+    accelerate_length_m: float = 3.0
+    depart_fast_length_m: float = 5.0
     bypass_length_m: float = 20.0
     cabin_capacity: int = 8
     cabin_length_m: float = 3.0
@@ -77,6 +82,24 @@ class CircularSkipStopSpec:
             raise ValueError("scenario_cabin_count must be positive")
         if self.demand_count_per_od_pair <= 0:
             raise ValueError("demand_count_per_od_pair must be positive")
+        if self.rope_segment_lengths_m is not None and (
+            len(self.rope_segment_lengths_m) != len(self.station_ids)
+            or any(length <= 0 for length in self.rope_segment_lengths_m)
+        ):
+            raise ValueError(
+                "rope_segment_lengths_m must contain one positive length per station"
+            )
+        for name, length in (
+            ("rope segment", self.rope_segment_length_m),
+            ("approach connector", self.approach_fast_length_m),
+            ("brake", self.brake_length_m),
+            ("platform", self.platform_length_m),
+            ("acceleration", self.accelerate_length_m),
+            ("departure connector", self.depart_fast_length_m),
+            ("bypass", self.bypass_length_m),
+        ):
+            if length <= 0:
+                raise ValueError(f"{name} length must be positive")
 
 
 class FiveStationCircleCwFullNoSkipNoWaitExample(ScenarioExample):
@@ -561,14 +584,21 @@ def build_circular_skip_stop_scenario(spec: CircularSkipStopSpec) -> Scenario:
                 platform_profile=platform_profile,
                 brake_profile=brake_profile,
                 accelerate_profile=accelerate_profile,
+                approach_fast_length_m=spec.approach_fast_length_m,
+                brake_length_m=spec.brake_length_m,
                 platform_length_m=spec.platform_length_m,
+                accelerate_length_m=spec.accelerate_length_m,
+                depart_fast_length_m=spec.depart_fast_length_m,
                 bypass_length_m=spec.bypass_length_m,
             )
         ),
         *_rope_segments(
             station_ids=spec.station_ids,
             direction=spec.direction,
-            length_m=spec.rope_segment_length_m,
+            lengths_m=(
+                spec.rope_segment_lengths_m
+                or (spec.rope_segment_length_m,) * len(spec.station_ids)
+            ),
             rope_profile=rope_profile,
         ),
     )
@@ -668,7 +698,11 @@ def _station_segments(
     platform_profile: SpeedProfile,
     brake_profile: SpeedProfile,
     accelerate_profile: SpeedProfile,
+    approach_fast_length_m: float,
+    brake_length_m: float,
     platform_length_m: float,
+    accelerate_length_m: float,
+    depart_fast_length_m: float,
     bypass_length_m: float,
 ) -> tuple[TrackSegment, ...]:
     return (
@@ -677,7 +711,7 @@ def _station_segments(
             kind=TrackSegmentKind.CONNECTOR,
             from_node_id=f"{station}_entry_{direction}",
             to_node_id=f"{station}_service_approach_{direction}",
-            length_m=5.0,
+            length_m=approach_fast_length_m,
             speed_profile=fast_profile,
             resource_id=f"{station}_service_{direction}",
         ),
@@ -686,7 +720,7 @@ def _station_segments(
             kind=TrackSegmentKind.CONNECTOR,
             from_node_id=f"{station}_service_approach_{direction}",
             to_node_id=f"{station}_platform_entry_{direction}",
-            length_m=3.0,
+            length_m=brake_length_m,
             speed_profile=brake_profile,
             resource_id=f"{station}_service_{direction}",
         ),
@@ -704,7 +738,7 @@ def _station_segments(
             kind=TrackSegmentKind.CONNECTOR,
             from_node_id=f"{station}_platform_exit_{direction}",
             to_node_id=f"{station}_service_accelerate_{direction}",
-            length_m=3.0,
+            length_m=accelerate_length_m,
             speed_profile=accelerate_profile,
             resource_id=f"{station}_service_{direction}",
         ),
@@ -713,7 +747,7 @@ def _station_segments(
             kind=TrackSegmentKind.CONNECTOR,
             from_node_id=f"{station}_service_accelerate_{direction}",
             to_node_id=f"{station}_exit_{direction}",
-            length_m=5.0,
+            length_m=depart_fast_length_m,
             speed_profile=fast_profile,
             resource_id=f"{station}_service_{direction}",
         ),
@@ -732,7 +766,7 @@ def _station_segments(
 def _rope_segments(
     station_ids: tuple[str, ...],
     direction: str,
-    length_m: float,
+    lengths_m: tuple[float, ...],
     rope_profile: SpeedProfile,
 ) -> tuple[TrackSegment, ...]:
     segments: list[TrackSegment] = []
@@ -744,7 +778,7 @@ def _rope_segments(
                 kind=TrackSegmentKind.ROPE,
                 from_node_id=f"{station_id}_exit_{direction}",
                 to_node_id=f"{next_station_id}_entry_{direction}",
-                length_m=length_m,
+                length_m=lengths_m[index],
                 speed_profile=rope_profile,
                 resource_id=f"rope_{direction}_{index + 1}",
             )

@@ -417,6 +417,8 @@ def _checkpoint_offset(
     platform_exit: float | None,
     exit_switch: float,
 ) -> float:
+    if kind is HeadwayCheckpointKind.ENTRY_SWITCH:
+        return 0.0
     if kind is HeadwayCheckpointKind.PLATFORM_ENTRY:
         if decision is not DddRouteDecision.STOP or platform_entry is None:
             raise ValueError("platform-entry checkpoint requires a STOP route")

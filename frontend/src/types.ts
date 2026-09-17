@@ -131,6 +131,7 @@ export interface Scenario {
   demands: Demand[];
   operating: OperatingParameters;
   headway_design?: HeadwayDesign | null;
+  experiment_metadata?: Record<string, string | number | boolean | null> | null;
 }
 
 export interface DiscreteNode {

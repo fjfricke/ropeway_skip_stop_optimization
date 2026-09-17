@@ -220,7 +220,14 @@ def build_network(
     arcs = []
 
     def add(source, target, kind, oid=None, resources=()):
-        arcs.append(PhaseArc(len(arcs), source, target, kind, oid, tuple(resources)))
+        resources = tuple(resources)
+        # Protect exactly one outgoing arc at an occupied entry node, including
+        # the return-to-sink arc. Dispatch-to-node itself is not counted twice.
+        if (problem.boundary_policy is not None and source is not None
+                and source[:2] == (problem.entry_state_id, "entry")):
+            b = problem.boundary_policy
+            resources += ((b.resource_id, source[2], source[2] + b.headway_tick),)
+        arcs.append(PhaseArc(len(arcs), source, target, kind, oid, resources))
 
     def usages(o, t, phase):
         intervals = []

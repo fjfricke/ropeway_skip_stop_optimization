@@ -24,7 +24,9 @@ from ropeway_skip_stop_optimization.optimization.ddd.reservoir_cp_sat_certificat
     DddReservoirCpPlan,
     DddReservoirCpTrip,
     validate_reservoir_cp_plan,
+    reservoir_cp_plan_from_payload,
     read_reservoir_cp_checkpoint,
+    read_reservoir_cp_checkpoint_for_fleet_resize,
     write_reservoir_cp_checkpoint,
 )
 from ropeway_skip_stop_optimization.optimization.ean.models import EanDemandGroup
@@ -97,11 +99,54 @@ def test_dispatch_during_service_and_early_return_are_decisions():
     assert r2["validated_upper_bound"] == 3
 
 
+def test_continuous_service_uses_first_complete_return_after_deadline():
+    p = problem(return_start_seconds=15)
+    # Complete returns occur at seconds 4, 8, 12, 16, and 20.  Once the
+    # lifecycle reaches the first return after the 15-second deadline, the
+    # cabin must leave rather than run the discretionary fifth lap.
+    late = DddReservoirCpPlan(
+        (trip(routes=("A_stop", "B_stop") * 5),),
+        {},
+    )
+    with pytest.raises(ValueError, match="first complete return"):
+        validate_reservoir_cp_plan(p, late)
+
+    result = DddReservoirCpSatOptimizer().solve(p)
+    plan = reservoir_cp_plan_from_payload(result["plan"])
+    assert result["proven_optimal"]
+    validate_reservoir_cp_plan(p, plan)
+
+
 def test_empty_operation_and_more_available_cabins_do_not_force_departures():
     p = problem(available_fleet_count=4)
     r = DddReservoirCpSatOptimizer().solve(p, fixed_plan=DddReservoirCpPlan((), {}))
     assert r["proven_optimal"] and r["metrics"]["used_fleet"] == 0
     assert r["metrics"]["unserved"] == 1 and r["proof_scope"] == "FIXED_MOVEMENT"
+
+
+def test_minimum_active_fleet_forces_available_cabin_to_dispatch():
+    p = problem()
+    result = DddReservoirCpSatOptimizer().solve(p, minimum_active_fleet=1)
+    assert result["minimum_active_fleet"] == 1
+    assert result["metrics"]["used_fleet"] == 1
+    with pytest.raises(ValueError, match="minimum active fleet"):
+        DddReservoirCpSatOptimizer().solve(p, minimum_active_fleet=2)
+
+
+def test_route_search_priority_only_adds_route_decision_strategy():
+    p = problem()
+    plain = build_reservoir_cp_sat(p)
+    focused = build_reservoir_cp_sat(
+        p,
+        config=DddIntegratedCpSatConfig(route_search_priority=True),
+    )
+    assert len(plain.movement.model.proto.search_strategy) == 0
+    assert len(focused.movement.model.proto.search_strategy) == 1
+    strategy = focused.movement.model.proto.search_strategy[0]
+    assert len(strategy.exprs) == len(focused.movement.selection_by_key)
+    assert focused.stats["route_priority_literals"] == len(
+        focused.movement.selection_by_key
+    )
 
 
 def test_no_return_at_other_station_or_after_horizon():
@@ -210,6 +255,22 @@ def test_checkpoint_detects_changes_and_preserves_seed(tmp_path, change):
         read_reservoir_cp_checkpoint(path, p)
 
 
+def test_checkpoint_can_be_retargeted_only_across_fleet_caps(tmp_path):
+    source = problem(available_fleet_count=2)
+    plan = DddReservoirCpPlan((trip(),), {})
+    path = tmp_path / "seed.json"
+    write_reservoir_cp_checkpoint(path, source, plan)
+
+    expanded = replace(source, available_fleet_count=4)
+    contracted = replace(source, available_fleet_count=1)
+    assert read_reservoir_cp_checkpoint_for_fleet_resize(path, expanded) == plan
+    assert read_reservoir_cp_checkpoint_for_fleet_resize(path, contracted) == plan
+
+    incompatible = replace(expanded, cabin_capacity=2)
+    with pytest.raises(ValueError, match="more than the available-fleet cap"):
+        read_reservoir_cp_checkpoint_for_fleet_resize(path, incompatible)
+
+
 def test_timeout_keeps_validated_seed_without_claiming_optimality():
     p = problem()
     plan = DddReservoirCpPlan((trip(),), {})
@@ -218,6 +279,33 @@ def test_timeout_keeps_validated_seed_without_claiming_optimality():
     ).solve(p, primal_seed=plan)
     assert r["solver_status"] == "UNKNOWN" and not r["proven_optimal"]
     assert r["cp_lower_bound"] is None and r["metrics"]["used_fleet"] == 1
+
+
+def test_seed_can_supply_cutoff_without_becoming_a_solution_hint():
+    p = problem()
+    seed = DddReservoirCpPlan((trip(),), {})
+    result = DddReservoirCpSatOptimizer(
+        DddIntegratedCpSatConfig(total_time_limit_seconds=5)
+    ).solve(p, primal_seed=seed, use_primal_hint=False)
+    assert result["primal_hint_enabled"] is False
+    assert result["proven_optimal"]
+    assert result["metrics"]["unserved"] == 0
+
+
+def test_solver_can_ignore_seed_hint_cutoff_and_lexicographic_cap():
+    result = DddReservoirCpSatOptimizer(
+        DddIntegratedCpSatConfig(total_time_limit_seconds=5),
+        DddReservoirCpObjective.SERVICE_THEN_JOURNEY,
+    ).solve(
+        problem(),
+        use_primal_hint=False,
+        use_primal_cutoff=False,
+        use_primal_lexicographic_cap=False,
+    )
+    assert result["primal_hint_enabled"] is False
+    assert result["primal_cutoff_enabled"] is False
+    assert result["primal_lexicographic_cap_enabled"] is False
+    assert result["proven_optimal"]
 
 
 def test_waiting_uses_same_resource_coefficients_and_bounds():

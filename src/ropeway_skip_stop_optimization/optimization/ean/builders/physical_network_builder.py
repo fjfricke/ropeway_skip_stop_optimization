@@ -293,12 +293,16 @@ def _resource_usages(
         )
 
     checkpoint_kinds = (
+        (HeadwayCheckpointKind.ENTRY_SWITCH, EanTimeReference.ENTRY_TIME),
         (HeadwayCheckpointKind.PLATFORM_ENTRY, EanTimeReference.PLATFORM_ENTRY_TIME),
         (HeadwayCheckpointKind.PLATFORM_EXIT, EanTimeReference.PLATFORM_EXIT_TIME),
         (HeadwayCheckpointKind.EXIT_SWITCH, EanTimeReference.EXIT_SWITCH_TIME),
     )
     for kind, time_reference in checkpoint_kinds:
-        if behavior is EanPassengerBehavior.SKIP and kind is not HeadwayCheckpointKind.EXIT_SWITCH:
+        if behavior is EanPassengerBehavior.SKIP and kind not in {
+            HeadwayCheckpointKind.ENTRY_SWITCH,
+            HeadwayCheckpointKind.EXIT_SWITCH,
+        }:
             continue
         resource_id = compatibility_resource_id(kind, state_id)
         resources.setdefault(resource_id, EanResource(id=resource_id, kind=EanResourceKind.COMPATIBILITY))
@@ -308,7 +312,10 @@ def _resource_usages(
                 time_reference=time_reference,
                 activation_reference=(
                     EanActivationReference.SERVE
-                    if kind is not HeadwayCheckpointKind.EXIT_SWITCH
+                    if kind not in {
+                        HeadwayCheckpointKind.ENTRY_SWITCH,
+                        HeadwayCheckpointKind.EXIT_SWITCH,
+                    }
                     else EanActivationReference.ACTIVE
                 ),
                 checkpoint_kind=kind,

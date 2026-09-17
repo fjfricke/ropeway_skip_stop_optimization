@@ -1,6 +1,7 @@
 """Build or solve the compact single-use reservoir fixed-line model."""
 
 import argparse
+from ropeway_skip_stop_optimization.optimization.ddd.reservoir_boundary import add_boundary_arguments, apply_boundary_arguments
 import json
 from pathlib import Path
 import subprocess
@@ -15,11 +16,16 @@ from ropeway_skip_stop_optimization.optimization.ddd.reservoir_cp_sat_certificat
 from ropeway_skip_stop_optimization.optimization.ddd.reservoir_hybrid.domain import (
     load_reference,
 )
+from ropeway_skip_stop_optimization.optimization.ddd.reservoir_cp_sat_certificate import (
+    validate_reservoir_cp_plan,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.reservoir_lines import (
     ReservoirLineCatalogProfile,
     ReservoirLineConfig,
+    ReservoirLineFormulation,
     ReservoirLineMode,
     ReservoirLineOptimizer,
+    ReservoirLinePreparation,
     ReservoirLineVariant,
     prepare_line_problem,
 )
@@ -57,17 +63,40 @@ def _source_identity() -> dict:
 def main():
     parser = argparse.ArgumentParser(description=__doc__, allow_abbrev=False)
     parser.add_argument("--reference-checkpoint", required=True, type=Path)
+    parser.add_argument(
+        "--initial-checkpoint",
+        type=Path,
+        help="optional start plan when the reference checkpoint is domain-only",
+    )
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument(
-        "--variant", choices=list(ReservoirLineVariant), default="dispatch_domains"
+        "--variant", choices=list(ReservoirLineVariant), default="intervals"
     )
     parser.add_argument(
         "--mode", choices=list(ReservoirLineMode), default="exact_service"
     )
     parser.add_argument(
+        "--preparation",
+        choices=list(ReservoirLinePreparation),
+        default="encoding_specific",
+    )
+    parser.add_argument(
+        "--formulation",
+        choices=list(ReservoirLineFormulation),
+        default="shared_rounds",
+    )
+    parser.add_argument(
         "--catalog", choices=list(ReservoirLineCatalogProfile), default="small"
     )
-    parser.add_argument("--dispatch-window-end", required=True, type=float)
+    parser.add_argument(
+        "--dispatch-window-end",
+        required=True,
+        type=float,
+        help=(
+            "end of the passenger-free dispatch phase and start of passenger "
+            "service, in seconds"
+        ),
+    )
     parser.add_argument("--max-cabins", type=int)
     parser.add_argument("--fixed-cabins", type=int)
     parser.add_argument("--fixed-pattern-sequence", type=Path)
@@ -81,14 +110,33 @@ def main():
     )
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--fix-reference-movement", action="store_true")
+    parser.add_argument(
+        "--no-reference-hint",
+        action="store_true",
+        help="load the physical problem from the checkpoint but do not hint its plan",
+    )
+    add_boundary_arguments(parser)
     args = parser.parse_args()
+
+    if args.no_reference_hint and args.fix_reference_movement:
+        parser.error("--no-reference-hint conflicts with --fix-reference-movement")
+    if args.no_reference_hint and args.initial_checkpoint:
+        parser.error("--no-reference-hint conflicts with --initial-checkpoint")
 
     runner_started = perf_counter()
     args.output.mkdir(parents=True, exist_ok=False)
     domain, reference_plan = load_reference(args.reference_checkpoint)
+    from dataclasses import replace
+
+    domain = replace(domain, problem=apply_boundary_arguments(domain.problem, args))
+    if args.initial_checkpoint is not None:
+        _, reference_plan = load_reference(args.initial_checkpoint)
+        validate_reservoir_cp_plan(domain.problem, reference_plan)
     config = ReservoirLineConfig(
         dispatch_window_end_seconds=args.dispatch_window_end,
         variant=ReservoirLineVariant(args.variant),
+        preparation=ReservoirLinePreparation(args.preparation),
+        formulation=ReservoirLineFormulation(args.formulation),
         mode=ReservoirLineMode(args.mode),
         catalog_profile=ReservoirLineCatalogProfile(args.catalog),
         maximum_cabins=args.max_cabins,
@@ -110,11 +158,18 @@ def main():
             stream.write(json.dumps(event, sort_keys=True) + "\n")
 
     logs = []
+
+    def solver_log_callback(message):
+        logs.append(message)
+        # Preserve presolve/search progress while long runs are still active.
+        with (args.output / "solver.log").open("a") as stream:
+            stream.write(message if message.endswith("\n") else message + "\n")
+
     result, plan = ReservoirLineOptimizer(config).solve(
         domain.problem,
-        reference_plan=reference_plan,
+        reference_plan=None if args.no_reference_hint else reference_plan,
         event_callback=event_callback,
-        log_callback=logs.append if args.log_search_progress else None,
+        log_callback=solver_log_callback if args.log_search_progress else None,
         build_only=args.build_only,
         prepared=prepared,
         fixed_movement_plan=reference_plan if args.fix_reference_movement else None,

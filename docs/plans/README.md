@@ -13,6 +13,39 @@ Each plan must:
 
 Current plans:
 
+- [`ean_cp_sat_optimized_initial_placement_20260917.md`](ean_cp_sat_optimized_initial_placement_20260917.md):
+  geplantes Ereignis-CP-SAT mit modellbestimmten Anfangspositionen und kompakten
+  OD-Passagieren; begrenzter F2-/F3-Pilot, getrennte Nachlaufprüfung und klare
+  Verfahrenszuordnung für Journey- und Kapazitätsstudie.
+
+- [`thesis_capacity_final_campaign_20260917.md`](thesis_capacity_final_campaign_20260917.md):
+  abschließende Kapazitätsreihe mit ausdrücklich neuen F2-Läufen, kleinem
+  Musterkatalog, begrenztem F3-Gate und CP-SAT-Nachoptimierung; keine vorzeitige
+  Rückkehr in irgendeinem Verfahren, höchstens 6 h 40 min einschließlich Reserve.
+
+- [`cp_sat_od_inventory_passengers_20260916.md`](cp_sat_od_inventory_passengers_20260916.md):
+  implementierte exakte OD-Bestandsformulierung mit Cumulative-Verfügbarkeit statt
+  Ankunftsgruppe×Fahrt-Zuordnung; Gleichheitsgates, Zertifikatsrekonstruktion und
+  Größenvergleich sind abgeschlossen, der Suchzeitvergleich bleibt offen.
+
+- [`reservoir_line_evolution_no_wait.md`](reservoir_line_evolution_no_wait.md):
+  implemented solver-free no-wait line decoding with GA, TPE and random
+  controls; the frozen one-hour R0/R2 comparison remains to be executed and
+  documented in the linked findings report.
+
+- [`thesis_example_calibration_20260913.md`](thesis_example_calibration_20260913.md):
+  quellenbasierte neue Geometrieprofile, verteilte Nachfragefreigaben,
+  geprüfte Vorlauf-/Rückkehrverträge, Flottenreferenz und Frontend-Auswahl;
+  alte Beispiele bleiben unverändert, Umsetzung mit Korrektheitsgates.
+- [`reservoir_line_interval_scaling_20260913.md`](reservoir_line_interval_scaling_20260913.md):
+  kontrollierte Fünf-Stationen-Matrix abgeschlossen; offen bleiben die
+  quellenkalibrierten Sechs-Stationen-Profile und deren neue Zeitverträge. Siehe
+  [Ergebnisbericht](../findings/reservoir_line_length_scaling_results_20260913.md).
+- [`../reference/all_stop_no_wait_capacity_baseline.md`](../reference/all_stop_no_wait_capacity_baseline.md):
+  verbindlicher Vergleichsvertrag für alle Kapazitätsexperimente; jede
+  Nachfrageinstanz benötigt eine phasenoptimierte, vollständig gefüllte
+  All-Stop-No-Wait-Referenz mit exakter Passagierzuweisung. Das gemeinsame
+  Phasenvariablen-Modell ist noch umzusetzen; Sweeps bleiben kleine Kontrolltests.
 - [`reservoir_symbolic_and_pattern_dp_20260912.md`](reservoir_symbolic_and_pattern_dp_20260912.md):
   planned RPID/CABS pilot with symbolic temporal networks and a shared
   whole-trip pattern-group variant; optional reservoir fleet, integral
@@ -124,6 +157,22 @@ Current plans:
 
 Git history preserves superseded implementation plans.
 
+The implemented V0--V3 reservoir-line compaction and its 12-run comparison are
+recorded in
+[`../findings/reservoir_line_compaction_results_20260913.md`](../findings/reservoir_line_compaction_results_20260913.md).
+The original gated design remains in
+[`reservoir_line_compaction_tests_20260913.md`](reservoir_line_compaction_tests_20260913.md)
+as the experiment protocol rather than future work.
+
+The controlled length and doubled-operation-horizon experiments are recorded
+in
+[`../findings/reservoir_line_length_scaling_results_20260913.md`](../findings/reservoir_line_length_scaling_results_20260913.md)
+and
+[`../findings/reservoir_line_operation_horizon_results_20260913.md`](../findings/reservoir_line_operation_horizon_results_20260913.md).
+The consolidated category-by-category freeze register for the final thesis
+campaign is
+[`../thesis/experiment_definition_register_20260913.md`](../thesis/experiment_definition_register_20260913.md).
+
 Implemented certified Fixed-$K$ trajectory Root-CG behavior and the campaign
 command are maintained in
 [`../reference/ddd_fixed_k_root_cg.md`](../reference/ddd_fixed_k_root_cg.md),
@@ -137,3 +186,8 @@ The implemented merge-aware Root-CG gate, its conditional tree design, and its
 negative K=20/K=39 decision are recorded in
 [`ddd_merge_aware_branch_price_cut.md`](ddd_merge_aware_branch_price_cut.md) and
 [`../findings/ddd_merge_aware_root_gate.md`](../findings/ddd_merge_aware_root_gate.md).
+# Active pattern-only pilot
+
+- [Kurzer OIP-Kapazitätsvergleich und Musterstarts: aktueller Gesprächsentwurf](oip_short_horizon_pattern_starts_20260917.md)
+
+- [Evolutionäre Musterwahl mit gemeinsamer No-Wait-Dispatchoptimierung](reservoir_pattern_only_evolution.md)

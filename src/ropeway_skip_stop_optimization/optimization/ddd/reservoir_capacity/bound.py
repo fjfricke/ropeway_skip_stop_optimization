@@ -23,6 +23,8 @@ def comparison_fingerprint(problem):
     # Compare physical inputs, not mode-dependent visit/candidate expansions.
     manifest = asdict(problem)
     manifest.pop("operating_mode", None)
+    if problem.boundary_policy is None:
+        manifest.pop("boundary_policy", None)
     return stable_fingerprint(manifest)
 
 

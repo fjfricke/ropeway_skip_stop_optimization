@@ -16,7 +16,9 @@ from .reservoir_arc_flow_problem import (
 )
 from .route_topology import unique_stop_route_option
 from .time_ticks import ddd_seconds_to_tick, ddd_tick_to_seconds
+from .time_ticks import DDD_TIME_TICKS_PER_SECOND
 from .trajectory_problem import DddTrajectoryWaitingPolicy
+from .reservoir_boundary import ReservoirBoundaryPolicy, LEGACY_BOUNDARY, SHARED_BOUNDARY
 
 
 @dataclass(frozen=True)
@@ -32,6 +34,7 @@ class DddReservoirCpSatProblem:
     return_start_seconds: float = 0.0
     waiting_policy: DddTrajectoryWaitingPolicy = DddTrajectoryWaitingPolicy()
     operating_mode: DddReservoirOperatingMode = DddReservoirOperatingMode.SKIP_STOP
+    boundary_policy: ReservoirBoundaryPolicy | None = None
 
     @classmethod
     def from_arc_flow(cls, source: DddReservoirArcFlowProblem):
@@ -151,6 +154,10 @@ class DddReservoirCpSatProblem:
 
     def validate(self):
         self.movement_core.validate()
+        if self.boundary_policy is not None:
+            if not isinstance(self.boundary_policy, ReservoirBoundaryPolicy):
+                raise ValueError("invalid reservoir boundary policy")
+            self.boundary_policy.validate(self.movement_core, self.entry_state_id)
         for value in (self.cabin_capacity, self.available_fleet_count):
             if type(value) is not int or value <= 0:
                 raise ValueError("reservoir capacity/fleet must be positive integers")
@@ -242,11 +249,18 @@ class DddReservoirCpSatProblem:
     @cached_property
     def manifest(self):
         self.validate()
+        payload = asdict(self)
+        if self.boundary_policy is None:
+            payload.pop("boundary_policy")  # Preserve historical hashes exactly.
+        else:
+            payload["boundary_headway_tick"] = self.boundary_policy.headway_tick
+        if DDD_TIME_TICKS_PER_SECOND != 1_000_000:
+            payload["time_ticks_per_second"] = DDD_TIME_TICKS_PER_SECOND
         return {
             "schema": "single_use_reservoir_cp_domain_v1",
-            "boundary_contract": "ideal_entry_state_no_depot_resource_unique_state_tick_v1",
+            "boundary_contract": LEGACY_BOUNDARY if self.boundary_policy is None else SHARED_BOUNDARY,
             "passenger_contract": "direct_first_destination_empty_return_v1",
-            **asdict(self),
+            **payload,
             "derived_visit_count": len(self.visit_states) - 1,
         }
 

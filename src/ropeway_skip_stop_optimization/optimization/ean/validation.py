@@ -540,6 +540,28 @@ def _validate_visit_decision_and_timing(
             "ean_visit",
             _visit_entity_id((visit.cabin_id, visit.visit_index)),
         )
+    if (
+        station_config.max_wait_seconds is not None
+        and visit.wait_seconds
+        > station_config.max_wait_seconds + tolerance_seconds
+    ):
+        _add_issue(
+            issues,
+            "EAN_WAIT_LIMIT_EXCEEDED",
+            f"visit {visit.cabin_id!r}/{visit.visit_index!r} waits "
+            f"{visit.wait_seconds}, above station limit "
+            f"{station_config.max_wait_seconds}",
+            "ean_visit",
+            _visit_entity_id((visit.cabin_id, visit.visit_index)),
+        )
+    if visit.decision is EanRouteDecision.SKIP and visit.wait_seconds > tolerance_seconds:
+        _add_issue(
+            issues,
+            "EAN_SKIP_WAIT_NOT_ALLOWED",
+            f"visit {visit.cabin_id!r}/{visit.visit_index!r} waits while skipping",
+            "ean_visit",
+            _visit_entity_id((visit.cabin_id, visit.visit_index)),
+        )
 
     if visit.decision is EanRouteDecision.STOP:
         _validate_stop_timing(visit, timing, issues, tolerance_seconds)

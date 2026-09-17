@@ -63,11 +63,13 @@ class ReservoirLineOptimizer:
         problem: DddReservoirCpSatProblem,
         *,
         reference_plan: DddReservoirCpPlan | None = None,
+        dispatch_hint_ticks: tuple[int, ...] | None = None,
         event_callback=None,
         log_callback=None,
         build_only: bool = False,
         prepared=None,
         fixed_movement_plan: DddReservoirCpPlan | None = None,
+        hard_deadline: float | None = None,
     ):
         started = perf_counter()
         problem.validate()
@@ -97,6 +99,21 @@ class ReservoirLineOptimizer:
         before = perf_counter()
         built = build_reservoir_line_model(problem, prepared, self.config)
         model_build_seconds = perf_counter() - before
+        if dispatch_hint_ticks is not None:
+            if len(dispatch_hint_ticks) != len(built.dispatch):
+                raise ValueError("dispatch hint must contain one tick per cabin slot")
+            step = prepared.dispatch_step_tick
+            end = prepared.dispatch_window_end_tick
+            for tick, dispatch, dispatch_index in zip(
+                dispatch_hint_ticks,
+                built.dispatch,
+                built.dispatch_index,
+                strict=True,
+            ):
+                if type(tick) is not int or not 0 <= tick <= end or tick % step:
+                    raise ValueError("dispatch hint lies outside the dispatch grid")
+                built.model.add_hint(dispatch, tick)
+                built.model.add_hint(dispatch_index, tick // step)
         reference_status, reference_reason = "absent", None
         if seed_plan is not None:
             try:
@@ -111,10 +128,15 @@ class ReservoirLineOptimizer:
                     "fixed_movement" if fixed_movement_plan is not None else "hinted"
                 )
             except ValueError as error:
+                if fixed_movement_plan is not None:
+                    raise ValueError(
+                        "fixed movement is outside the dispatch-then-continuous-service "
+                        "line domain"
+                    ) from error
                 reference_status, reference_reason = "not_representable", str(error)
 
         base = {
-            "schema": "single_use_reservoir_line_result_v1",
+            "schema": "single_use_reservoir_line_result_v4",
             "problem_fingerprint": problem.fingerprint,
             "model_fingerprint": stable_fingerprint(
                 {
@@ -130,7 +152,7 @@ class ReservoirLineOptimizer:
             "proof_scope": (
                 "FIXED_LINE_MOVEMENT"
                 if fixed_movement_plan is not None
-                else "RESERVOIR_SINGLE_USE_FIXED_LINES_NO_WAIT"
+                else "RESERVOIR_FREE_PHASE_DISPATCH_THEN_CONTINUOUS_FIXED_LINES_NO_WAIT"
             ),
             "config": asdict(self.config),
             "model_stats": {
@@ -142,6 +164,7 @@ class ReservoirLineOptimizer:
             "reference_status": reference_status,
             "reference_reason": reference_reason,
             "reference_metrics": None if reference_metrics is None else asdict(reference_metrics),
+            "dispatch_hint_used": dispatch_hint_ticks is not None,
         }
         if build_only:
             return {
@@ -152,8 +175,36 @@ class ReservoirLineOptimizer:
                 "peak_rss_bytes": _peak_rss_bytes(),
             }, None
 
+        solver_seconds = self.config.time_limit_seconds
+        if hard_deadline is not None:
+            solver_seconds = min(solver_seconds, hard_deadline - perf_counter())
+        if solver_seconds <= 0:
+            return {
+                **base,
+                "solver_status": "NOT_RUN",
+                "termination_reason": "BUILD_TIME_LIMIT",
+                "proven_optimal": False,
+                "validated_served": (
+                    None if reference_metrics is None else reference_metrics.served
+                ),
+                "validated_unserved": (
+                    None if reference_metrics is None else reference_metrics.unserved
+                ),
+                "used_fleet": (
+                    None if reference_metrics is None else reference_metrics.used_fleet
+                ),
+                "physical_plan_metrics": (
+                    None if reference_metrics is None else asdict(reference_metrics)
+                ),
+                "events": [],
+                "solve_seconds": 0.0,
+                "validation_seconds": 0.0,
+                "total_wall_seconds": perf_counter() - started,
+                "peak_rss_bytes": _peak_rss_bytes(),
+            }, (seed_plan if reference_status in ("hinted", "fixed_movement") else None)
+
         solver = cp_model.CpSolver()
-        solver.parameters.max_time_in_seconds = self.config.time_limit_seconds
+        solver.parameters.max_time_in_seconds = solver_seconds
         solver.parameters.num_search_workers = self.config.workers
         solver.parameters.random_seed = self.config.seed
         solver.parameters.max_memory_in_mb = int(self.config.memory_limit_gib * 1024)
@@ -171,6 +222,7 @@ class ReservoirLineOptimizer:
             raise RuntimeError("reservoir line progress callback failed") from callback.error
         status = solver.status_name(status_code)
         plan, metrics, movement_metrics, validation_seconds = None, None, None, 0.0
+        native_plan_found = status_code in (cp_model.FEASIBLE, cp_model.OPTIMAL)
         if status_code in (cp_model.FEASIBLE, cp_model.OPTIMAL):
             before = perf_counter()
             exact = self.config.mode is not ReservoirLineMode.OPTIMISTIC_SERVICE
@@ -189,6 +241,14 @@ class ReservoirLineOptimizer:
             "fixed_movement",
         ):
             raise RuntimeError("line model rejects its independently valid represented reference")
+        elif reference_status == "hinted":
+            # A CP-SAT hint is not guaranteed to be materialized as a native
+            # incumbent before a short time limit.  Keep the independently
+            # validated reference as the campaign fallback without reporting
+            # it as a native solver solution or improvement.
+            plan = seed_plan
+            metrics = reference_metrics
+            movement_metrics = reference_metrics
 
         native_bound = None
         served_upper_bound = None
@@ -216,6 +276,11 @@ class ReservoirLineOptimizer:
                 else "TIME_LIMIT"
             ),
             "proven_optimal": status_code == cp_model.OPTIMAL,
+            "native_plan_found": native_plan_found,
+            "selected_solution_origin": (
+                "native" if native_plan_found else "validated_reference"
+                if plan is not None else None
+            ),
             "validated_served": None if metrics is None else metrics.served,
             "validated_unserved": None if metrics is None else metrics.unserved,
             "used_fleet": None if metrics is None else metrics.used_fleet,

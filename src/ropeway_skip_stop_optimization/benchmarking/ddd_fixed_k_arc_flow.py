@@ -97,6 +97,9 @@ class DddFixedKArcFlowRunConfig:
         DddArcFlowResourceRowMode.EAGER_MAXIMAL_CLIQUES
     )
     passenger_formulation: DddArcFlowPassengerFormulationConfig = DddArcFlowPassengerFormulationConfig()
+    require_full_service: bool = False
+    horizon_seconds: float | None = None
+    use_primal_start: bool = True
 
     def validate(self) -> None:
         if not self.example_id or self.cabin_count <= 0:
@@ -113,6 +116,19 @@ class DddFixedKArcFlowRunConfig:
             raise ValueError("passenger profiles are available only for labeled arc-flow")
         if not isinstance(self.resource_row_mode, DddArcFlowResourceRowMode):
             raise ValueError("arc-flow resource-row mode is invalid")
+        if type(self.require_full_service) is not bool:
+            raise ValueError("require_full_service must be boolean")
+        if type(self.use_primal_start) is not bool:
+            raise ValueError("use_primal_start must be boolean")
+        if not self.use_primal_start and (
+            self.primal_seed_checkpoint_path is not None
+            or self.primal_seed_result_path is not None
+        ):
+            raise ValueError("external primal starts require use_primal_start")
+        if self.horizon_seconds is not None and (
+            not math.isfinite(self.horizon_seconds) or self.horizon_seconds <= 0
+        ):
+            raise ValueError("arc-flow horizon override must be positive")
         if (
             self.formulation is DddFixedKArcFlowFormulation.EXACT_ANONYMOUS
             and self.resource_row_mode
@@ -158,6 +174,7 @@ class DddFixedKArcFlowRunResult:
     independent_validation_objective: float | None
     independent_validation_seconds: float
     total_seconds: float
+    validated_passenger_plan: dict | None = None
     all_stop_maximum_cabin_count: int | None = None
     start_layout_kind: str = "canonical_rope"
     start_layout_cycle_seconds: float | None = None
@@ -188,6 +205,7 @@ class DddFixedKArcFlowRunResult:
                 "example_id": self.scenario.id,
                 "fixed_k_problem_manifest": self.problem.certificate_manifest,
                 "proof_scope": "FIXED_K_GLOBAL",
+                "validated_passenger_plan": self.validated_passenger_plan,
                 "exact_active_cabin_count": self.problem.fleet_cardinality,
                 "operating_mode": self.problem.operating_mode.value,
                 "objective": self.problem.objective.value,
@@ -381,6 +399,9 @@ def prepare_ddd_fixed_k_arc_flow_run(
     example = get_example(config.example_id)
     scenario = example.build_scenario()
     ean_config = example.build_ean_config(scenario)
+    if config.horizon_seconds is not None:
+        ean_config = replace(ean_config, horizon_seconds=config.horizon_seconds)
+        ean_config.validate()
     original_builder = example.build_ean_artifact_builder(scenario, ean_config)
     if not isinstance(original_builder, NetworkEanBuildArtifactBuilder):
         raise ValueError("fixed-K arc-flow requires the network EAN builder")
@@ -842,7 +863,10 @@ def run_ddd_fixed_k_arc_flow(
     seed_candidates: list[
         tuple[str, tuple[DddReferenceTrajectory, ...], float | None]
     ] = []
-    if prepared.seed_trajectories:
+    if not config.use_primal_start:
+        seed_trajectories = ()
+        seed_status, seed_kind, seed_seconds = "disabled", None, 0.0
+    elif prepared.seed_trajectories:
         seed_trajectories = prepared.seed_trajectories
         seed_status = DddFixedKSeedStatus.FEASIBLE.value
         seed_kind = prepared.start_layout_kind
@@ -949,6 +973,7 @@ def run_ddd_fixed_k_arc_flow(
         mip_focus=config.mip_focus,
         output_flag=config.output_flag,
         resource_row_mode=config.resource_row_mode,
+        require_full_service=config.require_full_service,
     )
     if config.formulation is DddFixedKArcFlowFormulation.EXACT_ANONYMOUS:
         solve_result = DddExactAnonymousArcFlowOptimizer(solve_config).solve(
@@ -969,6 +994,7 @@ def run_ddd_fixed_k_arc_flow(
     validation_status = "not_run"
     validation_objective = None
     validation_seconds = 0.0
+    validated_passenger_plan = None
     remaining = config.total_time_limit_seconds - (perf_counter() - started)
     if solve_result.solution is not None and remaining > 0.01:
         validation_started = perf_counter()
@@ -981,21 +1007,26 @@ def run_ddd_fixed_k_arc_flow(
             threads=1,
             waiting_policy=problem.resolved_trajectory_problem.waiting_policy,
             passenger_candidate_build=problem.passenger_build,
+            require_full_service=config.require_full_service,
         ).evaluate(network_problem, solve_result.solution)
         validation_seconds = perf_counter() - validation_started
         validation_status = evaluation.status.value
         validation_objective = evaluation.objective_value
+        if evaluation.status is DddPrimalEvaluationStatus.FEASIBLE:
+            if config.require_full_service and evaluation.unserved_passenger_count != 0:
+                raise RuntimeError("full-service validation returned unserved passengers")
+            validated_passenger_plan = asdict(evaluation.passenger_plan) if evaluation.passenger_plan is not None else None
         if (
             evaluation.status is DddPrimalEvaluationStatus.FEASIBLE
             and evaluation.objective_value is not None
             and solve_result.objective_value is not None
         ):
-            if evaluation.objective_value < solve_result.objective_value - 1e-4:
+            if evaluation.objective_value < solve_result.certified_lower_bound - 1e-4:
                 raise RuntimeError(
-                    "integrated arc-flow overestimates independent EAN Passenger recourse: "
-                    f"{solve_result.objective_value} != {evaluation.objective_value}"
+                    "independent passenger solution violates the global arc-flow bound: "
+                    f"{solve_result.certified_lower_bound} > {evaluation.objective_value}"
                 )
-            if evaluation.objective_value > solve_result.objective_value + 1e-4:
+            if abs(evaluation.objective_value - solve_result.objective_value) > 1e-4:
                 solve_result = replace(
                     solve_result,
                     status=DddFixedKArcFlowStatus.TIME_LIMIT_WITH_CERTIFIED_INTERVAL,
@@ -1008,7 +1039,7 @@ def run_ddd_fixed_k_arc_flow(
                     / max(abs(evaluation.objective_value), 1e-9),
                     detail=(
                         "independent Passenger recourse returned a valid incumbent "
-                        "above the integrated objective"
+                        "different from the integrated incumbent assignment"
                     ),
                 )
         elif solve_result.solution is not None and (
@@ -1051,6 +1082,7 @@ def run_ddd_fixed_k_arc_flow(
         independent_validation_objective=validation_objective,
         independent_validation_seconds=validation_seconds,
         total_seconds=perf_counter() - started,
+        validated_passenger_plan=validated_passenger_plan,
         all_stop_maximum_cabin_count=prepared.all_stop_maximum_cabin_count,
         start_layout_kind=prepared.start_layout_kind,
         start_layout_cycle_seconds=prepared.start_layout_cycle_seconds,

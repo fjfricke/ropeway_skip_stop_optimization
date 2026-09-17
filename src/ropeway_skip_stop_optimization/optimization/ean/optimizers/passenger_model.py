@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 from ropeway_skip_stop_optimization.models import Scenario
@@ -46,6 +47,11 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.movement_model i
     variable_value as _value,
     visits_by_cabin_id_for as _visits_by_cabin_id,
 )
+
+
+class EanPassengerEncoding(StrEnum):
+    SLOTS = "slots"
+    RIDE_COUNTS = "ride_counts"
 
 
 @dataclass(frozen=True)

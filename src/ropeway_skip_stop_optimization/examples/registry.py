@@ -29,6 +29,7 @@ from ropeway_skip_stop_optimization.examples.three_station import (
     ThreeStationFullNoSkipNoWaitExample,
     ThreeStationHalfNoSkipNoWaitExample,
 )
+from ropeway_skip_stop_optimization.examples.thesis_cases import thesis_ring_examples
 
 
 EXAMPLES: dict[str, ScenarioExample] = {
@@ -55,6 +56,7 @@ EXAMPLES: dict[str, ScenarioExample] = {
         example.metadata.id: example
         for example in artificial_physical_headway_examples()
     },
+    **{example.metadata.id: example for example in thesis_ring_examples()},
 }
 
 

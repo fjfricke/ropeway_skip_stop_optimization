@@ -184,6 +184,7 @@ class Scenario:
     demands: tuple[Demand, ...]
     operating: OperatingParameters
     headway_design: HeadwayDesign | None = None
+    experiment_metadata: dict[str, object] | None = None
 
     def validate(self) -> None:
         if self.service_end_time <= self.service_start_time:

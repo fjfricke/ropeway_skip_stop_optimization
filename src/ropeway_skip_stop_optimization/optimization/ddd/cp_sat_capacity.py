@@ -42,6 +42,7 @@ class DddCpSatCapacityOptimizer:
         fixed_movement=None,
         event_callback=None,
         log_callback=None,
+        require_full_service=False,
     ):
         self.config.validate()
         started = perf_counter()
@@ -118,6 +119,8 @@ class DddCpSatCapacityOptimizer:
                 formulation=self.config.formulation, prepared=prepared,
                 deadline_monotonic=deadline,
             )
+            if require_full_service:
+                b.model.add(passengers.objective_expression == 0)
             hint_started = perf_counter()
             if fixed_movement is not None:
                 values, _ = _movement_values(problem, b, fixed_movement)
@@ -238,7 +241,11 @@ class DddCpSatCapacityOptimizer:
                 raise RuntimeError("capacity callback failed") from callback.error
             if status == cp_model.MODEL_INVALID:
                 raise RuntimeError(response)
-            if status == cp_model.INFEASIBLE and incumbent is not None:
+            if (
+                status == cp_model.INFEASIBLE
+                and incumbent is not None
+                and score(incumbent) == 0
+            ):
                 raise RuntimeError("capacity infeasibility contradicts validated seed")
             if status in (cp_model.OPTIMAL, cp_model.FEASIBLE):
                 found = extract(solver.value)
@@ -247,6 +254,8 @@ class DddCpSatCapacityOptimizer:
             if status != cp_model.INFEASIBLE:
                 raw_bound = float(solver.best_objective_bound)
                 lower = conservative_count_bound(raw_bound)
+            elif require_full_service:
+                lower = 1
             if status == cp_model.OPTIMAL:
                 if incumbent is None or abs(raw_bound - score(incumbent)) > 0.25:
                     raise RuntimeError("capacity optimal bound mismatch")
@@ -277,7 +286,10 @@ class DddCpSatCapacityOptimizer:
             domain_manifest=manifest,
             proof_scope="FIXED_MOVEMENT"
             if fixed_movement is not None
+            else "FIXED_K_GLOBAL_FULL_SERVICE_TEST"
+            if require_full_service
             else "FIXED_K_GLOBAL",
+            require_full_service=require_full_service,
             solver_status=status_name,
             proven_optimal=feasible or status == cp_model.OPTIMAL,
             total_demand=sum(g.count for g in problem.passenger_build.demand_groups),

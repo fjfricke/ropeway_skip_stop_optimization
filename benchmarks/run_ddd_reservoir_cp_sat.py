@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+from ropeway_skip_stop_optimization.optimization.ddd.reservoir_boundary import add_boundary_arguments
 from ropeway_skip_stop_optimization.optimization.ddd.cp_formulation import add_formulation_arguments, formulation_from_args
 import json
 from pathlib import Path
@@ -19,6 +20,7 @@ from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_integrated import (
 )
 from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_passenger import (
     DddCpSatCostEncoding,
+    DddCpSatPassengerEncoding,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.reservoir_arc_flow_problem import (
     DddReservoirOperatingMode,
@@ -48,6 +50,11 @@ def main():
     p.add_argument(
         "--cost-encoding", choices=list(DddCpSatCostEncoding), default="product"
     )
+    p.add_argument(
+        "--passenger-encoding",
+        choices=list(DddCpSatPassengerEncoding),
+        default="groups",
+    )
     p.add_argument("--time-limit", type=float, default=60)
     p.add_argument("--seed-time-limit", type=float, default=10)
     p.add_argument("--num-workers", type=int, default=1)
@@ -56,6 +63,7 @@ def main():
     p.add_argument("--log-search-progress", action="store_true")
     p.add_argument("--output-dir", type=Path, required=True)
     add_formulation_arguments(p, "cp_sat")
+    add_boundary_arguments(p)
     a = p.parse_args()
     result = run_ddd_reservoir_cp_sat(
         DddReservoirCpSatRunConfig(
@@ -71,12 +79,15 @@ def main():
                 operating_mode=DddReservoirOperatingMode(a.mode),
             ),
             output_dir=a.output_dir,
+            reservoir_port_policy=a.reservoir_port_policy,
+            port_headway_evidence=a.port_headway_evidence,
             solver=DddIntegratedCpSatConfig(
                 total_time_limit_seconds=a.time_limit,
                 formulation=formulation_from_args(a),
                 num_workers=a.num_workers,
                 seed=a.seed,
                 cost_encoding=DddCpSatCostEncoding(a.cost_encoding),
+                passenger_encoding=DddCpSatPassengerEncoding(a.passenger_encoding),
                 log_search_progress=a.log_search_progress,
             ),
             objective=DddReservoirCpObjective(a.objective),

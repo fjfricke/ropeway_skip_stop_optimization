@@ -59,6 +59,8 @@ def prepare_native_structure(problem):
     reservoir = isinstance(problem, DddReservoirCpSatProblem)
     if reservoir:
         problem.validate()
+        if problem.boundary_policy is not None:
+            raise ValueError("native alternative solvers do not support shared_rope_headway")
         movement, waiting = problem.movement, problem.waiting_policy
         states = tuple(
             (k, problem.visit_states) for k in range(problem.available_fleet_count)

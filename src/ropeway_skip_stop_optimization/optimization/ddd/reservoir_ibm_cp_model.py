@@ -133,6 +133,8 @@ def build_ddd_reservoir_ibm_cp(
     formulation=DddCpFormulationConfig(),
 ) -> DddReservoirIbmCpModel:
     problem.validate()
+    if problem.boundary_policy is not None:
+        raise ValueError("IBM CP does not yet support shared_rope_headway; use CP-SAT or phase arc-flow")
     formulation.validate("ibm")
     if not isinstance(objective, DddReservoirCpObjective):
         raise ValueError("invalid IBM reservoir objective")

@@ -57,6 +57,8 @@ class SwitchVisitHeadwayCandidateBuilder(HeadwayCandidateBuilder):
 
 
 def time_reference_for_checkpoint_kind(kind: HeadwayCheckpointKind) -> EanTimeReference:
+    if kind is HeadwayCheckpointKind.ENTRY_SWITCH:
+        return EanTimeReference.ENTRY_TIME
     if kind is HeadwayCheckpointKind.PLATFORM_ENTRY:
         return EanTimeReference.PLATFORM_ENTRY_TIME
     if kind is HeadwayCheckpointKind.PLATFORM_EXIT:
@@ -70,6 +72,8 @@ def time_reference_for_checkpoint_kind(kind: HeadwayCheckpointKind) -> EanTimeRe
 
 
 def activation_reference_for_checkpoint_kind(kind: HeadwayCheckpointKind) -> EanActivationReference:
+    if kind is HeadwayCheckpointKind.ENTRY_SWITCH:
+        return EanActivationReference.ACTIVE
     if kind in {
         HeadwayCheckpointKind.PLATFORM_ENTRY,
         HeadwayCheckpointKind.PLATFORM_EXIT,

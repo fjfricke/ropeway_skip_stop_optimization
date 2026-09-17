@@ -65,6 +65,9 @@ def test_switch_visit_headway_candidate_builder_filters_by_switch_id() -> None:
 
 
 def test_checkpoint_kind_helpers_return_expected_references() -> None:
+    assert time_reference_for_checkpoint_kind(HeadwayCheckpointKind.ENTRY_SWITCH) is (
+        EanTimeReference.ENTRY_TIME
+    )
     assert time_reference_for_checkpoint_kind(HeadwayCheckpointKind.PLATFORM_ENTRY) is (
         EanTimeReference.PLATFORM_ENTRY_TIME
     )
@@ -73,6 +76,7 @@ def test_checkpoint_kind_helpers_return_expected_references() -> None:
     assert activation_reference_for_checkpoint_kind(HeadwayCheckpointKind.PLATFORM_ENTRY) is EanActivationReference.SERVE
     assert activation_reference_for_checkpoint_kind(HeadwayCheckpointKind.PLATFORM_EXIT) is EanActivationReference.SERVE
     assert activation_reference_for_checkpoint_kind(HeadwayCheckpointKind.EXIT_SWITCH) is EanActivationReference.ACTIVE
+    assert activation_reference_for_checkpoint_kind(HeadwayCheckpointKind.ENTRY_SWITCH) is EanActivationReference.ACTIVE
 
 
 def test_switch_visit_headway_candidate_builder_rejects_duplicate_visits() -> None:

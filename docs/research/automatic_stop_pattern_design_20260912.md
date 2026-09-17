@@ -60,4 +60,13 @@ Erwartung: weniger unabhängige Stopentscheidungen und koordinierte Änderungen 
 - Vergleich mit vollständigem Legacy-CP-SAT bei gleichem Budget; Referenzübernahme, native Lösungen und Verbesserungen getrennt erfassen.
 - Falls schon feste Muster schwer zu timen sind, liegt der verbleibende Engpass nicht allein bei der Musterwahl. Dann keine weitere Mustergenerierung als vermeintliche Lösung verkaufen.
 
-Die All-Stop-Referenz mit 2.496 Bedienten ist kein globales All-Stop-Optimum. Ein gültiger besserer Plan schlägt zunächst diese Referenz. Für einen globalen Vorteil muss sein Unserved-Wert einen abgesicherten All-Stop-Unterbound unterschreiten. Auch ein eingeschränkt erzeugter Plan kann diesen Nachweis liefern; ein globales Skip-Stop-Optimum ist dafür nicht erforderlich.
+Die All-Stop-Referenz mit 2.496 Bedienten ist das exakte Passagieroptimum für
+eine feste Bewegung und Phase, aber noch nicht das phasenoptimierte Maximum
+der verbindlichen gesättigten All-Stop-No-Wait-Referenz. Künftige
+Kapazitätsvergleiche müssen deshalb den Vertrag in
+[`all_stop_no_wait_capacity_baseline.md`](../reference/all_stop_no_wait_capacity_baseline.md)
+anwenden. Für einen noch stärkeren globalen Vorteil gegenüber der größeren
+All-Stop-Domäne muss der Unserved-Wert zusätzlich einen abgesicherten
+All-Stop-Unterbound unterschreiten. Auch ein eingeschränkt erzeugter Plan kann
+diesen Nachweis liefern; ein globales Skip-Stop-Optimum ist dafür nicht
+erforderlich.

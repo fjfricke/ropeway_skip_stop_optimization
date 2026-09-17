@@ -1,9 +1,14 @@
 from __future__ import annotations
 
 import math
+import os
 
 
-DDD_TIME_TICKS_PER_SECOND = 1_000_000
+DDD_TIME_TICKS_PER_SECOND = int(
+    os.environ.get("ROPEWAY_DDD_TIME_TICKS_PER_SECOND", "1000000")
+)
+if DDD_TIME_TICKS_PER_SECOND <= 0:
+    raise ValueError("ROPEWAY_DDD_TIME_TICKS_PER_SECOND must be positive")
 DDD_TIME_TICK_SECONDS = 1.0 / DDD_TIME_TICKS_PER_SECOND
 
 type DddTimeTick = int

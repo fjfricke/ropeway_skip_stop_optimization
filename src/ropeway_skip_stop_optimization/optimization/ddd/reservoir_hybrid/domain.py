@@ -77,5 +77,9 @@ def load_reference(path: Path):
         waiting_policy=DddTrajectoryWaitingPolicy(**w),
         operating_mode=DddReservoirOperatingMode(m["operating_mode"]),
     )
+    from ..reservoir_boundary import ReservoirBoundaryPolicy
+
+    if kwargs.get("boundary_policy") is not None:
+        kwargs["boundary_policy"] = ReservoirBoundaryPolicy(**kwargs["boundary_policy"])
     p = DddReservoirCpSatProblem(**kwargs)
     return ReservoirOperatingDomain(p), read_reservoir_cp_checkpoint(path, p)

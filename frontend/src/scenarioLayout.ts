@@ -65,10 +65,16 @@ export function layoutForScenario(scenario: Scenario): ScenarioLayout {
   if (scenario.scenario_id === "three_station_v0" || scenario.scenario_id.startsWith("three_station_")) {
     return threeStationLayout;
   }
-  if (scenario.scenario_id.startsWith("five_station_circle_cw")) {
+  if (isCircularScenario(scenario)) {
     return circularSkipStopLayout(scenario);
   }
   return linearSkipStopLayout(scenario);
+}
+
+export function isCircularScenario(scenario: Scenario): boolean {
+  return scenario.scenario_id.startsWith("five_station_circle_cw")
+    || scenario.scenario_id.startsWith("thesis_t5r_")
+    || scenario.scenario_id.startsWith("thesis_t6r_");
 }
 
 function linearSkipStopLayout(scenario: Scenario): ScenarioLayout {

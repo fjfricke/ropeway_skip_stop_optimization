@@ -259,6 +259,44 @@ uv run python benchmarks/run_ean_passenger_benchmark.py \
 The benchmark runner writes JSON results, SVG plots, and optional checkpoints.
 See `benchmarks/README.md` for plotting existing results and checkpoint layout.
 
+## Versioned thesis experiments
+
+The T5R/T6R experiment pipeline keeps topology, geometry, demand and solver
+configuration explicit. A single supervised run is started with, for example:
+
+```bash
+uv run python benchmarks/run_thesis_experiment.py \
+  --topology t5r --geometry g800 \
+  --demand-family f2 --demand-profile p0 \
+  --objective unserved --demand 2000 \
+  --method line_planning --formulation shared_rides --catalog relevant \
+  --max-cabins 84 \
+  --time-limit 300 --workers 12 --memory-limit-gib 32 \
+  --output-dir results/thesis_example
+```
+
+Methods are `all_stop_phase`, `line_planning`, and `labelled_arc_flow`.
+`all_stop_phase --capacity-search` brackets and bisects nested demand without
+treating a timeout as infeasibility. Labelled Arc-Flow accepts
+`--operating-mode all_stop|skip_stop` for comparisons with identical fixed
+starts. Every run stores the case and problem fingerprints, source hashes,
+events, native bounds, independently validated certificates, and process-tree
+resource measurements.
+
+The bounded calibration driver is:
+
+```bash
+uv run python benchmarks/run_thesis_calibration.py \
+  --output-dir results/thesis_calibration_YYYYMMDD_vN \
+  --wall-limit-seconds 7200 --workers 12 --memory-limit-gib 32
+```
+
+It runs one solver process at a time and never starts the later full thesis
+campaign automatically. The new cases derive `K_AS` and a separate reservoir
+port-throughput upper bound from each geometry; the historical Max50 cap is not
+reused. The first completed calibration and its open questions are documented
+in `docs/findings/thesis_calibration_results_20260914.md`.
+
 ## Common Workflow
 
 From a clean checkout:

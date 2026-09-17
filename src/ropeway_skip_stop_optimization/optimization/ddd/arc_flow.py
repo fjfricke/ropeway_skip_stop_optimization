@@ -75,6 +75,7 @@ class DddFixedKArcFlowSolveConfig:
     certificate_tolerance: float = 1e-5
     progress_interval_seconds: float = 5.0
     passenger_formulation: DddArcFlowPassengerFormulationConfig = DddArcFlowPassengerFormulationConfig()
+    require_full_service: bool = False
 
     def validate(self) -> None:
         if not math.isfinite(self.time_limit_seconds) or self.time_limit_seconds <= 0:
@@ -89,6 +90,8 @@ class DddFixedKArcFlowSolveConfig:
             raise ValueError("arc-flow resource-row mode is invalid")
         if self.certificate_tolerance <= 0:
             raise ValueError("arc-flow certificate tolerance must be positive")
+        if type(self.require_full_service) is not bool:
+            raise ValueError("require_full_service must be boolean")
         if (
             not math.isfinite(self.progress_interval_seconds)
             or self.progress_interval_seconds <= 0
@@ -505,6 +508,7 @@ class DddFixedKArcFlowOptimizer:
             route_by_arc_id=route,
             assignment_domain=EanPassengerAssignmentDomain.INTEGER,
             encoding=(passenger_encoding if self.config.passenger_formulation.profile != "legacy" else None),
+            require_full_service=self.config.require_full_service,
         )
         passenger_variable_count = passenger_model.variable_count
         passenger_constraint_count = passenger_model.constraint_count

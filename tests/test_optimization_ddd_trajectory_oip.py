@@ -31,6 +31,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanFleetMode,
     EanPassengerCandidateBuilder,
     EanPassengerObjective,
+    EanRouteDecision,
     StationWaitingMode,
     validate_ean_initial_boundary_against_artifact,
     validate_ean_movement_plan_against_artifact,
@@ -42,6 +43,18 @@ from ropeway_skip_stop_optimization.optimization.ddd.trajectory_exact_pricing im
 from ropeway_skip_stop_optimization.optimization.ddd.trajectory_oip import (
     DDD_OIP_HORIZON_TAIL_EPSILON_SECONDS,
     ddd_oip_covers_horizon,
+)
+from ropeway_skip_stop_optimization.optimization.oip import (
+    OipBackend,
+    OipPassengerEncoding,
+    OipRunConfig,
+    prepare_oip_domain,
+    run_oip,
+)
+from ropeway_skip_stop_optimization.optimization.oip import validate_oip_certificate
+from ropeway_skip_stop_optimization.optimization.oip.cp_sat import (
+    OipCpSatConfig,
+    solve_oip_cp_sat,
 )
 
 
@@ -97,6 +110,92 @@ def test_oip_adapter_builds_exact_continuous_start_domain() -> None:
     assert problem.start_domain.phase_state_ids
     with pytest.raises(ValueError, match="no fixed-start problem"):
         _ = problem.fixed_movement_problem
+
+
+def test_oip_cp_sat_optimizes_and_independently_validates_initial_state() -> None:
+    _, artifact, scenario = _problem_and_artifact(k=1)
+    domain = prepare_oip_domain(
+        scenario=scenario,
+        artifact=artifact,
+        fixed_k=1,
+    )
+
+    result = solve_oip_cp_sat(
+        domain,
+        OipCpSatConfig(time_limit_seconds=10.0, workers=1),
+    )
+
+    assert result.status in {"optimal", "feasible"}
+    assert result.movement_plan is not None
+    assert result.fleet_plan is not None
+    assert result.passenger_plan is not None
+    validate_ean_movement_plan_against_artifact(
+        domain.artifact,
+        result.movement_plan,
+        tolerance_seconds=0.0011,
+    ).raise_for_errors()
+    validate_ean_initial_boundary_against_artifact(
+        domain.artifact,
+        result.movement_plan,
+        result.fleet_plan,
+        tolerance_seconds=0.0011,
+    ).raise_for_errors()
+    metrics = validate_oip_certificate(
+        domain,
+        result.movement_plan,
+        result.fleet_plan,
+        result.passenger_plan,
+    )
+    assert metrics.served == result.served_passengers == 176
+    assert metrics.journey_time_seconds == pytest.approx(
+        result.journey_time_seconds, abs=1e-6
+    )
+    trajectory = next(
+        item for item in result.movement_plan.trajectories if item.visits
+    )
+    assert trajectory.visits[-1].switch_time_seconds <= domain.artifact.config.operational_end_seconds
+    assert trajectory.visits[-1].next_switch_time_seconds > domain.artifact.config.operational_end_seconds
+
+    grouped = solve_oip_cp_sat(
+        domain,
+        OipCpSatConfig(
+            time_limit_seconds=10.0,
+            workers=1,
+            passenger_encoding="groups",
+        ),
+    )
+    assert grouped.status == "optimal"
+    assert grouped.served_passengers == result.served_passengers
+    assert grouped.journey_time_seconds == pytest.approx(
+        result.journey_time_seconds, abs=1e-6
+    )
+
+
+def test_oip_portable_checkpoint_is_revalidated_and_used_as_hint(tmp_path) -> None:
+    _, artifact, scenario = _problem_and_artifact(k=1)
+    domain = prepare_oip_domain(scenario=scenario, artifact=artifact, fixed_k=1)
+    first = run_oip(
+        domain,
+        OipRunConfig(
+            backend=OipBackend.CP_SAT,
+            passenger_encoding=OipPassengerEncoding.OD_INVENTORY,
+            time_limit_seconds=5.0,
+            output_directory=tmp_path / "first",
+        ),
+    )
+    resumed = run_oip(
+        domain,
+        OipRunConfig(
+            backend=OipBackend.CP_SAT,
+            passenger_encoding=OipPassengerEncoding.OD_INVENTORY,
+            time_limit_seconds=5.0,
+            start_checkpoint_directory=tmp_path / "first",
+            output_directory=tmp_path / "resumed",
+        ),
+    )
+
+    assert first.served_passengers == resumed.served_passengers
+    assert first.journey_time_seconds == pytest.approx(resumed.journey_time_seconds)
 
 
 def test_oip_rope_start_preserves_non_tick_offset_and_validates_in_ean() -> None:
@@ -614,3 +713,116 @@ def test_architecture_b_rope_boundary_uses_previous_leader_behavior() -> None:
     assert len(service.boundary_resource_occurrences) > len(
         bypass.boundary_resource_occurrences
     )
+
+
+@pytest.mark.parametrize("backend", [OipBackend.CP_SAT, OipBackend.GUROBI])
+def test_oip_movement_only_skips_passengers_and_validates(backend, monkeypatch, tmp_path):
+    import json
+    from ropeway_skip_stop_optimization.optimization.ean.builders.passenger_builder import EanPassengerCandidateBuilder
+    from ropeway_skip_stop_optimization.optimization.oip.validation import validate_oip_movement_certificate
+
+    _, artifact, scenario = _problem_and_artifact(k=2)
+    domain = prepare_oip_domain(scenario=scenario, artifact=artifact, fixed_k=2)
+
+    def forbidden(*args, **kwargs):
+        raise AssertionError("movement feasibility must not build passenger candidates")
+
+    monkeypatch.setattr(EanPassengerCandidateBuilder, "build", forbidden)
+    result = run_oip(domain, OipRunConfig(
+        backend=backend, movement_only=True, time_limit_seconds=10,
+        workers=1, output_directory=tmp_path,
+    ))
+    assert result.movement_plan is not None
+    assert result.fleet_plan is not None
+    assert len(result.fleet_plan.active_cabin_ids) == 2
+    assert result.passenger_plan is None
+    validate_oip_movement_certificate(domain, result.movement_plan, result.fleet_plan)
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    detail = json.loads((tmp_path / "detail.json").read_text())
+    assert manifest["solve_mode"] == "movement_feasibility"
+    assert manifest["passenger_encoding"] is None
+    assert detail["latest"]["served"] is None
+    assert detail["latest"]["journey_time_seconds"] is None
+    assert detail["latest"]["gap_percent"] is None
+    assert detail["native_incumbent_seen"]
+
+
+def test_oip_cp_sat_movement_only_has_no_objective_and_accepts_movement_hint():
+    from ropeway_skip_stop_optimization.optimization.oip.cp_sat import build_oip_cp_sat_model
+
+    _, artifact, scenario = _problem_and_artifact(k=1)
+    domain = prepare_oip_domain(scenario=scenario, artifact=artifact, fixed_k=1)
+    built = build_oip_cp_sat_model(domain, movement_only=True)
+    assert built.passengers is None
+    assert built.passenger_build is None
+    assert not built.model.has_objective()
+    assert built.model.validate() == ""
+    first = solve_oip_cp_sat(domain, OipCpSatConfig(movement_only=True, time_limit_seconds=5))
+    hinted = solve_oip_cp_sat(domain, OipCpSatConfig(
+        movement_only=True, time_limit_seconds=5,
+        initial_movement_plan=first.movement_plan, initial_fleet_plan=first.fleet_plan,
+    ))
+    assert hinted.status == "feasible"
+    assert hinted.objective_value is None
+    assert hinted.best_bound is None
+    assert hinted.served_passengers is None
+    assert hinted.progress_samples == ()
+    # Prove infeasibility is distinct from timing out: fixed K=1 with no active cabins.
+    from ortools.sat.python import cp_model
+    built.model.add(sum(built.movement.cabin_active.values()) == 0)
+    solver = cp_model.CpSolver()
+    solver.parameters.max_time_in_seconds = 1
+    assert solver.solve(built.model) == cp_model.INFEASIBLE
+
+
+@pytest.mark.parametrize("backend", [OipBackend.CP_SAT, OipBackend.GUROBI])
+def test_oip_fixed_stop_patterns_keep_times_free_and_fix_every_active_visit(
+    backend, tmp_path
+):
+    _, artifact, scenario = _problem_and_artifact(k=2)
+    domain = prepare_oip_domain(scenario=scenario, artifact=artifact, fixed_k=2)
+    stations = tuple(dict.fromkeys(item.station_id for item in domain.artifact.timings))
+    patterns = tuple(stations for _ in range(2))
+
+    result = run_oip(
+        domain,
+        OipRunConfig(
+            backend=backend,
+            movement_only=True,
+            fixed_stop_patterns=patterns,
+            time_limit_seconds=10,
+            workers=1,
+            output_directory=tmp_path / backend.value,
+        ),
+    )
+
+    assert result.movement_plan is not None
+    assert all(
+        visit.decision is EanRouteDecision.STOP
+        for trajectory in result.movement_plan.trajectories
+        for visit in trajectory.visits
+    )
+    assert len(
+        {
+            visit.switch_time_seconds
+            for trajectory in result.movement_plan.trajectories
+            for visit in trajectory.visits
+        }
+    ) > 1
+
+
+def test_oip_movement_only_build_timeout_remains_unknown(monkeypatch):
+    import ropeway_skip_stop_optimization.optimization.oip.cp_sat as module
+
+    _, artifact, scenario = _problem_and_artifact(k=1)
+    domain = prepare_oip_domain(scenario=scenario, artifact=artifact, fixed_k=1)
+    times = iter([0.0, 0.0, 2.0, 2.0])
+    monkeypatch.setattr(module, "perf_counter", lambda: next(times))
+    result = solve_oip_cp_sat(domain, OipCpSatConfig(
+        movement_only=True, time_limit_seconds=1,
+    ))
+    assert result.status == "unknown"
+    assert result.solver_status == "BUILD_TIME_LIMIT"
+    assert result.movement_plan is None
+    assert result.best_bound is None
+    assert result.served_passengers is None

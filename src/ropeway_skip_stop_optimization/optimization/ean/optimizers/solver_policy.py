@@ -22,6 +22,8 @@ class GurobiSolverPolicy:
     mip_focus: int | None = None
     numeric_focus: int | None = None
     feasibility_tolerance: float | None = None
+    soft_memory_limit_gib: float | None = None
+    seed: int | None = None
 
     def validate(self) -> None:
         if self.mip_gap is not None and not (0 <= self.mip_gap <= 1):
@@ -40,6 +42,10 @@ class GurobiSolverPolicy:
             raise ValueError(
                 "feasibility_tolerance must lie between 1e-9 and 1e-2"
             )
+        if self.soft_memory_limit_gib is not None and self.soft_memory_limit_gib <= 0:
+            raise ValueError("soft_memory_limit_gib must be positive when set")
+        if self.seed is not None and self.seed < 0:
+            raise ValueError("seed must be nonnegative when set")
 
 
 def gurobi_solver_policy_for_preset(preset: GurobiSolverPolicyPreset | str) -> GurobiSolverPolicy:
@@ -89,3 +95,7 @@ def apply_gurobi_solver_policy(model: Any, policy: GurobiSolverPolicy) -> None:
         model.Params.NumericFocus = policy.numeric_focus
     if policy.feasibility_tolerance is not None:
         model.Params.FeasibilityTol = policy.feasibility_tolerance
+    if policy.soft_memory_limit_gib is not None:
+        model.Params.SoftMemLimit = policy.soft_memory_limit_gib
+    if policy.seed is not None:
+        model.Params.Seed = policy.seed

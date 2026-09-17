@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 
 @dataclass(frozen=True)
@@ -30,6 +30,7 @@ class GurobiSolvePhaseMetrics:
 @dataclass
 class GurobiMipProgressRecorder:
     samples: list[GurobiMipProgressSample] = field(default_factory=list)
+    on_sample: Callable[[GurobiMipProgressSample], None] | None = None
     _last_interval_runtime: float | None = None
     _last_solution_count: int | None = None
     _last_incumbent_objective: float | None = None
@@ -56,7 +57,7 @@ class GurobiMipProgressRecorder:
         if where == callback.MIPSOL:
             sample = self._sample_callback(model, grb, where, event="incumbent")
             if self._is_new_incumbent(sample):
-                self.samples.append(sample)
+                self._append(sample)
             return
         if where != callback.MIP:
             return
@@ -65,7 +66,7 @@ class GurobiMipProgressRecorder:
         if self._last_interval_runtime is None or (
             sample.runtime_seconds - self._last_interval_runtime >= sample_interval_seconds
         ):
-            self.samples.append(sample)
+            self._append(sample)
             self._last_interval_runtime = sample.runtime_seconds
 
     def record_final(self, model: Any, grb: Any) -> None:
@@ -81,7 +82,7 @@ class GurobiMipProgressRecorder:
             self._first_incumbent_runtime_seconds = (
                 _safe_float_attr(model, "Runtime") or 0.0
             )
-        self.samples.append(
+        self._append(
             GurobiMipProgressSample(
                 runtime_seconds=_safe_float_attr(model, "Runtime") or 0.0,
                 node_count=_safe_float_attr(model, "NodeCount"),
@@ -95,6 +96,11 @@ class GurobiMipProgressRecorder:
                 event="final",
             )
         )
+
+    def _append(self, sample: GurobiMipProgressSample) -> None:
+        self.samples.append(sample)
+        if self.on_sample is not None:
+            self.on_sample(sample)
 
     @property
     def phase_metrics(self) -> GurobiSolvePhaseMetrics:

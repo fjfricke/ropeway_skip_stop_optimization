@@ -20,6 +20,10 @@ native-solvers = ["z3-solver==4.16.0.0", "psutil>=6,<8"]
 hexaly = ["hexaly==15.0.20260909"]
 didp = ["didppy==0.10.1"]
 ibm-cp = ["docplex>=2.32.264,<3", "cplex>=22.2.0.1,<23"]
+evolutionary = [
+    "optuna==4.5.0",
+    "pymoo==0.6.1.6",
+]
 
 [project.scripts]
 ropeway-skip-stop-optimization = "ropeway_skip_stop_optimization.exports.cli:main"

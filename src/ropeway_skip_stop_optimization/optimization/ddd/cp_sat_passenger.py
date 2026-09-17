@@ -22,6 +22,11 @@ class DddCpSatCostEncoding(StrEnum):
     BINARY = "binary"
 
 
+class DddCpSatPassengerEncoding(StrEnum):
+    GROUPS = "groups"
+    OD_INVENTORY = "od_inventory"
+
+
 def binary_count_time_product(model, count, time, capacity, time_upper, name):
     """Exact bounded integer product, using conditional linear equalities.
 
@@ -53,10 +58,31 @@ class DddCpSatPassengerModel:
     capacity_row_count: int
     cost_encoding: DddCpSatCostEncoding
     binary: dict[tuple[int, int, int], tuple[cp_model.IntVar, cp_model.IntVar]] = field(default_factory=dict)
+    journey_expression: cp_model.LinearExpr | None = None
+    unserved_expression: cp_model.LinearExpr | None = None
+    lexicographic_weight: int | None = None
 
     @property
     def cost_auxiliary_count(self):
         return len(self.products) + 2 * (len(self.unary) + len(self.binary))
+
+    @property
+    def encoding(self) -> str:
+        return DddCpSatPassengerEncoding.GROUPS.value
+
+    @property
+    def legacy_ride_candidate_count(self) -> int:
+        return len(self.ride_count)
+
+    def supports_legacy_counts(self, counts: dict[str, int]) -> bool:
+        return all(not count or ride_id in self.ride_count for ride_id, count in counts.items())
+
+    def extract_legacy_counts(self, value) -> dict[str, int]:
+        return {
+            ride_id: int(value(variable))
+            for ride_id, variable in self.ride_count.items()
+            if value(variable)
+        }
 
     def add_hints(
         self,
@@ -156,8 +182,12 @@ def build_ddd_cp_sat_passenger_assignment(
                 stop.platform_exit_offset_seconds
             ) + built.waiting_step_tick * built.wait_steps_by_key[key]
             offset = ddd_seconds_to_tick(stop.platform_entry_offset_seconds)
+            start = built.time_by_cabin[cabin][visit]
+            fixed_arrival = start + offset if isinstance(start, int) else None
             alight_time = model.new_int_var(
-                offset, built.max_completion_tick + offset, f"alight_time[{cabin},{visit}]"
+                offset if fixed_arrival is None else fixed_arrival,
+                built.max_completion_tick + offset if fixed_arrival is None else fixed_arrival,
+                f"alight_time[{cabin},{visit}]",
             )
             model.add(alight_time == built.time_by_cabin[cabin][visit] + offset)
             alight_times[key] = alight_time
@@ -222,7 +252,8 @@ def build_ddd_cp_sat_passenger_assignment(
         time = alight_times[event]
         # The installed pybind repeated-field wrapper does not implement Python
         # negative indexing (domain[-1] silently returns 0). Use a list first.
-        time_upper = int(list(time.proto.domain)[-1])
+        time_domain = list(time.proto.domain)
+        time_upper = int(time_domain[-1])
         # Stay in the exact integer range of the solver's double-valued reports,
         # and well inside int64 for both expressions and product domains.
         expression_magnitude += capacity * (time_upper + horizon)
@@ -230,6 +261,11 @@ def build_ddd_cp_sat_passenger_assignment(
             raise ValueError("CP-SAT objective exceeds supported exact reporting range")
         alight_counts[event] = count
         if not with_journey_cost:
+            continue
+        if time_domain[0] == time_domain[-1]:
+            # Outside movements have exact constant arrival times. Their integer
+            # passenger assignment remains free; no amount/time encoding is needed.
+            terms.append((time_upper - horizon) * count)
             continue
         if cost_encoding is DddCpSatCostEncoding.PRODUCT:
             product = model.new_int_var(0, capacity * time_upper, f"alight_product[{event}]")
@@ -263,8 +299,9 @@ def build_ddd_cp_sat_passenger_assignment(
                 model.add(sum(unary[*event, k][1] for k in range(1, capacity + 1)) >= sum(bounds[q.id].minimum_arrival * counts[q.id] for q in candidates_by_alight[event]))
     if expression_magnitude >= 2**53:
         raise ValueError("CP-SAT objective exceeds supported exact reporting range")
+    unserved_expression = cp_model.LinearExpr.sum(list(unserved.values()))
     expression = (cp_model.LinearExpr.sum(terms) + constant if with_journey_cost
-                  else cp_model.LinearExpr.sum(list(unserved.values())))
+                  else unserved_expression)
     if with_journey_cost and formulation.enabled("journey_bounds"):
         total = model.new_int_var(prepared.analytical_lower_bound, constant, "bounded_journey_cost")
         model.add(total == expression)
@@ -275,4 +312,6 @@ def build_ddd_cp_sat_passenger_assignment(
         counts, used, unserved, alight_counts,
         {event: alight_times[event] for event in alight_counts},
         products, unary, constant, expression, len(onboard), cost_encoding, binary,
+        expression if with_journey_cost else None,
+        unserved_expression,
     )

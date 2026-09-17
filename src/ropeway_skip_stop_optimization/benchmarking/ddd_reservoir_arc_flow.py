@@ -80,6 +80,7 @@ class DddPreparedReservoirArcFlowRun:
     scenario: Scenario
     problem: DddReservoirArcFlowProblem
     all_stop_maximum_cabin_count: int
+    headway_policy: object | None = None
 
 
 def prepare_ddd_reservoir_arc_flow_run(
@@ -172,4 +173,5 @@ def prepare_ddd_reservoir_arc_flow_run(
         scenario=scenario,
         problem=problem,
         all_stop_maximum_cabin_count=analysis.maximum_cabin_count,
+        headway_policy=artifact.headway_policy,
     )

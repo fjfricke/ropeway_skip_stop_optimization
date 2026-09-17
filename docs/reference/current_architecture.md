@@ -21,6 +21,16 @@ Scenario
 New exact optimization work uses the continuous EAN path directly from the
 physical scenario.
 
+## Capacity-comparison contract
+
+Every thesis capacity experiment reports its validated Skip-Stop result against
+the phase-optimized saturated All-Stop circulation without waiting and with an
+exact integer passenger assignment. This baseline is recomputed for every
+demand level, OD distribution, and release profile. A fixed historical phase is
+only a reference witness; a bound for a broader All-Stop domain is additional
+evidence. The full definition and current R2 status are maintained in the
+[All-Stop capacity reference](all_stop_no_wait_capacity_baseline.md).
+
 ## Reservation insertion diagnostic
 
 The fixed-start reservation pilot composes a resource calendar, exact local
@@ -213,6 +223,23 @@ trajectory optimization. A separate exact root column-generation path derives
 certified passenger-objective lower bounds from exact finite-domain trajectory
 pricing. These algorithms share domain models and validation contracts but
 remain distinct solver strategies.
+
+The separate single-use reservoir line model restricts each active cabin to one
+repeating catalog pattern and a grid-aligned dispatch during a passenger-free
+dispatch phase. Every deployed cabin then circulates continuously until the
+service deadline and returns at the first subsequent pattern boundary; early
+withdrawal is not a decision. It keeps exact native resource intervals and
+integral direct passenger rides, but currently fixes every exit wait to zero. The default is
+`intervals + encoding_specific + shared_rounds`: resource occurrences and
+passenger rides are represented once per pattern/round prefix. Internally, the
+dispatch grid is partitioned by the uniquely implied final round. `shared_rides`
+additionally shares compatible ride quantities across patterns and remains an
+experimental memory-saving variant. `legacy_templates` remains available for
+encoding regression. All formulations verify the pattern-prefix contract before
+construction. Historical plan IDs and the independent reservoir validators remain
+unchanged. The implementation and performance evidence are documented in the
+[reservoir-line compaction finding](../findings/reservoir_line_compaction_results_20260913.md)
+and the [length-scaling finding](../findings/reservoir_line_length_scaling_results_20260913.md).
 
 The complete fixed-$K$ arc-flow runner additionally exposes the gated
 `exact_anonymous` formulation. It quotients the complete labeled no-wait DAG

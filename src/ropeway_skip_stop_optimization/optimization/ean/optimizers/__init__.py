@@ -5,10 +5,16 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.fixed_movement_p
     EanPassengerAssignmentDomain,
 )
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.passenger_model import (
+    EanPassengerEncoding,
     EanPassengerModel,
     EanPassengerModelBuilder,
     EanPassengerObjective,
     EanPassengerVariables,
+)
+from ropeway_skip_stop_optimization.optimization.ean.optimizers.ride_count_passenger_model import (
+    EanRideCountPassengerModel,
+    EanRideCountPassengerModelBuilder,
+    EanRideCountPassengerVariables,
 )
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.fleet_symmetry import (
     EanFleetSymmetryBreaker,
@@ -104,6 +110,10 @@ __all__ = [
     "EanPassengerAssignmentDomain",
     "EanPassengerServiceProblem",
     "EanPassengerVariables",
+    "EanPassengerEncoding",
+    "EanRideCountPassengerModel",
+    "EanRideCountPassengerModelBuilder",
+    "EanRideCountPassengerVariables",
     "EanSolveConfig",
     "GurobiCheckpointConfig",
     "GurobiSolverPolicy",

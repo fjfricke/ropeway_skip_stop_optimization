@@ -186,6 +186,8 @@ class ReservoirRepairProblem:
 
 
 def build_repair(context, *, deadline=None):
+    from ..reservoir_boundary import state_protection_tick
+
     built = build_reservoir_cp_sat(context.local, deadline=deadline)
     b = built.movement
     model = b.model
@@ -199,7 +201,7 @@ def build_repair(context, *, deadline=None):
             o = options[oid]
             states[o.from_state_id].append(
                 model.new_fixed_size_interval_var(
-                    t, 1, f"outside_state[{trip.cabin_id},{i}]"
+                    t, state_protection_tick(p, o.from_state_id), f"outside_state[{trip.cabin_id},{i}]"
                 )
             )
             for j, usage in enumerate(o.resource_usages):
@@ -225,7 +227,7 @@ def build_repair(context, *, deadline=None):
                     )
         states[p.entry_state_id].append(
             model.new_fixed_size_interval_var(
-                trip.return_tick, 1, f"outside_return[{trip.cabin_id}]"
+                trip.return_tick, state_protection_tick(p, p.entry_state_id), f"outside_return[{trip.cabin_id}]"
             )
         )
     for rid, intervals in resources.items():
@@ -239,7 +241,7 @@ def build_repair(context, *, deadline=None):
                     local_intervals.append(
                         model.new_optional_fixed_size_interval_var(
                             b.time_by_cabin[k][i],
-                            1,
+                            state_protection_tick(p, state),
                             present,
                             f"boundary_state[{k},{i}]",
                         )

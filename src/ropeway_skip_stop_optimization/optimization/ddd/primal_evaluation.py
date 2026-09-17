@@ -167,6 +167,7 @@ class DddEanPassengerPrimalEvaluator:
         default_factory=DddTrajectoryWaitingPolicy
     )
     passenger_candidate_build: EanPassengerCandidateBuildResult | None = None
+    require_full_service: bool = False
     _passenger_build: EanPassengerCandidateBuildResult | None = field(
         init=False,
         default=None,
@@ -283,6 +284,7 @@ class DddEanPassengerPrimalEvaluator:
                 objective=self.objective,
                 assignment_domain=EanPassengerAssignmentDomain.INTEGER,
                 passenger_builder=_PrebuiltPassengerCandidateBuilder(passenger_build),
+                require_full_service=self.require_full_service,
             )
         )
         solve_seconds = perf_counter() - solve_started

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from .reservoir_boundary import state_protection_tick
+
 from time import perf_counter
 from ortools.sat.python import cp_model
 
@@ -22,13 +24,26 @@ def build_reservoir_cp_movement(
     movement, states = problem.movement, problem.visit_states
     horizon = movement.operational_end_tick
     policy = problem.waiting_policy
-    step = ddd_seconds_to_tick(policy.step_seconds or 0.000001)
+    # No-Wait has no physical waiting step.  Use one model tick as a harmless
+    # coefficient for the zero-bounded wait variables.  Converting the former
+    # one-microsecond fallback can round to zero on coarser time grids.
+    step = (
+        1
+        if policy.step_seconds is None
+        else ddd_seconds_to_tick(policy.step_seconds)
+    )
+    if step <= 0:
+        raise ValueError("waiting step must span at least one model tick")
     model = cp_model.CpModel()
     times, active, selection, waits = {}, {}, {}, {}
     intervals = {r.id: [] for r in movement.resources}
     state_intervals = {s.id: [] for s in movement.states}
     first = ddd_seconds_to_tick(problem.dispatch_start_seconds)
     last = ddd_seconds_to_tick(problem.dispatch_end_seconds)
+    service_end = movement.passenger_service_end_tick
+    continuous_until_service_end = (
+        ddd_seconds_to_tick(problem.return_start_seconds) >= service_end
+    )
     dispatch_step = ddd_seconds_to_tick(problem.dispatch_step_seconds)
     for k in range(problem.available_fleet_count):
         if deadline is not None and perf_counter() >= deadline:
@@ -51,11 +66,11 @@ def build_reservoir_cp_movement(
                 model.add(t[0] >= times[k - 1][0]).only_enforce_if(a[0])
         for i, state in enumerate(states):
             present = a[0] if i == 0 else a[i - 1]
-            # Same unique state-time occupancy as the anonymous reservoir net;
-            # one tick is uniqueness, NOT an invented physical depot headway.
+            # Legacy states use one tick for uniqueness; the shared port uses
+            # the physical rope headway, including the terminal return node.
             state_intervals[state].append(
                 model.new_optional_fixed_size_interval_var(
-                    t[i], 1, present, f"state[{k},{i}]"
+                    t[i], state_protection_tick(problem, state), present, f"state[{k},{i}]"
                 )
             )
             if i:
@@ -68,6 +83,12 @@ def build_reservoir_cp_movement(
                     model.add(
                         t[i] >= ddd_seconds_to_tick(problem.return_start_seconds)
                     ).only_enforce_if(returned)
+                    # Under the continuous-service lifecycle, a cabin may pass
+                    # the port before the deadline but must leave at its first
+                    # complete return at or after it.  Continuing from such a
+                    # return would silently add a later, discretionary lap.
+                    if continuous_until_service_end:
+                        model.add(t[i] <= service_end - 1).only_enforce_if(a[i])
             if i == len(states) - 1:
                 continue
             options = movement.route_options_by_state_id[state]

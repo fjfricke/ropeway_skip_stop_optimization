@@ -31,6 +31,9 @@ from ropeway_skip_stop_optimization.optimization.ean.headway_separator import (
 )
 from ropeway_skip_stop_optimization.optimization.ean.fleet import EanFleetPlan
 from ropeway_skip_stop_optimization.optimization.ean.models import EanHeadwayPairScope
+from ropeway_skip_stop_optimization.optimization.ean.network import (
+    EanResourceConflictIndex,
+)
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.fixed_movement_passenger_model import (
     EanFixedMovementPassengerModel,
     EanFixedMovementPassengerModelBuilder,
@@ -48,10 +51,18 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.movement_model i
     EanMovementModel,
     EanMovementModelBuilder,
 )
+from ropeway_skip_stop_optimization.optimization.ean.optimizers.fleet_symmetry import (
+    EanFleetSymmetryBreaker,
+)
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.passenger_model import (
+    EanPassengerEncoding,
     EanPassengerModel,
     EanPassengerModelBuilder,
     EanPassengerObjective,
+)
+from ropeway_skip_stop_optimization.optimization.ean.optimizers.ride_count_passenger_model import (
+    EanRideCountPassengerModel,
+    EanRideCountPassengerModelBuilder,
 )
 from ropeway_skip_stop_optimization.optimization.ean.passenger_objective import (
     ean_passenger_objective_definition,
@@ -133,6 +144,7 @@ class EanSolveConfig:
     total_time_limit_seconds: float | None = None
     build_only: bool = False
     build_progress_callback: EanBuildProgressCallback | None = None
+    time_grid_ticks_per_second: int | None = None
 
     def validate(self) -> None:
         self.solver_policy.validate()
@@ -145,15 +157,72 @@ class EanSolveConfig:
             and self.total_time_limit_seconds <= 0
         ):
             raise ValueError("total_time_limit_seconds must be positive")
+        if (
+            self.time_grid_ticks_per_second is not None
+            and self.time_grid_ticks_per_second <= 0
+        ):
+            raise ValueError("time_grid_ticks_per_second must be positive")
 
 
 @dataclass(frozen=True)
 class EanMovementFeasibilityProblem:
     artifact: EanBuildArtifact
+    fixed_stop_patterns: tuple[tuple[str, ...], ...] | None = None
 
     @property
     def kind(self) -> EanOptimizationProblemKind:
         return EanOptimizationProblemKind.MOVEMENT_FEASIBILITY
+
+
+def _restrict_artifact_to_fixed_patterns(
+    artifact: EanBuildArtifact,
+    patterns: tuple[tuple[str, ...], ...],
+) -> EanBuildArtifact:
+    """Remove only candidates whose activation is impossible under a mask."""
+
+    if len(patterns) != len(artifact.cabin_starts):
+        raise ValueError("fixed stop patterns must define every candidate cabin")
+    masks = tuple(frozenset(pattern) for pattern in patterns)
+    visit_by_key = {
+        (visit.cabin_id, visit.visit_index): visit
+        for visit in artifact.switch_visits
+    }
+    station_by_switch = {
+        timing.switch_id: timing.station_id for timing in artifact.timings
+    }
+
+    def possible(candidate) -> bool:
+        visit = visit_by_key[candidate.cabin_id, candidate.visit_index]
+        serves = station_by_switch[visit.switch_id] in masks[candidate.cabin_id]
+        if candidate.activation_reference.value == "serve":
+            return serves
+        if candidate.activation_reference.value == "skip":
+            return not serves
+        return True
+
+    candidates = tuple(
+        candidate for candidate in artifact.headway_candidates if possible(candidate)
+    )
+    candidate_ids = {candidate.id for candidate in candidates}
+    pairs = tuple(
+        pair
+        for pair in artifact.headway_pairs
+        if pair.first_candidate_id in candidate_ids
+        and pair.second_candidate_id in candidate_ids
+    )
+    result = replace(
+        artifact,
+        headway_candidates=candidates,
+        headway_pairs=pairs,
+        resource_conflict_index=EanResourceConflictIndex.build(
+            artifact.movement_network,
+            artifact.headway_checkpoints,
+            candidates,
+        ),
+        build_metrics=None,
+    )
+    result.validate()
+    return result
 
 
 @dataclass(frozen=True)
@@ -163,12 +232,117 @@ class EanPassengerServiceProblem:
     objective: EanPassengerObjective = EanPassengerObjective.WAITING_TIME
     passenger_builder: EanPassengerCandidateBuilder | None = None
     mip_start_strategy: EanMipStartStrategy = EanMipStartStrategy.AUTO
+    passenger_encoding: EanPassengerEncoding = EanPassengerEncoding.SLOTS
+    initial_movement_plan: EanMovementPlan | None = None
+    initial_fleet_plan: EanFleetPlan | None = None
+    initial_passenger_plan: EanPassengerServicePlan | None = None
 
     @property
     def kind(self) -> EanOptimizationProblemKind:
         return EanOptimizationProblemKind.PASSENGER_SERVICE
 
 
+def _fix_movement_stop_patterns(
+    model: Any,
+    movement: EanMovementModel,
+    patterns: tuple[tuple[str, ...], ...],
+) -> None:
+    """Fix repeating per-cabin station masks while leaving all times free."""
+
+    cabin_ids = tuple(sorted(movement.visits_by_cabin_id))
+    if cabin_ids != tuple(range(len(patterns))):
+        raise ValueError("fixed stop patterns must define every candidate cabin")
+    station_ids = {
+        timing.station_id for timing in movement.timing_by_switch_id.values()
+    }
+    masks = tuple(frozenset(pattern) for pattern in patterns)
+    mandatory = {
+        timing.station_id
+        for timing in movement.timing_by_switch_id.values()
+        if not timing.skip_allowed
+    }
+    for cabin_id, mask in enumerate(masks):
+        if not mask or not mask <= station_ids:
+            raise ValueError(f"invalid fixed stop pattern for cabin {cabin_id}")
+        if not mandatory <= mask:
+            raise ValueError(
+                f"fixed stop pattern for cabin {cabin_id} skips mandatory stations"
+            )
+        for visit in movement.visits_by_cabin_id[cabin_id]:
+            key = cabin_id, visit.visit_index
+            station_id = movement.timing_by_switch_id[visit.switch_id].station_id
+            target = movement.variables.route_active[key] if station_id in mask else 0
+            model.addConstr(
+                movement.variables.stop[key] == target,
+                name=f"fixed_pattern_{cabin_id}_{visit.visit_index}",
+            )
+
+    fleet = movement.fleet_model
+    parameters = movement.artifact.initial_placement_parameters
+    if fleet is None or parameters is None:
+        return
+    previous_service = fleet.variables.initial_previous_service
+    phase_count = parameters.initial_phase_visit_count
+    circulation = movement.artifact.circulation_state_ids
+    for cabin_id, visits in movement.visits_by_cabin_id.items():
+        if cabin_id not in previous_service:
+            continue
+        for phase_index, visit in enumerate(visits[:phase_count]):
+            key = cabin_id, visit.visit_index
+            previous_switch = circulation[(phase_index - 1) % len(circulation)]
+            previous_station = movement.timing_by_switch_id[previous_switch].station_id
+            rope = fleet.variables.rope_selected[key]
+            if previous_station in masks[cabin_id]:
+                model.addConstr(
+                    previous_service[cabin_id] >= rope,
+                    name=f"fixed_pattern_previous_service_{cabin_id}_{visit.visit_index}",
+                )
+            else:
+                model.addConstr(
+                    previous_service[cabin_id] <= 1 - rope,
+                    name=f"fixed_pattern_previous_skip_{cabin_id}_{visit.visit_index}",
+                )
+
+    # Cabin labels remain interchangeable only inside one identical mask.
+    # Re-install the strong initial-state ordering for exactly those classes;
+    # the global ordering is disabled by the OIP runner for mixed patterns.
+    groups: dict[frozenset[str], list[int]] = {}
+    for cabin_id, mask in enumerate(masks):
+        groups.setdefault(mask, []).append(cabin_id)
+    breaker = EanFleetSymmetryBreaker()
+    for cabin_ids in groups.values():
+        if len(cabin_ids) < 2:
+            continue
+        breaker._add_initial_category_order(
+            model=model,
+            cabin_ids=cabin_ids,
+            cabin_active=fleet.variables.cabin_active,
+            station_selected=fleet.variables.station_selected,
+            rope_selected=fleet.variables.rope_selected,
+            visits_by_cabin_id=movement.visits_by_cabin_id,
+            phase_count=phase_count,
+        )
+        breaker._add_initial_station_order(
+            model=model,
+            cabin_ids=cabin_ids,
+            station_selected=fleet.variables.station_selected,
+            switch_time=movement.variables.switch_time,
+            phase_count=phase_count,
+            big_m=movement.big_m,
+        )
+        breaker._add_initial_platform_entry_order(
+            model=model,
+            artifact=movement.artifact,
+            cabin_ids=cabin_ids,
+            station_selected=fleet.variables.station_selected,
+            rope_selected=fleet.variables.rope_selected,
+            switch_time=movement.variables.switch_time,
+            stop=movement.variables.stop,
+            visits_by_cabin_id=movement.visits_by_cabin_id,
+            timing_by_switch_id=movement.timing_by_switch_id,
+            phase_count=phase_count,
+            big_m=movement.big_m,
+        )
 @dataclass(frozen=True)
 class EanFixedMovementPassengerProblem:
     scenario: Scenario
@@ -179,6 +353,8 @@ class EanFixedMovementPassengerProblem:
         EanPassengerAssignmentDomain.INTEGER
     )
     passenger_builder: EanPassengerCandidateBuilder | None = None
+    require_full_service: bool = False
+    lexicographic_unserved_first: bool = False
 
     @property
     def kind(self) -> EanOptimizationProblemKind:
@@ -351,6 +527,16 @@ class EanOptimizer:
 
         self.config.validate()
         problem.artifact.validate()
+        if (
+            isinstance(problem, EanMovementFeasibilityProblem)
+            and problem.fixed_stop_patterns is not None
+        ):
+            problem = replace(
+                problem,
+                artifact=_restrict_artifact_to_fixed_patterns(
+                    problem.artifact, problem.fixed_stop_patterns
+                ),
+            )
         if isinstance(problem, EanFixedMovementPassengerProblem):
             return _solve_fixed_movement_passenger(
                 optimizer=self,
@@ -419,6 +605,20 @@ class EanOptimizer:
             optimization_config=optimization_config,
             progress_callback=self.config.build_progress_callback,
         )
+        if (
+            isinstance(problem, EanMovementFeasibilityProblem)
+            and problem.fixed_stop_patterns is not None
+        ):
+            _fix_movement_stop_patterns(
+                model, movement_model, problem.fixed_stop_patterns
+            )
+        if self.config.time_grid_ticks_per_second is not None:
+            _add_ean_time_grid_constraints(
+                model,
+                movement_model,
+                ticks_per_second=self.config.time_grid_ticks_per_second,
+                integer_vtype=GRB.INTEGER,
+            )
         movement_runtime = perf_counter() - movement_started
         movement_fixing_runtime = 0.0
         passenger_model = None
@@ -445,7 +645,12 @@ class EanOptimizer:
                 variable_count=int(model.NumVars),
                 constraint_count=int(model.NumConstrs),
             )
-            passenger_model = EanPassengerModelBuilder().build(
+            passenger_model_builder = (
+                EanRideCountPassengerModelBuilder()
+                if problem.passenger_encoding is EanPassengerEncoding.RIDE_COUNTS
+                else EanPassengerModelBuilder()
+            )
+            passenger_model = passenger_model_builder.build(
                 scenario=problem.scenario,
                 movement_model=movement_model,
                 objective=problem.objective,
@@ -454,7 +659,69 @@ class EanOptimizer:
                 grb=GRB,
                 passenger_builder=problem.passenger_builder,
                 passenger_build=passenger_build,
+                **(
+                    {
+                        "objective_ticks_per_second": (
+                            self.config.time_grid_ticks_per_second or 1
+                        )
+                    }
+                    if problem.passenger_encoding is EanPassengerEncoding.RIDE_COUNTS
+                    else {}
+                ),
             )
+            if (
+                self.config.time_grid_ticks_per_second is not None
+                and problem.passenger_encoding is EanPassengerEncoding.SLOTS
+            ):
+                # The isolated integer-time OIP comparison uses the same exact
+                # lexicographic contract for both Gurobi passenger encodings.
+                ticks = self.config.time_grid_ticks_per_second
+                total_demand = sum(
+                    group.count for group in passenger_build.demand_groups
+                )
+                lexicographic_weight = (
+                    total_demand * problem.artifact.config.horizon_seconds * ticks
+                    + 1.0
+                )
+                definition = ean_passenger_objective_definition(problem.objective)
+                secondary_expression = (
+                    passenger_model.objective_expression
+                    + gp.quicksum(
+                        definition.unserved_cost_seconds(
+                            release_time_seconds=group.release_time_seconds,
+                            horizon_seconds=problem.artifact.config.horizon_seconds,
+                        )
+                        * passenger_model.variables.unserved[group.id]
+                        for group in passenger_build.demand_groups
+                    )
+                )
+                passenger_model = replace(
+                    passenger_model,
+                    objective_expression=secondary_expression,
+                )
+                # EanPassengerModelBuilder installs the historical three-stage
+                # OIP objective.  Drop its fleet stage explicitly before
+                # installing the common scalarized two-stage comparison.
+                model.NumObj = 1
+                model.setObjective(
+                    lexicographic_weight
+                    * gp.quicksum(passenger_model.variables.unserved.values())
+                    + ticks * secondary_expression,
+                    GRB.MINIMIZE,
+                )
+            if problem.initial_movement_plan is not None:
+                if (
+                    problem.initial_fleet_plan is None
+                    or problem.initial_passenger_plan is None
+                ):
+                    raise ValueError(
+                        "EAN portable start needs movement, fleet, and passengers"
+                    )
+                passenger_model.apply_mip_start(
+                    problem.initial_movement_plan,
+                    problem.initial_passenger_plan,
+                    problem.initial_fleet_plan,
+                )
             passenger_runtime = perf_counter() - passenger_started
             emit_build_progress(
                 self.config.build_progress_callback,
@@ -840,6 +1107,8 @@ def _solve_fixed_movement_passenger(
         passenger_build=passenger_build,
         objective=problem.objective,
         assignment_domain=problem.assignment_domain,
+        require_full_service=problem.require_full_service,
+        lexicographic_unserved_first=problem.lexicographic_unserved_first,
         grb=grb,
         gp=gp,
     )
@@ -1084,7 +1353,7 @@ def _seed_active_cabin_count(seed: EanAllStopMipStartSeed) -> int:
 
 
 def _seed_passenger_objective_seconds(
-    passenger_model: EanPassengerModel,
+    passenger_model: EanPassengerModel | EanRideCountPassengerModel,
     passenger_plan: EanPassengerServicePlan,
 ) -> float:
     definition = ean_passenger_objective_definition(passenger_model.objective)
@@ -1106,7 +1375,7 @@ def _metadata(
     diagnostics: dict[str, Any],
     checkpoint_diagnostics: dict[str, str | None],
     movement_model: EanMovementModel,
-    passenger_model: EanPassengerModel | None,
+    passenger_model: EanPassengerModel | EanRideCountPassengerModel | None,
     model: Any,
     model_nonzero_count: int,
     setup_runtime: float,
@@ -1235,6 +1504,42 @@ def _metadata(
             build_metrics.diagnostically_omitted_headway_pair_count
         ),
     )
+
+
+def _add_ean_time_grid_constraints(
+    model: Any,
+    movement_model: EanMovementModel,
+    *,
+    ticks_per_second: int,
+    integer_vtype: Any,
+) -> None:
+    """Restrict canonical EAN event times to an isolated integer grid."""
+
+    if ticks_per_second <= 0:
+        raise ValueError("EAN time grid must have a positive tick rate")
+    variables = movement_model.variables
+    groups = (
+        ("switch", variables.switch_time),
+        ("exit", variables.exit_switch_time),
+        ("wait", variables.wait_time),
+    )
+    for label, values in groups:
+        for key, event_time in values.items():
+            lower = math.ceil(float(event_time.LB) * ticks_per_second - 1e-9)
+            upper = math.floor(float(event_time.UB) * ticks_per_second + 1e-9)
+            if lower > upper:
+                raise ValueError(f"empty EAN time-grid domain for {label} {key!r}")
+            tick = model.addVar(
+                lb=lower,
+                ub=upper,
+                vtype=integer_vtype,
+                name=f"oip_{label}_tick_{key[0]}_{key[1]}",
+            )
+            model.addConstr(
+                ticks_per_second * event_time == tick,
+                name=f"oip_{label}_grid_{key[0]}_{key[1]}",
+            )
+    model.update()
 
 
 def _optimize(

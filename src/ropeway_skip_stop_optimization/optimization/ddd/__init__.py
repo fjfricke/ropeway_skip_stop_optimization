@@ -6,6 +6,29 @@ from importlib import import_module
 from typing import Any
 
 _EXPORTS_BY_MODULE: dict[str, tuple[str, ...]] = {
+    "ropeway_skip_stop_optimization.optimization.ddd.corridor_arc_flow": (
+        "CorridorAdaptiveConfig",
+        "CorridorAdaptiveOptimizer",
+        "CorridorAdaptiveResult",
+        "CorridorAdaptiveRound",
+        "CorridorArcFlowConfig",
+        "CorridorArcFlowMode",
+        "CorridorArcFlowOptimizer",
+        "CorridorArcFlowProgress",
+        "CorridorArcFlowResult",
+        "CorridorArcFlowSolveConfig",
+        "CorridorArcFlowStatus",
+        "CorridorPassengerSeedResult",
+        "CorridorPartition",
+        "CorridorPreparedProblem",
+        "build_cycle_spacing_waiting_policy",
+        "anchor_corridor_partitions",
+        "prepare_corridor_problem",
+        "optimize_corridor_seed_passengers",
+        "refine_corridor_partition",
+        "refine_corridor_partitions",
+        "validate_corridor_passenger_assignment",
+    ),
     "ropeway_skip_stop_optimization.optimization.ddd.cp_formulation": (
         "DddCpFormulationConfig", "DddCpFormulationProfile", "PreparedCpStructure",
     ),
@@ -244,6 +267,7 @@ _EXPORTS_BY_MODULE: dict[str, tuple[str, ...]] = {
     ),
     'ropeway_skip_stop_optimization.optimization.ddd.cp_sat_passenger': (
         'DddCpSatCostEncoding',
+        'DddCpSatPassengerEncoding',
     ),
     'ropeway_skip_stop_optimization.optimization.ddd.cp_sat_primal': (
         'DddCpSatFixedCabinRoute',
@@ -698,6 +722,7 @@ __all__ = [
     'DddIntegratedCpSatOptimizer',
     'DddIntegratedCpSatResult',
     'DddCpSatCostEncoding',
+    'DddCpSatPassengerEncoding',
     'build_ddd_integrated_cp_sat',
 
     'DDD_TIME_TICKS_PER_SECOND',

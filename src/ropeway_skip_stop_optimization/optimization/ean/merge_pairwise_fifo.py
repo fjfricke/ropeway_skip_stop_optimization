@@ -56,6 +56,7 @@ class EanPairwiseFifoConstraintBuilder:
         for pair in artifact.headway_pairs:
             checkpoint = checkpoint_by_id[pair.checkpoint_id]
             if checkpoint.kind not in {
+                HeadwayCheckpointKind.ENTRY_SWITCH,
                 HeadwayCheckpointKind.PLATFORM_ENTRY,
                 HeadwayCheckpointKind.PLATFORM_EXIT,
                 HeadwayCheckpointKind.EXIT_SWITCH,
@@ -85,7 +86,10 @@ class EanPairwiseFifoConstraintBuilder:
 
             # Platform and mechanism candidates are Service-only. At the
             # direct Exit Switch, also preserve the Skip subsequence.
-            if checkpoint.kind is HeadwayCheckpointKind.EXIT_SWITCH:
+            if checkpoint.kind in {
+                HeadwayCheckpointKind.ENTRY_SWITCH,
+                HeadwayCheckpointKind.EXIT_SWITCH,
+            }:
                 skip_relaxation = stop[first_key] + stop[second_key]
                 model.addConstr(
                     switch_time[first_key] - switch_time[second_key]

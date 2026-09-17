@@ -46,9 +46,9 @@ export function ViewerHeader({ scenarioId, counts, hasDiscrete, artifactSelectio
         </div>
         <div className="artifact-controls" aria-label="Loaded artifact selection">
           <label>
-            <span>Stations</span>
+            <span>Topology</span>
             <select
-              aria-label="Stations setup"
+              aria-label="Topology"
               value={artifactSelection.selectedFamilyId}
               onChange={(event) => artifactSelection.onFamilyChange(event.target.value)}
             >
@@ -60,9 +60,9 @@ export function ViewerHeader({ scenarioId, counts, hasDiscrete, artifactSelectio
             </select>
           </label>
           <label>
-            <span>Scenario</span>
+            <span>Geometry</span>
             <select
-              aria-label="Scenario variant"
+              aria-label="Geometry variant"
               value={artifactSelection.selectedVariantId}
               onChange={(event) => artifactSelection.onVariantChange(event.target.value)}
             >

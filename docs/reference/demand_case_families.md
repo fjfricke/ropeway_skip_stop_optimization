@@ -1,5 +1,14 @@
 # Demand Case Families and Demand Profiles
 
+> **Confirmed thesis functions, 14 September 2026:** The functions and parameters
+> approved after discussion are recorded in sections 12–13 of the
+> [decision register](../thesis/experiment_definition_register_20260913.md).
+> They distinguish arrival rates from batches and define the directional OD
+> weights, P0, the P1 peak, and the background-plus-pulses P4 profile. The older
+> formulas below remain historical design context; matching F/P names do not
+> make them identical to the newly approved demand contract. Arrival aggregation
+> and within-interval release generation are still open.
+
 This document defines a compact case taxonomy for evaluating when skip-stop
 operation improves an urban ropeway system. A **demand family** describes the
 spatial OD and resource-conflict structure. A **demand profile** describes how
@@ -22,6 +31,36 @@ The central explanatory quantity is the overlap of **avoidable station
 resources** between OD groups. Skip-stop is expected to be most valuable when
 this overlap is low while shared rope and mandatory terminal resources still
 have residual capacity.
+
+### Research basis for the joint spatial-temporal design
+
+Spatial family and temporal profile are kept as separate, crossable axes, but
+they must be specified together for each executable demand field. This follows
+the rail-timetabling literature, which represents demand as time-dependent OD
+matrices rather than as one system-wide passenger total. Niu, Zhou and Gao
+explicitly distinguish minute- and hour-dependent OD demand in a skip-stop
+timetabling model
+([doi:10.1016/j.trb.2015.03.004](https://doi.org/10.1016/j.trb.2015.03.004)).
+Sun et al. use demand variation derived from smart-card data in demand-driven
+metro timetabling
+([doi:10.1016/j.trc.2014.06.003](https://doi.org/10.1016/j.trc.2014.06.003)).
+Blanco et al. represent incoming flows with piecewise-linear arrival-rate and
+bulk-arrival components, supporting separate smooth and feeder/event cases
+([doi:10.1016/j.omega.2019.102165](https://doi.org/10.1016/j.omega.2019.102165)).
+
+The chosen spatial contrasts are mechanism tests rather than claims that one
+synthetic matrix is typical of every urban ropeway. Mei et al. find that the
+performance of AB-type skip-stop designs depends materially on spatially
+heterogeneous demand and unevenly distributed origins
+([doi:10.1016/j.trb.2021.06.008](https://doi.org/10.1016/j.trb.2021.06.008)).
+Farrando et al. report the expected contrast that long-distance passengers can
+benefit from saved stops while short-distance passengers may lose through
+additional waiting
+([doi:10.1016/j.jrtpm.2024.100461](https://doi.org/10.1016/j.jrtpm.2024.100461)).
+These findings motivate F0 as a diffuse control, F2 as a deliberately
+complementary capacity case, and F3/F4 as the long-versus-local Journey-Time
+contrast. They do not determine the numerical OD weights; those remain
+pre-registered synthetic experiment inputs.
 
 ## 2. Demand Profiles
 

@@ -34,6 +34,7 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     EanMipStartStrategy,
     EanTimeBoundFormulation,
     EanPassengerObjective,
+    EanPassengerEncoding,
     EanPassengerAssignmentDomain,
     EanPassengerServiceProblem,
     EanRideCandidate,
@@ -77,6 +78,7 @@ class _PassengerSolveOptions:
     mip_start_strategy: EanMipStartStrategy = (
         EanMipStartStrategy.OPTIMIZED_ALL_STOP
     )
+    passenger_encoding: EanPassengerEncoding = EanPassengerEncoding.SLOTS
 
 
 def _solve_passenger(
@@ -93,8 +95,43 @@ def _solve_passenger(
             artifact=artifact,
             objective=options.objective,
             mip_start_strategy=options.mip_start_strategy,
+            passenger_encoding=options.passenger_encoding,
         )
     )
+
+
+def test_ean_ride_counts_match_slot_objective_and_assignment() -> None:
+    pytest.importorskip("gurobipy")
+    scenario = _minimal_scenario(
+        demands=(
+            Demand(arrival_time=time(8, 0), origin="A", destination="B", count=8),
+        ),
+    )
+    artifact = _minimal_artifact(cabin_capacity=8, cycle_count=2)
+    common = dict(
+        objective=EanPassengerObjective.JOURNEY_TIME,
+        mip_start_strategy=EanMipStartStrategy.NONE,
+    )
+    slots = _solve_passenger(
+        scenario,
+        artifact,
+        _PassengerSolveOptions(**common, passenger_encoding=EanPassengerEncoding.SLOTS),
+    )
+    counts = _solve_passenger(
+        scenario,
+        artifact,
+        _PassengerSolveOptions(
+            **common, passenger_encoding=EanPassengerEncoding.RIDE_COUNTS
+        ),
+    )
+
+    assert counts.metadata.status == "optimal"
+    assert counts.metadata.served_passenger_count == slots.metadata.served_passenger_count
+    assert counts.metadata.unserved_passenger_count == slots.metadata.unserved_passenger_count
+    assert counts.metadata.objective_value_seconds == pytest.approx(
+        slots.metadata.objective_value_seconds
+    )
+    assert counts.metadata.slot_variable_count < slots.metadata.slot_variable_count
 
 
 def test_ean_passenger_service_minimizes_waiting_with_unserved_backlog() -> None:
@@ -1465,3 +1502,15 @@ def _timing(service_seconds: float, skip_seconds: float) -> SkipStopTiming:
         rope_to_next_switch_seconds=5.0,
         skip_allowed=True,
     )
+
+
+def test_fixed_movement_full_service_does_not_fall_back_to_partial_service() -> None:
+    """The odd-cycle capacity instance has no integer full-service assignment."""
+    pytest.importorskip("gurobipy")
+    scenario, artifact, movement_plan = _odd_cycle_fixed_movement_case()
+    result = EanOptimizer().solve(EanFixedMovementPassengerProblem(
+        scenario=scenario, artifact=artifact, movement_plan=movement_plan,
+        objective=EanPassengerObjective.JOURNEY_TIME, require_full_service=True,
+    ))
+    assert result.metadata.status == "infeasible"
+    assert result.passenger_plan is None
