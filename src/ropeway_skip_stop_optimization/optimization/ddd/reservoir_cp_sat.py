@@ -218,10 +218,18 @@ def _extract(problem, built, value):
                     int(value(b.time_by_cabin[k][len(ids)])),
                 )
             )
-    return DddReservoirCpPlan(
-        tuple(trips),
-        built.passengers.extract_legacy_counts(value),
-    )
+    extractor = getattr(built.passengers, "extract_legacy_counts", None)
+    if extractor is not None:
+        ride_counts = extractor(value)
+    else:
+        # Lightweight movement-only builders used by repairs and tests expose
+        # the legacy ride variables directly instead of a passenger adapter.
+        ride_counts = {
+            ride_id: amount
+            for ride_id, variable in getattr(built.passengers, "ride_count", {}).items()
+            if (amount := int(value(variable))) > 0
+        }
+    return DddReservoirCpPlan(tuple(trips), ride_counts)
 
 
 def _movement_values(problem, built, plan):

@@ -1,9 +1,9 @@
+import json
 from dataclasses import replace
 from datetime import date, datetime, timedelta
-import json
 
-from ortools.sat.python import cp_model
 import pytest
+from ortools.sat.python import cp_model
 
 from ropeway_skip_stop_optimization.benchmarking.oip_pattern_waiting import (
     prepare_oip_pattern_waiting_pilot,
@@ -33,6 +33,18 @@ def test_frontend_export_preserves_zero_and_absent_incumbent_values(tmp_path):
     assert detail["latest"]["unserved"] == 0
     assert detail["latest"]["journey_time_seconds"] == 0.0
     assert detail["latest"]["used_fleet"] is None
+
+
+def test_live_placeholder_reports_waiting_contract(tmp_path):
+    from ropeway_skip_stop_optimization.optimization.oip.runner import (
+        OipRunConfig,
+        _write_live_files,
+    )
+
+    _write_live_files(tmp_path, _small_domain(120), OipRunConfig(movement_only=True), [])
+    detail = json.loads((tmp_path / "detail.json").read_text())
+    assert detail["maximum_wait_seconds"] == 120
+    assert "Waiting≤120s" in detail["subtitle"]
 from ropeway_skip_stop_optimization.examples.three_station import (
     ThreeStationOptimizedInitialPlacementExample,
 )
@@ -43,18 +55,18 @@ from ropeway_skip_stop_optimization.optimization.ean import (
     validate_ean_initial_boundary_against_artifact,
     validate_ean_movement_plan_against_artifact,
 )
-from ropeway_skip_stop_optimization.optimization.oip import prepare_oip_domain
 from ropeway_skip_stop_optimization.optimization.oip import (
     OipBackend,
     OipRunConfig,
+    prepare_oip_domain,
     run_oip,
-)
-from ropeway_skip_stop_optimization.optimization.oip.validation import (
-    validate_oip_movement_certificate,
 )
 from ropeway_skip_stop_optimization.optimization.oip.cp_sat import (
     _extract_movement,
     build_oip_cp_sat_model,
+)
+from ropeway_skip_stop_optimization.optimization.oip.validation import (
+    validate_oip_movement_certificate,
 )
 
 

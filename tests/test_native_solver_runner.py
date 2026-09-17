@@ -1,4 +1,5 @@
 import sys
+import time
 from unittest.mock import patch
 
 import pytest
@@ -63,6 +64,39 @@ def test_memory_limit_is_not_an_unsat_proof(tmp_path):
     )
     assert result["supervisor_reason"] == "MEMORY_LIMIT"
     assert result["peak_process_tree_rss_bytes"] > 0
+
+
+def test_deadline_stops_process_group_after_parent_exits(tmp_path):
+    pid_file = tmp_path / "child.pid"
+    program = (
+        "import pathlib, subprocess, sys, time; "
+        "child=subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(30)']); "
+        f"pathlib.Path({str(pid_file)!r}).write_text(str(child.pid)); "
+        "time.sleep(0.15)"
+    )
+    result = supervise([sys.executable, "-c", program], tmp_path, seconds=0.35)
+    assert result["supervisor_reason"] == "WALL_DEADLINE"
+    child_pid = int(pid_file.read_text())
+    time.sleep(0.05)
+    with pytest.raises(ProcessLookupError):
+        import os
+        os.kill(child_pid, 0)
+
+
+def test_blocking_checkpoint_validator_does_not_block_deadline(tmp_path):
+    (tmp_path / "best.json").write_text("{}")
+
+    def block(path, elapsed):
+        time.sleep(30)
+
+    result = supervise(
+        [sys.executable, "-c", "import time; time.sleep(30)"],
+        tmp_path,
+        seconds=0.25,
+        checkpoint_callback=block,
+    )
+    assert result["supervisor_reason"] == "WALL_DEADLINE"
+    assert result["civil_wall_seconds"] < 2
 
 
 def test_recommendation_requires_both_additional_repetitions():

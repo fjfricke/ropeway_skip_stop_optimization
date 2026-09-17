@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-from collections import Counter
 import importlib.util
 import json
-from pathlib import Path
 import sys
+from collections import Counter
+from pathlib import Path
 
 import pytest
 
@@ -19,7 +19,6 @@ from ropeway_skip_stop_optimization.benchmarking.oip_pattern_waiting import (
     prepare_oip_pattern_waiting_pilot,
 )
 from ropeway_skip_stop_optimization.benchmarking.thesis_cases import ThesisDemandFamily
-
 
 STATIONS = ("S0", "S1", "S2", "S3", "S4")
 
@@ -194,6 +193,8 @@ def test_build_only_manifest_and_resume_do_not_duplicate_trials(
     prepared = json.loads((output / "campaign.json").read_text())
     assert prepared["status"] == "prepared"
     assert prepared["trial_count"] == 1
+    assert prepared["study_membership"] == "archive"
+    assert prepared["contract_id"] is None
     assert prepared["trials"][0]["pattern_composition"] == {
         "S1+S3": 1,
         "S2+S4": 1,
@@ -208,6 +209,24 @@ def test_build_only_manifest_and_resume_do_not_duplicate_trials(
     assert resumed["trials"][0]["attempts"] == []
     assert resumed["trials"][0]["status"] == "not_started_deadline"
     assert resumed["resume_count"] == 1
+
+
+def test_current_thesis_screening_requires_calibration_provenance(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runner_path = Path(__file__).parents[1] / "benchmarks" / "run_oip_pattern_screening.py"
+    spec = importlib.util.spec_from_file_location("screening_contract", runner_path)
+    assert spec is not None and spec.loader is not None
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    monkeypatch.setattr(sys, "argv", [
+        "runner", "--output", str(tmp_path / "campaign"), "--build-only",
+        "--allocations", "direct", "--k-values", "2",
+        "--study-membership", "current_thesis",
+        "--contract-id", runner.THESIS_CONTRACT_ID,
+    ])
+    with pytest.raises(ValueError, match="calibrated reference provenance"):
+        runner.main()
 
 
 def test_refinement_selection_keeps_best_two_per_k() -> None:

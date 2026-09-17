@@ -2,9 +2,21 @@
 
 Stand: 17.09.2026. Code-Sicherung vor den Anpassungen: `ae62642`.
 
-**Abgrenzung:** Jetzt werden ausschließlich die Thesis-Laufverträge und ihre
-Vorbereitung angepasst und getestet. Repo-, Archiv- und Frontend-Umbau sind hier
-geplant, werden aber noch nicht umgesetzt. Keine Kampagne wird gestartet.
+Der aktuelle Versuchsablauf steht zentral in der
+[Thesis-Versuchs-README](../experiments/README.md). Neu vereinbart sind **27
+Kalibrierungen zuerst**: 24 feste Journey-Starts und drei regelmäßige
+All-Stop-Phasenreferenzen bei geometrisch ermitteltem K_AS,max für F0/F2/F3.
+Der gemeinsame reine Kalibrierungscontroller ist noch umzusetzen.
+
+Nachträglich bestätigt: OIP wird bei **100 % und 110 %** der jeweiligen neuen
+CAL-O-Kapazität verglichen (110 % auf ganze Personen aufrunden). Frühere Hinweise
+auf einen offenen Lastfaktor unten sind damit überholt; K-Raster und endgültige
+Kampagnenbudgets bleiben offen. Details stehen in der zentralen Versuchs-README.
+
+**Abgrenzung:** Die Thesis-Laufverträge, ihre Vorbereitung sowie die erste
+Repo-, Archiv- und Frontend-Trennung sind umgesetzt und getestet. Keine Kampagne
+wird durch diesen Umbau gestartet. Weitere Archivierung alter Optimierer bleibt
+eine getrennte, anhand der unten beschriebenen Grenzen auszuführende Etappe.
 Thesis, Präsentation, temporäre Dateien und Laufdaten gehören nicht zum
 Code-Sicherungscommit. Bestehende Ergebnisse werden weder gelöscht noch umetikettiert.
 

@@ -258,6 +258,7 @@ class CorridorAdaptiveOptimizer:
         current_seed_rides = seed_ride_counts
         current = prepared
         last_outer = None
+        final_partition_needs_check = False
         deadline = started + self.config.total_time_limit_seconds
         inner_build_estimate = 0.0
         outer_build_estimate = 0.0
@@ -321,6 +322,9 @@ class CorridorAdaptiveOptimizer:
                     current, anchors=candidates, config=self.formulation,
                     seed=current_seed,
                 )
+                final_partition_needs_check = True
+            else:
+                final_partition_needs_check = False
             completed_round = CorridorAdaptiveRound(
                 index, inner, outer, tuple(split_keys), tuple(candidates), conflict_count
             )
@@ -329,6 +333,26 @@ class CorridorAdaptiveOptimizer:
                 round_callback(completed_round)
             if not candidates or (inner_budget <= 0.001 and outer_budget <= 0.001):
                 break
+        # Never finish immediately after creating a finer inner model without
+        # checking it.  Refinement rounds otherwise have an off-by-one failure:
+        # the final split can make the model feasible, but no solve observes it.
+        closure_slice = min(
+            self.config.inner_slice_seconds,
+            inner_budget,
+            max(0.0, deadline - perf_counter()),
+        )
+        if final_partition_needs_check and closure_slice > 0.001:
+            closure = CorridorArcFlowOptimizer(CorridorArcFlowSolveConfig(
+                mode=CorridorArcFlowMode.INNER,
+                time_limit_seconds=closure_slice,
+                threads=self.config.threads,
+                seed=self.config.seed,
+                memory_limit_gib=self.config.memory_limit_gib,
+            )).solve(current, seed=current_seed, seed_ride_counts=current_seed_rides)
+            if closure.solution is not None and (
+                best is None or closure.objective_value < best.objective_value
+            ):
+                best = closure
         return CorridorAdaptiveResult(
             tuple(rounds), best, best_lb, current, perf_counter() - started
         )

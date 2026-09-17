@@ -259,7 +259,18 @@ uv run python benchmarks/run_ean_passenger_benchmark.py \
 The benchmark runner writes JSON results, SVG plots, and optional checkpoints.
 See `benchmarks/README.md` for plotting existing results and checkpoint layout.
 
-## Versioned thesis experiments
+## Current thesis experiments
+
+The [thesis experiment README](docs/experiments/README.md) defines the current
+27 calibrations, the two Journey series, and the OIP pattern screening under
+the corrected short-horizon contract. It lists agreed settings, open decisions,
+available CLI commands, and the remaining calibration-controller work.
+Use that document to prepare new thesis runs.
+
+### Earlier experiment pipeline
+
+The following examples describe earlier exploratory workflows. They do not
+launch the newly agreed 27-calibration matrix.
 
 The T5R/T6R experiment pipeline keeps topology, geometry, demand and solver
 configuration explicit. A single supervised run is started with, for example:

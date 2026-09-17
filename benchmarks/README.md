@@ -3,6 +3,11 @@
 This folder contains runnable benchmark entry points. Benchmark outputs are
 machine-specific and are written under `benchmarks/output/` by default.
 
+For current thesis runs, start with the [thesis experiment README](../docs/experiments/README.md).
+It separates reference calibration, relative and constant-demand Journey runs,
+and OIP pattern screening. The benchmark catalogue below also includes historical
+and exploratory entry points; it is not the current thesis execution schedule.
+
 ## DDD Phase-0 movement census
 
 Build a read-only structural census for all registered fixed-start examples:

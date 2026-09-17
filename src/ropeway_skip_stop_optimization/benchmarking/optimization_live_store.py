@@ -1,13 +1,17 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import os
-from pathlib import Path
 import tempfile
 import threading
-from typing import Any, Iterable, Mapping
+from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
 
+from ropeway_skip_stop_optimization.benchmarking.frontend_results import (
+    update_campaign_index,
+)
 from ropeway_skip_stop_optimization.benchmarking.optimization_events import (
     OptimizationEventKind,
     OptimizationProgressEvent,
@@ -99,41 +103,17 @@ class OptimizationLiveStore:
 
     def _publish_frontend_index(self, snapshot: Mapping[str, Any]) -> None:
         assert self.paths.frontend_root is not None
-        index_path = self.paths.frontend_root / "index.json"
-        existing: dict[str, Any] = {"schema_version": 1, "campaigns": []}
-        if index_path.exists():
-            existing = json.loads(index_path.read_text(encoding="utf-8"))
-        summary = {
-            key: snapshot.get(key)
-            for key in (
-                "campaign_id",
-                "label",
-                "status",
-                "objective",
-                "method",
-                "formulation",
-                "campaign_kind",
-                "operating_mode",
-                "updated_at_utc",
-                "sequence",
-                "completed_trial_count",
-                "trial_count",
-                "largest_certified_feasible_k",
-                "frontier_k",
-                "frontier_status",
-                "frontier_termination",
-            )
-        }
-        campaigns = [
-            item
-            for item in existing.get("campaigns", [])
-            if item.get("campaign_id") != snapshot.get("campaign_id")
-        ]
-        campaigns.append(summary)
-        campaigns.sort(key=lambda item: str(item.get("campaign_id")))
-        _atomic_write_json(
-            index_path,
-            {"schema_version": 1, "campaigns": campaigns},
+        update_campaign_index(
+            self.paths.frontend_root,
+            dict(snapshot),
+            summary_fields=(
+                "campaign_id", "label", "status", "objective", "method",
+                "formulation", "campaign_kind", "operating_mode",
+                "updated_at_utc", "sequence", "completed_trial_count",
+                "trial_count", "largest_certified_feasible_k", "frontier_k",
+                "frontier_status", "frontier_termination", "contract_id",
+                "study_membership",
+            ),
         )
 
 

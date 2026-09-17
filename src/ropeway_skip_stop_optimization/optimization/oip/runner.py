@@ -1,19 +1,24 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
 import hashlib
 import json
-from pathlib import Path
 import re
+from dataclasses import asdict, dataclass
+from datetime import UTC
+from pathlib import Path
 from typing import Any
 
-from ...benchmarking.frontend_results import update_campaign_index
-
+from ropeway_skip_stop_optimization.optimization.ean.fleet import (
+    EanFleetPlan,
+    EanInitialPlacementState,
+    EanInitialPlacementStateKind,
+)
 from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     EanFormulationConfig,
     EanHorizonFormulation,
     EanTimeBoundFormulation,
 )
+from ropeway_skip_stop_optimization.optimization.ean.models import EanFleetMode
 from ropeway_skip_stop_optimization.optimization.ean.optimization_config import (
     EanOptimizationConfig,
 )
@@ -21,9 +26,9 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.passenger_model 
     EanPassengerEncoding,
 )
 from ropeway_skip_stop_optimization.optimization.ean.optimizers.solver import (
-    EanMovementFeasibilityProblem,
     EanFixedMovementPassengerProblem,
     EanMipStartStrategy,
+    EanMovementFeasibilityProblem,
     EanOptimizer,
     EanPassengerServiceProblem,
     EanSolveConfig,
@@ -34,12 +39,6 @@ from ropeway_skip_stop_optimization.optimization.ean.optimizers.solver_policy im
 from ropeway_skip_stop_optimization.optimization.ean.passenger_objective import (
     EanPassengerObjective,
 )
-from ropeway_skip_stop_optimization.optimization.ean.fleet import (
-    EanFleetPlan,
-    EanInitialPlacementState,
-    EanInitialPlacementStateKind,
-)
-from ropeway_skip_stop_optimization.optimization.ean.models import EanFleetMode
 from ropeway_skip_stop_optimization.optimization.ean.passenger_plan import (
     EanPassengerServicePlan,
     EanServedRideGroup,
@@ -54,6 +53,7 @@ from ropeway_skip_stop_optimization.optimization.solver_progress import (
     GurobiMipProgressRecorder,
 )
 
+from ...benchmarking.frontend_results import update_campaign_index
 from .cp_sat import BuiltOipCpSatModel, OipCpSatConfig, OipCpSatResult, solve_oip_cp_sat
 from .domain import OipBackend, OipDomain, OipPassengerEncoding
 from .validation import validate_oip_certificate, validate_oip_movement_certificate
@@ -544,9 +544,9 @@ def _write_frontend_snapshot(
     *,
     passenger_evaluation: dict[str, Any] | None = None,
 ) -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     demand_total = sum(demand.count for demand in domain.scenario.demands)
     if isinstance(result, BuiltOipCpSatModel):
         status = "build_only"
@@ -798,7 +798,7 @@ def _load_reference(directory: Path | None, domain: OipDomain) -> dict[str, Any]
     detail = json.loads(detail_path.read_text())
     reference = detail.get("latest")
     if not isinstance(reference, dict):
-        raise ValueError("OIP reference has no validated latest point")
+        raise TypeError("OIP reference has no validated latest point")
     return reference
 
 
@@ -853,10 +853,14 @@ def _record_gurobi_live_sample(directory, domain, config, points, sample) -> Non
 
 
 def _write_live_files(directory, domain, config, points) -> None:
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     directory.mkdir(parents=True, exist_ok=True)
     demand_total = sum(demand.count for demand in domain.scenario.demands)
+    maximum_wait_seconds = max(
+        (item.max_wait_seconds or 0.0)
+        for item in domain.artifact.config.station_configs
+    )
     latest = points[-1] if points else {
         "seconds": 0.0,
         "ub": None,
@@ -870,13 +874,17 @@ def _write_live_files(directory, domain, config, points) -> None:
     detail = {
         "eyebrow": "Optimierte Anfangsaufstellung · gemeinsamer 1-ms-Vertrag",
         "title": f"{config.backend.value.upper()} · {domain.operation.value.replace('_', ' ')}",
-        "subtitle": f"K{'=' if domain.exact_k else '≤'}{domain.k_max} · {'Bewegungsmachbarkeit' if config.movement_only else config.passenger_encoding.value} · No-Wait",
+        "subtitle": (
+            f"K{'=' if domain.exact_k else '≤'}{domain.k_max} · "
+            f"{'Bewegungsmachbarkeit' if config.movement_only else config.passenger_encoding.value} · "
+            f"{'No-Wait' if maximum_wait_seconds == 0 else f'Waiting≤{maximum_wait_seconds:g}s'}"
+        ),
         "status": "running",
         "elapsed_seconds": latest["seconds"],
         "demand_total": demand_total,
         "fleet_cap": domain.k_max,
         "all_stop_capacity": 0,
-        "maximum_wait_seconds": 0,
+        "maximum_wait_seconds": maximum_wait_seconds,
         "passenger_encoding": None if config.movement_only else config.passenger_encoding.value,
         "solve_mode": "movement_feasibility" if config.movement_only else "passenger_service",
         "native_incumbent_seen": bool(points),
@@ -903,7 +911,7 @@ def _write_live_files(directory, domain, config, points) -> None:
         "completed_trial_count": 0,
         "trials": [],
         "events": [],
-        "updated_at_utc": datetime.now(timezone.utc).isoformat(),
+        "updated_at_utc": datetime.now(UTC).isoformat(),
     }
     _atomic_json(directory / "detail.json", detail)
     _atomic_json(directory / "snapshot.json", snapshot)

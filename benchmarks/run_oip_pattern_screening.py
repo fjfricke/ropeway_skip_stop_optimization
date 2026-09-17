@@ -4,27 +4,22 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
 import shutil
 import subprocess
 import sys
 import time
+from datetime import UTC, datetime
+from pathlib import Path
 from typing import Any
 
 import gurobipy
 import ortools
 
-from ropeway_skip_stop_optimization.benchmarking.process_supervisor import supervise
 from ropeway_skip_stop_optimization.benchmarking.frontend_results import (
     update_campaign_index,
-)
-from ropeway_skip_stop_optimization.benchmarking.thesis_contract import (
-    THESIS_CONTRACT_ID,
-    source_digest,
 )
 from ropeway_skip_stop_optimization.benchmarking.oip_pattern_screening import (
     OipScreeningDemandFamily,
@@ -35,10 +30,14 @@ from ropeway_skip_stop_optimization.benchmarking.oip_pattern_screening import (
 from ropeway_skip_stop_optimization.benchmarking.oip_pattern_waiting import (
     prepare_oip_pattern_waiting_pilot,
 )
+from ropeway_skip_stop_optimization.benchmarking.process_supervisor import supervise
+from ropeway_skip_stop_optimization.benchmarking.thesis_contract import (
+    THESIS_CONTRACT_ID,
+    source_digest,
+)
 from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_certificate import (
     atomic_json,
 )
-
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_FRONTEND_ROOT = ROOT / "frontend" / "public" / "generated" / "optimization"
@@ -50,9 +49,8 @@ def main() -> None:
     deadline = started + args.wall_limit_seconds
     frozen = freeze_campaign(args, started, deadline)
 
-    if output.exists() and not args.resume:
-        if any(output.iterdir()):
-            raise ValueError(f"output directory already contains a campaign: {output}")
+    if output.exists() and not args.resume and any(output.iterdir()):
+        raise ValueError(f"output directory already contains a campaign: {output}")
     output.mkdir(parents=True, exist_ok=True)
     campaign_path = output / "campaign.json"
     if args.resume:
@@ -166,7 +164,7 @@ def main() -> None:
             trial["status"] = "complete"
             if frontend_root is not None:
                 _publish_run_frontend(
-                    frontend_root, attempt_dir, run_campaign_id, trial
+                    frontend_root, attempt_dir, run_campaign_id, trial, manifest
                 )
         else:
             attempt["status"] = "interrupted"
@@ -254,7 +252,8 @@ def main() -> None:
                 refinement["status"] = "complete"
                 if frontend_root is not None:
                     _publish_run_frontend(
-                        frontend_root, attempt_dir, run_campaign_id, refinement
+                        frontend_root, attempt_dir, run_campaign_id, refinement,
+                        manifest,
                     )
             else:
                 attempt["status"] = "interrupted"
@@ -283,6 +282,28 @@ def main() -> None:
 
 
 def freeze_campaign(args, started: float, deadline: float) -> dict[str, Any]:
+    if args.study_membership == "current_thesis":
+        if args.contract_id != THESIS_CONTRACT_ID:
+            raise ValueError("current thesis campaigns require the frozen thesis contract")
+        if (
+            not args.reference_kind
+            or not args.reference_sha256
+            or args.reference_result is None
+        ):
+            raise ValueError(
+                "current thesis campaigns require calibrated reference provenance"
+            )
+        reference = args.reference_result.resolve()
+        if hashlib.sha256(reference.read_bytes()).hexdigest() != args.reference_sha256:
+            raise ValueError("calibrated reference content has changed")
+        evidence = json.loads(reference.read_text())
+        if (
+            evidence.get("contract_id") != THESIS_CONTRACT_ID
+            or evidence.get("reference_kind") != args.reference_kind
+            or evidence.get("family") != args.family.value
+            or evidence.get("capacity_proven") is not True
+        ):
+            raise ValueError("current thesis campaign reference is not valid evidence")
     family_catalog = pattern_allocations(
         args.family, ("S0", "S1", "S2", "S3", "S4")
     )
@@ -366,6 +387,13 @@ def freeze_campaign(args, started: float, deadline: float) -> dict[str, Any]:
         "memory_limit_gib": args.memory_limit_gib,
         "demand_total": args.demand_total,
         "maximum_wait_seconds": 0,
+        "contract_id": args.contract_id,
+        "study_membership": args.study_membership,
+        "reference_kind": args.reference_kind,
+        "reference_sha256": args.reference_sha256,
+        "reference_result": (
+            None if args.reference_result is None else str(args.reference_result.resolve())
+        ),
     }
     configuration_fingerprint = hashlib.sha256(
         json.dumps(configuration, sort_keys=True, separators=(",", ":")).encode()
@@ -387,8 +415,13 @@ def freeze_campaign(args, started: float, deadline: float) -> dict[str, Any]:
         "schema_version": 2,
         "campaign_id": args.output.resolve().name,
         "campaign_kind": "oip_pattern_screening",
-        "contract_id": THESIS_CONTRACT_ID,
-        "study_membership": "current_thesis",
+        "contract_id": args.contract_id,
+        "study_membership": args.study_membership,
+        "reference_kind": args.reference_kind,
+        "reference_sha256": args.reference_sha256,
+        "reference_result": (
+            None if args.reference_result is None else str(args.reference_result.resolve())
+        ),
         "label": f"{args.family.value.upper()} fixed-pattern fleet screening",
         "objective": "validated service and journey time by K",
         "method": "oip_fixed_pattern_cp_sat",
@@ -556,6 +589,7 @@ def _publish_run_frontend(
     attempt_dir: Path,
     run_campaign_id: str,
     trial: dict[str, Any],
+    manifest: dict[str, Any],
 ) -> None:
     target = frontend_root / run_campaign_id
     target.mkdir(parents=True, exist_ok=True)
@@ -570,8 +604,8 @@ def _publish_run_frontend(
             f"{trial['allocation_label']} · K={trial['available_fleet_count']}"
         ),
         completed_trial_count=1,
-        contract_id=THESIS_CONTRACT_ID,
-        study_membership="current_thesis",
+        contract_id=manifest.get("contract_id"),
+        study_membership=manifest.get("study_membership", "archive"),
     )
     atomic_json(target / "snapshot.json", source_snapshot)
     _update_frontend_index(frontend_root, source_snapshot)
@@ -596,7 +630,7 @@ def _git_revision() -> dict[str, Any]:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 def parse_args() -> argparse.Namespace:
@@ -616,6 +650,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--memory-limit-gib", type=float, default=32)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--frontend-root", type=Path, default=DEFAULT_FRONTEND_ROOT)
+    parser.add_argument(
+        "--study-membership", choices=("archive", "current_thesis"), default="archive",
+        help="Direct screenings are archival; only a calibrated suite may select current_thesis.",
+    )
+    parser.add_argument("--contract-id", default=None)
+    parser.add_argument("--reference-kind", default=None)
+    parser.add_argument("--reference-sha256", default=None)
+    parser.add_argument("--reference-result", type=Path, default=None)
     parser.add_argument("--build-only", action="store_true")
     parser.add_argument("--resume", action="store_true")
     args = parser.parse_args()

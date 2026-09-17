@@ -4,23 +4,23 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
 import hashlib
 import json
 import os
-from pathlib import Path
 import subprocess
 import sys
-from typing import Any
+from datetime import UTC, datetime
+from pathlib import Path
 
 from ropeway_skip_stop_optimization.benchmarking.thesis_contract import (
-    HEADWAY_CONTRACT, THESIS_CONTRACT_ID, solver_versions, source_digest,
+    HEADWAY_CONTRACT,
+    THESIS_CONTRACT_ID,
+    solver_versions,
+    source_digest,
 )
-
 from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_certificate import (
     atomic_json,
 )
-
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_FRONTEND_ROOT = ROOT / "frontend" / "public" / "generated" / "optimization"
@@ -37,9 +37,14 @@ def calibrated_cases(path: Path | None) -> list[dict]:
     No old 45-minute load or unproved capacity becomes a default here.
     """
     if path is None:
-        return [dict(family=family, demand_total=None,
-                     demand_provenance="pending_short_contract_calibration")
-                for family in THESIS_FAMILIES]
+        return [
+            {
+                "family": family,
+                "demand_total": None,
+                "demand_provenance": "pending_short_contract_calibration",
+            }
+            for family in THESIS_FAMILIES
+        ]
     payload = json.loads(path.read_text())
     if (payload.get("contract_id") != THESIS_CONTRACT_ID
             or payload.get("reference_kind") != REFERENCE_KIND):
@@ -147,6 +152,11 @@ def main() -> None:
             "--memory-limit-gib", str(args.memory_limit_gib),
             "--output", str(case_output),
             "--frontend-root", str(args.frontend_root.resolve()),
+            "--study-membership", "current_thesis",
+            "--contract-id", THESIS_CONTRACT_ID,
+            "--reference-kind", REFERENCE_KIND,
+            "--reference-sha256", str(case["reference_sha256"]),
+            "--reference-result", str(case["reference_result"]),
         ]
         if args.build_only:
             command.append("--build-only")
@@ -225,7 +235,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def _now() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
 
 
 if __name__ == "__main__":

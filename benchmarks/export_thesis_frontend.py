@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import asdict
-from datetime import datetime, timezone
 import hashlib
 import json
-from pathlib import Path
-import shutil
+import re
 import tempfile
 import time
-import re
+from datetime import UTC, datetime
+from pathlib import Path
+
 try:
     from .thesis_detail_export import write_detail
 except ImportError:
@@ -23,7 +22,6 @@ from ropeway_skip_stop_optimization.benchmarking.thesis_cases import (
 from ropeway_skip_stop_optimization.benchmarking.thesis_contract import (
     THESIS_CONTRACT_ID,
 )
-
 
 COPIED_ARTIFACTS = (
     "arguments.json",
@@ -374,6 +372,7 @@ def export(results_roots: tuple[Path, ...], output: Path, study_manifest: Path |
     by_group = {group["id"]: group for group in groups}
     output.mkdir(parents=True, exist_ok=True)
     runs = []
+    archived_runs = []
     running = False
     seen = set()
     for root in results_roots:
@@ -393,7 +392,7 @@ def export(results_roots: tuple[Path, ...], output: Path, study_manifest: Path |
                 continue
             seen.add(run_dir.resolve())
             summary = _export_one(run_dir, output, live.get(run_dir))
-            if summary is None or summary["groupId"] not in by_group:
+            if summary is None:
                 continue
             attempt = attempts.get(run_dir)
             if attempt:
@@ -403,7 +402,12 @@ def export(results_roots: tuple[Path, ...], output: Path, study_manifest: Path |
                                transferKind=attempt.get("transfer"), provenance="main_study")
             else:
                 summary["provenance"] = "calibration"
-            if summary.get("studyMembership") != "current_thesis":
+            if (
+                summary.get("studyMembership") != "current_thesis"
+                or summary.get("contractId") != THESIS_CONTRACT_ID
+                or summary["groupId"] not in by_group
+            ):
+                archived_runs.append(summary)
                 continue
             runs.append(summary)
             by_group[summary["groupId"]]["runIds"].append(summary["id"])
@@ -420,7 +424,7 @@ def export(results_roots: tuple[Path, ...], output: Path, study_manifest: Path |
 
     payload = {
         "schema": "thesis_frontend_index_v1",
-        "generatedAt": datetime.now(timezone.utc).isoformat(),
+        "generatedAt": datetime.now(UTC).isoformat(),
         "campaignStatus": "running" if running else "partial" if runs else "planned",
         "contractId": THESIS_CONTRACT_ID,
         "groups": groups,
@@ -450,6 +454,18 @@ def export(results_roots: tuple[Path, ...], output: Path, study_manifest: Path |
         stream.write("\n")
         temporary = Path(stream.name)
     temporary.replace(output / "index.json")
+    archive_payload = {
+        "schema": "thesis_archive_index_v1",
+        "generatedAt": payload["generatedAt"],
+        "runs": sorted(archived_runs, key=lambda item: item["id"]),
+    }
+    with tempfile.NamedTemporaryFile(
+        "w", dir=output, delete=False, encoding="utf-8"
+    ) as stream:
+        json.dump(archive_payload, stream, indent=2, sort_keys=True)
+        stream.write("\n")
+        archive_temporary = Path(stream.name)
+    archive_temporary.replace(output / "archive-index.json")
     # Include archived generated artifacts too; an existing public directory may
     # retain older read-only runs that are no longer in the active index.
     files = [path for path in output.rglob("*") if path.is_file()

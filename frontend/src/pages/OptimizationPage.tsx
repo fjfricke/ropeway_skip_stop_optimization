@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { OptimizationCampaignIndex } from "../optimizationTypes";
 import { AppLink } from "../App";
+import { THESIS_CONTRACT_ID } from "../thesisContract";
 
 export default function OptimizationPage() {
   const [index, setIndex] = useState<OptimizationCampaignIndex | null>(null);
@@ -37,7 +38,8 @@ export default function OptimizationPage() {
     };
   }, []);
   const campaigns = index?.campaigns.filter(
-    (campaign) => campaign.study_membership === "current_thesis",
+    (campaign) => campaign.study_membership === "current_thesis"
+      && campaign.contract_id === THESIS_CONTRACT_ID,
   ) ?? [];
   return (
     <main className="optimization-shell">

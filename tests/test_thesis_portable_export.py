@@ -1,9 +1,21 @@
 """Read-only exports must preserve uncertainty and exact certificate events."""
 import json
-from benchmarks.export_thesis_frontend import _run_summary, _copy_portable, _live_directories
-from benchmarks.thesis_detail_export import replay_payload, read_events
 
-CASE = dict(topology="t5r", geometry="g500", demand_family="f2", demand_profile="p0", objective="journey_time", demand_total=10)
+from benchmarks.export_thesis_frontend import (
+    _copy_portable,
+    _live_directories,
+    _run_summary,
+)
+from benchmarks.thesis_detail_export import read_events, replay_payload
+
+CASE = {
+    "topology": "t5r",
+    "geometry": "g500",
+    "demand_family": "f2",
+    "demand_profile": "p0",
+    "objective": "journey_time",
+    "demand_total": 10,
+}
 
 
 def test_supervisor_abort_keeps_validated_value_without_completed_status(tmp_path):
@@ -58,6 +70,30 @@ def test_export_cache_skips_unchanged_raw_results(tmp_path, monkeypatch):
         return original(path)
     monkeypatch.setattr(exporter, "_read", read)
     assert exporter._export_one(source, destination, None) == first
+
+
+def test_historical_thesis_run_is_exported_only_to_archive_index(tmp_path):
+    from benchmarks import export_thesis_frontend as exporter
+    source = tmp_path / "historical" / "run"
+    source.mkdir(parents=True)
+    (source / "case_spec.json").write_text(json.dumps(CASE))
+    (source / "arguments.json").write_text(json.dumps({
+        "method": "labelled_arc_flow", "fixed_k": 10,
+    }))
+    (source / "result.json").write_text(json.dumps({
+        "method": "labelled_arc_flow",
+        "run": {
+            "status": "complete",
+            "independent_validation_status": "feasible",
+            "independent_validation_objective": 42,
+        },
+    }))
+    destination = tmp_path / "package"
+    current = exporter.export((source.parent,), destination)
+    archived = json.loads((destination / "archive-index.json").read_text())
+    assert current["runs"] == []
+    assert len(archived["runs"]) == 1
+    assert archived["runs"][0]["studyMembership"] == "archive"
 
 
 def test_resolution_decision_requires_bounds_not_only_matching_incumbents():

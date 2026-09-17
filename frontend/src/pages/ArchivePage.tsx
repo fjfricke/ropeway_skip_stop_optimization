@@ -1,9 +1,16 @@
 import { useEffect, useState } from "react";
 import { AppLink } from "../App";
 import type { OptimizationCampaignIndex } from "../optimizationTypes";
+import type { ThesisRunSummary } from "../thesisTypes";
+
+type ThesisArchiveIndex = {
+  schema: "thesis_archive_index_v1";
+  runs: ThesisRunSummary[];
+};
 
 export default function ArchivePage() {
   const [index, setIndex] = useState<OptimizationCampaignIndex | null>(null);
+  const [thesisArchive, setThesisArchive] = useState<ThesisArchiveIndex | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
     fetch(`/generated/optimization/index.json?t=${Date.now()}`, { cache: "no-store" })
@@ -13,6 +20,13 @@ export default function ArchivePage() {
       })
       .then(setIndex)
       .catch((cause) => setError(cause instanceof Error ? cause.message : "Archive unavailable"));
+    fetch(`/generated/thesis/archive-index.json?t=${Date.now()}`, { cache: "no-store" })
+      .then((response) => {
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        return response.json() as Promise<ThesisArchiveIndex>;
+      })
+      .then(setThesisArchive)
+      .catch(() => setThesisArchive({ schema: "thesis_archive_index_v1", runs: [] }));
   }, []);
   const campaigns = index?.campaigns.filter(
     (campaign) => campaign.study_membership !== "current_thesis",
@@ -30,6 +44,17 @@ export default function ArchivePage() {
         <h2>{campaign.label ?? campaign.campaign_id}</h2>
         <p>{campaign.objective ?? "Objective not recorded"}</p>
       </AppLink>)}
+    </section>
+    <section className="thesis-archive">
+      <div><p className="eyebrow">Earlier thesis contracts</p><h2>Historical thesis runs</h2>
+        <p>Recorded results stay inspectable without entering the current comparison.</p></div>
+      <div className="campaign-grid">
+        {(thesisArchive?.runs ?? []).map((run) => <a className="campaign-card" href={run.snapshot ?? "#"} key={run.id}>
+          <div className="campaign-card__top"><span className="run-state">archived contract</span><span>{run.status}</span></div>
+          <h2>{run.groupId}</h2>
+          <p>{run.method} · K={run.k ?? "?"} · demand {run.demand ?? "?"}</p>
+        </a>)}
+      </div>
     </section>
   </main>;
 }

@@ -1,4 +1,5 @@
 import type { ThesisGroup, ThesisIndex, ThesisRunSummary } from "./thesisTypes";
+import { THESIS_CONTRACT_ID } from "./thesisContract";
 
 const families = ["f0", "f2", "f3", "f4"] as const;
 
@@ -18,7 +19,7 @@ export const plannedThesisGroups: ThesisGroup[] = [
 export const plannedThesisIndex: ThesisIndex = {
   schema: "thesis_frontend_index_v1",
   campaignStatus: "planned",
-  contractId: "t5r_g500_b_entry_exit_2cycles_900completion_300tail_v2",
+  contractId: THESIS_CONTRACT_ID,
   groups: plannedThesisGroups,
   runs: [],
   sources: [{

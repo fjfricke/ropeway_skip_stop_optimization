@@ -137,7 +137,13 @@ def validate_reservoir_cp_plan(
             )
         service_end = core.passenger_service_end_tick
         if ddd_seconds_to_tick(problem.return_start_seconds) >= service_end:
-            eligible_returns = [value for value in complete_returns if value >= service_end]
+            first_allowed_return = max(
+                service_end,
+                ddd_seconds_to_tick(problem.return_start_seconds),
+            )
+            eligible_returns = [
+                value for value in complete_returns if value >= first_allowed_return
+            ]
             if not eligible_returns or trip.return_tick != eligible_returns[0]:
                 raise ValueError(
                     "reservoir trip must use its first complete return at or after service end"
