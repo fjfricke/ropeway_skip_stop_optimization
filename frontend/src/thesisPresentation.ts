@@ -3,18 +3,6 @@ import type { ThesisGroup, ThesisIndex, ThesisRunSummary } from "./thesisTypes";
 const families = ["f0", "f2", "f3", "f4"] as const;
 
 export const plannedThesisGroups: ThesisGroup[] = [
-  ...(["t5r", "t6r"] as const).flatMap((topology) =>
-    families.map((demandFamily) => ({
-      id: `capacity_${topology}_${demandFamily}_g500_p0`,
-      topology,
-      geometry: "g500" as const,
-      demandFamily,
-      demandProfile: "p0" as const,
-      objective: "unserved" as const,
-      method: "evolution" as const,
-      runIds: [],
-    })),
-  ),
   ...families.map((demandFamily) => ({
     id: `journey_t5r_${demandFamily}_g500_p0`,
     topology: "t5r" as const,
@@ -30,6 +18,7 @@ export const plannedThesisGroups: ThesisGroup[] = [
 export const plannedThesisIndex: ThesisIndex = {
   schema: "thesis_frontend_index_v1",
   campaignStatus: "planned",
+  contractId: "t5r_g500_b_entry_exit_2cycles_900completion_300tail_v2",
   groups: plannedThesisGroups,
   runs: [],
   sources: [{

@@ -9,6 +9,14 @@ The separately authorized run-contract changes and their 66 targeted regression
 tests are recorded in [the implementation plan](../plans/thesis_reruns_and_repository_restructuring_20260917.md).
 References below describe the audited snapshot; no historical result was changed.
 
+**Implementation update (17 September 2026):** The first bounded restructuring
+described in this report has since been implemented. OIP null/zero semantics,
+resume identity, solver-neutral supervision, transactional frontend indexing,
+dependency declarations, current-study membership and archive navigation are now
+covered by targeted tests. Two unreferenced historical entry documents were moved
+to `archive/`; shared DDD/EAN/reservoir code was deliberately retained. Tables
+below remain the evidence from snapshot `ae62642`, not a new whole-repository audit.
+
 The main risk is inconsistent experiment contracts and result provenance, rather than literal copy-paste. Journey preparation has no explicit 300-second continuation, while OIP does. The latest OIP suite imports old long-window reservoir loads into a two-cycle demand window. Old reference paths are hardcoded in the Journey campaign. These must not become the new thesis comparison by renaming runs.
 
 Two confirmed defects need immediate fixes: zero unserved is lost in the OIP export; OIP resume checks configuration but not the frozen physical domain. Resume also resets the total campaign budget. The current Thesis page describes the superseded reservoir/evolution programme as the current study.

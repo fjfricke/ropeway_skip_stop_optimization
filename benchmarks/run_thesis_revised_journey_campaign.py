@@ -13,7 +13,7 @@ import subprocess
 import sys
 import time
 
-from ropeway_skip_stop_optimization.benchmarking.native_solvers import supervise
+from ropeway_skip_stop_optimization.benchmarking.process_supervisor import supervise
 from ropeway_skip_stop_optimization.benchmarking.thesis_contract import (
     THESIS_CONTRACT_ID, solver_versions, source_digest,
 )

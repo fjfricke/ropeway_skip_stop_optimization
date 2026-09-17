@@ -7,6 +7,8 @@ from pathlib import Path
 import re
 from typing import Any
 
+from ...benchmarking.frontend_results import update_campaign_index
+
 from ropeway_skip_stop_optimization.optimization.ean.formulation_config import (
     EanFormulationConfig,
     EanHorizonFormulation,
@@ -550,13 +552,13 @@ def _write_frontend_snapshot(
         status = "build_only"
         latest = {
             "seconds": 0.0,
-            "ub": 0.0,
+            "ub": None,
             "lb": None,
             "gap_percent": None,
-            "served": 0,
-            "unserved": demand_total,
-            "journey_time_seconds": 0.0,
-            "used_fleet": 0,
+            "served": None,
+            "unserved": None,
+            "journey_time_seconds": None,
+            "used_fleet": None,
         }
         points: list[dict[str, Any]] = []
         build_seconds = result.build_seconds
@@ -569,13 +571,13 @@ def _write_frontend_snapshot(
         status = result.status
         latest = {
             "seconds": result.runtime_seconds,
-            "ub": result.objective_value or 0,
+            "ub": result.objective_value,
             "lb": result.best_bound,
             "gap_percent": None if result.gap is None else 100 * result.gap,
-            "served": result.served_passengers or 0,
-            "unserved": result.unserved_passengers or demand_total,
-            "journey_time_seconds": result.journey_time_seconds or 0.0,
-            "used_fleet": len(result.fleet_plan.active_cabin_ids) if result.fleet_plan else 0,
+            "served": result.served_passengers,
+            "unserved": result.unserved_passengers,
+            "journey_time_seconds": result.journey_time_seconds,
+            "used_fleet": len(result.fleet_plan.active_cabin_ids) if result.fleet_plan else None,
         }
         points = [
             {
@@ -607,14 +609,15 @@ def _write_frontend_snapshot(
     else:
         metadata = result.metadata
         status = metadata.status
-        unserved = metadata.unserved_passenger_count or 0
-        served = metadata.served_passenger_count or 0
+        has_solution = bool(metadata.solution_count)
+        unserved = metadata.unserved_passenger_count if has_solution else None
+        served = metadata.served_passenger_count if has_solution else None
         ticks = domain.grid.ticks_per_second
         weight = demand_total * domain.artifact.config.horizon_seconds * ticks + 1.0
         objective = (
             weight * unserved + ticks * (metadata.objective_value_seconds or 0.0)
-            if metadata.solution_count
-            else 0.0
+            if has_solution and unserved is not None
+            else None
         )
         points = [
             {
@@ -637,8 +640,8 @@ def _write_frontend_snapshot(
             "gap_percent": None if metadata.mip_gap is None else 100 * metadata.mip_gap,
             "served": served,
             "unserved": unserved,
-            "journey_time_seconds": metadata.objective_value_seconds or 0.0,
-            "used_fleet": len(result.fleet_plan.active_cabin_ids) if result.fleet_plan else 0,
+            "journey_time_seconds": metadata.objective_value_seconds if has_solution else None,
+            "used_fleet": len(result.fleet_plan.active_cabin_ids) if result.fleet_plan else None,
         }
         if points and points[-1]["ub"] is not None:
             latest["ub"] = points[-1]["ub"]
@@ -708,7 +711,7 @@ def _write_frontend_snapshot(
         "eyebrow": "Optimierte Anfangsaufstellung · gemeinsamer 1-ms-Vertrag",
         "title": f"{config.backend.value.upper()} · {domain.operation.value.replace('_', ' ')}",
         "subtitle": (
-            f"K≤{domain.k_max} · "
+            f"K{'=' if domain.exact_k else '≤'}{domain.k_max} · "
             f"{'Bewegungsmachbarkeit' if config.movement_only else config.passenger_encoding.value} · "
             f"Waiting≤{max((item.max_wait_seconds or 0.0) for item in domain.artifact.config.station_configs):g}s"
         ),
@@ -856,7 +859,7 @@ def _write_live_files(directory, domain, config, points) -> None:
     demand_total = sum(demand.count for demand in domain.scenario.demands)
     latest = points[-1] if points else {
         "seconds": 0.0,
-        "ub": 0.0,
+        "ub": None,
         "lb": None,
         "gap_percent": None,
         "served": None,
@@ -867,7 +870,7 @@ def _write_live_files(directory, domain, config, points) -> None:
     detail = {
         "eyebrow": "Optimierte Anfangsaufstellung · gemeinsamer 1-ms-Vertrag",
         "title": f"{config.backend.value.upper()} · {domain.operation.value.replace('_', ' ')}",
-        "subtitle": f"K≤{domain.k_max} · {'Bewegungsmachbarkeit' if config.movement_only else config.passenger_encoding.value} · No-Wait",
+        "subtitle": f"K{'=' if domain.exact_k else '≤'}{domain.k_max} · {'Bewegungsmachbarkeit' if config.movement_only else config.passenger_encoding.value} · No-Wait",
         "status": "running",
         "elapsed_seconds": latest["seconds"],
         "demand_total": demand_total,
@@ -925,28 +928,4 @@ def _load_start_value(directory: Path | None) -> dict[str, Any] | None:
 def _update_frontend_index(directory: Path, snapshot: dict[str, Any]) -> None:
     if directory.parent.name != "optimization":
         return
-    index_path = directory.parent / "index.json"
-    payload = json.loads(index_path.read_text()) if index_path.exists() else {"campaigns": []}
-    campaigns = [
-        item
-        for item in payload.get("campaigns", [])
-        if item.get("campaign_id") != snapshot["campaign_id"]
-    ]
-    campaigns.append(
-        {
-            "campaign_id": snapshot["campaign_id"],
-            "campaign_kind": snapshot["campaign_kind"],
-            "label": snapshot["label"],
-            "status": snapshot["status"],
-            "objective": snapshot["objective"],
-            "method": snapshot["method"],
-            "operating_mode": snapshot["operating_mode"],
-            "formulation": snapshot["formulation"],
-            "sequence": snapshot["sequence"],
-            "trial_count": snapshot["trial_count"],
-            "completed_trial_count": snapshot["completed_trial_count"],
-            "updated_at_utc": snapshot["updated_at_utc"],
-        }
-    )
-    payload["campaigns"] = campaigns
-    _atomic_json(index_path, payload)
+    update_campaign_index(directory.parent, snapshot)

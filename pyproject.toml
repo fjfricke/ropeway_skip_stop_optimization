@@ -11,12 +11,14 @@ dependencies = [
     "gurobipy>=13.0.2",
     "numpy>=2.5.1",
     "ortools>=9.15.6755",
+    "psutil>=6,<8",
     "scipy>=1.18.0",
     "tqdm>=4.67.3",
 ]
 
 [project.optional-dependencies]
-native-solvers = ["z3-solver==4.16.0.0", "psutil>=6,<8"]
+native-solvers = ["z3-solver==4.16.0.0"]
+analysis = ["matplotlib>=3.10,<4"]
 hexaly = ["hexaly==15.0.20260909"]
 didp = ["didppy==0.10.1"]
 ibm-cp = ["docplex>=2.32.264,<3", "cplex>=22.2.0.1,<23"]
@@ -36,3 +38,6 @@ build-backend = "uv_build"
 dev = [
     "pytest>=9.0.3",
 ]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

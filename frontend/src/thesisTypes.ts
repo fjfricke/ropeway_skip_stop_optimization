@@ -38,6 +38,8 @@ export interface ThesisRunSummary {
   stopReason?: string | null;
   transferKind?: string | null;
   provenance?: "main_study" | "calibration";
+  studyMembership?: "current_thesis" | "archive";
+  contractId?: string | null;
   snapshot?: string | null;
   replay?: string | null;
   reference?: ThesisReference | null;
@@ -59,6 +61,7 @@ export interface ThesisIndex {
   schema: "thesis_frontend_index_v1";
   generatedAt?: string;
   campaignStatus: "planned" | "calibrating" | "partial" | "ready" | "running" | "complete";
+  contractId?: string;
   groups: ThesisGroup[];
   runs: ThesisRunSummary[];
   launchReadiness?: { status: string; groups: { id: string; blockers: string[]; demandBasis?: string }[] };

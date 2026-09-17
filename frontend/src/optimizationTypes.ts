@@ -20,6 +20,8 @@ export interface OptimizationCampaignSummary {
   frontier_k?: number | null;
   frontier_status?: string | null;
   frontier_termination?: string | null;
+  contract_id?: string | null;
+  study_membership?: "current_thesis" | "archive" | null;
 }
 
 export interface OptimizationEvent {
@@ -145,6 +147,8 @@ export interface OptimizationCampaignSnapshot {
   formulation?: string;
   campaign_kind?: string;
   operating_mode?: string;
+  contract_id?: string | null;
+  study_membership?: "current_thesis" | "archive" | null;
   minimum_k?: number;
   maximum_k?: number;
   largest_certified_feasible_k?: number | null;

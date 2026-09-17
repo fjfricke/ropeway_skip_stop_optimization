@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 import zipfile
-from ropeway_skip_stop_optimization.benchmarking.native_solvers import supervise
+from ropeway_skip_stop_optimization.benchmarking.process_supervisor import supervise
 from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_certificate import atomic_json
 
 ROOT=Path(__file__).resolve().parents[1]

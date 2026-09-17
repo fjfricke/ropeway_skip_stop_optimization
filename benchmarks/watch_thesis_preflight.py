@@ -22,6 +22,7 @@ def main():
         raw = json.loads(args.input.read_text())
         view = {
             "schema": "thesis_preflight_view_v1", "status": raw["status"],
+            "contractId": raw.get("contract_id"),
             "startedAt": raw["startedAt"], "generatedAt": datetime.now(timezone.utc).isoformat(),
             "plannedJobs": 25,
             "jobs": [{k: v for k, v in job.items() if k in allowed} for job in raw["jobs"]],

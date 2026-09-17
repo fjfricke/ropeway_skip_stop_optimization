@@ -1218,11 +1218,15 @@ dependencies = [
     { name = "gurobipy" },
     { name = "numpy" },
     { name = "ortools" },
+    { name = "psutil" },
     { name = "scipy" },
     { name = "tqdm" },
 ]
 
 [package.optional-dependencies]
+analysis = [
+    { name = "matplotlib" },
+]
 didp = [
     { name = "didppy" },
 ]
@@ -1238,7 +1242,6 @@ ibm-cp = [
     { name = "docplex" },
 ]
 native-solvers = [
-    { name = "psutil" },
     { name = "z3-solver" },
 ]
 
@@ -1254,16 +1257,17 @@ requires-dist = [
     { name = "docplex", marker = "extra == 'ibm-cp'", specifier = ">=2.32.264,<3" },
     { name = "gurobipy", specifier = ">=13.0.2" },
     { name = "hexaly", marker = "extra == 'hexaly'", specifier = "==15.0.20260909" },
+    { name = "matplotlib", marker = "extra == 'analysis'", specifier = ">=3.10,<4" },
     { name = "numpy", specifier = ">=2.5.1" },
     { name = "optuna", marker = "extra == 'evolutionary'", specifier = "==4.5.0" },
     { name = "ortools", specifier = ">=9.15.6755" },
-    { name = "psutil", marker = "extra == 'native-solvers'", specifier = ">=6,<8" },
+    { name = "psutil", specifier = ">=6,<8" },
     { name = "pymoo", marker = "extra == 'evolutionary'", specifier = "==0.6.1.6" },
     { name = "scipy", specifier = ">=1.18.0" },
     { name = "tqdm", specifier = ">=4.67.3" },
     { name = "z3-solver", marker = "extra == 'native-solvers'", specifier = "==4.16.0.0" },
 ]
-provides-extras = ["native-solvers", "hexaly", "didp", "ibm-cp", "evolutionary"]
+provides-extras = ["native-solvers", "analysis", "hexaly", "didp", "ibm-cp", "evolutionary"]
 
 [package.metadata.requires-dev]
 dev = [{ name = "pytest", specifier = ">=9.0.3" }]

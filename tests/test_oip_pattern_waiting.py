@@ -1,5 +1,6 @@
 from dataclasses import replace
 from datetime import date, datetime, timedelta
+import json
 
 from ortools.sat.python import cp_model
 import pytest
@@ -7,6 +8,31 @@ import pytest
 from ropeway_skip_stop_optimization.benchmarking.oip_pattern_waiting import (
     prepare_oip_pattern_waiting_pilot,
 )
+
+
+def test_frontend_export_preserves_zero_and_absent_incumbent_values(tmp_path):
+    from ropeway_skip_stop_optimization.optimization.oip.cp_sat import OipCpSatResult
+    from ropeway_skip_stop_optimization.optimization.oip.runner import (
+        OipRunConfig,
+        _write_frontend_snapshot,
+    )
+
+    prepared = prepare_oip_pattern_waiting_pilot(
+        maximum_wait_seconds=0, cabin_count=2
+    )
+    result = OipCpSatResult(
+        status="feasible", solver_status="FEASIBLE", objective_value=0,
+        best_bound=0, gap=0.0, runtime_seconds=0.1, build_seconds=0.05,
+        movement_plan=None, fleet_plan=None, passenger_plan=None,
+        served_passengers=sum(d.count for d in prepared.domain.scenario.demands),
+        unserved_passengers=0, journey_time_seconds=0.0, model_stats="",
+    )
+    _write_frontend_snapshot(tmp_path, prepared.domain, OipRunConfig(), result)
+    detail = json.loads((tmp_path / "detail.json").read_text())
+    assert detail["latest"]["ub"] == 0
+    assert detail["latest"]["unserved"] == 0
+    assert detail["latest"]["journey_time_seconds"] == 0.0
+    assert detail["latest"]["used_fleet"] is None
 from ropeway_skip_stop_optimization.examples.three_station import (
     ThreeStationOptimizedInitialPlacementExample,
 )

@@ -69,7 +69,7 @@ F2 und F3 sind innerhalb des Referenzvertrags exakt bestimmt. Bei F0 bleiben Int
 
 Beispiel F2: `ceil(1.1 * 2918) = 3210` bedeutet 10 % mehr **Profilnachfrage**. Es bedeutet nicht, dass All-Stop bei N=3.210 genau 2.918 Personen bedient. Bei größerer Nachfrage kann sich seine tatsächlich bediente Menge ändern. Für einen Vergleich „served bei gleichem N“ müssen beide Fahrpläne auf genau diesem N bewertet werden; eine bloß mitgeführte Linie bei 2.918 ersetzt das nicht.
 
-Quellen: [ausgewählte Journey-Queue](../../results/thesis_journey_revised_campaign_20260915/queue.json), [Referenzablage](../../results/thesis_phase_cell_capacity_references_20260916), [bisheriger Studienplan](thesis_study_execution_20260915.md).
+Quellen: [ausgewählte Journey-Queue](../../results/thesis_journey_revised_campaign_20260915/queue.json), [Referenzablage](../../results/thesis_phase_cell_capacity_references_20260916), [bisheriger Studienplan](../../archive/docs/plans/thesis_study_execution_20260915.md).
 
 ## 3. Labelled Arc-Flow und aktuelles CP-SAT: der konkrete Unterschied
 

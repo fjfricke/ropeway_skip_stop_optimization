@@ -10,7 +10,7 @@ from pathlib import Path
 import sys
 import time
 
-from ropeway_skip_stop_optimization.benchmarking.native_solvers import supervise
+from ropeway_skip_stop_optimization.benchmarking.process_supervisor import supervise
 
 
 ROOT = Path(__file__).resolve().parents[1]

@@ -16,7 +16,7 @@ import time
 from ropeway_skip_stop_optimization.benchmarking.ddd_fixed_k_arc_flow import (
     run_ddd_fixed_k_arc_flow,
 )
-from ropeway_skip_stop_optimization.benchmarking.native_solvers import supervise
+from ropeway_skip_stop_optimization.benchmarking.process_supervisor import supervise
 from ropeway_skip_stop_optimization.benchmarking.thesis_cases import (
     ExperimentCaseSpec,
     ThesisDemandFamily,

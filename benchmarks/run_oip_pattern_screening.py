@@ -18,8 +18,14 @@ from typing import Any
 import gurobipy
 import ortools
 
-from ropeway_skip_stop_optimization.benchmarking.native_solvers import supervise
-from ropeway_skip_stop_optimization.benchmarking.thesis_contract import source_digest
+from ropeway_skip_stop_optimization.benchmarking.process_supervisor import supervise
+from ropeway_skip_stop_optimization.benchmarking.frontend_results import (
+    update_campaign_index,
+)
+from ropeway_skip_stop_optimization.benchmarking.thesis_contract import (
+    THESIS_CONTRACT_ID,
+    source_digest,
+)
 from ropeway_skip_stop_optimization.benchmarking.oip_pattern_screening import (
     OipScreeningDemandFamily,
     demand_fingerprint,
@@ -381,6 +387,8 @@ def freeze_campaign(args, started: float, deadline: float) -> dict[str, Any]:
         "schema_version": 2,
         "campaign_id": args.output.resolve().name,
         "campaign_kind": "oip_pattern_screening",
+        "contract_id": THESIS_CONTRACT_ID,
+        "study_membership": "current_thesis",
         "label": f"{args.family.value.upper()} fixed-pattern fleet screening",
         "objective": "validated service and journey time by K",
         "method": "oip_fixed_pattern_cp_sat",
@@ -531,6 +539,7 @@ def _publish_campaign_frontend(frontend_root: Path, manifest: dict[str, Any]) ->
         key: manifest.get(key)
         for key in (
             "schema_version", "campaign_id", "campaign_kind", "label", "status",
+            "contract_id", "study_membership",
             "objective", "method", "formulation", "operating_mode", "sequence",
             "updated_at_utc", "trial_count", "completed_trial_count", "demand_total",
             "demand_family", "passenger_horizon_seconds", "operation_seconds", "allocation_order",
@@ -560,33 +569,16 @@ def _publish_run_frontend(
         label=(
             f"{trial['allocation_label']} · K={trial['available_fleet_count']}"
         ),
-        status="complete",
         completed_trial_count=1,
+        contract_id=THESIS_CONTRACT_ID,
+        study_membership="current_thesis",
     )
     atomic_json(target / "snapshot.json", source_snapshot)
     _update_frontend_index(frontend_root, source_snapshot)
 
 
 def _update_frontend_index(frontend_root: Path, snapshot: dict[str, Any]) -> None:
-    index_path = frontend_root / "index.json"
-    payload = json.loads(index_path.read_text()) if index_path.exists() else {
-        "schema_version": 1,
-        "campaigns": [],
-    }
-    summary_keys = (
-        "campaign_id", "campaign_kind", "label", "status", "objective", "method",
-        "operating_mode", "formulation", "sequence", "trial_count",
-        "completed_trial_count", "updated_at_utc",
-    )
-    summary = {key: snapshot.get(key) for key in summary_keys}
-    campaigns = [
-        item for item in payload.get("campaigns", [])
-        if item.get("campaign_id") != snapshot["campaign_id"]
-    ]
-    campaigns.append(summary)
-    campaigns.sort(key=lambda item: str(item.get("campaign_id")))
-    payload["campaigns"] = campaigns
-    atomic_json(index_path, payload)
+    update_campaign_index(frontend_root, snapshot)
 
 
 def _git_revision() -> dict[str, Any]:

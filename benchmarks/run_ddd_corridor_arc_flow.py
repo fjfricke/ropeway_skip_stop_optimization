@@ -50,7 +50,7 @@ from ropeway_skip_stop_optimization.benchmarking.environment import (
     git_is_dirty,
     gurobi_version,
 )
-from ropeway_skip_stop_optimization.benchmarking.native_solvers import supervise
+from ropeway_skip_stop_optimization.benchmarking.process_supervisor import supervise
 
 
 def _payload(result):

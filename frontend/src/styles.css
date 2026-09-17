@@ -3272,3 +3272,4 @@ h3 {
 }
 
 .thesis-group > .thesis-group__gates { grid-column: 1 / -1; min-height: 0; padding: 8px 20px; }
+.archive-shortcuts { margin: 20px 0; max-width: 520px; }

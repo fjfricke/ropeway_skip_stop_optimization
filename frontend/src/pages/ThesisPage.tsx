@@ -25,13 +25,18 @@ export default function ThesisPage() {
         const response = await fetch(`/generated/thesis/index.json?t=${Date.now()}`, { cache: "no-store" });
         const isJson = response.headers.get("content-type")?.includes("application/json");
         if (!response.ok || !isJson) throw new Error(response.ok ? "response is not JSON" : `HTTP ${response.status}`);
-        const value = await response.json() as ThesisIndex;
+        const loaded = await response.json() as ThesisIndex;
+        const value = loaded.contractId === plannedThesisIndex.contractId
+          ? { ...loaded, runs: loaded.runs.filter((run) => run.studyMembership === "current_thesis") }
+          : plannedThesisIndex;
         if (value.schema !== "thesis_frontend_index_v1" || !Array.isArray(value.groups) || !Array.isArray(value.runs)) {
           throw new Error("unsupported result manifest");
         }
         if (!stopped) {
           setIndex(value);
-          setNotice(value.generatedAt ? `Data package · ${new Date(value.generatedAt).toLocaleString()}` : "Result package loaded");
+          setNotice(value === plannedThesisIndex
+            ? "No result package for the current contract — earlier packages are in the archive"
+            : value.generatedAt ? `Data package · ${new Date(value.generatedAt).toLocaleString()}` : "Result package loaded");
           nextDelay = valueDelay(value.campaignStatus);
         }
       } catch (cause) {
@@ -64,13 +69,13 @@ export default function ThesisPage() {
 
     <section className="thesis-contract" aria-label="Frozen experiment contract">
       <div><span>Track</span><strong>G500</strong><small>500 m free rope per section</small></div>
-      <div><span>Operation</span><strong>No-Wait</strong><small>reservoir capacity · fixed-start Journey</small></div>
-      <div><span>Capacity study</span><strong>8 groups</strong><small>T5R + T6R · evolutionary lines</small></div>
-      <div><span>Journey study</span><strong>4 groups</strong><small>T5R · labelled arc-flow</small></div>
+      <div><span>Window</span><strong>2 cycles</strong><small>+ 900 s completion · + 300 s continued movement</small></div>
+      <div><span>Journey starts</span><strong>Fixed balanced</strong><small>same T5R/G500 geometry and Architecture-B headways</small></div>
+      <div><span>OIP starts</span><strong>Optimized</strong><small>No-Wait first · independently validated</small></div>
     </section>
 
     <section className="thesis-controls" aria-label="Filter experiment matrix">
-      <div><p className="eyebrow">Experiment matrix</p><h2>Twelve comparable questions</h2></div>
+      <div><p className="eyebrow">Experiment matrix</p><h2>Current frozen comparisons</h2></div>
       <label>Objective<select value={objective} onChange={(event) => setObjective(event.target.value as typeof objective)}><option value="all">All</option><option value="unserved">Capacity</option><option value="journey_time">Journey time</option></select></label>
       <label>Topology<select value={topology} onChange={(event) => setTopology(event.target.value as typeof topology)}><option value="all">All</option><option value="t5r">T5R</option><option value="t6r">T6R</option></select></label>
       <label>Release resolution<select value={resolution} onChange={e => setResolution(e.target.value)}><option value="all">All · separate results</option>{[30, 15, 5].map(n => <option key={n} value={n}>{n} s</option>)}</select></label>
@@ -89,8 +94,8 @@ export default function ThesisPage() {
 
     <section className="thesis-archive" aria-label="Research archive">
       <div><p className="eyebrow">Research archive</p><h2>Trace every optimization run</h2></div>
-      <a href="/optimization"><strong>Optimization campaigns</strong><span>Solver bounds, model sizes and completed trials</span></a>
-      <a href="/evolution-live"><strong>Evolution diagnostics</strong><span>Candidate histories, conflicts and repair behavior</span></a>
+      <a href="/optimization"><strong>Current optimization campaigns</strong><span>Only runs declaring this thesis contract</span></a>
+      <a href="/archive"><strong>Historical experiments</strong><span>Earlier contracts, evolution diagnostics and exploratory runs</span></a>
     </section>
 
     <footer className="thesis-sources">

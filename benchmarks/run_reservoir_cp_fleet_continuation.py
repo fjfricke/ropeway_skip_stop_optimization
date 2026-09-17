@@ -15,7 +15,7 @@ import subprocess
 import sys
 import time
 
-from ropeway_skip_stop_optimization.benchmarking.native_solvers import supervise
+from ropeway_skip_stop_optimization.benchmarking.process_supervisor import supervise
 from ropeway_skip_stop_optimization.benchmarking.optimization_events import OptimizationEventKind
 from ropeway_skip_stop_optimization.benchmarking.optimization_live_store import (
     OptimizationLivePaths,

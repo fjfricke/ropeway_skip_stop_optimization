@@ -11,7 +11,7 @@ from pathlib import Path
 import sys
 from time import monotonic
 
-from ropeway_skip_stop_optimization.benchmarking.native_solvers import supervise
+from ropeway_skip_stop_optimization.benchmarking.process_supervisor import supervise
 from ropeway_skip_stop_optimization.benchmarking.thesis_cases import (
     ExperimentCaseSpec,
     ThesisDemandFamily,

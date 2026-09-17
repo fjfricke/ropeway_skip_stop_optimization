@@ -20,6 +20,9 @@ except ImportError:
 from ropeway_skip_stop_optimization.benchmarking.thesis_cases import (
     thesis_g500_experiment_groups,
 )
+from ropeway_skip_stop_optimization.benchmarking.thesis_contract import (
+    THESIS_CONTRACT_ID,
+)
 
 
 COPIED_ARTIFACTS = (
@@ -145,7 +148,14 @@ def _group_id(case: dict) -> str | None:
     )
 
 
-def _run_summary(run_dir: Path, result: dict, case: dict, arguments: dict) -> dict | None:
+def _run_summary(
+    run_dir: Path,
+    result: dict,
+    case: dict,
+    arguments: dict,
+    *,
+    contract_id: str | None = None,
+) -> dict | None:
     group_id = _group_id(case)
     if group_id is None:
         return None
@@ -254,6 +264,10 @@ def _run_summary(run_dir: Path, result: dict, case: dict, arguments: dict) -> di
             if (run_dir / "best.json").is_file()
             else None
         ),
+        "contractId": contract_id,
+        "studyMembership": (
+            "current_thesis" if contract_id == THESIS_CONTRACT_ID else "archive"
+        ),
     }
     if frontend_method == "all_stop_phase":
         summary["reference"] = _reference(result, case)
@@ -302,6 +316,7 @@ def _export_one(run_dir, output, live_status):
         return dict(cached["summary"])
     result = _read(run_dir / "result.json")
     case = _read(run_dir / "case_spec.json")
+    prepared = _read(run_dir / "prepared_case.json") or {}
     arguments = _read(run_dir / "arguments.json") or {}
     placeholder = result is None
     if result is None and live_status:
@@ -309,7 +324,10 @@ def _export_one(run_dir, output, live_status):
                   "status": live_status, "native_result_available": False, "run": {}}
     if result is None or case is None:
         return None
-    summary = _run_summary(run_dir, result, case, arguments)
+    contract_id = prepared.get("thesis_contract_id") or case.get("thesis_contract_id")
+    summary = _run_summary(
+        run_dir, result, case, arguments, contract_id=contract_id
+    )
     if summary is None:
         return None
     if placeholder and summary["method"] == "evolution":
@@ -339,6 +357,8 @@ def _export_one(run_dir, output, live_status):
 def export(results_roots: tuple[Path, ...], output: Path, study_manifest: Path | None = None) -> dict:
     groups = []
     for item in thesis_g500_experiment_groups():
+        if item.objective.value != "journey_time" or item.topology.value != "t5r":
+            continue
         groups.append(
             {
                 "id": item.group_id,
@@ -383,6 +403,8 @@ def export(results_roots: tuple[Path, ...], output: Path, study_manifest: Path |
                                transferKind=attempt.get("transfer"), provenance="main_study")
             else:
                 summary["provenance"] = "calibration"
+            if summary.get("studyMembership") != "current_thesis":
+                continue
             runs.append(summary)
             by_group[summary["groupId"]]["runIds"].append(summary["id"])
             running = running or summary["status"] == "running"
@@ -400,6 +422,7 @@ def export(results_roots: tuple[Path, ...], output: Path, study_manifest: Path |
         "schema": "thesis_frontend_index_v1",
         "generatedAt": datetime.now(timezone.utc).isoformat(),
         "campaignStatus": "running" if running else "partial" if runs else "planned",
+        "contractId": THESIS_CONTRACT_ID,
         "groups": groups,
         "runs": runs,
         "sources": [

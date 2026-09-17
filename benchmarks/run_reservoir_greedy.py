@@ -12,7 +12,7 @@ from pathlib import Path
 
 import psutil
 
-from ropeway_skip_stop_optimization.benchmarking.native_solvers import supervise
+from ropeway_skip_stop_optimization.benchmarking.process_supervisor import supervise
 from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_certificate import (
     atomic_json,
 )

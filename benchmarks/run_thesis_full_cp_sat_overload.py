@@ -12,7 +12,7 @@ from pathlib import Path
 from time import monotonic, time
 import sys
 
-from ropeway_skip_stop_optimization.benchmarking.native_solvers import supervise
+from ropeway_skip_stop_optimization.benchmarking.process_supervisor import supervise
 from ropeway_skip_stop_optimization.benchmarking.thesis_full_cp_sat_overload import (
     ThesisOverloadPilotConfig,
     campaign_identity,

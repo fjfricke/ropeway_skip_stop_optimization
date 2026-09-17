@@ -5,7 +5,15 @@ import pytest
 
 pytest.importorskip("psutil")
 
-from ropeway_skip_stop_optimization.benchmarking.native_solvers import supervise
+from ropeway_skip_stop_optimization.benchmarking.process_supervisor import supervise
+
+
+def test_historical_supervisor_import_remains_compatible():
+    from ropeway_skip_stop_optimization.benchmarking.native_solvers import (
+        supervise as compatibility_supervise,
+    )
+
+    assert compatibility_supervise is supervise
 
 
 def test_deadline_stops_child_without_claiming_solver_infeasibility(tmp_path):

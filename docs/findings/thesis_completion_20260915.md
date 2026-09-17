@@ -23,7 +23,7 @@ Bedienungszahlen sind nur bei unabhängiger Bestätigung als Ergebnisse aufgefü
   backend. Unveränderte große Rohdateien werden beim Live-Export nicht erneut
   geparst oder kopiert. Auf der Startseite wird nur der kleine Index geladen.
 
-Bedienung und Befehle: [Ausführungsplan](../plans/thesis_study_execution_20260915.md).
+Bedienung und Befehle: [Ausführungsplan](../../archive/docs/plans/thesis_study_execution_20260915.md).
 Die räumliche Szenario-/Videoansicht bleibt eine vorhandene separate Ansicht.
 Der neue integrierte Replay zeigt die Ereignis-/Belegungstafel. Bei historischen
 Arc-Flow-Läufen ohne Zuordnungsartefakt ist Belegung ausdrücklich nicht verfügbar;

@@ -93,7 +93,7 @@ Stundenkapazität oder unbegrenzte Fortsetzbarkeit.
   Nachfragepunkte, Waiting-Vergleich und Gesamtbudget. Keine automatische Freigabe
   einer größeren Kampagne durch diesen Entwurf.
 
-Grundlagen: [bisherige Reihen](thesis_study_execution_20260915.md),
+Grundlagen: [bisherige Reihen](../../archive/docs/plans/thesis_study_execution_20260915.md),
 [Kapazitätsergebnisse](../../results/thesis_capacity_final_campaign_20260917_summary.json),
 [CP-SAT-Hint](https://github.com/google/or-tools/blob/stable/ortools/sat/cp_model.proto),
 [Gurobi-MIP-Starts](https://docs.gurobi.com/projects/optimizer/en/current/reference/parameters.html#parameterstartnumber).

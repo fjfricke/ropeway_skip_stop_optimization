@@ -20,6 +20,7 @@ type Snapshot = {
   generatedAt: string;
   plannedJobs: number;
   jobs: Gate[];
+  contractId?: string;
 };
 
 function outcome(gate: Gate) {
@@ -46,6 +47,7 @@ export default function ThesisPreflight() {
         if (!response.ok || !response.headers.get("content-type")?.includes("application/json")) throw new Error("unavailable");
         const value = await response.json() as Snapshot;
         if (value.schema !== "thesis_preflight_view_v1" || !Array.isArray(value.jobs)) throw new Error("schema");
+        if (value.contractId !== "t5r_g500_b_entry_exit_2cycles_900completion_300tail_v2") throw new Error("historical contract");
         if (!disposed) { setSnapshot(value); setStale(false); }
       } catch {
         if (!disposed) setStale(true);

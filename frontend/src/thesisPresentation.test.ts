@@ -12,10 +12,10 @@ describe("thesis presentation", () => {
     expect(matchingAllStop(run, [{ ...as, releaseResolutionSeconds: 30 }])).toBeUndefined();
     expect(matchingAllStop(run, [{ ...as, caseFingerprint: "different" }])).toBeUndefined();
   });
-  it("contains the frozen twelve-group G500 matrix", () => {
-    expect(plannedThesisGroups).toHaveLength(12);
-    expect(new Set(plannedThesisGroups.map((group) => group.id)).size).toBe(12);
-    expect(plannedThesisGroups.filter((group) => group.objective === "unserved")).toHaveLength(8);
+  it("contains the four current fixed-start Journey groups", () => {
+    expect(plannedThesisGroups).toHaveLength(4);
+    expect(new Set(plannedThesisGroups.map((group) => group.id)).size).toBe(4);
+    expect(plannedThesisGroups.filter((group) => group.objective === "unserved")).toHaveLength(0);
     expect(plannedThesisGroups.filter((group) => group.objective === "journey_time")).toHaveLength(4);
   });
 

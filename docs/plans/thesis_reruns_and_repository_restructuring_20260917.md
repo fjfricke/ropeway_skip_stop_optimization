@@ -115,13 +115,13 @@ Provenienz; sie ersetzt nicht die unabhängige Prüfung der Kalibrierungszertifi
 - Regressionsprüfung des schon vorhandenen ENTRY_SWITCH-Schutzes bis in DDD.
   Die Formel wurde nicht nochmals verändert.
 
-## 5. Audit und danach geplante Umstrukturierung — noch nicht umgesetzt
+## 5. Umgesetzte Repository- und Frontend-Struktur
 
 Der [Audit](../audits/repository_20260917.md) enthält Befunde, Belege und eine
 priorisierte PR-Folge. Wichtig: Ein großer Teil der DDD-Dateien ist gemeinsame
 Infrastruktur, nicht isoliert entfernbarer historischer Code.
 
-Zielstruktur, in kleinen überprüfbaren Schritten:
+Die erste sichere Umbauetappe ist umgesetzt. Die Zielstruktur lautet:
 
 ```text
 src/             aktive Domäne, Solveradapter, unabhängige Prüfer
@@ -132,37 +132,26 @@ archive/         historische Controller/Methoden/Dokumente mit Herkunft
 results/         lokale Laufdaten; separat veröffentlichbares Datenpaket
 ```
 
-1. **Ergebnisfehler zuerst:** OIP-Export verliert aktuell `unserved=0` durch einen
-   Fallback auf Gesamtnachfrage; unbekannte Werte werden teilweise als nullwertige
-   Ergebnisse dargestellt. Im Audit nachgewiesen, in diesem eingeschränkten
-   Schritt noch nicht korrigiert. Vor neuen veröffentlichten Ergebnissen beheben.
-2. **Aktive Abhängigkeiten markieren:** Einstiegspunkte → Vorbereitung → Solver
-   → Validator → Export verfolgen. IO und Supervisor aus historisch benannten
-   Solvermodulen lösen, bevor deren Ordner verschoben werden.
-3. **Archivieren:** zuerst alte Einmalcontroller und zugehörige Dokumentation;
-   danach unbenutzte Methoden nur mit überprüfter Importmenge und passenden Tests.
-   Git-Historie und historische Resultatidentitäten erhalten. Binaries nicht
-   pauschal neu einchecken. Archivieren verkleinert die aktive Oberfläche, nicht
-   automatisch die Größe der Git-Historie.
-4. **Abhängigkeiten:** psutil wird für alle überwachten Kampagnen benötigt, ist
-   aber bisher nur optional; Plotting-Abhängigkeiten gesondert deklarieren.
-   Das wird als eigener kleiner Änderungsschritt umgesetzt.
-5. **Frontend:** aktuelle Thesis-Versuche als Haupteinstieg, vorhandener Scenario
-   Viewer bleibt; EAN-Details passend zum konkreten Betrieb anzeigen. Alte
-   Evolution-/Reservoir-/DDD-Ansichten unter Archiv, direkte Links erhalten.
-   Studienzugehörigkeit aus explizitem Manifest, nicht aus Dateinamen ableiten.
-   Keine UI zum Starten von Läufen; weiterhin lokale, teilbare Ergebnisanzeige.
-6. **Statussemantik:** ungeklärt ≠ unzulässig; abgeschlossen ≠ optimal;
-   Bewegungsmachbarkeit hat keinen Optimierungsgap; All-Stop-Zeugen und Optima
-   unterscheiden. Vergleiche nur bei passenden Nachfrage-/Domänenfingerprints.
-
-Keine dieser Archiv-, Frontend- oder Abhängigkeitsänderungen gehört zur jetzigen
-Implementierung. Die zunächst begonnenen Archivverschiebungen wurden nach der
-Präzisierung des Auftrags vollständig zurückgenommen.
+1. **Ergebnisse:** OIP bewahrt echte Nullwerte und exportiert fehlende Incumbents
+   als `null`. Exact-K wird auch in der Laufbeschreibung als Exact-K ausgewiesen.
+2. **Infrastruktur:** Prozessüberwachung und transaktionale Frontend-Indizes sind
+   solverneutral. Alte Supervisor-Imports bleiben kompatibel.
+3. **Archiv:** der einmalige Abschlusscontroller und der abgelöste Studienplan
+   liegen mit Herkunftshinweis unter `archive/`. Gemeinsam genutzte DDD-, EAN-
+   und Reservoirmodule bleiben wegen aktiver Importpfade in `src/`.
+4. **Abhängigkeiten:** `psutil` ist Basisabhängigkeit; Plotting liegt im optionalen
+   `analysis`-Extra.
+5. **Frontend:** Thesis Atlas, aktuelle Thesis-Läufe, Scenario Viewer und Archiv
+   sind getrennte Haupteinstiege. Alte direkte URLs bleiben gültig; Evolution
+   wird lazy geladen. Nur `study_membership=current_thesis` und die passende
+   `contract_id` erscheinen als aktuelle Evidenz.
+6. **Weiter offen:** OIP-Kalibrierung, Lastfaktor, K-Raster und Budgets bleiben
+   fachlich offen. Weitere Solververzeichnisse werden erst nach einem gesonderten
+   Import- und Reproduktionstest archiviert.
 
 ## 6. Prüfung vor dem nächsten Start
 
-- Aktueller Prüfstand: 66 gezielt ausgewählte Tests bestanden (Vertrag,
+- Prüfstand des Vertragscommits: 66 gezielt ausgewählte Tests bestanden (Vertrag,
   Headways, Horizontereignisse, Fixed-K-Kalibrierung, Wiederaufnahme,
   Reporting-Bestand und Importgrenzen). Kein vollständiger Lauf aller
   170 Testmodule und keine Performancekampagne.
@@ -170,5 +159,12 @@ Präzisierung des Auftrags vollständig zurückgenommen.
 - Build-only zeigt 24 Referenzen und 104 Journey-Vergleiche; keine Solver laufen.
 - Neue Nachfragekalibrierung liefert passende geprüfte Referenzen.
 - OIP-Lastfaktor/K-Raster/Budgets sind festgelegt.
-- Ergebnisexportfehler behoben; Frontend trennt aktuellen Vertrag vom Archiv.
+- Umbauprüfung: 59 gezielte Python-Tests sowie 25 Frontend-Tests bestanden;
+  Produktionsbuild und visuelle Prüfung von Thesis-, Run- und Archivansicht sind
+  erfolgreich. Von der vollständigen Python-Suite bestanden 1.830 Tests, 22
+  wurden übersprungen und sechs bereits fachlich veraltete/historische Tests
+  scheitern (zwei Checkpoint-Fingerprints, Corridor-Verfeinerung, zwei Reservoir-
+  Lebenszyklus-/Fixture-Verträge und ein alter Overload-Referenzvertrag). Diese
+  Fehler liegen außerhalb der geänderten Module und werden nicht als bestanden
+  dargestellt. Der Build meldet nur die bestehende Warnung zu einem großen Chunk.
 - Erst danach ausdrücklich die gewünschte Teilreihe starten.

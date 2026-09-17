@@ -9,7 +9,7 @@ import sys
 from time import perf_counter
 
 from run_reservoir_compact_campaign import VARIANTS
-from ropeway_skip_stop_optimization.benchmarking.native_solvers import supervise
+from ropeway_skip_stop_optimization.benchmarking.process_supervisor import supervise
 from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_certificate import (
     atomic_json,
 )

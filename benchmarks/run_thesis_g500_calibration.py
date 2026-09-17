@@ -22,7 +22,7 @@ from ropeway_skip_stop_optimization.benchmarking.thesis_cases import (
     prepare_experiment_case,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_certificate import atomic_json
-from ropeway_skip_stop_optimization.benchmarking.native_solvers import supervise
+from ropeway_skip_stop_optimization.benchmarking.process_supervisor import supervise
 
 
 ROOT = Path(__file__).resolve().parents[1]

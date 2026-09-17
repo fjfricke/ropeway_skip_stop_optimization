@@ -11,7 +11,7 @@ import sys
 import time
 import zipfile
 
-from ropeway_skip_stop_optimization.benchmarking.native_solvers import supervise
+from ropeway_skip_stop_optimization.benchmarking.process_supervisor import supervise
 from ropeway_skip_stop_optimization.benchmarking.thesis_study import (
     DemandLadder, confirmed_service, journey_confirmed, manifest_identity, validate_study,
 )

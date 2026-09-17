@@ -1,11 +1,13 @@
-import { useEffect, useState } from "react";
+import { lazy, Suspense, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import ScenarioPage from "./pages/ScenarioPage";
 import OptimizationPage from "./pages/OptimizationPage";
 import OptimizationCampaignPage from "./pages/OptimizationCampaignPage";
 import OptimizationTrialPage from "./pages/OptimizationTrialPage";
-import EvolutionLivePage from "./pages/EvolutionLivePage";
 import ThesisPage from "./pages/ThesisPage";
+
+const EvolutionLivePage = lazy(() => import("./pages/EvolutionLivePage"));
+const ArchivePage = lazy(() => import("./pages/ArchivePage"));
 
 export default function App() {
   const [path, setPath] = useState(window.location.pathname);
@@ -20,8 +22,9 @@ export default function App() {
   else if (parts[0] === "optimization" && parts.length === 2) page = <OptimizationCampaignPage campaignId={decodeURIComponent(parts[1])} />;
   else if (parts[0] === "optimization" && parts.length >= 4) page = <OptimizationTrialPage campaignId={decodeURIComponent(parts[1])} policyId={decodeURIComponent(parts[2])} fleetCount={Number(parts[3])} />;
   else if (parts[0] === "evolution-live") page = <EvolutionLivePage />;
+  else if (parts[0] === "archive") page = <ArchivePage />;
   else if (parts[0] === "thesis") page = <ThesisPage />;
-  return <><nav className="app-nav"><AppLink href="/thesis">Thesis Atlas</AppLink><AppLink href="/">Scenario Viewer</AppLink><AppLink href="/optimization">Optimization Lab</AppLink><AppLink href="/evolution-live">Evolution Live</AppLink></nav>{page}</>;
+  return <><nav className="app-nav"><AppLink href="/thesis">Thesis Atlas</AppLink><AppLink href="/optimization">Thesis runs</AppLink><AppLink href="/">Scenario Viewer</AppLink><AppLink href="/archive">Archive</AppLink></nav><Suspense fallback={<main className="optimization-shell"><section className="optimization-empty">Loading view…</section></main>}>{page}</Suspense></>;
 }
 
 export function AppLink({ href, className, children }: { href: string; className?: string; children: ReactNode }) {

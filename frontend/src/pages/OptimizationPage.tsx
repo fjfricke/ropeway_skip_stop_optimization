@@ -36,13 +36,17 @@ export default function OptimizationPage() {
       if (timer !== undefined) window.clearTimeout(timer);
     };
   }, []);
+  const campaigns = index?.campaigns.filter(
+    (campaign) => campaign.study_membership === "current_thesis",
+  ) ?? [];
   return (
     <main className="optimization-shell">
-      <header className="optimization-hero"><div><p className="eyebrow">Optimization Lab</p><h1>Certified fleet experiments</h1></div><p>Live DDD bounds, fixed-K campaigns and validated incumbents.</p></header>
+      <header className="optimization-hero"><div><p className="eyebrow">Current thesis runs</p><h1>Comparable optimization evidence</h1></div><p>Only campaigns that explicitly declare the current frozen thesis contract appear here.</p></header>
       {error && <section className="optimization-empty">{error}. Start a sweep with <code>--frontend-live</code>.</section>}
       {!error && !index && <section className="optimization-empty">Loading campaigns…</section>}
+      {index && campaigns.length === 0 && <section className="optimization-empty">No campaign for the current thesis contract has been published yet. Historical and exploratory runs remain available in the archive.</section>}
       <section className="campaign-grid">
-        {index?.campaigns.map((campaign) => (
+        {campaigns.map((campaign) => (
           <AppLink className="campaign-card" href={`/optimization/${campaign.campaign_id}`} key={campaign.campaign_id}>
             <div className="campaign-card__top"><span className={`run-state run-state--${campaign.status ?? "queued"}`}>{campaign.status ?? "queued"}</span><span>seq {campaign.sequence ?? 0}</span></div>
             <h2>{campaign.label ?? campaign.campaign_id}</h2>
