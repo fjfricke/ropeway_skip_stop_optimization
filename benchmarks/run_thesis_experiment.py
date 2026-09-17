@@ -267,6 +267,33 @@ def worker(args) -> None:
                     "case": case_manifest,
                     "run": run.to_payload(),
                 }
+        elif (
+            args.method == "all_stop_phase"
+            and args.capacity_search
+            and spec.objective is ThesisObjective.JOURNEY_TIME
+        ):
+            if args.build_only or args.cabins is None:
+                raise ValueError("Journey capacity search needs --cabins and cannot use --build-only")
+            native = search_fixed_k_all_stop_capacity(
+                spec,
+                AllStopCapacitySearchConfig(
+                    maximum_demand=spec.demand_total,
+                    initial_demand=min(args.capacity_initial_demand, spec.demand_total),
+                    time_limit_seconds=remaining_budget(), workers=args.workers,
+                    seed=args.seed, cabins=args.cabins,
+                    log_search_progress=args.log_search_progress,
+                    probe_demands=tuple(args.capacity_probe_demand),
+                ),
+                cabins=args.cabins, event_callback=emit,
+            )
+            # Each probe contains its actual fixed-start physical manifest.
+            # Do not wrap this result in an unrelated reservoir domain.
+            result = {
+                "schema": "thesis_experiment_result_v1", "method": args.method,
+                "case_fingerprint": spec.fingerprint,
+                "case": native["probes"][-1]["case"] if native["probes"] else None,
+                "run": native,
+            }
         else:
             requested_fleet = (
                 args.cabins

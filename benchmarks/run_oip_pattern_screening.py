@@ -19,6 +19,7 @@ import gurobipy
 import ortools
 
 from ropeway_skip_stop_optimization.benchmarking.native_solvers import supervise
+from ropeway_skip_stop_optimization.benchmarking.thesis_contract import source_digest
 from ropeway_skip_stop_optimization.benchmarking.oip_pattern_screening import (
     OipScreeningDemandFamily,
     demand_fingerprint,
@@ -52,11 +53,9 @@ def main() -> None:
         if not campaign_path.is_file():
             raise ValueError("--resume requires an existing campaign.json")
         manifest = json.loads(campaign_path.read_text())
-        if manifest.get("configuration_fingerprint") != frozen["configuration_fingerprint"]:
-            raise ValueError("resume configuration does not match the frozen campaign")
+        _validate_resume(manifest, frozen)
         manifest["status"] = "running"
         manifest["resume_count"] = int(manifest.get("resume_count", 0)) + 1
-        manifest["deadline_unix"] = deadline
     else:
         manifest = frozen
 
@@ -80,6 +79,12 @@ def main() -> None:
         print(f"Prepared {len(manifest['trials'])} trials in {campaign_path}")
         return
 
+    # Preparing a manifest does not consume its execution budget. Resuming an
+    # executed campaign must never grant another complete budget.
+    if manifest.get("execution_started_unix") is None:
+        manifest["execution_started_unix"] = started
+        manifest["deadline_unix"] = deadline
+    deadline = float(manifest["deadline_unix"])
     manifest["status"] = "running"
     save()
     for trial in manifest["trials"]:
@@ -359,8 +364,21 @@ def freeze_campaign(args, started: float, deadline: float) -> dict[str, Any]:
     configuration_fingerprint = hashlib.sha256(
         json.dumps(configuration, sort_keys=True, separators=(",", ":")).encode()
     ).hexdigest()
+    identity = {
+        "source_digest": source_digest(ROOT),
+        "ortools": ortools.__version__,
+        "gurobi": list(gurobipy.gurobi.version()),
+        "demand": next(iter(fingerprints)),
+        "trials": [
+            {key: trial[key] for key in (
+                "trial_id", "pattern_identity", "domain_fingerprint",
+                "comparison_fingerprint",
+            )}
+            for trial in trials
+        ],
+    }
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "campaign_id": args.output.resolve().name,
         "campaign_kind": "oip_pattern_screening",
         "label": f"{args.family.value.upper()} fixed-pattern fleet screening",
@@ -376,6 +394,8 @@ def freeze_campaign(args, started: float, deadline: float) -> dict[str, Any]:
         "sequence": 0,
         "configuration": configuration,
         "configuration_fingerprint": configuration_fingerprint,
+        "frozen_identity": identity,
+        "execution_started_unix": None,
         "demand_fingerprint": next(iter(fingerprints)),
         "demand_family": args.family.value,
         "demand_total": args.demand_total,
@@ -398,6 +418,15 @@ def freeze_campaign(args, started: float, deadline: float) -> dict[str, Any]:
         "refinements": [],
         "resume_count": 0,
     }
+
+
+def _validate_resume(manifest: dict, frozen: dict) -> None:
+    if manifest.get("configuration_fingerprint") != frozen["configuration_fingerprint"]:
+        raise ValueError("resume configuration does not match the frozen campaign")
+    if manifest.get("frozen_identity") != frozen["frozen_identity"]:
+        raise ValueError(
+            "resume domain, patterns, solver versions or code changed; create a new campaign"
+        )
 
 
 def _select_refinements(

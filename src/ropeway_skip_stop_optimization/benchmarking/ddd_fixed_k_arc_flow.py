@@ -100,6 +100,7 @@ class DddFixedKArcFlowRunConfig:
     require_full_service: bool = False
     horizon_seconds: float | None = None
     use_primal_start: bool = True
+    tail_seconds: float | None = None
 
     def validate(self) -> None:
         if not self.example_id or self.cabin_count <= 0:
@@ -129,6 +130,10 @@ class DddFixedKArcFlowRunConfig:
             not math.isfinite(self.horizon_seconds) or self.horizon_seconds <= 0
         ):
             raise ValueError("arc-flow horizon override must be positive")
+        if self.tail_seconds is not None and (
+            not math.isfinite(self.tail_seconds) or self.tail_seconds < 0
+        ):
+            raise ValueError("arc-flow tail override must be nonnegative")
         if (
             self.formulation is DddFixedKArcFlowFormulation.EXACT_ANONYMOUS
             and self.resource_row_mode
@@ -401,6 +406,9 @@ def prepare_ddd_fixed_k_arc_flow_run(
     ean_config = example.build_ean_config(scenario)
     if config.horizon_seconds is not None:
         ean_config = replace(ean_config, horizon_seconds=config.horizon_seconds)
+        ean_config.validate()
+    if config.tail_seconds is not None:
+        ean_config = replace(ean_config, tail_seconds=config.tail_seconds)
         ean_config.validate()
     original_builder = example.build_ean_artifact_builder(scenario, ean_config)
     if not isinstance(original_builder, NetworkEanBuildArtifactBuilder):

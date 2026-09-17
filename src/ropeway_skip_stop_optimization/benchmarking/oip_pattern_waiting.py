@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 
+from .thesis_contract import HEADWAY_CONTRACT, ThesisWindows
+
 from ropeway_skip_stop_optimization.benchmarking.thesis_cases import (
     ExperimentCaseSpec,
     ThesisDemandFamily,
@@ -63,9 +65,10 @@ def prepare_oip_pattern_waiting_pilot(
     )
     reference = prepare_experiment_case(spec, fleet_cap=cabin_count)
     cycle_seconds = reference.all_stop_cycle_tick / 1_000_000
-    demand_window_seconds = 2 * cycle_seconds
-    passenger_horizon_seconds = demand_window_seconds + 900.0
-    operation_seconds = passenger_horizon_seconds + 300.0
+    windows = ThesisWindows(cycle_seconds)
+    demand_window_seconds = windows.demand_window_seconds
+    passenger_horizon_seconds = windows.service_horizon_seconds
+    operation_seconds = windows.operation_seconds
 
     example = get_example(spec.example_id)
     base = example.build_scenario()
@@ -104,14 +107,15 @@ def prepare_oip_pattern_waiting_pilot(
             "topology": "t5r",
             "geometry": "g500",
             "architecture": "B",
+            "headway_contract": HEADWAY_CONTRACT,
             "demand_family": demand_family.value,
             "demand_profile": "p0",
             "demand_total": demand_total,
             "release_resolution_seconds": 15,
             "all_stop_cycle_seconds": cycle_seconds,
             "demand_window_seconds": demand_window_seconds,
-            "completion_seconds": 900.0,
-            "continuation_seconds": 300.0,
+            "completion_seconds": windows.completion_seconds,
+            "continuation_seconds": windows.continuation_seconds,
             "maximum_wait_seconds": maximum_wait_seconds,
             "technical_test_load": True,
         },

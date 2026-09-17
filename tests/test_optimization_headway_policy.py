@@ -195,6 +195,14 @@ def test_ddd_adapter_preserves_architecture_b_directed_usage_headways() -> None:
     assert stop_usage.separation_after_seconds == pytest.approx(4.981010)
     assert skip_usage.separation_after_seconds == pytest.approx(1.052439)
 
+    # Thesis chapter 3.2 applies the same STOP-leader protection at entry.
+    entry = problem.resources_by_id["entry_switch::A_entry_cw"]
+    for option, expected in ((stop_option, 4.981010), (skip_option, 1.052439)):
+        usage = next(u for u in option.resource_usages if u.resource_id == entry.id)
+        assert usage.follower_enter_offset_tick == 0
+        assert usage.leader_clear_offset_tick == 0
+        assert usage.separation_after_seconds == pytest.approx(expected)
+
 
 class _OneCabinStartBuilder(EanCabinStartBuilder):
     def build(self, scenario, config, network, pattern, headway_policy=None):

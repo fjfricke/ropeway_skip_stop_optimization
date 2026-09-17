@@ -7,6 +7,8 @@ from dataclasses import asdict, dataclass, replace
 from enum import StrEnum
 from math import ceil
 
+from .thesis_contract import HEADWAY_CONTRACT, THESIS_CONTRACT_ID, ThesisWindows
+
 from .ddd_reservoir_arc_flow import (
     DddReservoirArcFlowRunConfig,
     prepare_ddd_reservoir_arc_flow_run,
@@ -446,14 +448,13 @@ def prepare_fixed_k_experiment(
         first.start_layout_bottleneck_headway_seconds or 0
     )
     station_count = 5 if spec.topology is ThesisTopology.T5R else 6
-    completion_tick = max(
-        ddd_seconds_to_tick(15 * 60),
-        headway_tick + ceil((station_count // 2) * cycle_tick / station_count),
-    )
+    windows = ThesisWindows(ddd_tick_to_seconds(cycle_tick))
+    completion_tick = ddd_seconds_to_tick(windows.completion_seconds)
     horizon_tick = 2 * cycle_tick + completion_tick
     config = DddFixedKArcFlowRunConfig(
         **common,
         horizon_seconds=ddd_tick_to_seconds(horizon_tick),
+        tail_seconds=windows.continuation_seconds,
     )
     prepared = prepare_ddd_fixed_k_arc_flow_run(config)
     groups = build_demand_groups(
@@ -473,6 +474,8 @@ def prepare_fixed_k_experiment(
         prepared.scenario,
         experiment_metadata={
             "schema": "thesis_experiment_frontend_v1",
+            "headway_contract": HEADWAY_CONTRACT,
+            "thesis_contract_id": THESIS_CONTRACT_ID if spec.topology is ThesisTopology.T5R and spec.geometry is ThesisGeometry.G500 else None,
             "topology": spec.topology.value,
             "geometry": spec.geometry.value,
             "architecture": "B",
@@ -483,6 +486,8 @@ def prepare_fixed_k_experiment(
             "release_resolution_seconds": spec.release_resolution_seconds,
             "demand_window_seconds": ddd_tick_to_seconds(2 * cycle_tick),
             "completion_seconds": ddd_tick_to_seconds(completion_tick),
+            "continuation_seconds": windows.continuation_seconds,
+            "operation_seconds": windows.operation_seconds,
             "all_stop_cycle_seconds": ddd_tick_to_seconds(cycle_tick),
             "all_stop_headway_seconds": ddd_tick_to_seconds(headway_tick),
             "all_stop_reference_cabins": prepared.all_stop_maximum_cabin_count,
@@ -492,10 +497,15 @@ def prepare_fixed_k_experiment(
     )
     prepared = replace(prepared, scenario=scenario, problem=problem)
     return config, prepared, {
+        "headway_contract": HEADWAY_CONTRACT,
+        "thesis_contract_id": scenario.experiment_metadata["thesis_contract_id"],
+        "problem_fingerprint": problem.fingerprint,
         "cycle_tick": cycle_tick,
         "demand_window_tick": 2 * cycle_tick,
         "completion_tick": completion_tick,
         "horizon_tick": horizon_tick,
+        "continuation_tick": ddd_seconds_to_tick(windows.continuation_seconds),
+        "operation_tick": ddd_seconds_to_tick(windows.operation_seconds),
         "cabins": cabins,
         "operating_mode": operating_mode.value,
         "demand_groups": len(groups),
