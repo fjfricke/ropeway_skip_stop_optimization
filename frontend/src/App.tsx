@@ -7,6 +7,7 @@ import OptimizationTrialPage from "./pages/OptimizationTrialPage";
 import ThesisPage from "./pages/ThesisPage";
 
 const EvolutionLivePage = lazy(() => import("./pages/EvolutionLivePage"));
+const CalibrationLivePage = lazy(() => import("./pages/CalibrationLivePage"));
 const ArchivePage = lazy(() => import("./pages/ArchivePage"));
 
 export default function App() {
@@ -22,9 +23,10 @@ export default function App() {
   else if (parts[0] === "optimization" && parts.length === 2) page = <OptimizationCampaignPage campaignId={decodeURIComponent(parts[1])} />;
   else if (parts[0] === "optimization" && parts.length >= 4) page = <OptimizationTrialPage campaignId={decodeURIComponent(parts[1])} policyId={decodeURIComponent(parts[2])} fleetCount={Number(parts[3])} />;
   else if (parts[0] === "evolution-live") page = <EvolutionLivePage />;
+  else if (parts[0] === "calibration-live") page = <CalibrationLivePage />;
   else if (parts[0] === "archive") page = <ArchivePage />;
   else if (parts[0] === "thesis") page = <ThesisPage />;
-  return <><nav className="app-nav"><AppLink href="/thesis">Thesis Atlas</AppLink><AppLink href="/optimization">Thesis runs</AppLink><AppLink href="/">Scenario Viewer</AppLink><AppLink href="/archive">Archive</AppLink></nav><Suspense fallback={<main className="optimization-shell"><section className="optimization-empty">Loading view…</section></main>}>{page}</Suspense></>;
+  return <><nav className="app-nav"><AppLink href="/thesis">Thesis Atlas</AppLink><AppLink href="/optimization">Thesis runs</AppLink><AppLink href="/calibration-live">Calibration live</AppLink><AppLink href="/">Scenario Viewer</AppLink><AppLink href="/archive">Archive</AppLink></nav><Suspense fallback={<main className="optimization-shell"><section className="optimization-empty">Loading view…</section></main>}>{page}</Suspense></>;
 }
 
 export function AppLink({ href, className, children }: { href: string; className?: string; children: ReactNode }) {
