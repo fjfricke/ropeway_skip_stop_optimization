@@ -846,6 +846,17 @@ def _validate_prepared_run_compatibility(
         mismatches.append(
             f"start policy {problem.start_policy.value!r} != {config.start_policy.value!r}"
         )
+    # A prepared historical graph must not bypass the current thesis headways.
+    if config.example_id.startswith("thesis_"):
+        expected = get_example(config.example_id).build_scenario().headway_design
+        if prepared.scenario.headway_design != expected:
+            mismatches.append("headway design differs from the current thesis contract; rebuild")
+        policy = problem.artifact.headway_policy
+        if policy is None or policy.has_leader_behavior_rules or any(
+            resource.kind.value == "service_mechanism"
+            for resource in policy.resource_requirements
+        ):
+            mismatches.append("prepared thesis artifact contains legacy headway rules")
     if mismatches:
         raise ValueError(
             "prepared fixed-K run is incompatible with solve config: "

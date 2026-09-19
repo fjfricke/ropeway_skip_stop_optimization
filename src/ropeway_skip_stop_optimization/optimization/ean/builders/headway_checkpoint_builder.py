@@ -112,6 +112,7 @@ class SkipStopHeadwayCheckpointBuilder(HeadwayCheckpointBuilder):
 @dataclass(frozen=True)
 class PolicyHeadwayCheckpointBuilder(HeadwayCheckpointBuilder):
     policy: DerivedHeadwayPolicy | EffectiveHeadwayPolicy
+    retain_no_wait_platform_exit: bool = False
 
     def build(
         self,
@@ -135,6 +136,7 @@ class PolicyHeadwayCheckpointBuilder(HeadwayCheckpointBuilder):
                 )
             if (
                 resource.kind is DerivedHeadwayResourceKind.PLATFORM_EXIT
+                and not self.retain_no_wait_platform_exit
                 and station_config.waiting_mode
                 not in {
                     StationWaitingMode.END_OF_PLATFORM_WAIT,

@@ -11,16 +11,16 @@ from ropeway_skip_stop_optimization.benchmarking.thesis_calibration import (
 )
 
 
-def test_calibration_manifest_contains_only_the_24_plus_3_references():
+def test_calibration_manifest_contains_only_the_20_plus_3_references():
     jobs = calibration_jobs(oip_cabins=62)
-    assert len(jobs) == 27
+    assert len(jobs) == 23
     journey = [job for job in jobs if job["group"] == "journey"]
     oip = [job for job in jobs if job["group"] == "oip"]
-    assert len(journey) == 24
+    assert len(journey) == 20
     assert {(job["family"], job["cabins"]) for job in journey} == {
         (family, cabins)
         for family in ("f0", "f2", "f3", "f4")
-        for cabins in (10, 15, 20, 25, 30, 31)
+        for cabins in (10, 15, 20, 25, 30)
     }
     assert all(job["reference_kind"] == JOURNEY_REFERENCE_KIND for job in journey)
     assert [(job["family"], job["cabins"]) for job in oip] == [

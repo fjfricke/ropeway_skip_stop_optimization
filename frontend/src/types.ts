@@ -90,18 +90,27 @@ export interface HeadwayParameterProvenance {
 export interface HeadwayPhysicalParameters {
   service_clearance_m: number;
   rope_clearance_m: number;
-  merge_clearance_m: number;
+  /** Legacy v1 input only; absent in geometric v2 scenarios. */
+  merge_clearance_m?: number;
   cabin_height_m: number;
   attachment_to_cabin_roof_m: number;
   rope_sway_angle_rad: number;
-  emergency_merge_sway_angle_rad: number;
-  control_delay_seconds: number;
-  emergency_deceleration_m_per_s2: number;
+  /** Legacy v1 input only; absent in geometric v2 scenarios. */
+  emergency_merge_sway_angle_rad?: number;
+  /** Legacy v1 input only; absent in geometric v2 scenarios. */
+  control_delay_seconds?: number;
+  /** Legacy v1 input only; absent in geometric v2 scenarios. */
+  emergency_deceleration_m_per_s2?: number;
   provenance: HeadwayParameterProvenance[];
 }
 
 export type StationMechanismDesign =
+  | Record<string, never>
   | { manufacturer_vehicle_interval_seconds: number }
+  | { mechanical_service_cycle_seconds: number; service_resource_id: string;
+      merge_clearance_m: number; emergency_merge_sway_angle_rad: number;
+      control_delay_seconds: number; emergency_deceleration_m_per_s2: number;
+      provenance?: HeadwayParameterProvenance[] }
   | { mechanical_service_cycle_seconds: number; service_resource_id: string }
   | {
       mechanical_service_cycle_seconds: number;
@@ -113,6 +122,7 @@ export type StationMechanismDesign =
   | { guaranteed_vehicle_interval_seconds: number; service_resource_id: string };
 
 export interface HeadwayDesign {
+  schema_version?: 1 | 2;
   physical: HeadwayPhysicalParameters;
   station_mechanisms: { exit_switch_id: string; design: StationMechanismDesign }[];
   provenance: HeadwayParameterProvenance[];

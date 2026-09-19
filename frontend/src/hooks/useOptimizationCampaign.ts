@@ -8,6 +8,9 @@ export function useOptimizationCampaign(campaignId: string | undefined) {
 
   useEffect(() => {
     if (!campaignId) return;
+    setCampaign(null);
+    setError(null);
+    latestSequence.current = -1;
     let cancelled = false;
     let timer: number | undefined;
 

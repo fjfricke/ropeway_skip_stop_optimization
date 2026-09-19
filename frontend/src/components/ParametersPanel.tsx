@@ -6,7 +6,15 @@ interface ParametersPanelProps {
 }
 
 export function ParametersPanel({ scenario }: ParametersPanelProps) {
-  const spacing = scenario.operating.cabin_length_m + scenario.operating.min_clearance_m;
+  const physical = scenario.headway_design?.physical;
+  const spacing = scenario.operating.cabin_length_m + (physical?.service_clearance_m ?? scenario.operating.min_clearance_m);
+  const geometric = !!scenario.headway_design?.station_mechanisms.length
+    && scenario.headway_design.station_mechanisms.every(({ design }) => Object.keys(design).length === 0);
+  const ropeHeadway = physical ? (
+    scenario.operating.cabin_length_m
+    + 2 * (physical.cabin_height_m + physical.attachment_to_cabin_roof_m) * Math.sin(physical.rope_sway_angle_rad)
+    + physical.rope_clearance_m
+  ) / scenario.operating.rope_speed_m_per_s : null;
   const spacingLabel = scenario.headway_design ? "station pitch" : "spacing";
   const segments = new Map(scenario.track_segments.map((segment) => [segment.id, segment]));
   const ropeSegments = scenario.track_segments.filter((segment) => segment.kind === "rope");
@@ -47,7 +55,9 @@ export function ParametersPanel({ scenario }: ParametersPanelProps) {
         <Metric label="bypass path" value={skipRoutes.length > 0 ? `${routeLength(skipRoutes[0].segment_ids, segments).toFixed(2)} m` : "n/a"} />
         <Metric label="STOP time" value={serviceDuration === null ? "n/a" : `${serviceDuration.toFixed(3)} s`} />
         <Metric label="SKIP time" value={skipDuration === null ? "n/a" : `${skipDuration.toFixed(3)} s`} />
-        <Metric label="station mechanism" value={mechanismCycles.length > 0 ? `${Math.max(...mechanismCycles).toFixed(3)} s` : "n/a"} />
+        {mechanismCycles.length > 0 ? <Metric label="station mechanism" value={`${Math.max(...mechanismCycles).toFixed(3)} s`} /> : null}
+        {geometric && ropeHeadway !== null ? <Metric label="geometric entry / exit headway" value={`${ropeHeadway.toFixed(3)} s`} /> : null}
+        {geometric ? <Metric label="platform headway" value={`${(spacing / scenario.operating.station_speed_m_per_s).toFixed(3)} s`} /> : null}
         <Metric label="All-Stop cycle" value={`${allStopCycle.toFixed(3)} s`} />
         <Metric label="operating window" value={`${scenario.service_start_time}–${scenario.service_end_time}`} />
         <Metric label="loaded demand" value={loadedDemand} />

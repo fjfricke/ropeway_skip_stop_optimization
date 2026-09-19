@@ -3,7 +3,8 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
+import time
 from datetime import UTC
 from pathlib import Path
 from typing import Any
@@ -56,6 +57,7 @@ from ropeway_skip_stop_optimization.optimization.solver_progress import (
 from ...benchmarking.frontend_results import update_campaign_index
 from .cp_sat import BuiltOipCpSatModel, OipCpSatConfig, OipCpSatResult, solve_oip_cp_sat
 from .domain import OipBackend, OipDomain, OipPassengerEncoding
+from .passenger_candidates import oip_passenger_candidate_builder
 from .validation import validate_oip_certificate, validate_oip_movement_certificate
 
 
@@ -70,12 +72,19 @@ class OipRunConfig:
     build_only: bool = False
     movement_only: bool = False
     fixed_stop_patterns: tuple[tuple[str, ...], ...] | None = None
+    type_catalog: str | None = None
+    fixed_type_counts: dict[str, int] | None = None
     passenger_evaluation_time_limit_seconds: float | None = None
     output_directory: Path | None = None
     log_to_console: bool = False
     memory_limit_gib: float | None = 32.0
     reference_directory: Path | None = None
     start_checkpoint_directory: Path | None = None
+    formulation: str = "ean"
+    objective: str = "lexicographic"
+    stop_if_cannot_beat_reference: bool = False
+    deadline_unix: float | None = None
+    completion_reserve_seconds: float = 10.0
 
     def validate(self) -> None:
         if self.time_limit_seconds is not None and self.time_limit_seconds <= 0:
@@ -106,6 +115,27 @@ class OipRunConfig:
             raise ValueError(
                 "integrated fixed stop patterns are currently supported only by CP-SAT"
             )
+        if self.type_catalog not in {None, "all_stop_alternating", "all_stop_bd_ce"}:
+            raise ValueError("unknown OIP cabin type catalog")
+        if self.type_catalog is not None and self.fixed_stop_patterns is not None:
+            raise ValueError("type catalog and fixed stop patterns are mutually exclusive")
+        if self.type_catalog is not None and self.backend is not OipBackend.CP_SAT:
+            raise ValueError("OIP cabin type catalogs currently require CP-SAT")
+        if self.formulation not in {"ean", "nowait_templates"}:
+            raise ValueError("unknown OIP formulation")
+        if self.objective not in {"lexicographic", "served"}:
+            raise ValueError("unknown OIP objective")
+        if self.formulation == "nowait_templates" and (
+            self.backend is not OipBackend.CP_SAT
+            or self.type_catalog is None
+            or self.movement_only
+            or self.objective != "served"
+        ):
+            raise ValueError(
+                "No-Wait templates require CP-SAT, a type catalog, passengers, and served objective"
+            )
+        if self.backend is not OipBackend.CP_SAT and self.objective != "lexicographic":
+            raise ValueError("served-only OIP currently requires CP-SAT")
         allowed = {
             OipBackend.CP_SAT: {
                 OipPassengerEncoding.OD_INVENTORY,
@@ -127,29 +157,62 @@ def run_oip(domain: OipDomain, config: OipRunConfig) -> Any:
     """Run one comparable OIP solve and persist a portable manifest."""
 
     config.validate()
+    if config.fixed_type_counts is not None and (config.start_checkpoint_directory is not None or config.formulation != "nowait_templates" or config.backend is not OipBackend.CP_SAT):
+        raise ValueError("Fixed type counts require CP-SAT nowait_templates without a start checkpoint")
     domain.validate()
+    if config.formulation == "nowait_templates" and any(
+        (item.max_wait_seconds or 0.0) != 0.0
+        for item in domain.artifact.config.station_configs
+    ):
+        raise ValueError("No-Wait templates do not support waiting")
+    reference_cutoff = None
+    if config.stop_if_cannot_beat_reference:
+        if config.reference_directory is None or config.objective != "served" or config.backend is not OipBackend.CP_SAT:
+            raise ValueError("Reference stopping requires a matching reference and CP-SAT served objective")
+        reference_certificate = _read_portable_checkpoint(config.reference_directory, domain)
+        reference_cutoff = validate_oip_certificate(domain, *reference_certificate).served
     live_points: list[dict[str, Any]] = []
     start = (
         _read_portable_checkpoint(
             config.start_checkpoint_directory,
             domain,
             expected_fixed_stop_patterns=config.fixed_stop_patterns,
+            expected_type_catalog=config.type_catalog,
         )
         if config.start_checkpoint_directory is not None
         else None
     )
     if config.output_directory is not None:
         _write_live_files(config.output_directory, domain, config, live_points)
+    if config.deadline_unix is not None:
+        remaining = config.deadline_unix - time.time() - config.completion_reserve_seconds
+        if remaining <= 0:
+            raise TimeoutError("OIP preparation exhausted the solve budget; no feasibility conclusion")
+        config = replace(config, time_limit_seconds=min(config.time_limit_seconds or remaining, remaining))
+    incumbent_store = None
+    if config.backend is OipBackend.CP_SAT and config.output_directory is not None and not config.build_only and not config.movement_only:
+        from .incumbent_store import OipIncumbentStore
+        incumbent_store = OipIncumbentStore(
+            domain, config.output_directory,
+            lambda directory, incumbent: _write_run(directory, domain, config, incumbent),
+        )
     if config.backend is OipBackend.CP_SAT:
         result = solve_oip_cp_sat(
             domain,
             OipCpSatConfig(
                 time_limit_seconds=config.time_limit_seconds,
+                search_deadline_unix=(config.deadline_unix - config.completion_reserve_seconds
+                                      if config.deadline_unix is not None else None),
                 workers=config.workers,
                 seed=config.seed,
                 build_only=config.build_only,
                 movement_only=config.movement_only,
                 fixed_stop_patterns=config.fixed_stop_patterns,
+                stop_at_reference_served=reference_cutoff,
+                type_catalog=config.type_catalog,
+                fixed_type_counts=config.fixed_type_counts,
+                formulation=config.formulation,
+                objective=config.objective,
                 memory_limit_gib=config.memory_limit_gib,
                 passenger_encoding=config.passenger_encoding.value,
                 progress_callback=(
@@ -163,6 +226,7 @@ def run_oip(domain: OipDomain, config: OipRunConfig) -> Any:
                     if config.output_directory is not None
                     else None
                 ),
+                incumbent_callback=incumbent_store.submit if incumbent_store is not None else None,
                 initial_movement_plan=start[0] if start else None,
                 initial_fleet_plan=start[1] if start else None,
                 initial_passenger_plan=start[2] if start else None,
@@ -231,6 +295,69 @@ def run_oip(domain: OipDomain, config: OipRunConfig) -> Any:
                 initial_passenger_plan=start[2] if start else None,
             )
         )
+    if (
+        isinstance(result, OipCpSatResult)
+        and result.movement_plan is None
+        and start is not None
+        and not config.build_only
+    ):
+        # CP-SAT can spend the whole budget without reporting the hinted point
+        # as a native solution.  The independently validated portable start is
+        # still a legitimate campaign incumbent, but must not be presented as
+        # native search progress.
+        start_metrics = validate_oip_certificate(domain, start[0], start[1], start[2])
+        horizon_tick = domain.grid.upper_tick(domain.artifact.config.horizon_seconds)
+        total_demand = sum(item.count for item in domain.scenario.demands)
+        weight = total_demand * horizon_tick + 1
+        objective = (
+            start_metrics.unserved
+            if config.objective == "served"
+            else weight * start_metrics.unserved
+                + domain.grid.lower_tick(start_metrics.journey_time_seconds)
+        )
+        result = OipCpSatResult(
+            status="feasible",
+            solver_status=f"INHERITED_START_AFTER_{result.solver_status}",
+            objective_value=objective,
+            best_bound=result.best_bound,
+            gap=(
+                None
+                if result.best_bound is None
+                else abs(objective - result.best_bound) / max(1, abs(objective))
+            ),
+            runtime_seconds=result.runtime_seconds,
+            build_seconds=result.build_seconds,
+            movement_plan=start[0],
+            fleet_plan=start[1],
+            passenger_plan=start[2],
+            served_passengers=start_metrics.served,
+            unserved_passengers=start_metrics.unserved,
+            journey_time_seconds=start_metrics.journey_time_seconds,
+            model_stats=result.model_stats,
+            progress_samples=result.progress_samples,
+            cabin_types={cabin_id: "all_stop" for cabin_id in start[1].active_cabin_ids},
+            type_counts={"all_stop": len(start[1].active_cabin_ids)},
+        )
+    checked_incumbent = False
+    if incumbent_store is not None:
+        incumbent_store.submit(result)
+        timeout = (max(0.0, config.deadline_unix - time.time() - 1.0)
+                   if config.deadline_unix is not None else None)
+        checked = incumbent_store.finish(timeout)
+        if checked is not None:
+            checked_incumbent = True
+            if checked is not result:
+                # Final validation may outlast the reserve. Keep an earlier checked
+                # incumbent and only the conservative bound saved with that solve.
+                result = replace(checked, solver_status="FEASIBLE_CHECKPOINT",
+                                 termination_reason="finalization_deadline")
+        elif result.movement_plan is not None:
+            # Native counts without independent validation are not final results.
+            result = replace(result, status="unknown", solver_status="VALIDATION_PENDING",
+                             movement_plan=None, fleet_plan=None, passenger_plan=None,
+                             served_passengers=None, unserved_passengers=None,
+                             journey_time_seconds=None, objective_value=None, gap=None,
+                             termination_reason="finalization_deadline")
     movement = getattr(result, "movement_plan", None)
     fleet = getattr(result, "fleet_plan", None)
     passengers = getattr(result, "passenger_plan", None)
@@ -265,7 +392,7 @@ def run_oip(domain: OipDomain, config: OipRunConfig) -> Any:
             time_limit_seconds=config.passenger_evaluation_time_limit_seconds,
             memory_limit_gib=config.memory_limit_gib,
         )
-    if movement is not None and fleet is not None and passengers is not None:
+    if not checked_incumbent and movement is not None and fleet is not None and passengers is not None:
         metrics = validate_oip_certificate(domain, movement, fleet, passengers)
         native_served = getattr(result, "served_passengers", None)
         if native_served is None and hasattr(result, "metadata"):
@@ -299,16 +426,33 @@ def _read_portable_checkpoint(
     domain: OipDomain,
     *,
     expected_fixed_stop_patterns: tuple[tuple[str, ...], ...] | None = None,
+    expected_type_catalog: str | None = None,
 ):
     manifest = json.loads((directory / "manifest.json").read_text())
     if manifest.get("domain_fingerprint") != domain.fingerprint:
-        raise ValueError("OIP start checkpoint domain fingerprint mismatch")
+        portable_all_stop = (
+            manifest.get("operation") == "all_stop"
+            and manifest.get("comparison_fingerprint")
+            == domain.comparison_fingerprint
+        )
+        if not portable_all_stop:
+            raise ValueError("OIP start checkpoint domain fingerprint mismatch")
     checkpoint_patterns = manifest.get("fixed_stop_patterns")
     if expected_fixed_stop_patterns is not None and checkpoint_patterns != [
         list(pattern) for pattern in expected_fixed_stop_patterns
     ]:
         raise ValueError("OIP start checkpoint fixed-pattern mismatch")
+    checkpoint_catalog = manifest.get("type_catalog")
+    if expected_type_catalog is not None and checkpoint_catalog not in {
+        None, expected_type_catalog
+    }:
+        raise ValueError("OIP start checkpoint type-catalog mismatch")
     payload = json.loads((directory / "result.json").read_text())
+    return decode_oip_certificate(payload, domain)
+
+
+def decode_oip_certificate(payload, domain):
+    """Deserialize and independently validate; domain provenance belongs to the importer."""
     movement_data = payload.get("movement_plan")
     fleet_data = payload.get("fleet_plan")
     passenger_data = payload.get("passenger_plan")
@@ -400,6 +544,7 @@ def _evaluate_fixed_movement_passengers(
             movement_plan=movement,
             objective=EanPassengerObjective.JOURNEY_TIME,
             lexicographic_unserved_first=True,
+            passenger_builder=oip_passenger_candidate_builder(),
         )
     )
     payload: dict[str, Any] = {
@@ -452,6 +597,11 @@ def _write_run(
                 "movement_only": config.movement_only,
                 "passenger_encoding": config.passenger_encoding.value,
                 "fixed_stop_patterns": config.fixed_stop_patterns,
+                "type_catalog": config.type_catalog,
+        "fixed_type_counts": config.fixed_type_counts,
+        "stop_if_cannot_beat_reference": config.stop_if_cannot_beat_reference,
+                "formulation": config.formulation,
+                "objective": config.objective,
             },
             sort_keys=True,
             separators=(",", ":"),
@@ -467,11 +617,19 @@ def _write_run(
         "passenger_encoding": None if config.movement_only else config.passenger_encoding.value,
         "solve_mode": "movement_feasibility" if config.movement_only else "passenger_service",
         "fixed_stop_patterns": config.fixed_stop_patterns,
+        "type_catalog": config.type_catalog,
+        "fixed_type_counts": config.fixed_type_counts,
+        "stop_if_cannot_beat_reference": config.stop_if_cannot_beat_reference,
+        "formulation": config.formulation,
+        "objective": config.objective,
         "ticks_per_second": domain.grid.ticks_per_second,
         "fixed_k": domain.fixed_k,
         "k_max": domain.k_max,
         "horizon_seconds": domain.artifact.config.horizon_seconds,
         "operation_seconds": domain.artifact.config.operational_end_seconds,
+        "headway_contract": (domain.scenario.experiment_metadata or {}).get("headway_contract"),
+        "deadline_unix": config.deadline_unix,
+        "completion_reserve_seconds": config.completion_reserve_seconds,
         "maximum_wait_seconds": max(
             (item.max_wait_seconds or 0.0)
             for item in domain.artifact.config.station_configs
@@ -494,14 +652,13 @@ def _write_run(
             for name, seconds, ticks, delta in domain.quantization_manifest
         ],
     }
-    (directory / "manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n"
-    )
+    _atomic_json(directory / "manifest.json", manifest)
     if isinstance(result, BuiltOipCpSatModel):
         payload = {
             "status": "build_only",
             "build_seconds": result.build_seconds,
             "model_stats": result.model_stats,
+            "reduction_stats": result.reduction_stats,
             "resource_interval_count": result.resource_interval_count,
         }
     elif isinstance(result, OipCpSatResult):
@@ -527,9 +684,7 @@ def _write_run(
         visit.wait_seconds for visit in movement_visits
     )
     payload["passenger_evaluation"] = passenger_evaluation
-    (directory / "result.json").write_text(
-        json.dumps(payload, indent=2, sort_keys=True, default=str) + "\n"
-    )
+    _atomic_json(directory / "result.json", payload)
     _write_frontend_snapshot(
         directory, domain, config, result,
         passenger_evaluation=passenger_evaluation,
@@ -578,7 +733,9 @@ def _write_frontend_snapshot(
             "unserved": result.unserved_passengers,
             "journey_time_seconds": result.journey_time_seconds,
             "used_fleet": len(result.fleet_plan.active_cabin_ids) if result.fleet_plan else None,
+            "type_counts": result.type_counts,
         }
+        latest.update(_bound_fields(domain, config, latest))
         points = [
             {
                 "seconds": sample.runtime_seconds,
@@ -589,9 +746,12 @@ def _write_frontend_snapshot(
                 "unserved": sample.unserved_passengers,
                 "journey_time_seconds": sample.journey_time_seconds,
                 "used_fleet": sample.active_fleet,
+                "type_counts": sample.type_counts,
             }
             for sample in result.progress_samples
         ]
+        for point in points:
+            point.update(_bound_fields(domain, config, point))
         if result.objective_value is not None and not points:
             points = [latest]
         build_seconds = result.build_seconds
@@ -606,6 +766,13 @@ def _write_frontend_snapshot(
         active_fleet = latest["used_fleet"]
         peak_rss_gb = None
         model_stats = _cp_model_stats(result.model_stats)
+        if result.presolved_model_stats:
+            presolved = _cp_model_stats(result.presolved_model_stats)
+            model_stats.update(
+                presolved_variables=presolved["variables"],
+                presolved_constraints=presolved["constraints"],
+                presolved_intervals=presolved["intervals"],
+            )
     else:
         metadata = result.metadata
         status = metadata.status
@@ -720,6 +887,9 @@ def _write_frontend_snapshot(
         "demand_total": demand_total,
         "fleet_cap": domain.k_max,
         "all_stop_capacity": 0,
+        "headway_contract": (domain.scenario.experiment_metadata or {}).get("headway_contract"),
+        "deadline_unix": config.deadline_unix,
+        "completion_reserve_seconds": config.completion_reserve_seconds,
         "maximum_wait_seconds": max(
             (item.max_wait_seconds or 0.0)
             for item in domain.artifact.config.station_configs
@@ -740,16 +910,28 @@ def _write_frontend_snapshot(
             if config.fixed_stop_patterns is not None
             else None
         ),
+        "type_catalog": config.type_catalog,
+        "fixed_type_counts": config.fixed_type_counts,
+        "stop_if_cannot_beat_reference": config.stop_if_cannot_beat_reference,
+        "type_counts": getattr(result, "type_counts", None),
+        "cabin_types": getattr(result, "cabin_types", None),
         "passenger_evaluation": passenger_evaluation,
         "passenger_encoding": None if config.movement_only else config.passenger_encoding.value,
         "solve_mode": "movement_feasibility" if config.movement_only else "passenger_service",
-        "native_incumbent_seen": bool(points) or (config.movement_only and fleet_plan is not None),
+        "termination_reason": getattr(result, "termination_reason", None),
+        "reference_served_cutoff": getattr(result, "reference_served_cutoff", None),
+        "native_incumbent_seen": (
+            not str(getattr(result, "solver_status", "")).startswith("INHERITED_START_AFTER_")
+            and (bool(points) or fleet_plan is not None)
+        ),
         "inherited_start": config.start_checkpoint_directory is not None,
         "inherited_start_value": _load_start_value(config.start_checkpoint_directory),
         "reference": _load_reference(config.reference_directory, domain),
         "latest": latest,
         "points": points,
         "backend": config.backend.value,
+        "formulation": config.formulation,
+        "objective": _objective_id(config),
         "operation": domain.operation.value,
         "active_fleet": active_fleet,
         "initial_placement": initial_placement,
@@ -760,6 +942,7 @@ def _write_frontend_snapshot(
         "search_seconds": search_seconds,
         "peak_rss_gb": peak_rss_gb,
         "model_stats": model_stats,
+        "reduction_stats": getattr(result, "reduction_stats", None),
     }
     snapshot = {
         "schema_version": 1,
@@ -767,10 +950,10 @@ def _write_frontend_snapshot(
         "label": detail["title"],
         "status": status,
         "campaign_kind": "oip_comparison",
-        "objective": "movement_feasibility" if config.movement_only else "lexicographic_unserved_then_journey_time",
+        "objective": _objective_id(config),
         "method": "optimized_initial_placement",
         "operating_mode": domain.operation.value,
-        "formulation": "common_1ms_oip",
+        "formulation": config.formulation,
         "sequence": 1,
         "trial_count": 1,
         "completed_trial_count": int(status not in {"running", "build_only"}),
@@ -815,12 +998,13 @@ def _cp_model_stats(text: str) -> dict[str, int]:
             else 0
         ),
         "constraints": constraints,
+        "intervals": sum(int(m.group(1).replace("\'", "").replace(",", ""))
+                         for m in re.finditer(r"#kInterval:\s*([0-9,']+)", text)),
     }
 
 
 def _record_cp_live_sample(directory, domain, config, points, sample) -> None:
-    points.append(
-        {
+    point = {
             "seconds": sample.runtime_seconds,
             "ub": sample.objective_value,
             "lb": sample.best_bound,
@@ -829,8 +1013,10 @@ def _record_cp_live_sample(directory, domain, config, points, sample) -> None:
             "unserved": sample.unserved_passengers,
             "journey_time_seconds": sample.journey_time_seconds,
             "used_fleet": sample.active_fleet,
+            "type_counts": sample.type_counts,
         }
-    )
+    point.update(_bound_fields(domain, config, point))
+    points.append(point)
     _write_live_files(directory, domain, config, points)
 
 
@@ -895,6 +1081,10 @@ def _write_live_files(directory, domain, config, points) -> None:
         "points": points,
         "backend": config.backend.value,
         "operation": domain.operation.value,
+        "type_catalog": config.type_catalog,
+        "fixed_type_counts": config.fixed_type_counts,
+        "stop_if_cannot_beat_reference": config.stop_if_cannot_beat_reference,
+        "type_counts": latest.get("type_counts"),
     }
     snapshot = {
         "schema_version": 1,
@@ -902,10 +1092,10 @@ def _write_live_files(directory, domain, config, points) -> None:
         "label": detail["title"],
         "status": "running",
         "campaign_kind": "oip_comparison",
-        "objective": "movement_feasibility" if config.movement_only else "lexicographic_unserved_then_journey_time",
+        "objective": _objective_id(config),
         "method": "optimized_initial_placement",
         "operating_mode": domain.operation.value,
-        "formulation": "common_1ms_oip",
+        "formulation": config.formulation,
         "sequence": len(points),
         "trial_count": 1,
         "completed_trial_count": 0,
@@ -916,6 +1106,62 @@ def _write_live_files(directory, domain, config, points) -> None:
     _atomic_json(directory / "detail.json", detail)
     _atomic_json(directory / "snapshot.json", snapshot)
     _update_frontend_index(directory, snapshot)
+
+
+def _objective_id(config: OipRunConfig) -> str:
+    if config.movement_only:
+        return "movement_feasibility"
+    return (
+        "minimize_unserved"
+        if config.objective == "served"
+        else "lexicographic_unserved_then_journey_time"
+    )
+
+
+def _bound_fields(
+    domain: OipDomain, config: OipRunConfig, point: dict[str, Any]
+) -> dict[str, Any]:
+    if config.objective == "served":
+        total = sum(item.count for item in domain.scenario.demands)
+        bound = point.get("lb")
+        incumbent_unserved = point.get("unserved")
+        return {
+            "served_lower_bound": (
+                None if incumbent_unserved is None else total - int(incumbent_unserved)
+            ),
+            "served_upper_bound": (
+                None if bound is None else total - max(0, min(total, int(bound)))
+            ),
+            "journey_time_lower_bound": None,
+        }
+    return _lexicographic_bound_fields(domain, point)
+
+
+def _lexicographic_bound_fields(domain: OipDomain, point: dict[str, Any]) -> dict[str, Any]:
+    """Derive primary bounds; expose a journey LB only after primary closure."""
+    total = sum(item.count for item in domain.scenario.demands)
+    bound = point.get("lb")
+    incumbent_unserved = point.get("unserved")
+    if bound is None or incumbent_unserved is None:
+        return {
+            "served_lower_bound": None,
+            "served_upper_bound": None,
+            "journey_time_lower_bound": None,
+        }
+    horizon = domain.grid.upper_tick(domain.artifact.config.horizon_seconds)
+    secondary_maximum = total * horizon
+    weight = secondary_maximum + 1
+    lower_unserved = max(0, min(total, (int(bound) - secondary_maximum + weight - 1) // weight))
+    fields = {
+        "served_lower_bound": total - int(incumbent_unserved),
+        "served_upper_bound": total - lower_unserved,
+        "journey_time_lower_bound": None,
+    }
+    if lower_unserved == int(incumbent_unserved):
+        fields["journey_time_lower_bound"] = domain.grid.seconds(
+            max(0, int(bound) - weight * int(incumbent_unserved))
+        )
+    return fields
 
 
 def _atomic_json(path: Path, payload: dict[str, Any]) -> None:

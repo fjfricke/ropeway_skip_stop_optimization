@@ -9,9 +9,11 @@ import {
   optimizationStatusClass,
 } from "../optimizationPresentation";
 import type { OptimizationEvent, OptimizationTrialSnapshot } from "../optimizationTypes";
+import JourneyCampaignDashboard from "./JourneyCampaignDashboard";
 import FleetContinuationDashboard from "./FleetContinuationDashboard";
 import ThesisOverloadDashboard from "./ThesisOverloadDashboard";
 import OipPatternScreeningDashboard from "./OipPatternScreeningDashboard";
+import OipTypeCatalogDashboard from "./OipTypeCatalogDashboard";
 
 export default function OptimizationCampaignPage({ campaignId }: { campaignId: string }) {
   const { campaign, error, stale } = useOptimizationCampaign(campaignId);
@@ -24,13 +26,15 @@ export default function OptimizationCampaignPage({ campaignId }: { campaignId: s
   const continuation = campaign.campaign_kind === "reservoir_cp_fleet_continuation";
   const overload = campaign.campaign_kind === "thesis_full_cp_sat_overload" || campaign.campaign_kind === "oip_comparison";
   const patternScreening = campaign.campaign_kind === "oip_pattern_screening";
+  const journey = campaign.campaign_kind === "journey_comparison";
+  const typeCatalog = campaign.campaign_kind === "oip_type_catalog";
   return (
     <main className="optimization-shell">
       <header className="optimization-hero">
         <div><p className="eyebrow">{feasibility ? "Movement feasibility" : continuation ? "Fleet continuation" : "Campaign"}</p><h1>{campaign.label ?? campaign.campaign_id}</h1></div>
         <div className="campaign-status">
           <span className={`run-state run-state--${campaign.status}`}>{campaign.status.replaceAll("_", " ")}</span>
-          {stale && <span className="stale-badge">No update for 15s</span>}
+          {stale && <span className="stale-badge">{overload ? "No new solver event for 15s" : "No update for 15s"}</span>}
           <strong>{feasibility ? `certified through K=${campaign.largest_certified_feasible_k ?? "—"}` : `${campaign.completed_trial_count ?? 0}/${campaign.trial_count ?? trials.length}`}</strong>
         </div>
       </header>
@@ -38,6 +42,8 @@ export default function OptimizationCampaignPage({ campaignId }: { campaignId: s
       {continuation && <FleetContinuationDashboard campaignId={campaignId} />}
       {overload && <ThesisOverloadDashboard campaignId={campaignId} />}
       {patternScreening && <OipPatternScreeningDashboard campaign={campaign} />}
+      {typeCatalog && <OipTypeCatalogDashboard campaign={campaign} />}
+      {journey && <JourneyCampaignDashboard campaign={campaign} />}
       {feasibility && campaign.frontier_k != null && (
         <section className="feasibility-verdict" aria-label="Feasibility frontier">
           <div><span>Largest certified feasible fleet</span><strong>K={campaign.largest_certified_feasible_k ?? "—"}</strong></div>
@@ -45,12 +51,12 @@ export default function OptimizationCampaignPage({ campaignId }: { campaignId: s
           <p>Each verdict applies to the documented canonical Fixed-K starts. UNKNOWN is not an infeasibility certificate.</p>
         </section>
       )}
-      {!continuation && !overload && !patternScreening && <section className="optimization-panel">
+      {!continuation && !overload && !patternScreening && !typeCatalog && !journey && <section className="optimization-panel">
         <div className="panel-heading"><h2>{feasibility ? "Exact-K feasibility probes" : continuation ? "Progressive fleet caps" : "Policy × fleet size"}</h2><span>{feasibility ? `${trials.length} tested fleet sizes` : continuation ? "Each bound belongs to its displayed K" : "Global certificates only"}</span></div>
         <div className="trial-matrix">{trials.map((trial) => <TrialCell key={trial.trial_id} campaignId={campaignId} trial={trial} feasibility={feasibility} continuation={continuation} />)}</div>
       </section>}
-      {!feasibility && !continuation && !overload && !patternScreening && policies.map((policy) => <section className="optimization-panel" key={policy.policy.id}><div className="panel-heading"><h2>{policy.policy.label}</h2><span>{policy.policy.example_id}</span></div><BoundProgressChart points={policy.bounds.map((point) => ({ x: point.available_fleet_count, lower: point.tightened_lower_bound, upper: point.tightened_upper_bound }))} /></section>)}
-      {!overload && !patternScreening && <section className="optimization-panel"><div className="panel-heading"><h2>Recent events</h2><span>seq {campaign.sequence}</span></div><EventList events={(campaign.events ?? []).slice(-12).reverse()} /></section>}
+      {!feasibility && !continuation && !overload && !patternScreening && !typeCatalog && !journey && policies.map((policy) => <section className="optimization-panel" key={policy.policy.id}><div className="panel-heading"><h2>{policy.policy.label}</h2><span>{policy.policy.example_id}</span></div><BoundProgressChart points={policy.bounds.map((point) => ({ x: point.available_fleet_count, lower: point.tightened_lower_bound, upper: point.tightened_upper_bound }))} /></section>)}
+      {!overload && !patternScreening && !typeCatalog && !journey && <section className="optimization-panel"><div className="panel-heading"><h2>Recent events</h2><span>seq {campaign.sequence}</span></div><EventList events={(campaign.events ?? []).slice(-12).reverse()} /></section>}
     </main>
   );
 }

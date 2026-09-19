@@ -3,9 +3,6 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass
 
-from ropeway_skip_stop_optimization.optimization.ean.builders.passenger_builder import (
-    EanPassengerCandidateBuilder,
-)
 from ropeway_skip_stop_optimization.optimization.ean.fleet import EanFleetPlan
 from ropeway_skip_stop_optimization.optimization.ean.passenger_plan import (
     EanPassengerServicePlan,
@@ -17,6 +14,7 @@ from ropeway_skip_stop_optimization.optimization.ean.validation import (
 )
 
 from .domain import OipDomain
+from .passenger_candidates import oip_passenger_candidate_builder
 
 
 @dataclass(frozen=True)
@@ -35,7 +33,7 @@ def validate_oip_certificate(
 ) -> OipCertificateMetrics:
     validate_oip_movement_certificate(domain, movement, fleet)
     tolerance = 1.1 / domain.grid.ticks_per_second
-    build = EanPassengerCandidateBuilder().build(domain.scenario, domain.artifact)
+    build = oip_passenger_candidate_builder().build(domain.scenario, domain.artifact)
     groups = {group.id: group for group in build.demand_groups}
     candidates = {
         (
@@ -55,6 +53,8 @@ def validate_oip_certificate(
     onboard: dict[tuple[int, int], int] = defaultdict(int)
     journey = 0.0
     for ride in passengers.served_rides:
+        if type(ride.count) is not int or ride.count <= 0:
+            raise ValueError("OIP passenger ride count must be a positive integer")
         key = (
             ride.demand_group_id,
             ride.cabin_id,
@@ -68,6 +68,12 @@ def validate_oip_certificate(
         if board.decision.value != "stop" or alight.decision.value != "stop":
             raise ValueError("OIP passenger ride uses a skipped endpoint")
         group = groups[ride.demand_group_id]
+        if board.platform_exit_time_seconds is None or alight.platform_entry_time_seconds is None:
+            raise ValueError("OIP passenger ride has no physical endpoint time")
+        if abs(ride.boarding_time_seconds - board.platform_exit_time_seconds) > tolerance:
+            raise ValueError("OIP passenger boarding time differs from movement")
+        if abs(ride.alighting_time_seconds - alight.platform_entry_time_seconds) > tolerance:
+            raise ValueError("OIP passenger alighting time differs from movement")
         if ride.boarding_time_seconds + tolerance < max(0.0, group.release_time_seconds):
             raise ValueError("OIP passenger ride boards before release")
         if ride.alighting_time_seconds > domain.artifact.config.horizon_seconds + tolerance:
@@ -85,6 +91,8 @@ def validate_oip_certificate(
             raise ValueError(f"OIP cabin capacity exceeded at {key!r}")
     for group_id, group in groups.items():
         unserved = passengers.unserved_counts_by_demand_group_id.get(group_id)
+        if type(unserved) is not int or unserved < 0:
+            raise ValueError("OIP unserved count must be a nonnegative integer")
         if unserved is None or served_by_group[group_id] + unserved != group.count:
             raise ValueError(f"OIP demand balance fails for {group_id!r}")
         journey += unserved * max(

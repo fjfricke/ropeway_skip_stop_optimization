@@ -35,6 +35,34 @@ def test_frontend_export_preserves_zero_and_absent_incumbent_values(tmp_path):
     assert detail["latest"]["used_fleet"] is None
 
 
+def test_certificate_rejects_claimed_times_that_differ_from_movement():
+    from dataclasses import replace
+
+    from ropeway_skip_stop_optimization.optimization.oip.cp_sat import (
+        OipCpSatConfig,
+        solve_oip_cp_sat,
+    )
+    from ropeway_skip_stop_optimization.optimization.oip.validation import (
+        validate_oip_certificate,
+    )
+
+    domain = _small_domain(0.0)
+    result = solve_oip_cp_sat(
+        domain, OipCpSatConfig(time_limit_seconds=5, workers=1)
+    )
+    assert result.passenger_plan is not None and result.passenger_plan.served_rides
+    first = result.passenger_plan.served_rides[0]
+    broken = replace(
+        result.passenger_plan,
+        served_rides=(
+            replace(first, boarding_time_seconds=first.boarding_time_seconds + 1),
+            *result.passenger_plan.served_rides[1:],
+        ),
+    )
+    with pytest.raises(ValueError, match="boarding time differs"):
+        validate_oip_certificate(domain, result.movement_plan, result.fleet_plan, broken)
+
+
 def test_live_placeholder_reports_waiting_contract(tmp_path):
     from ropeway_skip_stop_optimization.optimization.oip.runner import (
         OipRunConfig,

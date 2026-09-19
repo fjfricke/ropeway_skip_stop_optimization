@@ -31,6 +31,7 @@ from ropeway_skip_stop_optimization.models import (
     HeadwayEvidenceKind,
     HeadwayParameterProvenance,
     HeadwayPhysicalParameters,
+    GeometricSharedBoundaryDesign,
     MandatoryServiceStationDesign,
     PhysicalNode,
     PhysicalNodeKind,
@@ -193,6 +194,7 @@ def with_architecture_b_headways(
                 StationMechanismAssignment(
                     exit_switch_id=f"{station}_exit_{direction}",
                     design=DefaultBypassStopOnFaultDesign(
+                        **_fault_parameters(),
                         mechanical_service_cycle_seconds=6.0,
                         service_resource_id=(
                             f"service_attachment::{station}::{direction}"
@@ -203,6 +205,24 @@ def with_architecture_b_headways(
             ),
             provenance=(
                 _architecture_provenance(ArtificialHeadwayArchitecture.B),
+            ),
+        ),
+    )
+
+
+def with_geometric_headways(
+    scenario: Scenario, *, scenario_id: str, direction: str = "cw",
+) -> Scenario:
+    """Build the thesis geometry directly, without legacy fault inputs."""
+    return replace(
+        scenario, id=scenario_id,
+        headway_design=HeadwayDesign(
+            physical=_physical_parameters(),
+            station_mechanisms=tuple(
+                StationMechanismAssignment(
+                    exit_switch_id=f"{station.id}_exit_{direction}",
+                    design=GeometricSharedBoundaryDesign(),
+                ) for station in scenario.stations
             ),
         ),
     )
@@ -469,43 +489,18 @@ def _example(
     )
 
 
-def _physical_parameters() -> HeadwayPhysicalParameters:
-    return HeadwayPhysicalParameters(
-        service_clearance_m=0.5,
-        rope_clearance_m=0.5,
+def _fault_parameters() -> dict:
+    """Inputs used only by the historical stop-on-fault mechanism."""
+    return dict(
         merge_clearance_m=0.5,
-        cabin_height_m=2.22,
-        attachment_to_cabin_roof_m=2.0,
-        rope_sway_angle_rad=0.34,
         emergency_merge_sway_angle_rad=0.34,
         control_delay_seconds=0.5,
         emergency_deceleration_m_per_s2=1.75,
         provenance=(
             _provenance(
-                "service_clearance_m", "tezak2016", HeadwayEvidenceKind.LITERATURE
-            ),
-            _provenance(
-                "rope_clearance_m",
-                "artificial_case_v0",
-                HeadwayEvidenceKind.EXPERIMENTAL,
-            ),
-            _provenance(
                 "merge_clearance_m",
                 "artificial_case_v0",
                 HeadwayEvidenceKind.EXPERIMENTAL,
-            ),
-            _provenance(
-                "cabin_height_m",
-                "doppelmayr_d_line",
-                HeadwayEvidenceKind.MANUFACTURER,
-            ),
-            _provenance(
-                "attachment_to_cabin_roof_m",
-                "artificial_case_v0",
-                HeadwayEvidenceKind.EXPERIMENTAL,
-            ),
-            _provenance(
-                "rope_sway_angle_rad", "en12929_rm2", HeadwayEvidenceKind.EXPERIMENTAL
             ),
             _provenance(
                 "emergency_merge_sway_angle_rad",
@@ -526,6 +521,39 @@ def _physical_parameters() -> HeadwayPhysicalParameters:
     )
 
 
+def _physical_parameters() -> HeadwayPhysicalParameters:
+    return HeadwayPhysicalParameters(
+        service_clearance_m=0.5,
+        rope_clearance_m=0.5,
+        cabin_height_m=2.22,
+        attachment_to_cabin_roof_m=2.0,
+        rope_sway_angle_rad=0.34,
+        provenance=(
+            _provenance(
+                "service_clearance_m", "tezak2016", HeadwayEvidenceKind.LITERATURE
+            ),
+            _provenance(
+                "rope_clearance_m",
+                "artificial_case_v0",
+                HeadwayEvidenceKind.EXPERIMENTAL,
+            ),
+            _provenance(
+                "cabin_height_m",
+                "doppelmayr_d_line",
+                HeadwayEvidenceKind.MANUFACTURER,
+            ),
+            _provenance(
+                "attachment_to_cabin_roof_m",
+                "artificial_case_v0",
+                HeadwayEvidenceKind.EXPERIMENTAL,
+            ),
+            _provenance(
+                "rope_sway_angle_rad", "en12929_rm2", HeadwayEvidenceKind.EXPERIMENTAL
+            ),
+        ),
+    )
+
+
 def _bypass_mechanism(
     architecture: ArtificialHeadwayArchitecture,
     *,
@@ -536,6 +564,7 @@ def _bypass_mechanism(
         return ConventionalQuickSwitchDesign(manufacturer_vehicle_interval_seconds=9.0)
     if architecture is ArtificialHeadwayArchitecture.B:
         return DefaultBypassStopOnFaultDesign(
+            **_fault_parameters(),
             mechanical_service_cycle_seconds=6.0,
             service_resource_id=resource_id,
         )

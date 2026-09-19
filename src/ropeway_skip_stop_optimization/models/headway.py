@@ -30,32 +30,24 @@ class HeadwayParameterProvenance:
 class HeadwayPhysicalParameters:
     service_clearance_m: float
     rope_clearance_m: float
-    merge_clearance_m: float
     cabin_height_m: float
     attachment_to_cabin_roof_m: float
     rope_sway_angle_rad: float
-    emergency_merge_sway_angle_rad: float
-    control_delay_seconds: float
-    emergency_deceleration_m_per_s2: float
     provenance: tuple[HeadwayParameterProvenance, ...] = ()
 
     def validate(self) -> None:
         for name in (
             "service_clearance_m",
             "rope_clearance_m",
-            "merge_clearance_m",
-            "control_delay_seconds",
         ):
             _require_finite_nonnegative(name, getattr(self, name))
         for name in (
             "cabin_height_m",
             "attachment_to_cabin_roof_m",
-            "emergency_deceleration_m_per_s2",
         ):
             _require_finite_positive(name, getattr(self, name))
         for name in (
             "rope_sway_angle_rad",
-            "emergency_merge_sway_angle_rad",
         ):
             value = getattr(self, name)
             if not math.isfinite(value) or not 0 <= value < math.pi / 2:
@@ -74,6 +66,14 @@ class HeadwayPhysicalParameters:
 
 
 @dataclass(frozen=True)
+class GeometricSharedBoundaryDesign:
+    """Shared entry/exit use rope geometry only; no switching mechanism."""
+
+    def validate(self) -> None:
+        pass
+
+
+@dataclass(frozen=True)
 class ConventionalQuickSwitchDesign:
     manufacturer_vehicle_interval_seconds: float
 
@@ -88,6 +88,11 @@ class ConventionalQuickSwitchDesign:
 class DefaultBypassStopOnFaultDesign:
     mechanical_service_cycle_seconds: float
     service_resource_id: str
+    merge_clearance_m: float
+    emergency_merge_sway_angle_rad: float
+    control_delay_seconds: float
+    emergency_deceleration_m_per_s2: float
+    provenance: tuple[HeadwayParameterProvenance, ...] = ()
 
     def validate(self) -> None:
         _require_finite_positive(
@@ -95,6 +100,13 @@ class DefaultBypassStopOnFaultDesign:
             self.mechanical_service_cycle_seconds,
         )
         _require_id("service_resource_id", self.service_resource_id)
+        _require_finite_nonnegative("merge_clearance_m", self.merge_clearance_m)
+        _require_finite_nonnegative("control_delay_seconds", self.control_delay_seconds)
+        _require_finite_positive("emergency_deceleration_m_per_s2", self.emergency_deceleration_m_per_s2)
+        angle = self.emergency_merge_sway_angle_rad
+        if not math.isfinite(angle) or not 0 <= angle < math.pi / 2:
+            raise ValueError("emergency_merge_sway_angle_rad must lie in [0, pi/2)")
+        _validate_provenance(self.provenance)
 
 
 @dataclass(frozen=True)
@@ -135,7 +147,8 @@ class MandatoryServiceStationDesign:
 
 
 type StationMechanismDesign = (
-    ConventionalQuickSwitchDesign
+    GeometricSharedBoundaryDesign
+    | ConventionalQuickSwitchDesign
     | DefaultBypassStopOnFaultDesign
     | FailSafeDiversionDesign
     | MandatoryServiceStationDesign
@@ -158,7 +171,11 @@ class HeadwayDesign:
     station_mechanisms: tuple[StationMechanismAssignment, ...]
     provenance: tuple[HeadwayParameterProvenance, ...] = ()
 
+    schema_version: int = 2
+
     def validate(self) -> None:
+        if self.schema_version != 2:
+            raise ValueError("headway design requires schema_version 2")
         self.physical.validate()
         if not self.station_mechanisms:
             raise ValueError("headway design needs station mechanism assignments")

@@ -5,15 +5,15 @@ from dataclasses import replace
 from pathlib import Path
 from time import perf_counter
 
-from ropeway_skip_stop_optimization.examples.registry import EXAMPLES, get_example
-from ropeway_skip_stop_optimization.benchmarking.oip_pattern_waiting import (
-    prepare_oip_pattern_waiting_pilot,
-)
 from ropeway_skip_stop_optimization.benchmarking.oip_pattern_screening import (
     OipScreeningDemandFamily,
     materialize_pattern_allocation,
     pattern_allocations,
 )
+from ropeway_skip_stop_optimization.benchmarking.oip_pattern_waiting import (
+    prepare_oip_pattern_waiting_pilot,
+)
+from ropeway_skip_stop_optimization.examples.registry import EXAMPLES, get_example
 from ropeway_skip_stop_optimization.optimization.ean import (
     EanFleetCardinalityMode,
     EanFleetMode,
@@ -43,9 +43,12 @@ def main() -> None:
             demand_total=args.demand_total,
             ticks_per_second=args.ticks_per_second,
             demand_family=demand_family.value,
+            operation=OipOperation(args.operation),
         )
         domain = prepared.domain
-        if args.pattern_mix in prepared.pattern_mixes:
+        if args.type_catalog is not None:
+            fixed_stop_patterns = None
+        elif args.pattern_mix in prepared.pattern_mixes:
             fixed_stop_patterns = prepared.pattern_mixes[args.pattern_mix]
         else:
             station_ids = tuple(
@@ -72,18 +75,24 @@ def main() -> None:
             backend=OipBackend(args.backend),
             passenger_encoding=OipPassengerEncoding(args.passenger_encoding),
             time_limit_seconds=remaining_time,
+            deadline_unix=args.deadline_unix,
             seed=args.seed,
             workers=args.workers,
             mip_gap=args.mip_gap,
             build_only=args.build_only,
             movement_only=args.movement_only,
             fixed_stop_patterns=fixed_stop_patterns,
+            stop_if_cannot_beat_reference=args.stop_if_cannot_beat_reference,
+            type_catalog=args.type_catalog,
+            fixed_type_counts=args.fixed_type_counts,
             passenger_evaluation_time_limit_seconds=args.passenger_evaluation_time_limit,
             output_directory=args.output,
             log_to_console=args.log_to_console,
             memory_limit_gib=args.memory_limit_gib,
             reference_directory=args.all_stop_reference,
             start_checkpoint_directory=args.start_checkpoint,
+            formulation=args.formulation,
+            objective=args.objective,
         ),
     )
     status = getattr(result, "status", None) or getattr(
@@ -179,6 +188,7 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--warmup-seconds", type=float, default=0.0)
     parser.add_argument("--maximum-wait-seconds", type=float, default=0.0)
     parser.add_argument("--time-limit", type=float, default=None)
+    parser.add_argument("--deadline-unix", type=float, default=None)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--workers", type=int, default=1)
     parser.add_argument("--memory-limit-gib", type=float, default=32.0)
@@ -187,18 +197,41 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument("--movement-only", action="store_true",
                         help="Find a feasible movement without building passenger variables")
     parser.add_argument(
+        "--formulation", choices=("ean", "nowait_templates"), default="ean",
+    )
+    parser.add_argument(
+        "--objective", choices=("lexicographic", "served"),
+        default="lexicographic",
+    )
+    patterns = parser.add_mutually_exclusive_group()
+    patterns.add_argument(
         "--pattern-mix",
         help=(
             "Fix a repeating per-cabin station mask. Integrated passenger "
             "optimization with fixed patterns is supported by CP-SAT."
         ),
     )
+    patterns.add_argument(
+        "--type-catalog",
+        choices=("all_stop_alternating", "all_stop_bd_ce"),
+        help="Let CP-SAT choose one of a small set of cabin-wide stop types.",
+    )
+    parser.add_argument("--fixed-type-counts", help="JSON object of exact catalog type counts")
     parser.add_argument("--log-to-console", action="store_true")
+    parser.add_argument("--stop-if-cannot-beat-reference", action="store_true")
     parser.add_argument("--all-stop-reference", type=Path, default=None)
     parser.add_argument("--start-checkpoint", type=Path, default=None)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--passenger-evaluation-time-limit", type=float, default=None)
     args = parser.parse_args()
+    if args.fixed_type_counts is not None:
+        import json
+        try:
+            args.fixed_type_counts = json.loads(args.fixed_type_counts)
+        except ValueError:
+            parser.error("--fixed-type-counts must be a JSON object")
+        if not isinstance(args.fixed_type_counts, dict) or args.formulation != "nowait_templates" or args.start_checkpoint is not None:
+            parser.error("fixed type counts require nowait_templates without a start checkpoint")
     if args.thesis_f2_pilot:
         if args.example is not None or args.k_max is not None:
             parser.error("--thesis-f2-pilot fixes the example and accepts only --fixed-k")
@@ -206,8 +239,19 @@ def _parse_args() -> argparse.Namespace:
             parser.error("--fixed-k must be positive")
         if args.demand_total <= 0:
             parser.error("--demand-total must be positive")
-        if args.pattern_mix is None:
-            parser.error("the thesis pilot requires --pattern-mix")
+        if args.pattern_mix is None and args.type_catalog is None:
+            parser.error("the thesis pilot requires --pattern-mix or --type-catalog")
+        if args.formulation == "nowait_templates" and (
+            args.type_catalog is None
+            or args.maximum_wait_seconds != 0
+            or args.movement_only
+            or args.objective != "served"
+            or args.backend != OipBackend.CP_SAT
+        ):
+            parser.error(
+                "--formulation nowait_templates requires CP-SAT, No-Wait, "
+                "a type catalog, passengers, and --objective served"
+            )
         if not args.movement_only and args.backend != OipBackend.CP_SAT:
             parser.error(
                 "integrated thesis-pilot pattern solves currently require CP-SAT"

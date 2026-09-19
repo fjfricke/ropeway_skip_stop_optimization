@@ -12,11 +12,12 @@ import math
 from pathlib import Path
 
 
-THESIS_CONTRACT_ID = "t5r_g500_b_entry_exit_2cycles_900completion_300tail_v2"
-HEADWAY_CONTRACT = "architecture_b_stop_leader_entry_and_exit"
+THESIS_CONTRACT_ID = "t5r_g500_geometric_2cycles_900completion_300tail_v3"
+HEADWAY_CONTRACT = "geometric_shared_entry_exit_v1"
 RELATIVE_JOURNEY_K = tuple(range(10, 31, 5))
 CONSTANT_JOURNEY_K = tuple(range(20, 31, 5))
-CONSTANT_REFERENCE_K = 31
+CONSTANT_REFERENCE_K = 30
+JOURNEY_REFERENCE_K = tuple(sorted(set((*RELATIVE_JOURNEY_K, CONSTANT_REFERENCE_K))))
 
 
 def solver_versions() -> dict[str, str | None]:

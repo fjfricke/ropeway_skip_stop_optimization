@@ -11,6 +11,7 @@ from ropeway_skip_stop_optimization.models import (
     ConstantHeadwayRule,
     ConventionalQuickSwitchDesign,
     DefaultBypassStopOnFaultDesign,
+    GeometricSharedBoundaryDesign,
     DerivedHeadwayPolicy,
     DerivedHeadwayResource,
     DerivedHeadwayResourceKind,
@@ -219,7 +220,9 @@ class PhysicalHeadwayPolicyBuilder:
             exit_rule_id = f"headway_rule::exit_switch::{state_id}"
             service_resource_seconds: float | None = None
             service_resource_id: str | None = None
-            if isinstance(mechanism, ConventionalQuickSwitchDesign):
+            if isinstance(mechanism, GeometricSharedBoundaryDesign):
+                rules.append(ConstantHeadwayRule(exit_rule_id, rope_headway))
+            elif isinstance(mechanism, ConventionalQuickSwitchDesign):
                 rules.append(
                     ConstantHeadwayRule(
                         exit_rule_id,
@@ -233,6 +236,7 @@ class PhysicalHeadwayPolicyBuilder:
                 merge_envelope_headway, stop_time, stop_headway = _stop_headway(
                     scenario=scenario,
                     merge_speed=merge_speed,
+                    mechanism=mechanism,
                 )
                 rules.append(
                     LeaderBehaviorHeadwayRule(
@@ -348,7 +352,11 @@ class PhysicalHeadwayPolicyBuilder:
                 DerivedSpatialSpacing(DerivedSpatialRole.SERVICE, service_spacing),
             ),
             derived_quantities=tuple(quantities),
-            provenance=physical.provenance + design.provenance,
+            provenance=tuple(dict.fromkeys(
+                physical.provenance + design.provenance
+                + tuple(p for assignment in design.station_mechanisms
+                        for p in getattr(assignment.design, "provenance", ()))
+            )),
         )
         policy.validate()
         return policy
@@ -490,7 +498,7 @@ def _profile_end_speed(profile: SpeedProfile) -> float:
 
 
 def _stop_headway(
-    *, scenario: Scenario, merge_speed: float
+    *, scenario: Scenario, merge_speed: float, mechanism: DefaultBypassStopOnFaultDesign
 ) -> tuple[float, float, float]:
     assert scenario.headway_design is not None
     physical = scenario.headway_design.physical
@@ -498,13 +506,13 @@ def _stop_headway(
         scenario.operating.cabin_length_m
         + 2.0
         * physical.attachment_to_lowest_envelope_m
-        * math.sin(physical.emergency_merge_sway_angle_rad)
-        + physical.merge_clearance_m
+        * math.sin(mechanism.emergency_merge_sway_angle_rad)
+        + mechanism.merge_clearance_m
     )
     envelope = merge_spacing / merge_speed
     stop_time = (
-        physical.control_delay_seconds
-        + merge_speed / physical.emergency_deceleration_m_per_s2
+        mechanism.control_delay_seconds
+        + merge_speed / mechanism.emergency_deceleration_m_per_s2
     )
     rope_headway = (
         scenario.operating.cabin_length_m

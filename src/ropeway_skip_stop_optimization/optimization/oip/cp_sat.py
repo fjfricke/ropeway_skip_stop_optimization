@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from dataclasses import dataclass
-from time import perf_counter
-from typing import Any, Callable
+from collections.abc import Callable
+from dataclasses import dataclass, replace
+from itertools import pairwise
+from math import floor, isfinite
+from time import perf_counter, time
+from threading import Event, Thread
+from typing import Any
 
 from ortools.sat.python import cp_model
 
@@ -12,13 +16,12 @@ from ropeway_skip_stop_optimization.models import (
     LeaderBehaviorHeadwayRule,
 )
 from ropeway_skip_stop_optimization.optimization.ddd.cp_sat_passenger_inventory import (
-    DddOdInventoryRide,
     _aggregate_rides,
     _od_id,
 )
 from ropeway_skip_stop_optimization.optimization.ean.builders.passenger_builder import (
-    EanPassengerCandidateBuildResult,
     EanPassengerCandidateBuilder,
+    EanPassengerCandidateBuildResult,
 )
 from ropeway_skip_stop_optimization.optimization.ean.fleet import (
     EanFleetPlan,
@@ -50,22 +53,30 @@ from ropeway_skip_stop_optimization.optimization.ean.time_bounds import (
 )
 
 from .domain import OipDomain, OipOperation
+from .passenger_candidates import oip_passenger_candidate_builder
 
 
 @dataclass(frozen=True)
 class OipCpSatConfig:
     time_limit_seconds: float | None = None
+    search_deadline_unix: float | None = None
     workers: int = 1
     seed: int = 0
     build_only: bool = False
     movement_only: bool = False
     fixed_stop_patterns: tuple[tuple[str, ...], ...] | None = None
+    type_catalog: str | None = None
+    fixed_type_counts: dict[str, int] | None = None
     memory_limit_gib: float | None = None
     passenger_encoding: str = "od_inventory"
-    progress_callback: Callable[["OipCpSatProgressSample"], None] | None = None
+    progress_callback: Callable[[OipCpSatProgressSample], None] | None = None
+    incumbent_callback: Callable[[OipCpSatResult], None] | None = None
     initial_movement_plan: EanMovementPlan | None = None
     initial_fleet_plan: EanFleetPlan | None = None
     initial_passenger_plan: EanPassengerServicePlan | None = None
+    formulation: str = "ean"
+    objective: str = "lexicographic"
+    stop_at_reference_served: int | None = None
 
     def validate(self) -> None:
         if self.time_limit_seconds is not None and self.time_limit_seconds <= 0:
@@ -76,6 +87,20 @@ class OipCpSatConfig:
             raise ValueError("OIP CP-SAT memory limit must be positive")
         if self.passenger_encoding not in {"od_inventory", "groups"}:
             raise ValueError("unknown OIP CP-SAT passenger encoding")
+        if self.type_catalog not in {None, "all_stop_alternating", "all_stop_bd_ce"}:
+            raise ValueError("unknown OIP cabin type catalog")
+        if self.type_catalog is not None and self.fixed_stop_patterns is not None:
+            raise ValueError("type catalog and fixed stop patterns are mutually exclusive")
+        if self.formulation not in {"ean", "nowait_templates"}:
+            raise ValueError("unknown OIP CP-SAT formulation")
+        if self.objective not in {"lexicographic", "served"}:
+            raise ValueError("unknown OIP objective")
+        if self.formulation == "nowait_templates" and (
+            self.type_catalog is None or self.movement_only or self.objective != "served"
+        ):
+            raise ValueError(
+                "No-Wait templates require a type catalog, passengers, and served objective"
+            )
 
 
 @dataclass(frozen=True)
@@ -86,8 +111,9 @@ class OipCpSatProgressSample:
     gap: float
     served_passengers: int
     unserved_passengers: int
-    journey_time_seconds: float
+    journey_time_seconds: float | None
     active_fleet: int
+    type_counts: dict[str, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -101,6 +127,10 @@ class OipCpSatMovementVariables:
     exit_time: dict[tuple[int, int], cp_model.IntVar]
     wait_time: dict[tuple[int, int], cp_model.IntVar]
     stop: dict[tuple[int, int], cp_model.IntVar]
+    cabin_type: dict[tuple[int, str], cp_model.IntVar]
+    type_ids: tuple[str, ...] = ()
+    fixed_cabin_types: dict[int, str] | None = None
+    fixed_stop_patterns: tuple[frozenset[str], ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -111,7 +141,7 @@ class OipCpSatPassengerVariables:
     rides: dict[str, Any]
     groups_by_od: dict[tuple[str, str], tuple[Any, ...]]
     board_time: dict[str, cp_model.IntVar]
-    journey: cp_model.LinearExpr
+    journey: cp_model.LinearExpr | None
     unserved_total: cp_model.LinearExpr
     lexicographic_weight: int
     total_demand: int
@@ -126,6 +156,10 @@ class BuiltOipCpSatModel:
     passenger_build: EanPassengerCandidateBuildResult | None
     build_seconds: float
     resource_interval_count: int
+    formulation: str = "ean"
+    objective: str = "lexicographic"
+
+    reduction_stats: dict | None = None
 
     @property
     def model_stats(self) -> str:
@@ -149,6 +183,42 @@ class OipCpSatResult:
     journey_time_seconds: float | None
     model_stats: str
     progress_samples: tuple[OipCpSatProgressSample, ...] = ()
+    cabin_types: dict[int, str] | None = None
+    type_counts: dict[str, int] | None = None
+    presolved_model_stats: str | None = None
+    termination_reason: str | None = None
+    reference_served_cutoff: int | None = None
+    reduction_stats: dict | None = None
+
+
+def _type_ids(type_catalog: str | None) -> tuple[str, ...]:
+    if type_catalog is None:
+        return ()
+    if type_catalog == "all_stop_alternating":
+        return ("all_stop", "alternating_phase_0", "alternating_phase_1")
+    if type_catalog == "all_stop_bd_ce":
+        return ("all_stop", "bd", "ce")
+    raise ValueError(f"unknown OIP cabin type catalog: {type_catalog}")
+
+
+def _type_serves(
+    type_id: str,
+    *,
+    station_id: str,
+    visit_index: int,
+    skip_allowed: bool,
+) -> bool:
+    if not skip_allowed or type_id == "all_stop":
+        return True
+    if type_id == "bd":
+        return station_id in {"S1", "S3"}
+    if type_id == "ce":
+        return station_id in {"S2", "S4"}
+    if type_id == "alternating_phase_0":
+        return visit_index % 2 == 0
+    if type_id == "alternating_phase_1":
+        return visit_index % 2 == 1
+    raise ValueError(f"unknown OIP cabin type: {type_id}")
 
 
 def _validate_fixed_stop_patterns(
@@ -189,9 +259,28 @@ def build_oip_cp_sat_model(
     passenger_encoding: str = "od_inventory",
     movement_only: bool = False,
     fixed_stop_patterns: tuple[tuple[str, ...], ...] | None = None,
+    type_catalog: str | None = None,
+    fixed_type_counts: dict[str, int] | None = None,
+    formulation: str = "ean",
+    objective: str = "lexicographic",
+    specialize_fixed_types: bool = True,
+    reduce_headways: bool = True,
 ) -> BuiltOipCpSatModel:
     started = perf_counter()
     domain.validate()
+    if fixed_type_counts is not None and formulation != "nowait_templates":
+        raise ValueError("Fixed type counts require nowait_templates")
+    if formulation == "nowait_templates":
+        from .nowait_templates import build_nowait_template_model
+
+        if fixed_stop_patterns is not None or movement_only or objective != "served":
+            raise ValueError("No-Wait templates require a type catalog, passengers, and served objective")
+        return build_nowait_template_model(
+            domain, type_catalog=type_catalog, passenger_encoding=passenger_encoding,
+            fixed_type_counts=fixed_type_counts,
+            passenger_builder=passenger_builder,
+            specialize_fixed_types=specialize_fixed_types, reduce_headways=reduce_headways,
+        )
     artifact = domain.artifact
     grid = domain.grid
     model = cp_model.CpModel()
@@ -210,10 +299,18 @@ def build_oip_cp_sat_model(
         for visit in artifact.switch_visits
     }
     patterns = _validate_fixed_stop_patterns(domain, fixed_stop_patterns)
+    if patterns is not None and type_catalog is not None:
+        raise ValueError("type catalog and fixed stop patterns are mutually exclusive")
+    type_ids = _type_ids(type_catalog)
+    if type_ids and domain.fixed_k is None:
+        raise ValueError("OIP cabin type catalogs require an exact fixed K")
+    if formulation not in {"ean", "nowait_templates"}:
+        raise ValueError("unknown OIP CP-SAT formulation")
+    if objective not in {"lexicographic", "served"}:
+        raise ValueError("unknown OIP objective")
     timing = {item.switch_id: item for item in artifact.timings}
     station_config = {item.station_id: item for item in artifact.config.station_configs}
     phase_count = artifact.initial_placement_parameters.initial_phase_visit_count
-    horizon = grid.upper_tick(artifact.config.horizon_seconds)
     operation_end = grid.upper_tick(artifact.config.operational_end_seconds)
 
     active: dict[int, cp_model.IntVar] = {}
@@ -226,12 +323,29 @@ def build_oip_cp_sat_model(
     wait_time: dict[tuple[int, int], cp_model.IntVar] = {}
     stop: dict[tuple[int, int], cp_model.IntVar] = {}
     reached: dict[tuple[int, int], cp_model.IntVar] = {}
+    cabin_type: dict[tuple[int, str], cp_model.IntVar] = {}
+
+    needs_previous_service = bool(artifact.headway_policy and (
+        artifact.headway_policy.has_leader_behavior_rules
+        or any(artifact.initial_boundary_service_resource(state) is not None
+               for state in artifact.circulation_state_ids)
+    ))
 
     for cabin_id, visits in visits_by_cabin.items():
         active[cabin_id] = model.new_bool_var(f"cabin_active[{cabin_id}]")
-        previous_service[cabin_id] = model.new_bool_var(
-            f"initial_previous_service[{cabin_id}]"
-        )
+        for type_id in type_ids:
+            cabin_type[cabin_id, type_id] = model.new_bool_var(
+                f"cabin_type[{cabin_id},{type_id}]"
+            )
+        if type_ids:
+            model.add(
+                sum(cabin_type[cabin_id, type_id] for type_id in type_ids)
+                == active[cabin_id]
+            )
+        if needs_previous_service:
+            previous_service[cabin_id] = model.new_bool_var(
+                f"initial_previous_service[{cabin_id}]"
+            )
         for visit in visits:
             key = cabin_id, visit.visit_index
             visit_bounds = bounds.by_visit[key]
@@ -270,7 +384,8 @@ def build_oip_cp_sat_model(
                 for visit in visits[:phase_count])
             == active[cabin_id]
         )
-        model.add(previous_service[cabin_id] <= sum(rope[cabin_id, visit.visit_index] for visit in visits[:phase_count]))
+        if needs_previous_service:
+            model.add(previous_service[cabin_id] <= sum(rope[cabin_id, visit.visit_index] for visit in visits[:phase_count]))
 
         started_literals: list[cp_model.IntVar] = []
         for visit in visits:
@@ -283,52 +398,66 @@ def build_oip_cp_sat_model(
             model.add(route_active[key] <= reached[key])
             model.add(route_active[key] >= sum(started_literals) + reached[key] - 1)
             route_timing = timing[visit.switch_id]
+            model.add(stop[key] <= route_active[key])
             if patterns is not None:
                 if route_timing.station_id in patterns[cabin_id]:
                     model.add(stop[key] == route_active[key])
                 else:
                     model.add(stop[key] == 0)
+            elif type_ids:
+                for type_id in type_ids:
+                    serves = _type_serves(
+                        type_id,
+                        station_id=route_timing.station_id,
+                        visit_index=visit.visit_index,
+                        skip_allowed=route_timing.skip_allowed,
+                    )
+                    model.add(
+                        stop[key] == route_active[key] if serves else stop[key] == 0
+                    ).only_enforce_if(cabin_type[cabin_id, type_id])
             elif domain.operation is OipOperation.ALL_STOP or not route_timing.skip_allowed:
                 model.add(stop[key] == route_active[key])
             else:
                 model.add(stop[key] <= route_active[key])
 
-            wait_upper = grid.lower_tick(
-                station_config[route_timing.station_id].max_wait_seconds or 0.0
-            )
-            model.add(wait_time[key] <= wait_upper * stop[key])
+            if formulation == "ean":
+                wait_upper = grid.lower_tick(
+                    station_config[route_timing.station_id].max_wait_seconds or 0.0
+                )
+                model.add(wait_time[key] <= wait_upper * stop[key])
 
-            service = grid.lower_tick(
-                route_timing.entry_to_platform_entry_seconds
-                + route_timing.min_platform_entry_to_platform_exit_seconds
-                + route_timing.platform_exit_to_exit_switch_seconds
-            )
-            skip = grid.lower_tick(route_timing.skip_entry_to_exit_switch_seconds)
-            model.add(
-                exit_time[key] == switch[key] + service + wait_time[key]
-            ).only_enforce_if(
-                [route_active[key], stop[key]]
-            )
-            model.add(exit_time[key] == switch[key] + skip).only_enforce_if(
-                [route_active[key], stop[key].Not()]
-            )
+                service = grid.lower_tick(
+                    route_timing.entry_to_platform_entry_seconds
+                    + route_timing.min_platform_entry_to_platform_exit_seconds
+                    + route_timing.platform_exit_to_exit_switch_seconds
+                )
+                skip = grid.lower_tick(route_timing.skip_entry_to_exit_switch_seconds)
+                model.add(
+                    exit_time[key] == switch[key] + service + wait_time[key]
+                ).only_enforce_if(
+                    [route_active[key], stop[key]]
+                )
+                model.add(exit_time[key] == switch[key] + skip).only_enforce_if(
+                    [route_active[key], stop[key].Not()]
+                )
 
-        for previous, current in zip(visits, visits[1:]):
-            previous_key = cabin_id, previous.visit_index
-            current_key = cabin_id, current.visit_index
-            rope_time = grid.lower_tick(timing[previous.switch_id].rope_to_next_switch_seconds)
-            model.add(
-                switch[current_key] == exit_time[previous_key] + rope_time
-            ).only_enforce_if(route_active[previous_key])
-            start_at_current = (
-                station[current_key] + rope[current_key]
-                if current_key in station
-                else 0
-            )
-            model.add(
-                route_active[current_key]
-                <= route_active[previous_key] + start_at_current
-            )
+        if formulation == "ean":
+            for previous, current in pairwise(visits):
+                previous_key = cabin_id, previous.visit_index
+                current_key = cabin_id, current.visit_index
+                rope_time = grid.lower_tick(timing[previous.switch_id].rope_to_next_switch_seconds)
+                model.add(
+                    switch[current_key] == exit_time[previous_key] + rope_time
+                ).only_enforce_if(route_active[previous_key])
+                start_at_current = (
+                    station[current_key] + rope[current_key]
+                    if current_key in station
+                    else 0
+                )
+                model.add(
+                    route_active[current_key]
+                    <= route_active[previous_key] + start_at_current
+                )
 
         for phase_index, visit in enumerate(visits[:phase_count]):
             key = cabin_id, visit.visit_index
@@ -337,25 +466,42 @@ def build_oip_cp_sat_model(
             previous_switch = artifact.circulation_state_ids[
                 (phase_index - 1) % len(artifact.circulation_state_ids)
             ]
-            if patterns is not None:
-                previous_station = timing[previous_switch].station_id
-                if previous_station in patterns[cabin_id]:
+            if needs_previous_service:
+                if patterns is not None:
+                    previous_station = timing[previous_switch].station_id
+                    if previous_station in patterns[cabin_id]:
+                        model.add(previous_service[cabin_id] >= rope[key])
+                    else:
+                        model.add(previous_service[cabin_id] <= 1 - rope[key])
+                elif type_ids:
+                    previous_station = timing[previous_switch].station_id
+                    previous_skip_allowed = timing[previous_switch].skip_allowed
+                    previous_visit_index = visit.visit_index - 1
+                    for type_id in type_ids:
+                        serves = _type_serves(
+                            type_id,
+                            station_id=previous_station,
+                            visit_index=previous_visit_index,
+                            skip_allowed=previous_skip_allowed,
+                        )
+                        literals = [rope[key], cabin_type[cabin_id, type_id]]
+                        if serves:
+                            model.add(previous_service[cabin_id] == 1).only_enforce_if(literals)
+                        else:
+                            model.add(previous_service[cabin_id] == 0).only_enforce_if(literals)
+                if (
+                    not timing[previous_switch].skip_allowed
+                    and artifact.initial_boundary_service_resource(previous_switch)
+                    is not None
+                ):
                     model.add(previous_service[cabin_id] >= rope[key])
-                else:
-                    model.add(previous_service[cabin_id] <= 1 - rope[key])
-            if (
-                not timing[previous_switch].skip_allowed
-                and artifact.initial_boundary_service_resource(previous_switch)
-                is not None
-            ):
-                model.add(previous_service[cabin_id] >= rope[key])
             rope_time = grid.lower_tick(timing[previous_switch].rope_to_next_switch_seconds)
             model.add(switch[key] >= 1).only_enforce_if(rope[key])
             model.add(switch[key] <= rope_time - 1).only_enforce_if(rope[key])
         model.add(switch[cabin_id, visits[-1].visit_index] >= operation_end + 1).only_enforce_if(active[cabin_id])
 
     cabin_ids = sorted(active)
-    for first, second in zip(cabin_ids, cabin_ids[1:]):
+    for first, second in pairwise(cabin_ids):
         model.add(active[first] >= active[second])
     if domain.fixed_k is not None:
         model.add(sum(active.values()) == domain.fixed_k)
@@ -372,8 +518,32 @@ def build_oip_cp_sat_model(
                     + (2 * phase_index + 1) * rope[cabin_id, visit.visit_index]
                     for phase_index, visit in enumerate(visits)
                 )
-            for previous, current in zip(group, group[1:]):
+            for previous, current in pairwise(group):
                 model.add(categories[previous] <= categories[current])
+    elif type_ids:
+        # Types are interchangeable labels.  Sorting their indices removes that
+        # symmetry without imposing a spatial order between different types.
+        type_index = {
+            cabin_id: sum(
+                index * cabin_type[cabin_id, type_id]
+                for index, type_id in enumerate(type_ids)
+            )
+            for cabin_id in cabin_ids
+        }
+        categories = {}
+        for cabin_id in cabin_ids:
+            visits = visits_by_cabin[cabin_id][:phase_count]
+            categories[cabin_id] = sum(
+                2 * phase_index * station[cabin_id, visit.visit_index]
+                + (2 * phase_index + 1) * rope[cabin_id, visit.visit_index]
+                for phase_index, visit in enumerate(visits)
+            )
+        for previous, current in pairwise(cabin_ids):
+            model.add(type_index[previous] <= type_index[current])
+            for type_id in type_ids:
+                model.add(categories[previous] <= categories[current]).only_enforce_if(
+                    [cabin_type[previous, type_id], cabin_type[current, type_id]]
+                )
 
     checkpoint_by_id = {item.id: item for item in artifact.headway_checkpoints}
     intervals_by_resource: dict[str, list[cp_model.IntervalVar]] = defaultdict(list)
@@ -414,7 +584,10 @@ def build_oip_cp_sat_model(
         if checkpoint.kind is HeadwayCheckpointKind.PLATFORM_EXIT:
             config = station_config[timing[visits_by_key[key].switch_id].station_id]
             if config.waiting_mode.value == "end_of_platform_wait":
-                event = event - wait_time[key]
+                item = timing[visits_by_key[key].switch_id]
+                event = switch[key] + grid.lower_tick(
+                    item.entry_to_platform_entry_seconds + item.min_platform_entry_to_platform_exit_seconds
+                )
                 size = size + wait_time[key]
         end = model.new_int_var(
             -10**12, 10**12, f"headway_end[{candidate.id}]"
@@ -445,7 +618,7 @@ def build_oip_cp_sat_model(
                 model,
                 domain,
                 rule,
-                previous_service[cabin_id],
+                previous_service.get(cabin_id, 0),
                 f"boundary_headway_size[{cabin_id},{phase_index}]",
             )
             end = model.new_int_var(-10**12, 10**12, f"boundary_headway_end[{cabin_id},{phase_index}]")
@@ -560,28 +733,33 @@ def build_oip_cp_sat_model(
 
     movement = OipCpSatMovementVariables(
         active, station, rope, previous_service, route_active, switch, exit_time,
-        wait_time, stop
+        wait_time, stop, cabin_type, type_ids, fixed_stop_patterns=patterns
     )
     passenger_build = None
     passengers = None
     if not movement_only:
-        passenger_build = (passenger_builder or EanPassengerCandidateBuilder()).build(
+        passenger_build = (passenger_builder or oip_passenger_candidate_builder()).build(
             domain.scenario, artifact
         )
         if passenger_encoding == "od_inventory":
             passengers = _build_inventory_passengers(
-                domain, model, movement, passenger_build, visits_by_key, timing
+                domain, model, movement, passenger_build, visits_by_key, timing,
+                objective=objective,
             )
         elif passenger_encoding == "groups":
             passengers = _build_group_passengers(
-                domain, model, movement, passenger_build, visits_by_key, timing
+                domain, model, movement, passenger_build, visits_by_key, timing,
+                objective=objective,
             )
         else:
             raise ValueError("unknown OIP CP-SAT passenger encoding")
-        model.minimize(
-            passengers.lexicographic_weight * passengers.unserved_total
-            + passengers.journey
-        )
+        if objective == "served":
+            model.minimize(passengers.unserved_total)
+        else:
+            model.minimize(
+                passengers.lexicographic_weight * passengers.unserved_total
+                + passengers.journey
+            )
     return BuiltOipCpSatModel(
         domain=domain,
         model=model,
@@ -590,16 +768,21 @@ def build_oip_cp_sat_model(
         passenger_build=passenger_build,
         build_seconds=perf_counter() - started,
         resource_interval_count=sum(len(items) for items in intervals_by_resource.values()),
+        formulation=formulation,
+        objective=objective,
     )
 
 
 def solve_oip_cp_sat(
     domain: OipDomain,
-    config: OipCpSatConfig = OipCpSatConfig(),
+    config: OipCpSatConfig | None = None,
     *,
     passenger_builder: EanPassengerCandidateBuilder | None = None,
 ) -> OipCpSatResult | BuiltOipCpSatModel:
+    config = config or OipCpSatConfig()
     config.validate()
+    if config.fixed_type_counts is not None and config.initial_movement_plan is not None:
+        raise ValueError("Fixed type count diagnostic does not import hints")
     total_started = perf_counter()
     built = build_oip_cp_sat_model(
         domain,
@@ -607,6 +790,10 @@ def solve_oip_cp_sat(
         passenger_encoding=config.passenger_encoding,
         movement_only=config.movement_only,
         fixed_stop_patterns=config.fixed_stop_patterns,
+        type_catalog=config.type_catalog,
+                fixed_type_counts=config.fixed_type_counts,
+        formulation=config.formulation,
+        objective=config.objective,
     )
     if config.initial_movement_plan is not None:
         if config.initial_fleet_plan is None or (
@@ -628,6 +815,8 @@ def solve_oip_cp_sat(
         solver.parameters.stop_after_first_solution = True
     if config.time_limit_seconds is not None:
         remaining = config.time_limit_seconds - (perf_counter() - total_started)
+        if config.search_deadline_unix is not None:
+            remaining = min(remaining, config.search_deadline_unix - time())
         if remaining <= 0:
             return OipCpSatResult(
                 status="unknown",
@@ -643,15 +832,48 @@ def solve_oip_cp_sat(
                 served_passengers=None,
                 unserved_passengers=None,
                 journey_time_seconds=None,
-                model_stats=built.model_stats,
+                model_stats=built.model_stats, reduction_stats=built.reduction_stats,
                 progress_samples=(),
             )
         solver.parameters.max_time_in_seconds = remaining
     if config.memory_limit_gib is not None:
         solver.parameters.max_memory_in_mb = int(config.memory_limit_gib * 1024)
-    callback = _OipCpSatProgressCallback(built, config.progress_callback)
+    presolve_log = _PresolvedModelLog()
+    solver.parameters.log_search_progress = True
+    solver.parameters.log_to_stdout = False
+    solver.log_callback = presolve_log
+    callback = _OipCpSatProgressCallback(built, config.progress_callback, config.incumbent_callback)
     started = perf_counter()
-    code = solver.solve(built.model, callback)
+    cutoff = config.stop_at_reference_served
+    cutoff_reached = False
+    if cutoff is not None:
+        if config.objective != "served" or built.passengers is None or not 0 <= cutoff <= built.passengers.total_demand:
+            raise ValueError("Reference cutoff requires served objective and a valid reference count")
+    if cutoff is not None:
+        def bound_callback(bound):
+            nonlocal cutoff_reached
+            if cutoff is not None and cannot_beat_reference(built.passengers.total_demand, bound, cutoff):
+                cutoff_reached = True
+                solver.stop_search()
+        solver.best_bound_callback = bound_callback
+    # Native wall limits need not interrupt a long Python callback promptly.
+    # A separate watchdog requests a cooperative stop at the absolute deadline.
+    finished = Event()
+    watchdog = None
+    if config.search_deadline_unix is not None:
+        def stop_at_deadline():
+            while not finished.wait(min(0.1, max(0.0, config.search_deadline_unix - time()))):
+                if time() >= config.search_deadline_unix:
+                    solver.stop_search()
+                    return
+        watchdog = Thread(target=stop_at_deadline, daemon=True)
+        watchdog.start()
+    try:
+        code = solver.solve(built.model, callback)
+    finally:
+        finished.set()
+        if watchdog is not None:
+            watchdog.join(timeout=1)
     runtime = perf_counter() - started
     solver_status = solver.status_name(code)
     feasible = code in (cp_model.FEASIBLE, cp_model.OPTIMAL)
@@ -660,7 +882,7 @@ def solve_oip_cp_sat(
             status="infeasible" if code == cp_model.INFEASIBLE else "unknown",
             solver_status=solver_status,
             objective_value=None,
-            best_bound=(int(round(solver.best_objective_bound)) if code != cp_model.MODEL_INVALID and not config.movement_only else None),
+            best_bound=(round(solver.best_objective_bound) if code != cp_model.MODEL_INVALID and not config.movement_only else None),
             gap=None,
             runtime_seconds=runtime,
             build_seconds=built.build_seconds,
@@ -670,10 +892,18 @@ def solve_oip_cp_sat(
             served_passengers=None,
             unserved_passengers=None,
             journey_time_seconds=None,
-            model_stats=built.model_stats,
+            model_stats=built.model_stats, reduction_stats=built.reduction_stats,
             progress_samples=tuple(callback.samples),
+            presolved_model_stats=presolve_log.text,
+            termination_reason="cannot_beat_reference" if cutoff_reached else None,
+            reference_served_cutoff=cutoff,
         )
     movement_plan, fleet_plan = _extract_movement(built, solver)
+    cabin_types = _extract_cabin_types(built, solver)
+    type_counts = {
+        type_id: sum(value == type_id for value in cabin_types.values())
+        for type_id in built.movement.type_ids
+    } or None
     if config.movement_only:
         from .validation import validate_oip_movement_certificate
 
@@ -684,14 +914,23 @@ def solve_oip_cp_sat(
             runtime_seconds=runtime, build_seconds=built.build_seconds,
             movement_plan=movement_plan, fleet_plan=fleet_plan,
             passenger_plan=None, served_passengers=None, unserved_passengers=None,
-            journey_time_seconds=None, model_stats=built.model_stats,
+            journey_time_seconds=None, model_stats=built.model_stats, reduction_stats=built.reduction_stats,
+            cabin_types=cabin_types or None, type_counts=type_counts,
+            presolved_model_stats=presolve_log.text,
+            termination_reason="cannot_beat_reference" if cutoff_reached else None,
+            reference_served_cutoff=cutoff,
         )
     passenger_plan = _extract_passengers(built, solver)
     unserved = sum(passenger_plan.unserved_counts_by_demand_group_id.values())
     served = sum(ride.count for ride in passenger_plan.served_rides)
-    journey_ticks = int(solver.value(built.passengers.journey))
-    objective = int(round(solver.objective_value))
-    bound = int(round(solver.best_objective_bound))
+    if built.passengers.journey is None:
+        journey_seconds = _journey_seconds_from_plan(built, passenger_plan)
+    else:
+        journey_seconds = domain.grid.seconds(
+            int(solver.value(built.passengers.journey))
+        )
+    objective = round(solver.objective_value)
+    bound = round(solver.best_objective_bound)
     gap = 0.0 if objective == bound else abs(objective - bound) / max(1, abs(objective))
     return OipCpSatResult(
         status="optimal" if code == cp_model.OPTIMAL else "feasible",
@@ -706,14 +945,105 @@ def solve_oip_cp_sat(
         passenger_plan=passenger_plan,
         served_passengers=served,
         unserved_passengers=unserved,
-        journey_time_seconds=domain.grid.seconds(journey_ticks),
-        model_stats=built.model_stats,
+        journey_time_seconds=journey_seconds,
+        model_stats=built.model_stats, reduction_stats=built.reduction_stats,
         progress_samples=tuple(callback.samples),
+        cabin_types=cabin_types or None,
+        type_counts=type_counts,
+        presolved_model_stats=presolve_log.text,
+            termination_reason="cannot_beat_reference" if cutoff_reached else None,
+            reference_served_cutoff=cutoff,
     )
+
+
+def cannot_beat_reference(total_demand: int, unserved_lower_bound: float, reference_served: int) -> bool:
+    """Conservative conversion of a minimization bound into served upper bound."""
+    return isfinite(unserved_lower_bound) and total_demand - floor(unserved_lower_bound) <= reference_served
+
+
+class _PresolvedModelLog:
+    """Keep only CP-SAT's compact presolved-model block from the search log."""
+
+    def __init__(self) -> None:
+        self._parts: list[str] = []
+        self._collecting = False
+        self._done = False
+
+    def __call__(self, message: str) -> None:
+        if self._done:
+            return
+        if "Presolved optimization model" in message:
+            self._collecting = True
+            message = message[message.index("Presolved optimization model"):]
+        if not self._collecting:
+            return
+        if "Preloading model" in message:
+            message = message[:message.index("Preloading model")]
+            self._done = True
+        self._parts.append(message)
+        if sum(map(len, self._parts)) > 200_000:
+            self._done = True
+
+    @property
+    def text(self) -> str | None:
+        value = "".join(self._parts).strip()
+        return value or None
 
 
 def _apply_oip_cp_sat_hint(built, movement_plan, fleet_plan, passenger_plan) -> None:
     """Apply a validated portable OIP certificate as a nonbinding CP-SAT hint."""
+
+    # IDs are interchangeable only together with their passenger assignments.
+    # Match the model's type/category symmetry without fixing physical positions.
+    if built.movement.type_ids:
+        timing = {t.switch_id: t for t in built.domain.artifact.timings}
+        states_by_id = {s.cabin_id: s for s in fleet_plan.initial_states}
+        selected_types = {}
+        for trajectory in movement_plan.trajectories:
+            if trajectory.cabin_id not in states_by_id:
+                continue
+            state = states_by_id[trajectory.cabin_id]
+            matches = []
+            for type_id in built.movement.type_ids:
+                if not all(
+                    _type_serves(type_id, station_id=v.station_id,
+                        visit_index=v.visit_index,
+                        skip_allowed=timing[v.switch_id].skip_allowed)
+                    == (v.decision is EanRouteDecision.STOP)
+                    for v in trajectory.visits
+                ):
+                    continue
+                if state.kind is EanInitialPlacementStateKind.ROPE:
+                    previous = timing[state.switch_id]
+                    if _type_serves(type_id, station_id=previous.station_id,
+                            visit_index=state.visit_index-1,
+                            skip_allowed=previous.skip_allowed) != state.previous_service:
+                        continue
+                matches.append(type_id)
+            if not matches:
+                raise ValueError("Checkpoint trajectory does not match the type catalog")
+            selected_types[trajectory.cabin_id] = matches[0]
+        ordered = sorted(fleet_plan.active_cabin_ids, key=lambda c: (
+            built.movement.type_ids.index(selected_types[c]),
+            2*states_by_id[c].visit_index +
+            int(states_by_id[c].kind is EanInitialPlacementStateKind.ROPE), c))
+        mapping = {old: new for new, old in enumerate(
+            ordered + list(fleet_plan.inactive_cabin_ids))}
+        movement_plan = replace(movement_plan, trajectories=tuple(
+            replace(t, cabin_id=mapping[t.cabin_id], visits=tuple(
+                replace(v, cabin_id=mapping[v.cabin_id]) for v in t.visits))
+            for t in movement_plan.trajectories))
+        fleet_plan = replace(fleet_plan,
+            active_cabin_ids=tuple(mapping[c] for c in fleet_plan.active_cabin_ids),
+            inactive_cabin_ids=tuple(mapping[c] for c in fleet_plan.inactive_cabin_ids),
+            initial_states=tuple(replace(s, cabin_id=mapping[s.cabin_id])
+                for s in fleet_plan.initial_states))
+        if passenger_plan is not None:
+            passenger_plan = replace(passenger_plan, served_rides=tuple(
+                replace(r, cabin_id=mapping[r.cabin_id]) for r in passenger_plan.served_rides))
+        chosen = {mapping[c]: t for c, t in selected_types.items()}
+        for (cabin_id, type_id), variable in built.movement.cabin_type.items():
+            built.model.add_hint(variable, int(chosen.get(cabin_id) == type_id))
 
     active = set(fleet_plan.active_cabin_ids)
     states = {state.cabin_id: state for state in fleet_plan.initial_states}
@@ -724,7 +1054,8 @@ def _apply_oip_cp_sat_hint(built, movement_plan, fleet_plan, passenger_plan) -> 
     }
     variables = built.movement
     for cabin_id, variable in variables.cabin_active.items():
-        built.model.add_hint(variable, int(cabin_id in active))
+        if variable.proto.domain[0] != variable.proto.domain[len(variable.proto.domain)-1]:
+            built.model.add_hint(variable, int(cabin_id in active))
     for key, variable in variables.station_selected.items():
         state = states.get(key[0])
         built.model.add_hint(
@@ -750,6 +1081,7 @@ def _apply_oip_cp_sat_hint(built, movement_plan, fleet_plan, passenger_plan) -> 
         built.model.add_hint(variable, int(bool(state and state.previous_service)))
     for key, variable in variables.route_active.items():
         built.model.add_hint(variable, int(key in visits))
+    hinted_wait_variables: set[int] = set()
     for key, visit in visits.items():
         if key not in variables.switch_time:
             raise ValueError("OIP CP-SAT checkpoint contains an unknown visit")
@@ -760,10 +1092,13 @@ def _apply_oip_cp_sat_hint(built, movement_plan, fleet_plan, passenger_plan) -> 
             variables.exit_time[key], built.domain.grid.signed_lower_tick(visit.exit_switch_time_seconds)
         )
         built.model.add_hint(variables.stop[key], int(visit.decision is EanRouteDecision.STOP))
-        built.model.add_hint(
-            variables.wait_time[key],
-            built.domain.grid.lower_tick(max(0.0, visit.wait_seconds)),
-        )
+        wait_variable = variables.wait_time[key]
+        if wait_variable.index not in hinted_wait_variables:
+            built.model.add_hint(
+                wait_variable,
+                built.domain.grid.lower_tick(max(0.0, visit.wait_seconds)),
+            )
+            hinted_wait_variables.add(wait_variable.index)
 
     if built.passengers is None:
         return
@@ -804,16 +1139,28 @@ def _apply_oip_cp_sat_hint(built, movement_plan, fleet_plan, passenger_plan) -> 
         built.model.add_hint(built.passengers.ride_used[ride_id], int(value > 0))
 
 
+def _extract_cabin_types(built, solver) -> dict[int, str]:
+    if built.movement.fixed_cabin_types is not None:
+        return dict(built.movement.fixed_cabin_types)
+    return {
+        cabin_id: type_id
+        for (cabin_id, type_id), variable in built.movement.cabin_type.items()
+        if solver.boolean_value(variable)
+    }
+
+
 class _OipCpSatProgressCallback(cp_model.CpSolverSolutionCallback):
     def __init__(
         self,
         built: BuiltOipCpSatModel,
         progress_callback: Callable[[OipCpSatProgressSample], None] | None,
+        incumbent_callback: Callable[[OipCpSatResult], None] | None = None,
     ) -> None:
         super().__init__()
         self.built = built
         self.samples: list[OipCpSatProgressSample] = []
         self.progress_callback = progress_callback
+        self.incumbent_callback = incumbent_callback
 
     def on_solution_callback(self) -> None:
         passengers = self.built.passengers
@@ -821,9 +1168,17 @@ class _OipCpSatProgressCallback(cp_model.CpSolverSolutionCallback):
             return
         unserved = int(self.value(passengers.unserved_total))
         total = passengers.total_demand
-        objective = int(round(self.objective_value))
-        bound = int(round(self.best_objective_bound))
+        objective = round(self.objective_value)
+        bound = round(self.best_objective_bound)
         gap = abs(objective - bound) / max(1, abs(objective))
+        passenger_plan = _extract_passengers(self.built, self) if self.incumbent_callback is not None or passengers.journey is None else None
+        journey_seconds = (
+            self.built.domain.grid.seconds(int(self.value(passengers.journey)))
+            if passengers.journey is not None
+            else _journey_seconds_from_plan(
+                self.built, passenger_plan
+            )
+        )
         sample = OipCpSatProgressSample(
                 runtime_seconds=self.wall_time,
                 objective_value=objective,
@@ -831,17 +1186,52 @@ class _OipCpSatProgressCallback(cp_model.CpSolverSolutionCallback):
                 gap=gap,
                 served_passengers=total - unserved,
                 unserved_passengers=unserved,
-                journey_time_seconds=self.built.domain.grid.seconds(
-                    int(self.value(passengers.journey))
-                ),
+                journey_time_seconds=journey_seconds,
                 active_fleet=sum(
                     self.boolean_value(variable)
                     for variable in self.built.movement.cabin_active.values()
                 ),
+                type_counts=(
+                    {p: sum(t == p for t in _extract_cabin_types(self.built, self).values())
+                     for p in self.built.movement.type_ids}
+                    if self.built.movement.type_ids else None
+                ),
             )
         self.samples.append(sample)
+        if self.incumbent_callback is not None:
+            movement, fleet = _extract_movement(self.built, self)
+            self.incumbent_callback(OipCpSatResult(
+                status="feasible", solver_status="FEASIBLE",
+                objective_value=objective, best_bound=bound, gap=gap,
+                runtime_seconds=self.wall_time, build_seconds=self.built.build_seconds,
+                movement_plan=movement, fleet_plan=fleet, passenger_plan=passenger_plan,
+                served_passengers=sample.served_passengers, unserved_passengers=unserved,
+                journey_time_seconds=journey_seconds, model_stats=self.built.model_stats,
+                progress_samples=tuple(self.samples),
+                cabin_types=_extract_cabin_types(self.built, self),
+                type_counts=sample.type_counts, reduction_stats=self.built.reduction_stats,
+            ))
         if self.progress_callback is not None:
             self.progress_callback(sample)
+
+
+def _journey_seconds_from_plan(
+    built: BuiltOipCpSatModel, plan: EanPassengerServicePlan
+) -> float:
+    groups = {
+        group.id: group
+        for groups in built.passengers.groups_by_od.values()
+        for group in groups
+    }
+    horizon = built.domain.artifact.config.horizon_seconds
+    result = 0.0
+    for ride in plan.served_rides:
+        result += ride.count * (
+            ride.alighting_time_seconds - groups[ride.demand_group_id].release_time_seconds
+        )
+    for group_id, count in plan.unserved_counts_by_demand_group_id.items():
+        result += count * max(0.0, horizon - groups[group_id].release_time_seconds)
+    return result
 
 
 def _candidate_time(domain, reference, key, switch, exit_time, wait_time, visits, timing):
@@ -853,10 +1243,7 @@ def _candidate_time(domain, reference, key, switch, exit_time, wait_time, visits
     if reference is EanTimeReference.PLATFORM_ENTRY_TIME:
         return switch[key] + domain.grid.lower_tick(item.entry_to_platform_entry_seconds)
     if reference is EanTimeReference.PLATFORM_EXIT_TIME:
-        return switch[key] + domain.grid.lower_tick(
-            item.entry_to_platform_entry_seconds
-            + item.min_platform_entry_to_platform_exit_seconds
-        ) + wait_time[key]
+        return exit_time[key] - domain.grid.lower_tick(item.platform_exit_to_exit_switch_seconds)
     raise ValueError(f"unsupported OIP CP-SAT time reference: {reference}")
 
 
@@ -884,7 +1271,9 @@ def _headway_size(model, domain, rule, leader_stop, name):
     raise TypeError(f"unsupported OIP headway rule: {rule!r}")
 
 
-def _build_inventory_passengers(domain, model, movement, passenger_build, visits, timing):
+def _build_inventory_passengers(
+    domain, model, movement, passenger_build, visits, timing, *, objective
+):
     grid = domain.grid
     horizon = grid.upper_tick(domain.artifact.config.horizon_seconds)
     inventory_end = horizon + 1
@@ -960,39 +1349,39 @@ def _build_inventory_passengers(domain, model, movement, passenger_build, visits
     for values in onboard.values():
         model.add(sum(values) <= domain.artifact.config.cabin_capacity)
 
-    constant = sum(
-        group.count * max(0, horizon - grid.lower_tick(group.release_time_seconds))
-        for group in groups.values()
-    )
-    terms = []
-    for event, values in by_alight.items():
-        alight_count = model.new_int_var(0, domain.artifact.config.cabin_capacity, f"alight_count[{event}]")
-        model.add(alight_count == sum(values))
-        alight_offset = grid.lower_tick(timing[visits[event].switch_id].entry_to_platform_entry_seconds)
-        event_time_proto = movement.switch_time[event].proto
-        switch_lower = int(event_time_proto.domain[0])
-        switch_upper = int(event_time_proto.domain[len(event_time_proto.domain) - 1])
-        alight_lower = switch_lower + alight_offset
-        alight_upper = max(horizon, switch_upper + alight_offset)
-        alight_time = model.new_int_var(
-            alight_lower,
-            alight_upper,
-            f"alight_time[{event}]",
-        )
-        model.add(alight_time == movement.switch_time[event] + alight_offset)
-        product = model.new_int_var(
-            min(0, domain.artifact.config.cabin_capacity * alight_lower),
-            domain.artifact.config.cabin_capacity * alight_upper,
-            f"alight_product[{event}]",
-        )
-        model.add_multiplication_equality(product, [alight_count, alight_time])
-        terms.append(product - horizon * alight_count)
-    journey = cp_model.LinearExpr.sum(terms) + constant
     unserved_total = cp_model.LinearExpr.sum(list(unserved.values()))
     total_demand = sum(group.count for group in groups.values())
     weight = total_demand * horizon + 1
-    if weight * total_demand + total_demand * horizon >= 2**63:
-        raise ValueError("OIP lexicographic score exceeds CP-SAT int64 range")
+    journey = None
+    if objective == "lexicographic":
+        constant = sum(
+            group.count * max(0, horizon - grid.lower_tick(group.release_time_seconds))
+            for group in groups.values()
+        )
+        terms = []
+        for event, values in by_alight.items():
+            alight_count = model.new_int_var(0, domain.artifact.config.cabin_capacity, f"alight_count[{event}]")
+            model.add(alight_count == sum(values))
+            alight_offset = grid.lower_tick(timing[visits[event].switch_id].entry_to_platform_entry_seconds)
+            event_time_proto = movement.switch_time[event].proto
+            switch_lower = int(event_time_proto.domain[0])
+            switch_upper = int(event_time_proto.domain[len(event_time_proto.domain) - 1])
+            alight_lower = switch_lower + alight_offset
+            alight_upper = max(horizon, switch_upper + alight_offset)
+            alight_time = model.new_int_var(
+                alight_lower, alight_upper, f"alight_time[{event}]"
+            )
+            model.add(alight_time == movement.switch_time[event] + alight_offset)
+            product = model.new_int_var(
+                min(0, domain.artifact.config.cabin_capacity * alight_lower),
+                domain.artifact.config.cabin_capacity * alight_upper,
+                f"alight_product[{event}]",
+            )
+            model.add_multiplication_equality(product, [alight_count, alight_time])
+            terms.append(product - horizon * alight_count)
+        journey = cp_model.LinearExpr.sum(terms) + constant
+        if weight * total_demand + total_demand * horizon >= 2**63:
+            raise ValueError("OIP lexicographic score exceeds CP-SAT int64 range")
     return OipCpSatPassengerVariables(
         count,
         used,
@@ -1007,7 +1396,9 @@ def _build_inventory_passengers(domain, model, movement, passenger_build, visits
     )
 
 
-def _build_group_passengers(domain, model, movement, passenger_build, visits, timing):
+def _build_group_passengers(
+    domain, model, movement, passenger_build, visits, timing, *, objective
+):
     grid = domain.grid
     horizon = grid.upper_tick(domain.artifact.config.horizon_seconds)
     groups = {group.id: group for group in passenger_build.demand_groups}
@@ -1069,37 +1460,39 @@ def _build_group_passengers(domain, model, movement, passenger_build, visits, ti
     for values in onboard.values():
         model.add(sum(values) <= domain.artifact.config.cabin_capacity)
 
-    event_products = []
-    for event, values in by_alight.items():
-        total = model.new_int_var(0, domain.artifact.config.cabin_capacity, f"group_alight_count[{event}]")
-        model.add(total == sum(values))
-        offset = grid.lower_tick(timing[visits[event].switch_id].entry_to_platform_entry_seconds)
-        proto = movement.switch_time[event].proto
-        lower = int(proto.domain[0]) + offset
-        upper = int(proto.domain[len(proto.domain) - 1]) + offset
-        event_time = model.new_int_var(lower, upper, f"group_alight_time[{event}]")
-        model.add(event_time == movement.switch_time[event] + offset)
-        product = model.new_int_var(
-            min(0, domain.artifact.config.cabin_capacity * lower),
-            max(0, domain.artifact.config.cabin_capacity * upper),
-            f"group_alight_product[{event}]",
-        )
-        model.add_multiplication_equality(product, [total, event_time])
-        event_products.append(product)
-    release_constant = sum(
-        group.count * grid.lower_tick(group.release_time_seconds)
-        for group in groups.values()
-    )
     unserved_total = cp_model.LinearExpr.sum(list(unserved.values()))
-    journey = (
-        cp_model.LinearExpr.sum(event_products)
-        + horizon * unserved_total
-        - release_constant
-    )
     total_demand = sum(group.count for group in groups.values())
     weight = total_demand * horizon + 1
-    if weight * total_demand + total_demand * horizon >= 2**63:
-        raise ValueError("OIP lexicographic score exceeds CP-SAT int64 range")
+    journey = None
+    if objective == "lexicographic":
+        event_products = []
+        for event, values in by_alight.items():
+            total = model.new_int_var(0, domain.artifact.config.cabin_capacity, f"group_alight_count[{event}]")
+            model.add(total == sum(values))
+            offset = grid.lower_tick(timing[visits[event].switch_id].entry_to_platform_entry_seconds)
+            proto = movement.switch_time[event].proto
+            lower = int(proto.domain[0]) + offset
+            upper = int(proto.domain[len(proto.domain) - 1]) + offset
+            event_time = model.new_int_var(lower, upper, f"group_alight_time[{event}]")
+            model.add(event_time == movement.switch_time[event] + offset)
+            product = model.new_int_var(
+                min(0, domain.artifact.config.cabin_capacity * lower),
+                max(0, domain.artifact.config.cabin_capacity * upper),
+                f"group_alight_product[{event}]",
+            )
+            model.add_multiplication_equality(product, [total, event_time])
+            event_products.append(product)
+        release_constant = sum(
+            group.count * grid.lower_tick(group.release_time_seconds)
+            for group in groups.values()
+        )
+        journey = (
+            cp_model.LinearExpr.sum(event_products)
+            + horizon * unserved_total
+            - release_constant
+        )
+        if weight * total_demand + total_demand * horizon >= 2**63:
+            raise ValueError("OIP lexicographic score exceeds CP-SAT int64 range")
     return OipCpSatPassengerVariables(
         ride_count=count,
         ride_used=used,
@@ -1112,6 +1505,26 @@ def _build_group_passengers(domain, model, movement, passenger_build, visits, ti
         lexicographic_weight=weight,
         total_demand=total_demand,
     )
+
+
+def _previous_service_value(built, solver, cabin_id, selected_visit) -> bool:
+    """Reconstruct pre-zero route history without extra geometric-model variables."""
+    variables = built.movement
+    if cabin_id in variables.previous_service:
+        return solver.boolean_value(variables.previous_service[cabin_id])
+    artifact = built.domain.artifact
+    state = artifact.circulation_state_ids[(selected_visit.visit_index - 1) % len(artifact.circulation_state_ids)]
+    timing = next(t for t in artifact.timings if t.switch_id == state)
+    if variables.fixed_stop_patterns is not None:
+        return timing.station_id in variables.fixed_stop_patterns[cabin_id]
+    type_id = _extract_cabin_types(built, solver).get(cabin_id)
+    if type_id is not None:
+        return _type_serves(type_id, station_id=timing.station_id,
+                            visit_index=selected_visit.visit_index - 1,
+                            skip_allowed=timing.skip_allowed)
+    # Free routes: either history is allowed at this boundary; choose SKIP
+    # unless the infrastructure requires STOP. Fault models retain their variable.
+    return built.domain.operation is OipOperation.ALL_STOP or not timing.skip_allowed
 
 
 def _extract_movement(built, solver):
@@ -1155,7 +1568,7 @@ def _extract_movement(built, solver):
                 progress=first_tick / rope_tick,
                 previous_event_time_seconds=grid.seconds(first_tick - rope_tick),
                 next_event_time_seconds=grid.seconds(first_tick),
-                previous_service=solver.boolean_value(variables.previous_service[cabin_id]),
+                previous_service=_previous_service_value(built, solver, cabin_id, selected_visit),
             ))
         else:
             exit_tick = solver.value(variables.exit_time[selected_key])

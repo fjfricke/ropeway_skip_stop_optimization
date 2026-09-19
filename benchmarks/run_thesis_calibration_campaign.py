@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare or run only the 27 frozen thesis capacity calibrations."""
+"""Prepare or run only the 23 frozen thesis capacity calibrations."""
 
 from __future__ import annotations
 

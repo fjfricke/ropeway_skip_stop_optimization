@@ -179,6 +179,7 @@ def main() -> None:
             manifest["refinements"] = _select_refinements(
                 manifest,
                 candidates_per_k=args.refinement_candidates_per_k,
+                selection_mode=args.refinement_selection,
             )
             manifest["refinement_count"] = len(manifest["refinements"])
             save()
@@ -379,6 +380,7 @@ def freeze_campaign(args, started: float, deadline: float) -> dict[str, Any]:
         "trial_time_limit_seconds": args.trial_time_limit_seconds,
         "passenger_evaluation_time_limit_seconds": args.passenger_evaluation_time_limit_seconds,
         "refinement_candidates_per_k": args.refinement_candidates_per_k,
+        "refinement_selection": args.refinement_selection,
         "refinement_time_limit_seconds": args.refinement_time_limit_seconds,
         "screening_only": args.screening_only,
         "wall_limit_seconds": args.wall_limit_seconds,
@@ -471,14 +473,18 @@ def _validate_resume(manifest: dict, frozen: dict) -> None:
 
 
 def _select_refinements(
-    manifest: dict[str, Any], *, candidates_per_k: int
+    manifest: dict[str, Any], *, candidates_per_k: int,
+    selection_mode: str = "top_per_k",
 ) -> list[dict[str, Any]]:
+    if selection_mode not in {"top_per_k", "all_feasible"}:
+        raise ValueError(f"unknown refinement selection mode: {selection_mode}")
     selected: list[dict[str, Any]] = []
     for cabin_count in manifest["k_values"]:
         candidates = [
             trial
             for trial in manifest["trials"]
             if trial["available_fleet_count"] == cabin_count
+            and trial.get("movement_status") == "feasible"
             and trial.get("served") is not None
             and trial.get("attempts")
             and trial["attempts"][-1].get("status") == "complete"
@@ -490,7 +496,12 @@ def _select_refinements(
                 manifest["allocation_order"].index(trial["allocation_id"]),
             )
         )
-        for rank, source in enumerate(candidates[:candidates_per_k], start=1):
+        chosen = (
+            candidates
+            if selection_mode == "all_feasible"
+            else candidates[:candidates_per_k]
+        )
+        for rank, source in enumerate(chosen, start=1):
             source_attempt = source["attempts"][-1]
             selected.append(
                 {
@@ -641,6 +652,15 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--trial-time-limit-seconds", type=float, default=60)
     parser.add_argument("--passenger-evaluation-time-limit-seconds", type=float, default=30)
     parser.add_argument("--refinement-candidates-per-k", type=int, default=2)
+    parser.add_argument(
+        "--refinement-selection",
+        choices=("top_per_k", "all_feasible"),
+        default="top_per_k",
+        help=(
+            "Select either the ranked prefix per K or every screening candidate "
+            "with a validated movement and passenger evaluation."
+        ),
+    )
     parser.add_argument("--refinement-time-limit-seconds", type=float, default=180)
     parser.add_argument("--screening-only", action="store_true")
     parser.add_argument("--demand-total", type=int, default=3_210)

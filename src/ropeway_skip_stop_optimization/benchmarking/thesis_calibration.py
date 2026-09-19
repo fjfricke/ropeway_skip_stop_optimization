@@ -7,7 +7,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from .thesis_contract import CONSTANT_REFERENCE_K, RELATIVE_JOURNEY_K
+from .thesis_contract import JOURNEY_REFERENCE_K
 from .thesis_reruns import FAMILIES
 
 
@@ -40,7 +40,7 @@ def calibration_jobs(*, oip_cabins: int) -> list[dict]:
             cabins=k,
             reference_kind=JOURNEY_REFERENCE_KIND,
         ).payload()
-        for k in (*RELATIVE_JOURNEY_K, CONSTANT_REFERENCE_K)
+        for k in JOURNEY_REFERENCE_K
         for family in FAMILIES
     ]
     jobs.extend(

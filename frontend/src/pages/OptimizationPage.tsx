@@ -21,9 +21,7 @@ export default function OptimizationPage() {
         if (cancelled) return;
         setIndex(value);
         setError(null);
-        if (value.campaigns.some((campaign) => campaign.status === "running")) {
-          timer = window.setTimeout(poll, 1000);
-        }
+        timer = window.setTimeout(poll, value.campaigns.some((campaign) => campaign.status === "running") ? 1000 : 5000);
       } catch (cause) {
         if (cancelled) return;
         setError(cause instanceof Error ? cause.message : "Index unavailable");

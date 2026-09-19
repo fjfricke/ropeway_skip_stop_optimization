@@ -253,6 +253,7 @@ def test_refinement_selection_keeps_best_two_per_k() -> None:
                 "pattern_identity": allocation_id,
                 "pattern_composition": {allocation_id: 2},
                 "patterns_by_cabin_id": [["S0"], ["S0"]],
+                "movement_status": "feasible",
                 "served": served,
                 "unserved": 20 - served,
                 "journey_time_seconds": journey,
@@ -273,3 +274,48 @@ def test_refinement_selection_keeps_best_two_per_k() -> None:
         "four_stop",
         "direct",
     ]
+
+
+def test_refinement_selection_can_keep_every_feasible_candidate() -> None:
+    runner_path = Path(__file__).parents[1] / "benchmarks" / "run_oip_pattern_screening.py"
+    spec = importlib.util.spec_from_file_location(
+        "run_oip_pattern_screening_all_feasible", runner_path
+    )
+    assert spec is not None and spec.loader is not None
+    runner = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(runner)
+    trials = []
+    for allocation_id, served, movement_status in (
+        ("all_stop", 10, "feasible"),
+        ("direct", 12, "feasible"),
+        ("four_stop", None, "unknown"),
+    ):
+        trials.append(
+            {
+                "trial_id": f"{allocation_id}__k2",
+                "policy_id": allocation_id,
+                "allocation_id": allocation_id,
+                "allocation_label": allocation_id,
+                "available_fleet_count": 2,
+                "pattern_identity": allocation_id,
+                "pattern_composition": {allocation_id: 2},
+                "patterns_by_cabin_id": [["S0"], ["S0"]],
+                "movement_status": movement_status,
+                "served": served,
+                "unserved": None if served is None else 20 - served,
+                "journey_time_seconds": None if served is None else 1000 - served,
+                "attempts": [
+                    {"status": "complete", "directory": f"trials/{allocation_id}"}
+                ],
+            }
+        )
+    selected = runner._select_refinements(
+        {
+            "k_values": [2],
+            "allocation_order": ["all_stop", "direct", "four_stop"],
+            "trials": trials,
+        },
+        candidates_per_k=1,
+        selection_mode="all_feasible",
+    )
+    assert [item["allocation_id"] for item in selected] == ["direct", "all_stop"]

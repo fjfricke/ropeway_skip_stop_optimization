@@ -83,7 +83,7 @@ def write_detail(run_dir: Path, target: Path, result: dict, summary: dict):
         if not isinstance(t, (int, float)):
             continue
         last_event = max(last_event, t)
-        if event.get("kind") == "capacity_probe":
+        if event.get("kind") in {"capacity_probe", "fixed_k_capacity_probe"}:
             reference_probes.append(event)
         if summary["method"] == "evolution" and event.get("kind") == "incumbent":
             points.append({"seconds": t, "value": event.get("served"), "kind": "validated"})

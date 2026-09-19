@@ -82,6 +82,10 @@ def test_carrier_envelope_geometry_must_be_positive(field_name: str) -> None:
 def test_architecture_b_derives_directed_leader_rule_and_service_resource() -> None:
     scenario, network, timings, pattern = _case(
         lambda station: DefaultBypassStopOnFaultDesign(
+            merge_clearance_m=0.5,
+            emergency_merge_sway_angle_rad=0.34,
+            control_delay_seconds=0.5,
+            emergency_deceleration_m_per_s2=1.75,
             mechanical_service_cycle_seconds=6.0,
             service_resource_id=f"attachment::{station}",
         )
@@ -148,6 +152,10 @@ def test_mandatory_service_design_rejects_a_bypass_state() -> None:
 def test_ddd_adapter_preserves_architecture_b_directed_usage_headways() -> None:
     scenario, _, _, _ = _case(
         lambda station: DefaultBypassStopOnFaultDesign(
+            merge_clearance_m=0.5,
+            emergency_merge_sway_angle_rad=0.34,
+            control_delay_seconds=0.5,
+            emergency_deceleration_m_per_s2=1.75,
             mechanical_service_cycle_seconds=6.0,
             service_resource_id=f"attachment::{station}",
         )
@@ -235,13 +243,9 @@ def _case(mechanism_factory):
     physical = HeadwayPhysicalParameters(
         service_clearance_m=0.5,
         rope_clearance_m=0.5,
-        merge_clearance_m=0.5,
         cabin_height_m=2.22,
         attachment_to_cabin_roof_m=2.0,
         rope_sway_angle_rad=0.34,
-        emergency_merge_sway_angle_rad=0.34,
-        control_delay_seconds=0.5,
-        emergency_deceleration_m_per_s2=1.75,
     )
     scenario = replace(
         scenario,

@@ -176,26 +176,48 @@ function validateHeadwayPhysicalParameters(scenario: Scenario, diagnostics: stri
   for (const [name, value] of Object.entries({
     cabin_height_m: physical.cabin_height_m,
     attachment_to_cabin_roof_m: physical.attachment_to_cabin_roof_m,
-    emergency_deceleration_m_per_s2: physical.emergency_deceleration_m_per_s2,
   })) {
     if (!positiveFinite(value)) diagnostics.push(`Headway physical parameter ${name} must be positive`);
   }
   for (const [name, value] of Object.entries({
     service_clearance_m: physical.service_clearance_m,
     rope_clearance_m: physical.rope_clearance_m,
-    merge_clearance_m: physical.merge_clearance_m,
-    control_delay_seconds: physical.control_delay_seconds,
   })) {
     if (!nonnegativeFinite(value)) diagnostics.push(`Headway physical parameter ${name} must be nonnegative`);
   }
   for (const [name, value] of Object.entries({
     rope_sway_angle_rad: physical.rope_sway_angle_rad,
-    emergency_merge_sway_angle_rad: physical.emergency_merge_sway_angle_rad,
   })) {
     if (!nonnegativeFinite(value) || value >= Math.PI / 2) {
       diagnostics.push(`Headway physical parameter ${name} must lie in [0, pi/2)`);
     }
   }
+
+  // Legacy inputs are validated only when present, or required by a v2 fault mechanism.
+  const faultInputs: Record<string, unknown>[] = [physical as unknown as Record<string, unknown>];
+  for (const assignment of scenario.headway_design?.station_mechanisms ?? []) {
+    const design = assignment.design;
+    if ("mechanical_service_cycle_seconds" in design && !("safety_path_segment_ids" in design)) {
+      faultInputs.push(design);
+      if (scenario.headway_design?.schema_version === 2) {
+        for (const field of ["merge_clearance_m", "control_delay_seconds", "emergency_merge_sway_angle_rad", "emergency_deceleration_m_per_s2"]) {
+          if (!(field in design)) diagnostics.push(`Missing legacy mechanism parameter ${field}`);
+        }
+      }
+    }
+  }
+  for (const inputs of faultInputs) {
+    for (const name of ["merge_clearance_m", "control_delay_seconds", "emergency_merge_sway_angle_rad", "emergency_deceleration_m_per_s2"]) {
+      if (!(name in inputs)) continue;
+      const value = inputs[name];
+      const valid = typeof value === "number" && (
+        name === "emergency_deceleration_m_per_s2" ? positiveFinite(value)
+          : nonnegativeFinite(value) && (name !== "emergency_merge_sway_angle_rad" || value < Math.PI / 2)
+      );
+      if (!valid) diagnostics.push(`Invalid legacy mechanism parameter ${name}`);
+    }
+  }
+
 }
 
 function uniqueIds<T extends { id: string }>(values: T[], label: string, diagnostics: string[]): Set<string> {

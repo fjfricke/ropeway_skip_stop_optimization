@@ -1,3 +1,10 @@
+export interface JourneyJob {
+  id: string; family: string; k: number; kind: string; mode: string;
+  percent?: number; demand?: number | null; status: string; reason?: string;
+  native_incumbent?: number | null; validated_objective?: number | null;
+  lower_bound?: number | null; gap?: number | null;
+  capacity?: number | null; capacity_proven?: boolean; detail_url?: string | null;
+}
 export interface OptimizationCampaignIndex {
   schema_version: number;
   campaigns: OptimizationCampaignSummary[];
@@ -21,6 +28,7 @@ export interface OptimizationCampaignSummary {
   frontier_status?: string | null;
   frontier_termination?: string | null;
   contract_id?: string | null;
+  headway_contract?: string | null;
   study_membership?: "current_thesis" | "archive" | null;
 }
 
@@ -42,6 +50,7 @@ export interface OptimizationEvent {
 
 export interface OptimizationTrialSnapshot {
   trial_id: string;
+  comparison_trial_id?: string;
   policy_id: string;
   available_fleet_count: number;
   status: string;
@@ -109,6 +118,16 @@ export interface OptimizationTrialSnapshot {
   allocation_id?: string;
   allocation_label?: string;
   pattern_composition?: Record<string, number>;
+  type_catalog?: string;
+  type_counts?: Record<string, number> | null;
+  fixed_type_counts?: Record<string, number> | null;
+  termination_reason?: string | null;
+  reference_served_cutoff?: number | null;
+  load?: string;
+  family?: string;
+  demand_total?: number;
+  native_incumbent_seen?: boolean;
+  inherited_start_value?: Record<string, number | null> | null;
   pattern_identity?: string;
   movement_status?: string | null;
   passenger_status?: string | null;
@@ -138,6 +157,8 @@ export interface OptimizationPolicyResult {
 }
 
 export interface OptimizationCampaignSnapshot {
+  journey_jobs?: JourneyJob[];
+  constant_gates?: Record<string, { status: string; reason: string }>;
   schema_version: number;
   campaign_id: string;
   label?: string;
@@ -148,6 +169,7 @@ export interface OptimizationCampaignSnapshot {
   campaign_kind?: string;
   operating_mode?: string;
   contract_id?: string | null;
+  headway_contract?: string | null;
   study_membership?: "current_thesis" | "archive" | null;
   minimum_k?: number;
   maximum_k?: number;
@@ -165,10 +187,33 @@ export interface OptimizationCampaignSnapshot {
   operation_seconds?: number;
   allocation_order?: string[];
   k_values?: number[];
+  study_variant?: string;
+  comparison_campaign?: {
+    campaign_id: string;
+    fleet_count: number;
+    role: string;
+    trials: OptimizationTrialSnapshot[];
+  };
+  supplementary_phase_references?: {
+    status: string;
+    reference_runs: Record<string, {
+      status: string; demand_total: number; fixed_k: number;
+      served?: number | null; served_upper_bound?: number | null;
+      journey_time_seconds?: number | null; proven_optimal?: boolean;
+      run_campaign_id?: string;
+    }>;
+  };
+  reference_runs?: Record<string, {
+    status: string;
+    demand_total?: number;
+    served?: number | null;
+    unserved?: number | null;
+  }>;
   trials: Record<string, OptimizationTrialSnapshot> | OptimizationTrialSnapshot[];
   refinement_count?: number;
   completed_refinement_count?: number;
   refinements?: OptimizationRefinementSnapshot[];
+  waiting_plan?: Array<Record<string, unknown>>;
   policies?: Record<string, OptimizationPolicyResult>;
   policy_comparisons?: Array<Record<string, unknown>>;
   events?: OptimizationEvent[];

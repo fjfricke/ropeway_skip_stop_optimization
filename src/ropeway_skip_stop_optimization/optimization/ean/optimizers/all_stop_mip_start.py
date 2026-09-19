@@ -4,15 +4,14 @@ import math
 from dataclasses import dataclass, replace
 
 from ropeway_skip_stop_optimization.models import HeadwayRouteBehavior
-
 from ropeway_skip_stop_optimization.optimization.ean.artifact import (
     EanBuildArtifact,
 )
-from ropeway_skip_stop_optimization.optimization.ean.capacity_preparation import (
-    canonical_all_stop_fleet_count,
-)
 from ropeway_skip_stop_optimization.optimization.ean.baselines import (
     EarliestAllStopEanMovementPlanBuilder,
+)
+from ropeway_skip_stop_optimization.optimization.ean.capacity_preparation import (
+    canonical_all_stop_fleet_count,
 )
 from ropeway_skip_stop_optimization.optimization.ean.fleet import (
     EanFleetPlan,
@@ -29,6 +28,10 @@ from ropeway_skip_stop_optimization.optimization.ean.models import (
     SkipStopTiming,
     SwitchVisitDefinition,
 )
+from ropeway_skip_stop_optimization.optimization.ean.periodic_route import (
+    EanPeriodicRouteCapacityBound,
+    EanPeriodicRouteCapacityBoundBuilder,
+)
 from ropeway_skip_stop_optimization.optimization.ean.plan import (
     EanCabinTrajectory,
     EanCabinVisit,
@@ -36,14 +39,9 @@ from ropeway_skip_stop_optimization.optimization.ean.plan import (
     EanRouteDecision,
 )
 from ropeway_skip_stop_optimization.optimization.ean.primal_seed import EanPrimalSeed
-from ropeway_skip_stop_optimization.optimization.ean.periodic_route import (
-    EanPeriodicRouteCapacityBound,
-    EanPeriodicRouteCapacityBoundBuilder,
-)
 from ropeway_skip_stop_optimization.optimization.ean.time_bounds import (
     build_ean_model_time_bounds,
 )
-
 
 _TIME_TOLERANCE_SECONDS = 1e-9
 
@@ -68,6 +66,8 @@ class EanAllStopMipStartSeedBuilder:
         self,
         artifact: EanBuildArtifact,
         horizon_formulation: EanHorizonFormulation,
+        *,
+        common_phase_seconds: float = 0.0,
     ) -> EanAllStopMipStartSeed:
         if artifact.fleet_mode is EanFleetMode.FIXED_STARTS:
             return EanPrimalSeed(
@@ -81,6 +81,7 @@ class EanAllStopMipStartSeedBuilder:
             return _build_initial_placement_seed(
                 artifact,
                 horizon_formulation,
+                common_phase_seconds=common_phase_seconds,
             )
         raise ValueError(f"unsupported EAN fleet mode: {artifact.fleet_mode}")
 
@@ -162,6 +163,7 @@ def _build_initial_placement_seed(
     *,
     decisions_by_switch_id: dict[str, EanRouteDecision] | None = None,
     route_capacity: int | None = None,
+    common_phase_seconds: float = 0.0,
 ) -> EanAllStopMipStartSeed:
     parameters = artifact.initial_placement_parameters
     if parameters is None:
@@ -214,9 +216,11 @@ def _build_initial_placement_seed(
 
     visits_by_cabin_id = _visits_by_cabin_id(artifact)
     phase_spacing = cycle_seconds / active_count
+    if not 0 <= common_phase_seconds < phase_spacing + _TIME_TOLERANCE_SECONDS:
+        raise ValueError("common all-stop phase must lie within one fleet spacing")
     projected_phases: list[_ProjectedAllStopPhase] = []
     for phase_slot in range(active_count):
-        phase_seconds = phase_slot * phase_spacing
+        phase_seconds = (common_phase_seconds + phase_slot * phase_spacing) % cycle_seconds
         state, first_visit_index, first_switch_time = _project_phase_to_boundary(
             artifact=artifact,
             cabin_id=phase_slot,

@@ -50,22 +50,27 @@ Versuchsgeometrie mit 0,3 m/s.
 
 ## 2. Wiederholung der Journey-Reihen
 
+Update 19.09.: Ausführung vorläufig ohne K15/K25-Vergleiche, also 48 relative
+und 16 konstante Fälle. Abgeschlossene Kalibrierungen bleiben erhalten.
+Die vollständige Planung unten bleibt als spätere Erweiterung dokumentiert.
+
 F0/F2/F3/F4, jeweils All-Stop und freies Skip-Stop:
 
 - **Relative Nachfrage:** K=10,15,20,25,30; pro K jeweils
   `floor(0.25 * κ_AS(K))` und `floor(0.75 * κ_AS(K))` — 80 Vergleichsläufe.
 - **Konstante Nachfrage:** K=20,25,30; jeweils
-  `floor(0.50 * κ_AS(31))` desselben Profils — 24 Vergleichsläufe.
+  `floor(0.50 * κ_AS(30))` desselben Profils — 24 Vergleichsläufe.
 - κ_AS bezieht sich hier ausschließlich auf den jeweiligen **festen
   ausgeglichenen All-Stop-Start**, nicht auf frei optimierte Anfangspositionen.
-- K31 bleibt die Kalibrierungsflotte der konstanten Reihe; es ist kein zusätzlicher
-  Vergleichspunkt und nicht die aktuell untersuchte Kabinenzahl.
-- 24 neue Kalibrierungen: vier Profile × K10/15/20/25/30/31. Alte Nachweise mit
+- K30 ist die Referenzflotte der konstanten Reihe. Vor dieser Reihe muss die
+  Nachfrage auch innerhalb der bewiesenen All-Stop-Kapazität bei K20 und K25
+  liegen. Fehlende Nachweise sperren die Reihe; ihre Nachfrage wird nicht gesenkt.
+- 20 neue Kalibrierungen: vier Profile × K10/15/20/25/30. Alte Nachweise mit
   abweichendem Weichenschutz/Nachlauf werden nicht automatisch wiederverwendet.
 - 1800 s je Job einschließlich Aufbau; bei Optimierung 1 % relative Gapgrenze;
   Seed 0, zwölf Solverthreads, 32 GiB Prozessbaum-RSS, sequenziell.
 
-Das sind 128 Jobs insgesamt: maximal 64 Stunden Einzelbudgets plus 30 Minuten
+Das sind 124 Jobs insgesamt: maximal 62 Stunden Einzelbudgets plus 30 Minuten
 Kampagnenreserve. Dies ist die Obergrenze der vorbereiteten Matrix, keine erneute
 Startfreigabe. Fehlende exakte N/N+1-Referenz blockiert ausschließlich ihre
 abhängigen Vergleiche. UNKNOWN wird nicht als Unzulässigkeit behandelt.
@@ -73,6 +78,9 @@ abhängigen Vergleiche. UNKNOWN wird nicht als Unzulässigkeit behandelt.
 `benchmarks/run_thesis_revised_journey_campaign.py` erzeugt standardmäßig nur das
 Manifest; ein späterer Start verlangt explizit `--run`. Wiederaufnahme prüft den
 Code-/Vertragsfingerprint und behält die ursprüngliche Ausführungsdeadline.
+Der Runner publiziert Vorbereitung und laufende Werte automatisch unter
+`/optimization/<campaign_id>`; Detailverläufe verlinken auf den Thesis Atlas.
+Der aktive Vertrag ist geometrisch (v3); Fehlerfall-Headways entfallen.
 
 ## 3. Neue OIP-Nachfragekalibrierung
 

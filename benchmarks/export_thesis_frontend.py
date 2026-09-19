@@ -88,6 +88,16 @@ def _live_directories(root):
     for job in state.get("jobs", []):
         if job["status"] in {"running", "failed", "skipped"}:
             found[root / job["id"]] = ("running" if state.get("status") == "running" else "unknown") if job["status"] == "running" else "failed"
+    campaign = _read(root / "campaign.json") or {}
+    for job in campaign.get("jobs", []):
+        for attempt in job.get("attempts", []):
+            if "directory" not in attempt:
+                continue
+            directory = Path(attempt["directory"])
+            if not directory.is_absolute():
+                directory = root / directory
+            active = campaign.get("status") == "running" and job.get("status") == "running" and attempt is job["attempts"][-1]
+            found[directory] = "running" if active else "unknown"
     return found
 
 
@@ -301,14 +311,14 @@ def _file_hash(path):
     return _HASH_CACHE[key]
 
 
-def _export_one(run_dir, output, live_status):
+def _export_one(run_dir, output, live_status, declared_contract_id=None):
     target = output / "runs" / _slug(run_dir)
     sources = [run_dir / name for name in COPIED_ARTIFACTS]
     sources += sorted((run_dir / "incumbents").glob("*.json"))
     stamp = [[str(path.relative_to(run_dir)), path.stat().st_mtime_ns, path.stat().st_size]
              for path in sources if path.is_file()]
     stamp.append(["export_version", Path(__file__).stat().st_mtime_ns,
-                  Path(write_detail.__code__.co_filename).stat().st_mtime_ns, live_status])
+                  Path(write_detail.__code__.co_filename).stat().st_mtime_ns, live_status, declared_contract_id])
     cached = _read(target / "export_cache.json")
     if cached and cached.get("stamp") == stamp and (target / "detail.json").exists():
         return dict(cached["summary"])
@@ -322,7 +332,8 @@ def _export_one(run_dir, output, live_status):
                   "status": live_status, "native_result_available": False, "run": {}}
     if result is None or case is None:
         return None
-    contract_id = prepared.get("thesis_contract_id") or case.get("thesis_contract_id")
+    contract_id = (prepared.get("thesis_contract_id") or (result.get("case") or {}).get("thesis_contract_id")
+                   or case.get("thesis_contract_id") or declared_contract_id)
     summary = _run_summary(
         run_dir, result, case, arguments, contract_id=contract_id
     )
@@ -352,7 +363,9 @@ def _export_one(run_dir, output, live_status):
     return summary
 
 
-def export(results_roots: tuple[Path, ...], output: Path, study_manifest: Path | None = None) -> dict:
+def export(results_roots: tuple[Path, ...], output: Path, study_manifest: Path | None = None, *, preserve_existing: bool = False) -> dict:
+    previous_index = (_read(output / "index.json") or {}) if preserve_existing else {}
+    previous_archive = (_read(output / "archive-index.json") or {}) if preserve_existing else {}
     groups = []
     for item in thesis_g500_experiment_groups():
         if item.objective.value != "journey_time" or item.topology.value != "t5r":
@@ -379,6 +392,7 @@ def export(results_roots: tuple[Path, ...], output: Path, study_manifest: Path |
         if not root.exists():
             continue
         live = _live_directories(root)
+        campaign_contract = (_read(root / "campaign.json") or {}).get("identity", {}).get("contract_id")
         study = _read(root / "study.json") or {}
         attempts = {root / Path(a["result"]).parent: a for a in study.get("attempts", [])}
         successful = {a["key"]: root / Path(a["result"]).parent for a in study.get("attempts", []) if a["status"] == "complete"}
@@ -391,7 +405,7 @@ def export(results_roots: tuple[Path, ...], output: Path, study_manifest: Path |
             if run_dir.resolve() in seen:
                 continue
             seen.add(run_dir.resolve())
-            summary = _export_one(run_dir, output, live.get(run_dir))
+            summary = _export_one(run_dir, output, live.get(run_dir), campaign_contract)
             if summary is None:
                 continue
             attempt = attempts.get(run_dir)
@@ -421,6 +435,20 @@ def export(results_roots: tuple[Path, ...], output: Path, study_manifest: Path |
                          (bool(reference.get("capacityProven")), reference.get("provenFeasibleDemand") or 0) >
                          (bool(previous.get("capacityProven")), previous.get("provenFeasibleDemand") or 0))):
                     by_group[summary["groupId"]]["reference"] = reference
+
+    if preserve_existing:
+        current_ids = {r["id"] for r in runs + archived_runs}
+        for old in previous_index.get("runs", []):
+            if old["id"] in current_ids:
+                continue
+            if old.get("contractId") == THESIS_CONTRACT_ID and old.get("studyMembership") == "current_thesis" and old["groupId"] in by_group:
+                runs.append(old)
+                by_group[old["groupId"]]["runIds"].append(old["id"])
+            else:
+                archived_runs.append(old)
+        current_ids = {r["id"] for r in runs + archived_runs}
+        archived_runs.extend(r for r in previous_archive.get("runs", []) if r["id"] not in current_ids)
+        running = any(r["status"] == "running" for r in runs)
 
     payload = {
         "schema": "thesis_frontend_index_v1",

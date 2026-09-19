@@ -14,7 +14,7 @@ export default function ThesisPage() {
   const [resolution, setResolution] = useState("15");
   const [fleet, setFleet] = useState("all");
   const [demand, setDemand] = useState("all");
-  const [selected, setSelected] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(() => new URLSearchParams(window.location.search).get("run"));
 
   useEffect(() => {
     let stopped = false;
@@ -58,6 +58,11 @@ export default function ThesisPage() {
     && (run.method === "all_stop_phase" || ((fleet === "all" || run.k === Number(fleet)) && (demand === "all" || run.demand === Number(demand))))
   ) };
   const selectedRun = index.runs.find(run => run.id === selected);
+  useEffect(() => {
+    const select = () => setSelected(new URLSearchParams(window.location.search).get("run"));
+    window.addEventListener("popstate", select);
+    return () => window.removeEventListener("popstate", select);
+  }, []);
 
   return <main className="thesis-shell">
     <header className="thesis-masthead">
@@ -70,7 +75,7 @@ export default function ThesisPage() {
     <section className="thesis-contract" aria-label="Frozen experiment contract">
       <div><span>Track</span><strong>G500</strong><small>500 m free rope per section</small></div>
       <div><span>Window</span><strong>2 cycles</strong><small>+ 900 s completion · + 300 s continued movement</small></div>
-      <div><span>Journey starts</span><strong>Fixed balanced</strong><small>same T5R/G500 geometry and Architecture-B headways</small></div>
+      <div><span>Journey starts</span><strong>Fixed balanced</strong><small>T5R/G500 · geometric headways</small></div>
       <div><span>OIP starts</span><strong>Optimized</strong><small>No-Wait first · independently validated</small></div>
     </section>
 

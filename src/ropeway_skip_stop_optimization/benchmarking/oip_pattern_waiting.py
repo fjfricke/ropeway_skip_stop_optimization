@@ -45,6 +45,8 @@ class PreparedOipPatternWaitingPilot:
 def prepare_oip_pattern_waiting_pilot(
     *,
     maximum_wait_seconds: float,
+    legacy_headways: bool = False,
+    operation: OipOperation = OipOperation.SKIP_STOP,
     demand_total: int = 3_210,
     cabin_count: int = 62,
     ticks_per_second: int = 1_000,
@@ -71,7 +73,7 @@ def prepare_oip_pattern_waiting_pilot(
     operation_seconds = windows.operation_seconds
 
     example = get_example(spec.example_id)
-    base = example.build_scenario()
+    base = example.build_scenario(legacy_headways=legacy_headways)
     groups = build_demand_groups(
         spec,
         station_ids=tuple(f"S{i}" for i in range(5)),
@@ -107,7 +109,7 @@ def prepare_oip_pattern_waiting_pilot(
             "topology": "t5r",
             "geometry": "g500",
             "architecture": "B",
-            "headway_contract": HEADWAY_CONTRACT,
+            "headway_contract": ("architecture_b_stop_leader_entry_and_exit" if legacy_headways else HEADWAY_CONTRACT),
             "demand_family": demand_family.value,
             "demand_profile": "p0",
             "demand_total": demand_total,
@@ -171,7 +173,7 @@ def prepare_oip_pattern_waiting_pilot(
     domain = prepare_oip_domain(
         scenario=scenario,
         artifact=artifact,
-        operation=OipOperation.SKIP_STOP,
+        operation=operation,
         fixed_k=cabin_count,
         grid=OipTimeGrid(ticks_per_second),
     )

@@ -1,7 +1,7 @@
 """Fresh reference dependencies for the two agreed fixed-start Journey series."""
 
 from .thesis_contract import (
-    CONSTANT_JOURNEY_K, CONSTANT_REFERENCE_K, RELATIVE_JOURNEY_K,
+    CONSTANT_JOURNEY_K, CONSTANT_REFERENCE_K, RELATIVE_JOURNEY_K, JOURNEY_REFERENCE_K,
     THESIS_CONTRACT_ID, ThesisWindows,
 )
 
@@ -11,7 +11,7 @@ PROOF_SCOPE = "FIXED_K_BALANCED_START_ALL_STOP_AND_NESTED_DEMAND"
 
 def journey_jobs() -> list[dict]:
     jobs = []
-    for k in (*RELATIVE_JOURNEY_K, CONSTANT_REFERENCE_K):
+    for k in JOURNEY_REFERENCE_K:
         for family in FAMILIES:
             jobs.append(dict(
                 id=f"reference_{family}_k{k}", kind="reference", family=family,
@@ -75,7 +75,7 @@ def study_definition(cycle_seconds: float = 732.0) -> dict:
             "families": list(FAMILIES), "start_policy": "fixed_balanced",
             "objective": "journey_time_full_service", "waiting_seconds": 0,
             "time_limit_seconds": 1800, "relative_gap": 0.01,
-            "reference_jobs": 24, "comparison_jobs": 104,
+            "reference_jobs": len(JOURNEY_REFERENCE_K) * len(FAMILIES), "comparison_jobs": 104,
         },
         "oip": {
             "families": ["f0", "f2", "f3"],
@@ -91,3 +91,34 @@ def study_definition(cycle_seconds: float = 732.0) -> dict:
             "An All-Stop witness is not an optimal OIP capacity certificate.",
         ],
     }
+
+
+def constant_demand_gate(family: str, by_id: dict) -> dict:
+    """Use proven nested capacities; no extra solves or start-plan transfer.
+
+    A full-service witness at N also serves every prefix up to N. All three
+    capacities must be certified under this contract before the series starts.
+    """
+    from pathlib import Path
+    import hashlib
+    import json
+
+    capacities, evidence = {}, {}
+    for k in CONSTANT_JOURNEY_K:
+        reference = by_id[f"reference_{family}_k{k}"]
+        if reference["status"] != "complete" or not reference["attempts"]:
+            return dict(status="pending_reference", reason=f"All-Stop reference K{k} missing")
+        path = Path(reference["attempts"][-1]["directory"]) / "result.json"
+        try:
+            raw = path.read_bytes()
+            capacities[k] = exact_reference_capacity(json.loads(raw), k=k)
+        except (OSError, ValueError) as error:
+            return dict(status="pending_reference", reason=f"K{k}: {error}")
+        evidence[str(k)] = dict(capacity=capacities[k], result_sha256=hashlib.sha256(raw).hexdigest())
+    demand = capacities[CONSTANT_REFERENCE_K] // 2
+    failed = [k for k in CONSTANT_JOURNEY_K if capacities[k] < demand]
+    if demand < 1 or failed:
+        return dict(status="blocked_constant_demand", demand=demand, evidence=evidence,
+                    reason=f"Half K{CONSTANT_REFERENCE_K} demand is zero or exceeds All-Stop capacity at {failed}")
+    return dict(status="passed", demand=demand, evidence=evidence,
+                reason="Nested full-service demand is within the certified capacity at K20, K25 and K30")

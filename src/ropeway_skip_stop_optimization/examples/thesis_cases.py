@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from datetime import time
 
-from .artificial_headway_cases import with_architecture_b_headways
+from .artificial_headway_cases import with_architecture_b_headways, with_geometric_headways
 from .base import ScenarioExample, ScenarioExampleMetadata
 from .circular_skip_stop import (
     CircularSkipStopSpec,
@@ -44,7 +44,7 @@ class ThesisRingExample(ScenarioExample):
     station_count: int
     geometry_profile: str
 
-    def build_scenario(self) -> Scenario:
+    def build_scenario(self, *, legacy_headways: bool = False) -> Scenario:
         lengths = THESIS_GEOMETRIES[self.geometry_profile]
         if self.geometry_profile == "guneq_v2" and self.station_count != 6:
             raise ValueError("GUNEQ-v2 is defined only for T6R")
@@ -78,11 +78,8 @@ class ThesisRingExample(ScenarioExample):
                 demand_count_per_od_pair=1,
             )
         )
-        scenario = with_architecture_b_headways(
-            scenario,
-            scenario_id=self.metadata.id,
-            direction="cw",
-        )
+        headway_builder = with_architecture_b_headways if legacy_headways else with_geometric_headways
+        scenario = headway_builder(scenario, scenario_id=self.metadata.id, direction="cw")
         return replace(
             scenario,
             experiment_metadata={

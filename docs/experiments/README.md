@@ -1,3 +1,139 @@
+# K50: ergänzende regelmäßige All-Stop-Referenzen vorbereitet
+
+Drei zusätzliche Phasenbewertungen bei unveränderter Nachfrage (F2 2266,
+F3 5430, F0 7606), K50 und je fünf Minuten. Noch nicht gestartet. Eigener
+Runner `benchmarks/run_oip_k50_phase_references.py`; CLI und Vertrag im
+[K50-Plan](../plans/oip_k50_fleet_sensitivity_20260919.md#ergänzung-regelmäßige-k50-phasenreferenzen).
+Die abgeschlossenen Mischungen bleiben unverändert; die K50-Seite zeigt die
+Referenzen separat. Keine neue Nmax-Kalibrierung.
+
+# Ergänzung: K50-Flottensensitivität vorbereitet
+
+[Plan und CLI](../plans/oip_k50_fleet_sensitivity_20260919.md): 15 No-Wait-Läufe,
+K50 bei denselben absoluten Nachfragen wie K62, ohne frühen Referenzabbruch.
+Eigene Kampagne und Frontendvergleich mit K62. **Noch nicht gestartet.**
+
+# Aktuelle OIP-Reihe: 15 feste Mischungen
+
+[Verbindlicher Plan und CLI](../plans/oip_fixed_mixtures_120_20260918.md).
+T5R/G500, K62, No-Wait, geometrische Headways (Seil 1,053 s, Plattform 11,667 s).
+Keine Sonderressourcen an Weichen. F2/F3/F0 erhalten 2266/5430/7606 Personen,
+je fünf Mischungen: 62/0/0, 46/8/8, 30/16/16, 16/23/23 und 0/31/31.
+
+CAL-O ist für alle drei Familien abgeschlossen (1888/4525/6338).
+Die begrenzte Äquivalenzprüfung und erneute Zertifikatsprüfung dokumentieren die
+Übernahme in den neuen Vertrag. Drei neue regelmäßige All-Stop-Bewertungen
+verwenden danach dieselbe 120%-Nachfrage wie die Experimente.
+
+Pro Referenz und Mischung maximal 300 s gesamte Wandzeit, darin 10 s
+Abschlussreserve; ursprünglich höchstens 90 Minuten für die 18 Solves; die zwei später autorisierten Ersatzversuche erhielten zusätzlich je fünf Minuten.
+Served ist das einzige Ziel; Journey Time wird gemessen. Keine Fahrplanhints.
+**Abgeschlossen am 19.09.2026:** alle 15 Fälle abgearbeitet; zwei unterbrochene F3-Versuche wurden ausdrücklich als Ersatzversuche wiederholt.
+[Abschlussbericht und vollständige Ergebnismatrix](../results/oip_fixed_mixtures_geometric_20260919.md).
+F2 und F3 erreichen mit reinen Skip-Stop-Typen Vollbedienung; F0 bleibt bei Mischungen teilweise ungeklärt. Weitere Läufe sind nicht vorgesehen.
+
+Historischer Vorbereitungsaufruf (der Ergebnisordner existiert bereits):
+
+```sh
+PYTHONPATH=src .venv/bin/python benchmarks/run_oip_fixed_mix_campaign.py \
+  --output results/oip_fixed_mixes_geometric_120_20260918 --build-only
+```
+
+# Journey-Reihen: laufende Kampagne (19.09.2026)
+
+**Vorläufig reduzierte Ausführung:** K15/K25 werden auf Nutzerwunsch in beiden
+Vergleichsreihen zurückgestellt. Damit laufen 48 relative Vergleiche (K10/20/30)
+und 16 konstante Vergleiche (K20/30). Die 20 bereits abgeschlossenen
+Kalibrierungen bleiben erhalten, einschließlich K25 als zusätzlichem
+Feasibilitätsnachweis. Die vollständige geplante Matrix steht weiterhin unten.
+Zurückgestellte Fälle starten nicht automatisch bei Wiederaufnahme.
+Zusätzlich sind die fünf noch nicht gestarteten F0-Skip-Stop-Vergleiche
+zurückgestellt (relativ K20/75 %, K30/25 % und K30/75 %; konstant K20/K30).
+Fertige F0-Ergebnisse bleiben erhalten. Damit umfasst die aktive Auswahl
+59 Vergleichsläufe. `control.json` erlaubt dem Controller, ungestartete Fälle
+zwischen den Läufen zurückzustellen; laufende Versuche bleiben unverändert.
+
+F0/F2/F3/F4, T5R/G500, geometrische Headways (v3), feste ausgeglichene Starts,
+No-Wait und Vollbedienung. Nachfrage bis 1464 s, Bedienung bis 2364 s,
+Weiterfahrt bis 2664 s. Minimiert wird Journey Time mit Labelled Arc-Flow.
+
+- **20 Kalibrierungen:** je Familie K10,15,20,25,30; exakte All-Stop-N/N+1-Nachweise.
+- **80 relative Vergleiche:** dieses Raster × 25/75 % der jeweiligen Kapazität × All-Stop/Skip-Stop.
+- **24 konstante Vergleiche:** K20,25,30 × All-Stop/Skip-Stop bei `floor(0.5*Nmax(K30))`.
+  Die verschachtelte Nachfrage muss durch die neuen Referenzen bei allen drei K
+  vollständig bedienbar sein. Fehlende oder zu kleine Kapazitäten sperren die
+  konstante Reihe dieser Familie; UNKNOWN ist kein Unzulässigkeitsbeweis.
+
+124 Jobs, je höchstens 1800 s einschließlich Aufbau; zwölf Threads, Seed 0,
+32 GiB, sequenziell. Vergleiche enden auch bei 1 % Gap. Kein Fahrplanhint.
+Maximal 62 Stunden Einzelbudgets plus 30 Minuten Kampagnenreserve.
+
+```sh
+.venv/bin/python benchmarks/run_thesis_revised_journey_campaign.py \
+  --output-dir results/thesis_journey_geometric_20260919 --build-only
+# Erst nach gesonderter Startentscheidung:
+.venv/bin/python benchmarks/run_thesis_revised_journey_campaign.py \
+  --output-dir results/thesis_journey_geometric_20260919 --resume --run
+```
+
+Vorbereitung startet keinen Solver. Live-Export standardmäßig nach
+`frontend/public/generated` (änderbar mit `--frontend-root`). Die Übersicht
+`/optimization/<Ordnername>` zeigt Referenzgates, native Incumbents, bestätigte
+Journey Time, Lower Bounds und Gap; Detailverläufe sind ab dem ersten Export
+verlinkt. Unbekannte Werte bleiben leer. Historische Dateien bleiben erhalten.
+Wiederaufnahme prüft Quellcode/Vertrag und erneuert die Gesamtdeadline nicht.
+
+Die folgenden Abschnitte dokumentieren **historische Reihen und frühere Pläne**.
+Ihre Headways, F0-Sperren und Referenzen sind keine Vorgaben für diese neue Reihe.
+Vorhandene Journey-Ergebnisse bleiben unverändert; keine automatische Neuberechnung.
+
+# Historie: OIP-Referenzkorrektur (18.09.2026)
+
+
+**Template-Korrektur:** Der No-Wait-Pfad besitzt jetzt einen eigenständigen
+Bewegungsbuilder. Die gespeicherten F2/F3-K62-Starts wurden darin vollständig
+reproduziert und unabhängig geprüft. Die Vergleichskampagne bleibt gestoppt.
+[Änderung und Testergebnisse](../results/oip_nowait_template_repair_20260918.md).
+
+Für neue OIP-Läufe gilt die [exakte kurze Phasenreferenz](../plans/oip_exact_phase_reference_20260918.md).
+Die alten CAL-O-Kapazitäten und die fünfphasigen OIP-Starts sind dafür keine bewiesenen Kapazitätsreferenzen.
+Zunächst werden F2/F3/F0 bei K62 kalibriert; danach ist `ceil(1.2*Nmax)` vorgesehen.
+Die vorherige Hauptreihe ist pausiert. Neue Hauptläufe starten separat.
+
+```sh
+.venv/bin/python benchmarks/run_oip_phase_calibration.py \
+  --output results/oip_exact_phase_short_k62_20260918 \
+  --frontend frontend/public/generated/calibration
+```
+
+`--build-only` erzeugt nur das Manifest. `--resume` setzt dieselbe Konfiguration fort.
+Live-Ansicht: `/calibration-live`. Jede Familie erhält höchstens 30 Minuten.
+
+Nach drei bewiesenen Referenzen bereitet der folgende Runner den kontrollierten
+Served-only-Vergleich vor. Er verwendet `ceil(1.2*Nmax)`, K62, No-Wait und
+denselben All-Stop-Start für beide Formulierungen. Journey Time wird gemessen,
+nicht optimiert.
+
+```sh
+.venv/bin/python benchmarks/run_oip_nowait_formulation_comparison.py \
+  --output results/oip_nowait_formulation_comparison_20260918 \
+  --build-only
+
+.venv/bin/python benchmarks/run_oip_nowait_formulation_comparison.py \
+  --output results/oip_nowait_formulation_comparison_20260918 \
+  --resume
+```
+
+Der erste Aufruf verweigert das Manifest, solange F0, F2 oder F3 kein
+bewiesenes N/N+1-Intervall besitzt. Die sechs Hauptläufe dauern jeweils
+höchstens fünf Minuten; die drei gemeinsamen Referenzstarts ebenfalls höchstens
+fünf Minuten. Alte lexikografische Typkatalogläufe werden nicht fortgesetzt.
+
+Ein ausdrücklich begrenzter Teilvergleich darf nur bereits bewiesene Familien
+enthalten. Beispielsweise erzeugt `--families f2 f3` vier Hauptläufe und zwei
+Referenzstarts; F0 bleibt darin sichtbar ausgeschlossen und blockiert diese
+eigenständige Kampagne nicht.
+
 # Thesis-Versuchsreihen
 
 Stand: 17.09.2026. Diese Seite ist der zentrale Einstieg für die neu zu
@@ -106,13 +242,23 @@ Ein auf null abgerundeter Nachfragefall wird als solcher blockiert.
 
 ## 5. OIP-Musterscreening
 
+### Gemeinsame Typkatalogkampagne
+
+Die aktuelle Folgekampagne vergleicht den allgemeinen EAN-Builder mit dem
+affinen No-Wait-Templatebuilder. Beide wählen bei K62 je Kabine einen Typ sowie
+freie Anfangspositionen und maximieren die Bedienung. Die Nachfrage beträgt je
+Familie `ceil(1.2*Nmax)` der bewiesenen kurzen Phasenreferenz. Details und CLI:
+[No-Wait-Formulierungsvergleich](../plans/oip_joint_cabin_type_campaign_20260918.md).
+
+Die frühere lexikografische Typkatalogkampagne mit den absoluten Last-B-Werten
+ist ein historischer Pilot und wird nicht fortgesetzt.
+
 Bestätigt sind zwei Laststufen je Familie: **100 % und 110 %** der jeweiligen
 CAL-O-Kapazität. Die Nachfrage beträgt `N_AS,phase` beziehungsweise
 `ceil(11 × N_AS,phase / 10)` und bleibt innerhalb jeder Familie und Laststufe
-über alle K und Musterbelegungen identisch. **Das endgültige K-Raster und damit
-die Laufanzahl sind noch offen.** K40/50/62 ist bisher nur ein technisches Raster.
-Die Suite muss beide Laststufen als getrennte Kampagnen abbilden; bisher liest
-sie nur eine Nachfragemenge je Familie ein.
+über alle K und Musterbelegungen identisch. Das ausgeführte Screeningraster ist
+K40/50/62. Beide Laststufen wurden als getrennte Kampagnen vollständig
+ausgeführt.
 
 Pro Belegung werden genau K aktive Kabinen modelliert. Die Stationsmasken sind
 fest; Anfangspositionen und räumliche Reihenfolge bleiben frei. CP-SAT sucht
@@ -121,10 +267,14 @@ feste Gurobi-Passagier-IP lexikografisch Unserved und dann Journey Time einschli
 Unserved-Strafe. Diese Nachbewertung ist nur für die gefundene Bewegung optimal.
 
 Der vorhandene Controller unterstützt danach eine gesondert protokollierte
-gemeinsame CP-SAT-Nachoptimierung ausgewählter Kandidaten. Screening und
-Nachoptimierung sind getrennte Ergebnisstufen; verbesserte Werte werden nicht
-in den früheren Suchverlauf zurückdatiert. `--screening-only` schaltet diese
-Nachoptimierung aus.
+gemeinsame CP-SAT-Nachoptimierung. Dafür werden alle Kandidaten mit validierter
+zulässiger Bewegung und abgeschlossener Passagierbewertung übernommen. Die
+Passagierwerte des jeweils ersten gefundenen Fahrplans dienen nicht zur
+Vorauswahl. UNKNOWN und Ressourcenabbrüche werden in dieser Runde nicht
+fortgesetzt, gelten aber nicht als unzulässig; bewiesen unzulässige Kandidaten
+werden getrennt ausgeschlossen. Screening und Nachoptimierung sind getrennte
+Ergebnisstufen; verbesserte Werte werden nicht in den früheren Suchverlauf
+zurückdatiert. `--screening-only` schaltet die Nachoptimierung aus.
 
 Gefundene All-Stop-Fahrpläne des Screenings sind Vergleichspunkte, keine neuen
 Kapazitätsbeweise. UNKNOWN und Ressourcenabbruch bekommen keinen künstlichen
@@ -137,7 +287,7 @@ Bedienungswert null und keinen Machbarkeitsgap.
 | CAL-J | 1800 s je Referenz einschließlich Aufbau; exaktes N/N+1 oder offenes Ergebnis |
 | CAL-O | Vorschlag: 1800 s je Referenz; noch im neuen Ablauf festzulegen |
 | J-REL / J-CONST | 1800 s je Job einschließlich Aufbau; Optimierungsabbruch bei 1 % Gap |
-| OIP | Aktuelle technische Defaults: 60 s Bewegung, 30 s Passagiere; Nachoptimierung 180 s für bis zu zwei Kandidaten je K; endgültiges Kampagnenbudget offen |
+| OIP | Abgeschlossenes Screening: 60 s Bewegung und bis 30 s feste Passagierbewertung; danach 300 s gemeinsame Warmstart-Nachoptimierung für jeden validiert zulässigen Kandidaten |
 
 Seed 0, sequenzielle Jobs, höchstens zwölf Solverworker und 32 GiB
 Prozessbaum-RSS. Der feste OIP-Passagier-IP verwendet einen Thread. Für die
@@ -145,15 +295,19 @@ Kalibrierung reicht ein Optimierungsgap von 1 % nicht als exakter Kapazitätsnac
 Bei 1800 s für alle 27 Referenzen beträgt die Summe der Einzelbudgets 13,5 Stunden;
 eine Gesamtreserve muss im Controller zusätzlich explizit ausgewiesen werden.
 
-Planungsrechnung für OIP bei sechs Belegungen und beiden Laststufen:
-Pro K-Wert ergeben sich 3 Familien × 2 Lasten × 6 Belegungen = 36 Screenings,
-also höchstens 54 Minuten Einzelbudgets. Zwei Nachoptimierungen pro
-Familie/Last/K ergänzen bis zu 36 Minuten. Insgesamt sind das **90 Minuten je
-K-Wert**, bei drei K-Werten 4,5 Stunden, jeweils zuzüglich Orchestrierungsreserve.
-Diese Rechnung ist eine Budgetobergrenze, keine gemessene Laufzeitprognose und
-keine Festlegung auf drei K-Werte. Die bisherigen einstündigen Suite-Limits
-müssen zur später eingefrorenen Matrix passen; sie garantieren deren Abschluss
-nicht automatisch.
+Die abgeschlossenen Screenings umfassen 108 Kandidaten. Davon besitzen 43 eine
+validierte Bewegung und abgeschlossene Passagierbewertung, 61 endeten UNKNOWN
+und vier wurden als unzulässig bewiesen. Damit umfasst die nächste Stufe genau
+43 gleich budgetierte Nachoptimierungen. Bei 300 s je Kandidat beträgt deren
+Budgetobergrenze **215 Minuten**, zuzüglich Orchestrierung und Abschluss. Die
+Screeningwerte werden erst nach der Nachoptimierung zum Ranking verwendet.
+
+Die vorhandenen Screeningartefakte werden mit
+`benchmarks/run_oip_pattern_refinement_followup.py` fortgesetzt. Der Runner
+prüft die unveränderten Quellen, übernimmt den vollständigen validierten
+Incumbent nur als Hint und führt ein eigenes fortsetzbares Manifest. Die
+ursprünglichen Screeningzeiten und die 300-s-Fortsetzung werden getrennt
+ausgewiesen.
 
 ## 7. CLI: verfügbar und noch umzusetzen
 

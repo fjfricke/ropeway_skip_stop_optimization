@@ -97,9 +97,12 @@ class EanCompatibilityArtifactAssembler:
         timing_seconds = inputs.timing_seconds + perf_counter() - duration_started
 
         checkpoint_started = perf_counter()
+        from ropeway_skip_stop_optimization.models import GeometricSharedBoundaryDesign
+        retain_platform_exit = any(isinstance(m.design, GeometricSharedBoundaryDesign)
+                                   for m in (scenario.headway_design.station_mechanisms if scenario.headway_design else ()))
         solver_policy = inputs.effective_headway_policy or inputs.headway_policy
         checkpoints = (
-            PolicyHeadwayCheckpointBuilder(solver_policy).build(
+            PolicyHeadwayCheckpointBuilder(solver_policy, retain_platform_exit).build(
                 timings=inputs.timings,
                 station_configs=config.station_configs,
             )
@@ -116,7 +119,7 @@ class EanCompatibilityArtifactAssembler:
         checkpoint_seconds = perf_counter() - checkpoint_started
 
         full_checkpoints = (
-            PolicyHeadwayCheckpointBuilder(inputs.headway_policy).build(
+            PolicyHeadwayCheckpointBuilder(inputs.headway_policy, retain_platform_exit).build(
                 timings=inputs.timings,
                 station_configs=config.station_configs,
             )

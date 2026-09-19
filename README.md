@@ -8,6 +8,21 @@ The project is currently focused on small reproducible ropeway examples,
 legacy discrete-time replay/MILP work, and a continuous-time EAN optimization
 path with passenger-service objectives.
 
+## Thesis headways
+
+Current thesis scenarios use geometric entry/exit and platform headways only.
+There are no mechanical-cycle or fault-response constraints in this path.
+`HeadwayPhysicalParameters` contains geometry; historical fault inputs belong
+only to the existing legacy mechanism classes. `HeadwayDesign.schema_version`
+is now 2. Import saved headway configurations with
+`exports.json_codec.decode_headway_design`: v1 fault values are moved explicitly,
+and unused historical values are reported with a warning rather than silently dropped.
+Old result files remain unchanged. Rebuild prepared legacy models; revalidate
+primal certificates before reuse and do not transfer their solver bounds.
+
+Implementation and checks: [headway cleanup](docs/plans/geometric_headway_cleanup_20260918.md)
+and [build measurements](docs/findings/geometric_headway_cleanup_20260918.md).
+
 ## What Is Implemented
 
 - Physical scenario models for stations, nodes, track segments, station routes, cabins, demand, and operating parameters.
@@ -262,15 +277,15 @@ See `benchmarks/README.md` for plotting existing results and checkpoint layout.
 ## Current thesis experiments
 
 The [thesis experiment README](docs/experiments/README.md) defines the current
-27 calibrations, the two Journey series, and the OIP pattern screening under
-the corrected short-horizon contract. It lists agreed settings, open decisions,
-available CLI commands, and the remaining calibration-controller work.
+20 Journey calibrations and 104 Journey comparisons, alongside the completed
+OIP mixture series under the geometric short-horizon contract. It documents
+settings, reference gates, CLI commands and live views.
 Use that document to prepare new thesis runs.
 
 ### Earlier experiment pipeline
 
 The following examples describe earlier exploratory workflows. They do not
-launch the newly agreed 27-calibration matrix.
+launch the current Journey matrix.
 
 The T5R/T6R experiment pipeline keeps topology, geometry, demand and solver
 configuration explicit. A single supervised run is started with, for example:

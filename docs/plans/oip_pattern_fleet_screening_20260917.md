@@ -19,12 +19,10 @@ fleet. It uses optimized initial placement rather than reservoir dispatch.
   sizes K=40, 50 and 62.
 - F4 remains excluded. The active demand families are F0, F2 and F3.
 
-The fixed profile sizes are F2=3,210, F3=7,869 and F0=9,781. F2 and F3 are the
-110% profile sizes derived from the regular Reservoir All-Stop references. F0
-uses the proved regular-reference lower-bound profile because its exact
-reference capacity is open. These values are stress loads imported from the
-regular-operation study. They are not called capacities or 110% points of this
-short OIP contract.
+The two fixed profile levels are F0=9,785/10,764, F2=2,918/3,210 and
+F3=7,153/7,869 for 100%/110% of the calibrated regular All-Stop references.
+These values are stress loads imported from the regular-operation study. They
+are not called capacities of this short OIP contract.
 
 ## Pattern allocations
 
@@ -51,13 +49,17 @@ movement. The independent movement validator checks it. A fixed-movement
 Gurobi model then minimizes unserved passengers and, secondarily, journey time.
 Movement search receives 60 s and passenger evaluation 30 s.
 
-Stage B is joint refinement. For each K, the two Stage-A candidates with the
-largest validated service are selected; journey time breaks service ties and a
-stable allocation order breaks remaining ties. Their complete validated
-certificates become CP-SAT hints. The patterns remain fixed, while initial
-placement, every event time and the integer passenger assignment are jointly
-optimized. Hints fix no decision. Each refinement receives 180 s and minimizes
-unserved lexicographically before journey time.
+Stage B is joint refinement. Every Stage-A candidate with a validated feasible
+movement and a completed passenger evaluation is retained. The short Stage-A
+run is only a feasibility screen: its first feasible movement and resulting
+passenger value are not used to discard another feasible allocation. UNKNOWN
+and resource terminations are excluded from this refinement round but are not
+called infeasible; proved INFEASIBLE candidates are excluded separately. The
+complete validated certificates become CP-SAT hints. The patterns remain fixed,
+while initial placement, every event time and the integer passenger assignment
+are jointly optimized. Hints fix no decision. Each refinement receives 300 s
+and minimizes unserved lexicographically before journey time. Candidates are
+ranked only after this equal-budget refinement.
 
 UNKNOWN, resource termination and INFEASIBLE remain distinct. Bounds from a
 fixed pattern allocation apply only to that allocation. A fixed-movement
@@ -65,12 +67,14 @@ passenger optimum is not an optimum over other initial placements.
 
 ## Execution and runtime
 
-Each family contains 18 screening solves and at most six refinements. The
-per-family deadline is 60 minutes, including preparation and publication. A
-worst-case family uses about 46.5 minutes of solver budgets; the remaining time
-covers model construction and validation. The three families run sequentially,
-so the full suite can take up to three hours. Seed 0, 12 CP-SAT workers, one
-Gurobi passenger thread and a 32-GiB process-tree limit are used throughout.
+Each family contains 18 screening solves. The number of refinements is the
+number of validated feasible Stage-A candidates rather than a fixed ranked
+quota. In the completed 100% and 110% screenings, 43 of 108 candidates were
+eligible, so their 300-s refinement budgets total at most 215 minutes. The 61
+UNKNOWN and four proved-INFEASIBLE candidates do not enter this round. Screening
+artifacts remain immutable and refinement receives its own recorded deadline.
+Seed 0, 12 CP-SAT workers, one Gurobi passenger thread and a 32-GiB process-tree
+limit are used throughout.
 
 `benchmarks/run_oip_pattern_screening.py` runs or resumes one frozen family.
 `benchmarks/run_oip_thesis_pattern_campaigns.py` freezes and runs F2, F3 and F0
@@ -84,7 +88,8 @@ Stage-B table with source value, refined value, bound and gap.
 Before execution, tests must establish entry/exit headway construction,
 cross-solver movement validation, exact pattern cardinalities, fixed-pattern
 integrated CP-SAT, checkpoint import from the independently evaluated movement,
-stable refinement selection, timeout semantics and frontend serialization.
+selection of every and only validated feasible candidate, timeout semantics and
+frontend serialization.
 
 The experiment succeeds methodologically when it produces independently valid
 comparisons and reveals whether joint refinement improves the first feasible

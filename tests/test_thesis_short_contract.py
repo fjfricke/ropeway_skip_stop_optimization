@@ -33,8 +33,8 @@ def _runner(name):
 
 def test_journey_matrix_has_five_step_grid_and_fresh_reference_dependencies():
     jobs = journey_jobs()
-    assert len({job["id"] for job in jobs}) == len(jobs) == 128
-    assert len([j for j in jobs if j["kind"] == "reference"]) == 24
+    assert len({job["id"] for job in jobs}) == len(jobs) == 124
+    assert len([j for j in jobs if j["kind"] == "reference"]) == 20
     assert {j["k"] for j in jobs if j["kind"] == "relative"} == {10, 15, 20, 25, 30}
     assert {j["k"] for j in jobs if j["kind"] == "constant"} == {20, 25, 30}
     references = {j["id"] for j in jobs if j["kind"] == "reference"}
@@ -44,7 +44,7 @@ def test_journey_matrix_has_five_step_grid_and_fresh_reference_dependencies():
             assert job["demand"] is None
             assert job["status"] == "pending_reference"
         if job["kind"] == "constant":
-            assert job["reference_k"] == 31
+            assert job["reference_k"] == 30
 
 
 def test_old_or_unproved_references_are_rejected():
@@ -100,12 +100,12 @@ def test_both_adapters_share_windows_and_entry_exit_resources_without_solver():
 def test_journey_manifest_build_only_never_invokes_solver(tmp_path, monkeypatch):
     runner = _runner("run_thesis_revised_journey_campaign")
     monkeypatch.setattr(runner.subprocess, "run", lambda *a, **k: pytest.fail("solver launched"))
-    monkeypatch.setattr(sys, "argv", ["runner", "--output-dir", str(tmp_path / "study"), "--build-only"])
+    monkeypatch.setattr(sys, "argv", ["runner", "--output-dir", str(tmp_path / "study"), "--frontend-root", str(tmp_path / "frontend"), "--build-only"])
     runner.main()
     manifest = json.loads((tmp_path / "study/campaign.json").read_text())
     assert manifest["status"] == "prepared"
     assert manifest["execution_started_unix"] is None
-    assert len(manifest["jobs"]) == 128
+    assert len(manifest["jobs"]) == 124
 
 
 def test_oip_thesis_requires_new_calibration_and_never_defaults_old_loads(tmp_path, monkeypatch):
