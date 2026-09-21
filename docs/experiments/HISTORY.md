@@ -1,3 +1,10 @@
+# Historical experiment notes
+
+> Historical planning/status notes, preserved for provenance. “Current”,
+> “not started” and similar statements refer to the dates of those notes.
+> For the submitted studies, use the [reviewer guide](../REVIEWER_GUIDE.md)
+> and [current experiment guide](README.md).
+
 # K50: ergänzende regelmäßige All-Stop-Referenzen vorbereitet
 
 Drei zusätzliche Phasenbewertungen bei unveränderter Nachfrage (F2 2266,

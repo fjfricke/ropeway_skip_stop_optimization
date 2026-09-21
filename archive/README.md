@@ -1,5 +1,7 @@
 # Research archive
 
+> AI-generated documentation.
+
 This directory preserves historical experiment controllers and documentation that
 are no longer part of the current thesis workflow. They remain useful for
 provenance and for interpreting old result packages, but they are not supported

@@ -1,5 +1,7 @@
 # Findings
 
+> AI-generated documentation.
+
 This directory records empirical or structural observations that are not
 obvious from the code and are not yet explained in the thesis.
 

@@ -1,5 +1,10 @@
 # Reproduce the thesis experiments
 
+> AI-generated documentation.
+
+For the study scope and selected evidence, start with the
+[reviewer guide](../REVIEWER_GUIDE.md).
+
 Run the commands from the optimization repository root. Install with
 `uv sync --frozen`; the viewer also needs Node.js 22.12+ and `npm ci` in `frontend/`.
 Gurobi requires a license for optimization, not for inspecting saved data.
@@ -18,7 +23,7 @@ Extract the raw-data ZIP into the repository root, preserving `results/`.
 | Regular all-stop capacity calibration | `oip_exact_phase_short_k62_20260918` |
 | Regular all-stop K50 references | `oip_k50_phase_references_20260919` |
 
-The reported Journey selection has 64 comparisons; 22 use the replacement
+The reported Journey selection has 64 run records (both operating modes); 22 use the replacement
 campaign. Earlier attempts remain available separately. Service includes all
 30 mixtures, including runs without an incumbent. Code family F0 is thesis F1.
 All use T5R/G500, geometric headways and No-Wait. Input files and manifests
@@ -45,11 +50,9 @@ No optimization is performed. Allow several minutes and space for derived data.
 
 ## Regenerate thesis tables and figures
 
-Run `uv sync --frozen --extra analysis`. Then follow the short command block in
-[the report README](../../../idp_report/version_2/README.md). Keep the report and
-optimization directories beside each other. `make pdf` additionally needs the
-LaTeX tools listed by the report Makefile. Source hashes are retained in CSVs;
-PDF timestamps and absolute provenance paths are not numerical results.
+Follow [Regenerate thesis figures and tables](FIGURES.md). This requires the
+separate thesis-source repository beside the optimization repository and the
+`analysis` extra. Rebuilding the PDF also requires LaTeX; viewing results does not.
 
 ## Run new experiments
 

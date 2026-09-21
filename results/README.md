@@ -1,5 +1,7 @@
 # Thesis result data
 
+> AI-generated documentation.
+
 Extract the ZIP into `ropeway_skip_stop_optimization/`.
 The manifest must then be at `results/submission_manifest.json`.
 Keep the original campaign directory names; do not add another `results/` level.
@@ -33,5 +35,6 @@ Missing incumbents are not infeasibility proofs; bounds and solutions are separa
 One superseded Journey attempt has a replay-spacing warning and is excluded
 from the reported selection; see `replay_checks.json`.
 
-Reproduction commands: `docs/experiments/README.md` in the code repository.
+Reviewers: `docs/REVIEWER_GUIDE.md` in the code repository.
+Reproduction: `docs/experiments/README.md`.
 The ZIP contains raw data only; derived frontend files are regenerated.

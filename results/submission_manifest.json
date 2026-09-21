@@ -3042,8 +3042,8 @@
   "files": [
     {
       "path": "README.md",
-      "bytes": 1656,
-      "sha256": "c8adf8283cb3ad2980f7ada5c4b105624ac766ca2e663efc507a6981484c92c9"
+      "bytes": 1715,
+      "sha256": "6e2757d24a22326b4023c32b566f1fc271cb6cd0e735d8f2fd0436ea4ba36c03"
     },
     {
       "path": "oip_exact_phase_short_k62_20260918/campaign.json",
