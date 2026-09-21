@@ -41,14 +41,7 @@ model attributes, not parsed Gurobi logs.
 
 ## Frontend Delivery
 
-The release-based Vercel workflow, generated-data staging, chunked JSON loader,
-and Basic Auth middleware are implemented. Remaining operational work:
-
-1. Ensure Vercel does not publish production directly from `main`.
-2. Prepare the intended generated example data.
-3. Publish a GitHub release with `frontend-generated-examples.tar.gz`.
-4. Verify the release-triggered deployment, authentication, example loading,
-   and protection of direct `/generated/...` requests.
-
-Deployment verification is operational work and should not be mixed with
-optimization benchmark results.
+The hand-in uses a local viewer and a separately packaged raw-data ZIP.
+The former hosted-release deployment and its authentication configuration have
+been removed. No hosting setup is required to inspect the submitted results.
+See the [repository README](../../README.md) for export and startup commands.

@@ -526,6 +526,7 @@ Benchmark scripts write machine-specific JSON, SVG plots, and checkpoints under
 the ignored `benchmarks/output/` directory. Frontend artifacts are not produced
 by benchmarks unless explicitly requested.
 
-The release deployment workflow packages generated frontend data as a GitHub
-release asset, splits oversized JSON into chunks, rebuilds the frontend in
-GitHub Actions, deploys through Vercel, and protects requests with Basic Auth.
+Releases provide a source snapshot and the raw result package. The publication
+command rebuilds frontend data locally from the submission manifest; the viewer
+runs through Vite. No automatic hosting deployment is configured. See the
+[reviewer guide](../REVIEWER_GUIDE.md) for the submitted evidence.
