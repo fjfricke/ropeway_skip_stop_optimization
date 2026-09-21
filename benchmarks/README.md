@@ -3,7 +3,8 @@
 > AI-generated documentation.
 
 Thesis reviewers: start with the [reviewer guide](../docs/REVIEWER_GUIDE.md).
-For installation, data sources and fresh-run commands, use the
+For your own systems and single runs, use the [usage guide](../docs/USAGE.md).
+For submitted data sources and study-run commands, use the
 [experiment guide](../docs/experiments/README.md).
 
 | Purpose | Entry point |

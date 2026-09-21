@@ -48,11 +48,11 @@ raw data; old viewer files cannot substitute for missing evidence. The reported
 Journey view combines the selected attempts. Historical executions stay separate.
 No optimization is performed. Allow several minutes and space for derived data.
 
-## Regenerate thesis tables and figures
+## Rebuild the result views
 
-Follow [Regenerate thesis figures and tables](FIGURES.md). This requires the
-separate thesis-source repository beside the optimization repository and the
-`analysis` extra. Rebuilding the PDF also requires LaTeX; viewing results does not.
+The publication command above regenerates the frontend result views from the
+frozen raw data. This repository does not contain the thesis LaTeX sources or
+its figure-generation scripts.
 
 ## Run new experiments
 

@@ -2,58 +2,74 @@
 
 > AI-generated documentation.
 
-Code and raw-result tools for an IDP thesis on skip-stop urban ropeways.
-Two studies examine journey-time minimization and passenger-service maximization
-on a five-station ring with synthetic demand.
+Python models and solvers for ropeways with optional station stops, passenger
+assignment and resource constraints. A web viewer displays systems and timetables.
 
-**Reviewing the thesis? Start with the [reviewer guide](docs/REVIEWER_GUIDE.md).**
-It identifies the reported experiments, selected results, model code and limitations.
+**Thesis reviewers: start with the [reviewer guide](docs/REVIEWER_GUIDE.md)**
+for the reported experiments, selected results and relevant model code.
 
-## View the submitted results
+## Install
 
-Requirements: Python 3.12+, [uv](https://docs.astral.sh/uv/), Node.js 22.12+ and npm.
-Run from this repository root. Extract the separate raw-data ZIP here so its
-campaigns are under `results/` (no second nested `results/` directory).
-The tracked manifest alone does not contain the raw data.
+Use Python 3.12+, [uv](https://docs.astral.sh/uv/), and Node.js 22.12+ with npm
+for the viewer. Dependencies are pinned in `uv.lock` and `frontend/package-lock.json`.
 
 ```sh
 uv sync --frozen
-uv run python benchmarks/thesis_publication.py \
-  --submission-manifest results/submission_manifest.json
+```
+
+Gurobi requires a license for optimization. CP-SAT, the baseline export below
+and viewing saved results do not require a commercial solver license.
+
+## Try an existing system
+
+Export an all-stop timetable, then start the viewer:
+
+```sh
+uv run ropeway-skip-stop-optimization \
+  --example five_station_circle_cw_half_skip_no_wait_v0 \
+  --artifact-set ean_all_stop_baseline
 cd frontend
 npm ci
 npm run dev -- --port 5174 --strictPort
 ```
 
-Open **http://127.0.0.1:5174/thesis**. The viewer shows results, solver progress
-and available timetable replays. Export verifies file hashes and rebuilds viewer
-data without optimization or a solver license. The raw package is about 20 GiB
-uncompressed; allow additional space and several minutes for export.
+Open **http://127.0.0.1:5174/** and select the example and artifact set.
+This creates a deterministic baseline; it does not optimize passenger service.
 
-To check the raw package only, without installing dependencies:
+## Define and optimize your own system
+
+Systems are defined in Python under `src/ropeway_skip_stop_optimization/examples/`
+and registered in `examples/registry.py`. Define geometry, speeds, demand and
+operating rules there; select the fleet and solver through the relevant runner.
+The frontend is a viewer, not a system editor.
+
+[Usage guide](docs/USAGE.md): available examples, a new ring-system template,
+configuration locations and runnable optimization commands.
+
+| Task | Entry point |
+|---|---|
+| Fixed starts: optimize STOP/SKIP and passengers with Gurobi | `benchmarks/run_ddd_fixed_k_arc_flow.py` |
+| Free initial positions: optimize movement and passengers with CP-SAT | `benchmarks/run_oip.py` |
+| Repeat the reported studies | [Experiment guide](docs/experiments/README.md) |
+
+## View the submitted results
+
+Extract the separate raw-data ZIP here, preserving `results/`. The tracked
+manifest alone does not contain the raw data. From the repository root:
 
 ```sh
 python3 benchmarks/verify_submission.py
+uv run python benchmarks/thesis_publication.py \
+  --submission-manifest results/submission_manifest.json
 ```
 
-## Reproduce or inspect the code
+With the viewer running, open **http://127.0.0.1:5174/thesis**. Export checks
+file hashes and rebuilds the result views without optimization. The raw package
+is about 20 GiB uncompressed; allow extra space and several minutes for export.
 
-- [Experiment guide](docs/experiments/README.md): regenerate tables/figures or start **new** solver runs.
-- [Submission checks](docs/results/submission_check_20260921.md): validation and the excluded historical replay warning.
-- [Benchmark entry points](benchmarks/README.md): current runners and historical tools.
+## Further reading
 
-Gurobi optimization requires a separate license; CP-SAT has no commercial
-license requirement. Saved results can be inspected without either solver running.
-Dependencies are pinned in `uv.lock` and `frontend/package-lock.json`.
-
-| Directory | Contents |
-|---|---|
-| `src/ropeway_skip_stop_optimization/` | Models, solvers, validation and exporters |
-| `benchmarks/` | Experiment and publication runners |
-| `frontend/` | Result browser and timetable replay |
-| `tests/` | Model and tooling tests |
-| `results/` | Raw-data ZIP destination and tracked submission inventory |
-| `docs/`, `archive/` | Current instructions and earlier research material |
-
-The thesis sources are a separate repository, `../idp_report/version_2/` in the
-original layout. They are needed to regenerate thesis figures, not to use the viewer.
+- [Submission checks](docs/results/submission_check_20260921.md): validation and known historical warning.
+- [Benchmark index](benchmarks/README.md): current runners and historical experiments.
+- Code: `src/ropeway_skip_stop_optimization/`; tests: `tests/`; viewer: `frontend/`.
+- Checks: `uv run pytest`; in `frontend/`, `npm test` and `npm run build`.

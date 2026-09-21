@@ -2,10 +2,9 @@
 
 > AI-generated documentation.
 
-The submission consists of this code repository, the thesis and a separate
-raw-data ZIP. Start with [viewing the results](../README.md#view-the-submitted-results);
-no optimization run or solver license is needed. The thesis-source repository
-is only needed when rebuilding its tables, figures or PDF.
+This repository contains the optimization code and result viewer. The reported
+raw data is supplied in a separate ZIP. Start with [viewing the results](../README.md#view-the-submitted-results);
+no optimization run or solver license is needed.
 
 ## What was evaluated
 
@@ -38,8 +37,8 @@ maps the six packaged campaigns to the studies.
 - **Service:** 30 fixed-mixture trials, including 19 validated incumbents and
   trials without an incumbent. K50 and K62 use the same absolute demand per family.
 - The diffuse family is called **F0 in code/data and F1 in the thesis**.
-- The viewer and thesis exporters use the same Journey selection. Historical
-  attempts remain accessible separately and must not replace the reported selection.
+- The viewer uses this frozen Journey selection. Historical attempts remain
+  accessible separately and must not replace the reported selection.
 
 A missing incumbent or timeout is not a proof of infeasibility. For journey-time
 minimization, an incumbent is an upper bound and a solver bound is a lower bound.
