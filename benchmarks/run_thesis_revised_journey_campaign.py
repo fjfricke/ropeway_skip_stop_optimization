@@ -68,6 +68,13 @@ def apply_control(output, state):
             job.update(status="deferred", reason=control.get("reason", "Deferred by user"))
 
 
+def thesis_jobs():
+    """Final thesis matrix: 20 calibrations, 48 relative and 16 constant runs."""
+    return [j for j in journey_jobs() if j['kind']=='reference'
+            or j['kind']=='relative' and j['k'] in (10,20,30)
+            or j['kind']=='constant' and j['k'] in (20,30)]
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output-dir", type=Path, required=True)
@@ -97,8 +104,8 @@ def main():
         state = dict(
             schema=2, campaign_id=output.name, identity=identity, status="prepared",
             study=study_definition(),
-            jobs=journey_jobs(), execution_started_unix=None,
-            wall_limit_seconds=len(journey_jobs()) * 1800 + 1800,
+            jobs=thesis_jobs(), execution_started_unix=None,
+            wall_limit_seconds=len(thesis_jobs()) * 1800 + 1800,
         )
         save_and_publish(path, state, frontend)
     if not args.run:

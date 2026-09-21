@@ -546,7 +546,7 @@ export interface LeaderBehaviorHeadwayRule {
 }
 
 export type HeadwayRule = ConstantHeadwayRule | LeaderBehaviorHeadwayRule;
-export type DerivedHeadwayResourceKind = "platform_entry" | "platform_exit" | "exit_switch" | "service_mechanism";
+export type DerivedHeadwayResourceKind = "entry_switch" | "platform_entry" | "platform_exit" | "exit_switch" | "service_mechanism";
 export type DerivedSpatialRole = "rope" | "service";
 
 export interface DerivedHeadwayResource {

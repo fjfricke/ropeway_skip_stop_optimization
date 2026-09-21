@@ -19,20 +19,25 @@ def finite(value):
 
 
 def publish(output: Path, state: dict, frontend: Path) -> None:
+    try:
+        from benchmarks.thesis_publication import directory_for, publish_campaign
+    except ImportError:
+        from thesis_publication import directory_for, publish_campaign
     atlas = export((output,), frontend / "thesis", preserve_existing=True)
     summaries = {r['id']: r for r in atlas['runs']}
     rows = []
     for job in state['jobs']:
-        directory = Path(job['attempts'][-1]['directory']) if job['attempts'] else None
+        directory = directory_for(output.resolve(), job['attempts'][-1]) if job['attempts'] else None
         summary = summaries.get(_slug(directory), {}) if directory else {}
         # Capacity probes carry large passenger witnesses but no Journey bounds.
         events = read_events(directory / 'events.jsonl') if directory and job['kind'] != 'reference' else []
-        native = bound = None
+        native = bound = inherited = None
         for event in events:
+            if event.get("kind") == "validated_mip_start": inherited = event.get("objective")
             if finite(event.get('solver_incumbent')): native = event['solver_incumbent']
             if finite(event.get('certified_lower_bound')): bound = event['certified_lower_bound']
         if finite(summary.get('globalLowerBound')): bound = summary['globalLowerBound']
-        validated = summary.get('journeyTime') if summary.get('validated') else None
+        validated = summary.get('journeyTime') if summary.get('validated') else inherited
         upper = validated if finite(validated) else native
         gap = max(0, upper - bound) / abs(upper) if finite(upper) and finite(bound) and upper != 0 else None
         result = _read(directory / 'result.json') if directory else None
@@ -40,12 +45,12 @@ def publish(output: Path, state: dict, frontend: Path) -> None:
         rows.append(dict(id=job['id'], family=job['family'], k=job['k'], kind=job['kind'],
                          mode=job['mode'], percent=job.get('percent'), demand=job.get('demand'),
                          status=job['status'], reason=job.get('reason'),
-                         native_incumbent=native, validated_objective=validated, lower_bound=bound, gap=gap,
+                         all_stop_start=job.get("all_stop_objective"), native_incumbent=native, validated_objective=validated, lower_bound=bound, gap=gap,
                          capacity=run.get('proven_feasible_demand'), capacity_proven=run.get('capacity_proven', False),
                          detail_url=f"/thesis?run={_slug(directory)}" if summary else None))
     campaign_id = state['campaign_id']
     snapshot = dict(schema_version=1, campaign_id=campaign_id,
-        label="Journey Time · fixed starts · geometric headways", campaign_kind="journey_comparison",
+        label=state.get("label", "Journey Time · fixed starts · geometric headways"), campaign_kind="journey_comparison",
         contract_id=THESIS_CONTRACT_ID, study_membership="current_thesis", status=state['status'],
         objective="journey_time_full_service", sequence=time.time_ns() // 1000,
         updated_at_utc=datetime.now(UTC).isoformat(),
@@ -58,6 +63,7 @@ def publish(output: Path, state: dict, frontend: Path) -> None:
     summary = {k:v for k,v in snapshot.items() if k not in {'journey_jobs','trials','events','constant_gates'}}
     index['campaigns'] = [c for c in index['campaigns'] if c['campaign_id'] != campaign_id] + [summary]
     atomic_json(index_path, index)
+    publish_campaign(output, frontend)
 
 
 def main():

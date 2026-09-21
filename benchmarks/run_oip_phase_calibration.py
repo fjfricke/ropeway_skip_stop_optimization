@@ -32,6 +32,11 @@ def publish(output, frontend):
             if not (output / name).exists():
                 continue
             atomic_json(frontend / name, json.loads((output / name).read_text()))
+        try:
+            from benchmarks.thesis_publication import publish_calibration
+        except ImportError:
+            from thesis_publication import publish_calibration
+        publish_calibration(output,frontend.parent)
 
 
 def previous_probe_state(output: Path, family: str, attempt: str):

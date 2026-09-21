@@ -97,6 +97,7 @@ def parser() -> argparse.ArgumentParser:
     p.add_argument("--memory-limit-gib", type=float, default=32)
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--checkpoint-import", type=Path)
+    p.add_argument("--all-stop-mip-start", type=Path, help="Validated matching All-Stop result, including integer passengers.")
     p.add_argument("--allow-fleet-resize-checkpoint", action="store_true")
     p.add_argument("--output-dir", type=Path, required=True)
     p.add_argument("--build-only", action="store_true")
@@ -231,6 +232,21 @@ def worker(args) -> None:
                 output_flag=args.log_search_progress,
                 operating_mode=DddFixedKOperatingMode(args.operating_mode),
             )
+            primal_start = None
+            if args.all_stop_mip_start:
+                from ropeway_skip_stop_optimization.benchmarking.journey_mip_start import load_all_stop_start
+                _, reference, _ = prepare_fixed_k_experiment(
+                    spec, cabins=args.cabins, time_limit_seconds=remaining_budget(),
+                    workers=args.workers, seed=args.seed,
+                    operating_mode=DddFixedKOperatingMode.ALL_STOP,
+                )
+                primal_start = load_all_stop_start(args.all_stop_mip_start, reference.problem, prepared.problem)
+                config = replace(config, use_primal_start=True)
+                atomic_json(out / "mip_start.json", dict(
+                    source=str(args.all_stop_mip_start), objective=primal_start.objective_value,
+                    ride_count=len(primal_start.ride_counts_by_candidate_id), validated=True))
+                emit(dict(kind="validated_mip_start", objective=primal_start.objective_value,
+                          source=str(args.all_stop_mip_start), inherited=True))
             atomic_json(out / "prepared_case.json", case_manifest)
             write_json(out / "scenario.json", prepared.scenario)
             if args.build_only:
@@ -255,6 +271,8 @@ def worker(args) -> None:
                 run = run_ddd_fixed_k_arc_flow(
                     config,
                     prepared_run=prepared,
+                    primal_start=primal_start,
+                    primal_start_passenger_plan=(json.loads(args.all_stop_mip_start.read_text())["run"]["validated_passenger_plan"] if primal_start else None),
                     progress_hook=lambda progress: emit(
                         {"kind": "progress", **asdict(progress)}
                     ),
@@ -583,6 +601,8 @@ def main() -> None:
     _spec(args).validate()
     if args.method == "evolution" and args.operating_mode != "skip_stop":
         raise ValueError("evolution selects its catalogue; use all_stop_phase for All-Stop")
+    if args.all_stop_mip_start and (args.method != "labelled_arc_flow" or args.operating_mode != "skip_stop"):
+        raise ValueError("all-stop-mip-start requires labelled Skip-Stop")
     if args.method == "labelled_arc_flow" and args.checkpoint_import:
         raise ValueError("thesis arc-flow runs do not import a primal start")
     if args._worker:
@@ -609,6 +629,7 @@ def main() -> None:
                 if args.initial_pattern_sequences is None
                 else str(args.initial_pattern_sequences)
             ),
+            "all_stop_mip_start": str(args.all_stop_mip_start) if args.all_stop_mip_start else None,
             "output_dir": str(args.output_dir),
         },
     )

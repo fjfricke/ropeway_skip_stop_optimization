@@ -1,3 +1,4 @@
+import StudyRunLinks from "../components/StudyRunLinks";
 import { useEffect, useState } from "react";
 import { ScenarioViewer } from "../components/ScenarioViewer";
 import type {
@@ -72,7 +73,9 @@ export default function ScenarioPage() {
 
     async function loadManifest() {
       try {
-        const nextManifest = normalizeManifest(await fetchRequired<ExportManifest>(MANIFEST_URL));
+        const replay = new URLSearchParams(window.location.search).get("replay");
+        const url = replay ? `/generated/study/runs/${encodeURIComponent(replay)}/viewer.json` : MANIFEST_URL;
+        const nextManifest = normalizeManifest(await fetchRequired<ExportManifest>(url));
         const nextSelection = defaultSelection(nextManifest);
         if (!nextSelection) {
           throw new Error(`No export variants listed in ${MANIFEST_URL}`);
@@ -190,7 +193,10 @@ export default function ScenarioPage() {
   }
 
   return (
+    <>
+    {new URLSearchParams(window.location.search).get("replay") && <StudyRunLinks id={new URLSearchParams(window.location.search).get("replay")!} />}
     <ScenarioViewer
+      initialMode={new URLSearchParams(window.location.search).has("replay") ? "ean_replay" : "scenario"}
       scenario={artifacts.scenario}
       discreteScenario={artifacts.discreteScenario}
       movementPlan={artifacts.movementPlan}
@@ -221,6 +227,7 @@ export default function ScenarioPage() {
         onArtifactSetChange: handleArtifactSetChange,
       }}
     />
+    </>
   );
 }
 
@@ -362,7 +369,7 @@ async function fetchOptional<T>(
 
 function artifactUrl(artifactSet: ExportArtifactSetManifest, kind: ExportArtifactKind): string | null {
   const relativePath = artifactSet.artifacts[kind];
-  return relativePath ? `${ARTIFACT_BASE_URL}${relativePath}` : null;
+  return relativePath ? (relativePath.startsWith("/") ? relativePath : `${ARTIFACT_BASE_URL}${relativePath}`) : null;
 }
 
 function resolveSelection(manifest: ExportManifest, selection: ArtifactSelectionState) {

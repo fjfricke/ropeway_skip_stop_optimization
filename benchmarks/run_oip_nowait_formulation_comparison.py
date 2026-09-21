@@ -130,6 +130,8 @@ def save(output: Path, frontend: Path | None, manifest: dict[str, Any]) -> None:
         target = frontend / manifest["campaign_id"]
         atomic_json(target / "snapshot.json", manifest)
         update_campaign_index(frontend, manifest)
+        from thesis_publication import publish_campaign
+        publish_campaign(output, frontend.parent)
 
 
 def reference_command(family: str, demand: int, output: Path, args) -> list[str]:

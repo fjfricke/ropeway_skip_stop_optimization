@@ -758,6 +758,7 @@ def _load_ddd_fixed_k_arc_flow_result_seed(
     """Load one complete earlier arc-flow timetable across waiting domains."""
 
     payload = json.loads(path.read_text(encoding="utf-8"))
+    payload = payload.get("run", payload)
     expected_metadata = {
         "example_id": problem.artifact.scenario_id,
         "exact_active_cabin_count": problem.fleet_cardinality,
@@ -869,6 +870,8 @@ def run_ddd_fixed_k_arc_flow(
     *,
     progress_hook: Callable[[DddFixedKArcFlowProgress], None] | None = None,
     prepared_run: DddPreparedFixedKArcFlowRun | None = None,
+    primal_start: DddFixedKPrimalSeed | None = None,
+    primal_start_passenger_plan: dict | None = None,
 ) -> DddFixedKArcFlowRunResult:
     config.validate()
     started = perf_counter()
@@ -882,7 +885,13 @@ def run_ddd_fixed_k_arc_flow(
     seed_candidates: list[
         tuple[str, tuple[DddReferenceTrajectory, ...], float | None]
     ] = []
-    if not config.use_primal_start:
+    if primal_start is not None:
+        if not config.use_primal_start:
+            raise ValueError("imported start requires use_primal_start")
+        primal_start.validate(problem)
+        seed_trajectories = primal_start.solution.trajectories
+        seed_status, seed_kind, seed_seconds = "feasible", primal_start.provenance, 0.0
+    elif not config.use_primal_start:
         seed_trajectories = ()
         seed_status, seed_kind, seed_seconds = "disabled", None, 0.0
     elif prepared.seed_trajectories:
@@ -933,7 +942,7 @@ def run_ddd_fixed_k_arc_flow(
             ("arc_flow_result", result_trajectories, result_upper_bound)
         )
 
-    primal_seed: DddFixedKPrimalSeed | None = None
+    primal_seed: DddFixedKPrimalSeed | None = primal_start
     seed_evaluation_started = perf_counter()
     for provenance, trajectories, expected_upper_bound in seed_candidates:
         remaining_seed_budget = config.total_time_limit_seconds - (
@@ -1089,6 +1098,23 @@ def run_ddd_fixed_k_arc_flow(
                     solution=primal_seed.solution,
                     detail="solver incumbent failed independent Passenger validation",
                 )
+    if primal_start is not None and primal_start_passenger_plan is not None and (
+        validation_status != "feasible" or validation_objective is None
+        or validation_objective > primal_start.objective_value + 1e-4
+    ):
+        if solve_result.certified_lower_bound > primal_start.objective_value + 1e-4:
+            raise RuntimeError("Solver bound exceeds the independently validated start")
+        solve_result = replace(
+            solve_result, status=DddFixedKArcFlowStatus.TIME_LIMIT_WITH_CERTIFIED_INTERVAL,
+            objective_value=primal_start.objective_value,
+            validated_upper_bound=primal_start.objective_value,
+            solution=primal_start.solution,
+            relative_gap=max(0, primal_start.objective_value-solve_result.certified_lower_bound)
+                         / max(abs(primal_start.objective_value), 1e-9),
+            detail="Retained independently validated All-Stop start; no better verified assignment",
+        )
+        validation_status, validation_objective = "feasible", primal_start.objective_value
+        validated_passenger_plan = primal_start_passenger_plan
     return DddFixedKArcFlowRunResult(
         problem=problem,
         scenario=scenario,

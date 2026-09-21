@@ -40,7 +40,7 @@ function duration(seconds: number | null) {
   return hours ? `${hours}h ${minutes}m` : minutes ? `${minutes}m ${rest}s` : `${rest}s`;
 }
 
-export default function CalibrationLivePage() {
+export default function CalibrationLivePage({dataRoot = DATA_ROOT}:{dataRoot?:string}) {
   const [campaign, setCampaign] = useState<Campaign | null>(null);
   const [references, setReferences] = useState<ReferenceIndex>({ evidence: [] });
   const [error, setError] = useState<string | null>(null);
@@ -49,7 +49,7 @@ export default function CalibrationLivePage() {
   useEffect(() => {
     let cancelled = false;
     setCampaign(null); setReferences({ evidence: [] }); setError(null);
-    const dataRoot = DATA_ROOT;
+
     async function poll() {
       try {
         const stamp = Date.now();
@@ -76,7 +76,7 @@ export default function CalibrationLivePage() {
     const timer = window.setInterval(poll, 2000);
     const clock = window.setInterval(() => setNow(Date.now() / 1000), 1000);
     return () => { cancelled = true; window.clearInterval(timer); window.clearInterval(clock); };
-  }, []);
+  }, [dataRoot]);
 
   const evidence = useMemo(
     () => new Map(references.evidence.map((item) => [item.job_id, item])),

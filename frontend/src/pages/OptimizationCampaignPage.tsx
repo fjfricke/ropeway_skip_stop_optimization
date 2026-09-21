@@ -1,3 +1,4 @@
+import StudyRunLinks from "../components/StudyRunLinks";
 import { AppLink } from "../App";
 import { BoundProgressChart } from "../components/optimization/BoundProgressChart";
 import { useOptimizationCampaign } from "../hooks/useOptimizationCampaign";
@@ -30,6 +31,7 @@ export default function OptimizationCampaignPage({ campaignId }: { campaignId: s
   const typeCatalog = campaign.campaign_kind === "oip_type_catalog";
   return (
     <main className="optimization-shell">
+      <StudyRunLinks id={campaignId} />
       <header className="optimization-hero">
         <div><p className="eyebrow">{feasibility ? "Movement feasibility" : continuation ? "Fleet continuation" : "Campaign"}</p><h1>{campaign.label ?? campaign.campaign_id}</h1></div>
         <div className="campaign-status">
@@ -40,7 +42,7 @@ export default function OptimizationCampaignPage({ campaignId }: { campaignId: s
       </header>
       {error && <div className="optimization-warning">Live connection: {error}. Showing the last valid snapshot.</div>}
       {continuation && <FleetContinuationDashboard campaignId={campaignId} />}
-      {overload && <ThesisOverloadDashboard campaignId={campaignId} />}
+      {overload && <ThesisOverloadDashboard campaignId={campaignId} finished={campaign.status !== "running" && campaign.status !== "prepared"} />}
       {patternScreening && <OipPatternScreeningDashboard campaign={campaign} />}
       {typeCatalog && <OipTypeCatalogDashboard campaign={campaign} />}
       {journey && <JourneyCampaignDashboard campaign={campaign} />}

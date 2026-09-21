@@ -57,6 +57,10 @@ def publish(output: Path, source: Path, frontend: Path, manifest: dict) -> None:
         'status': manifest['status'], 'reference_runs': manifest['reference_runs'],
         'updated_at_utc': manifest['updated_at_utc']}
     atomic_json(frontend / parent['campaign_id'] / 'snapshot.json', parent)
+    from thesis_publication import publish_campaign
+    atomic_json(frontend.parent / 'study' / f"{parent['campaign_id']}.supplement.json",
+                {**parent['supplementary_phase_references'], 'source': str(output.resolve())})
+    publish_campaign(source, frontend.parent)
 
 
 def main() -> None:

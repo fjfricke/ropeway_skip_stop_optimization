@@ -1,32 +1,34 @@
-import { lazy, Suspense, useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import ScenarioPage from "./pages/ScenarioPage";
-import OptimizationPage from "./pages/OptimizationPage";
 import OptimizationCampaignPage from "./pages/OptimizationCampaignPage";
 import OptimizationTrialPage from "./pages/OptimizationTrialPage";
-import ThesisPage from "./pages/ThesisPage";
+import StudyOverview from "./pages/StudyOverview";
+import StudyReferences from "./pages/StudyReferences";
+import JourneyRunPage from "./pages/JourneyRunPage";
 
-const EvolutionLivePage = lazy(() => import("./pages/EvolutionLivePage"));
-const CalibrationLivePage = lazy(() => import("./pages/CalibrationLivePage"));
-const ArchivePage = lazy(() => import("./pages/ArchivePage"));
+
+
+
 
 export default function App() {
-  const [path, setPath] = useState(window.location.pathname);
+  const [path, setPath] = useState(window.location.pathname + window.location.search);
   useEffect(() => {
-    const update = () => setPath(window.location.pathname);
+    const update = () => setPath(window.location.pathname + window.location.search);
     window.addEventListener("popstate", update);
     return () => window.removeEventListener("popstate", update);
   }, []);
-  const parts = path.split("/").filter(Boolean);
-  let page = <ScenarioPage />;
-  if (parts[0] === "optimization" && parts.length === 1) page = <OptimizationPage />;
+  const parts = path.split("?")[0].split("/").filter(Boolean);
+  const runId = new URLSearchParams(window.location.search).get("run");
+  let page = <ScenarioPage key={path} />;
+  if (parts[0] === "optimization" && parts.length === 1) page = <StudyOverview />;
   else if (parts[0] === "optimization" && parts.length === 2) page = <OptimizationCampaignPage campaignId={decodeURIComponent(parts[1])} />;
   else if (parts[0] === "optimization" && parts.length >= 4) page = <OptimizationTrialPage campaignId={decodeURIComponent(parts[1])} policyId={decodeURIComponent(parts[2])} fleetCount={Number(parts[3])} />;
-  else if (parts[0] === "evolution-live") page = <EvolutionLivePage />;
-  else if (parts[0] === "calibration-live") page = <CalibrationLivePage />;
-  else if (parts[0] === "archive") page = <ArchivePage />;
-  else if (parts[0] === "thesis") page = <ThesisPage />;
-  return <><nav className="app-nav"><AppLink href="/thesis">Thesis Atlas</AppLink><AppLink href="/optimization">Thesis runs</AppLink><AppLink href="/calibration-live">Calibration live</AppLink><AppLink href="/">Scenario Viewer</AppLink><AppLink href="/archive">Archive</AppLink></nav><Suspense fallback={<main className="optimization-shell"><section className="optimization-empty">Loading view…</section></main>}>{page}</Suspense></>;
+  else if (parts[0] === "evolution-live" || parts[0] === "archive") page = <StudyOverview />;
+  else if (parts[0] === "calibration-live") page = <StudyReferences key={path} />;
+
+  else if (parts[0] === "thesis") page = runId ? <JourneyRunPage key={runId} id={runId} /> : <StudyOverview />;
+  return <><nav className="app-nav"><AppLink href="/thesis">Campaigns</AppLink><AppLink href="/calibration-live">Calibrations & references</AppLink><AppLink href="/">Scenario Viewer</AppLink></nav><Suspense fallback={<main className="optimization-shell"><section className="optimization-empty">Loading view…</section></main>}>{page}</Suspense></>;
 }
 
 export function AppLink({ href, className, children }: { href: string; className?: string; children: ReactNode }) {

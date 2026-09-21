@@ -73,7 +73,7 @@ function extend(points: Series["points"], elapsed: number) {
   return [...points, { ...points.at(-1)!, x: Math.max(elapsed, points.at(-1)!.x) }];
 }
 
-export default function ThesisOverloadDashboard({ campaignId }: { campaignId: string }) {
+export default function ThesisOverloadDashboard({ campaignId, finished = false }: { campaignId: string; finished?: boolean }) {
   const [detail, setDetail] = useState<Detail | null>(null);
   const [error, setError] = useState<string | null>(null);
   useEffect(() => {
@@ -85,14 +85,14 @@ export default function ThesisOverloadDashboard({ campaignId }: { campaignId: st
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const value = await response.json() as Detail;
         if (!stopped) { setDetail(value); setError(null); }
-        if (!stopped && !["complete", "failed", "resource_limit", "interrupted"].includes(value.status)) timer = window.setTimeout(poll, 2000);
+        if (!stopped && !finished && !["complete", "failed", "resource_limit", "interrupted"].includes(value.status)) timer = window.setTimeout(poll, 2000);
       } catch (cause) {
         if (!stopped) { setError(cause instanceof Error ? cause.message : "Live-Daten nicht verfügbar"); timer = window.setTimeout(poll, 2000); }
       }
     }
     poll();
     return () => { stopped = true; if (timer !== undefined) window.clearTimeout(timer); };
-  }, [campaignId]);
+  }, [campaignId, finished]);
 
   const charts = useMemo(() => {
     if (!detail) return null;

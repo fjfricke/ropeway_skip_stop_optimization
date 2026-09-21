@@ -72,7 +72,9 @@ export function layoutForScenario(scenario: Scenario): ScenarioLayout {
 }
 
 export function isCircularScenario(scenario: Scenario): boolean {
-  return scenario.scenario_id.startsWith("five_station_circle_cw")
+  return scenario.experiment_metadata?.topology === "t5r"
+    || scenario.experiment_metadata?.topology === "t6r"
+    || scenario.scenario_id.startsWith("five_station_circle_cw")
     || scenario.scenario_id.startsWith("thesis_t5r_")
     || scenario.scenario_id.startsWith("thesis_t6r_");
 }

@@ -23,6 +23,8 @@ from ropeway_skip_stop_optimization.benchmarking.thesis_contract import (
     THESIS_CONTRACT_ID,
 )
 
+from ropeway_skip_stop_optimization.submission import resolve_recorded
+
 COPIED_ARTIFACTS = (
     "arguments.json",
     "case_spec.json",
@@ -30,6 +32,7 @@ COPIED_ARTIFACTS = (
     "best_case.json",
     "result.json",
     "events.jsonl",
+    "mip_start.json",
     "scenario.json",
     "best.json",
     "source_identity.json",
@@ -93,9 +96,7 @@ def _live_directories(root):
         for attempt in job.get("attempts", []):
             if "directory" not in attempt:
                 continue
-            directory = Path(attempt["directory"])
-            if not directory.is_absolute():
-                directory = root / directory
+            directory = resolve_recorded(root, attempt["directory"])
             active = campaign.get("status") == "running" and job.get("status") == "running" and attempt is job["attempts"][-1]
             found[directory] = "running" if active else "unknown"
     return found
@@ -232,6 +233,9 @@ def _run_summary(
         if frontend_method == "all_stop_phase"
         else arguments.get("operating_mode") or _first(result, ("run", "operating_mode"))
     )
+    imported_start = _read(run_dir / "mip_start.json") or {}
+    if imported_start.get("validated") is not True:
+        imported_start = {}
     summary = {
         "id": run_id,
         "groupId": group_id,
@@ -239,8 +243,8 @@ def _run_summary(
         "stopReason": monitoring.get("supervisor_reason") or ("process_failed" if monitoring.get("exit_code") else None),
         "method": frontend_method,
         "validated": validated,
-        "primalSeedKind": _first(result, ("run", "seed_kind")),
-        "primalSeedObjective": _first(result, ("run", "primal_seed_objective_value")),
+        "primalSeedKind": _first(result, ("run", "seed_kind")) or ("imported_all_stop" if imported_start else None),
+        "primalSeedObjective": _first(result, ("run", "primal_seed_objective_value")) if result.get("run", {}).get("primal_seed_objective_value") is not None else imported_start.get("objective"),
         "operatingMode": operating_mode,
         "k": arguments.get("fixed_k", arguments.get("cabins")),
         "demand": case.get("demand_total"),
@@ -392,7 +396,15 @@ def export(results_roots: tuple[Path, ...], output: Path, study_manifest: Path |
         if not root.exists():
             continue
         live = _live_directories(root)
-        campaign_contract = (_read(root / "campaign.json") or {}).get("identity", {}).get("contract_id")
+        campaign = _read(root / "campaign.json") or {}
+        campaign_contract = campaign.get("identity", {}).get("contract_id")
+        main_directories = set()
+        for job in campaign.get("jobs", []):
+            if job.get("kind") not in {"relative", "constant"}:
+                continue
+            for recorded in job.get("attempts", []):
+                directory = resolve_recorded(root, recorded["directory"])
+                main_directories.add(directory.resolve())
         study = _read(root / "study.json") or {}
         attempts = {root / Path(a["result"]).parent: a for a in study.get("attempts", [])}
         successful = {a["key"]: root / Path(a["result"]).parent for a in study.get("attempts", []) if a["status"] == "complete"}
@@ -415,7 +427,7 @@ def export(results_roots: tuple[Path, ...], output: Path, study_manifest: Path |
                                cumulativeSeconds=cumulative_by_dir[run_dir],
                                transferKind=attempt.get("transfer"), provenance="main_study")
             else:
-                summary["provenance"] = "calibration"
+                summary["provenance"] = "main_study" if run_dir.resolve() in main_directories else "calibration"
             if (
                 summary.get("studyMembership") != "current_thesis"
                 or summary.get("contractId") != THESIS_CONTRACT_ID

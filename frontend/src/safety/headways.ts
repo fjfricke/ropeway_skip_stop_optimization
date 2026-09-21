@@ -105,7 +105,12 @@ export function checkResourceHeadways({
     diagnostics,
   });
 
-  const coalescedUsages = coalesceIdenticalUsages(usages);
+  // Finite-event-entry contract: include entry at H and retain its full
+  // clearance, but do not introduce resource entries after operation ends.
+  const endTick = Math.round(movementPlan.model_end_seconds * 1e6);
+  const coalescedUsages = coalesceIdenticalUsages(usages).filter(
+    usage => Math.round(usage.enterTime * 1e6) <= endTick,
+  );
   const usagesByResource = new Map<string, ResourceUsage[]>();
   for (const usage of coalescedUsages) {
     const group = usagesByResource.get(usage.resourceKey) ?? [];
@@ -201,7 +206,10 @@ function usageForVisit(
 ): ResourceUsage | null {
   let enterTime: number;
   let clearTime: number;
-  if (resource.kind === "platform_entry") {
+  if (resource.kind === "entry_switch") {
+    enterTime = visit.switch_time_seconds;
+    clearTime = enterTime;
+  } else if (resource.kind === "platform_entry") {
     if (visit.platform_entry_time_seconds === null) return null;
     enterTime = visit.platform_entry_time_seconds;
     clearTime = enterTime;
@@ -244,6 +252,7 @@ function usageForVisit(
 }
 
 function resourceNodeId(resource: DerivedHeadwayResource, scenario: Scenario | undefined): string {
+  if (resource.kind === "entry_switch") return resource.state_id;
   if (!scenario || (resource.kind !== "platform_entry" && resource.kind !== "platform_exit")) {
     return resource.exit_switch_id;
   }

@@ -41,6 +41,7 @@ import type {
 import { useReplaySafetyReport } from "../safety/useReplaySafetyReport";
 
 interface ScenarioViewerProps {
+  initialMode?: ViewerMode;
   scenario: Scenario;
   discreteScenario: DiscreteScenario | null;
   movementPlan: MovementPlan | null;
@@ -80,6 +81,7 @@ const EAN_REPLAY_TOGGLES: ViewerToggles = {
 };
 
 export function ScenarioViewer({
+  initialMode = "scenario",
   scenario,
   discreteScenario,
   movementPlan,
@@ -99,7 +101,7 @@ export function ScenarioViewer({
   eanPassengerServiceWarning,
   artifactSelection,
 }: ScenarioViewerProps) {
-  const [viewerMode, setViewerMode] = useState<ViewerMode>("scenario");
+  const [viewerMode, setViewerMode] = useState<ViewerMode>(initialMode);
   const [selected, setSelected] = useState<Selection | null>(null);
   const [hovered, setHovered] = useState<Selection | null>(null);
   const [toggles, setToggles] = useState<ViewerToggles>({

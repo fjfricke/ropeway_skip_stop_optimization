@@ -1,7 +1,7 @@
 export interface JourneyJob {
   id: string; family: string; k: number; kind: string; mode: string;
   percent?: number; demand?: number | null; status: string; reason?: string;
-  native_incumbent?: number | null; validated_objective?: number | null;
+  all_stop_start?: number | null; native_incumbent?: number | null; validated_objective?: number | null;
   lower_bound?: number | null; gap?: number | null;
   capacity?: number | null; capacity_proven?: boolean; detail_url?: string | null;
 }

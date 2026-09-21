@@ -41,6 +41,18 @@ describe("directed headway rules", () => {
     expect(bypassResult.minimumSlackSeconds).toBeCloseTo(2);
   });
 
+  it.each([[20, 1], [20.000001, 0]])(
+    "includes a resource entry at the horizon but not one tick after: %s",
+    (entry, expected) => {
+      const result = checkResourceHeadways({
+        artifact: artifact(policy({ id: "constant", kind: "constant", seconds: 3 })),
+        movementPlan: plan([visit(0, 0, "skip", 19), visit(1, 0, "skip", entry)]),
+        fleetPlan: null,
+      });
+      expect(result.totalViolationCount).toBe(expected);
+    },
+  );
+
   it("checks two rotations of the same cabin", () => {
     const result = checkResourceHeadways({
       artifact: artifact(policy({ id: "constant", kind: "constant", seconds: 3 })),

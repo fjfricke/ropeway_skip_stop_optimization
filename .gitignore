@@ -22,3 +22,11 @@ src/ropeway_skip_stop_optimization/frontend/
 
 # Machine-specific benchmark outputs.
 benchmarks/output/
+
+# Raw submission data is delivered separately; keep its small inventory.
+results/*
+!results/README.md
+!results/submission_manifest.json
+!results/submission_files.txt
+!results/oip_service_contract_checks.json
+!results/replay_checks.json

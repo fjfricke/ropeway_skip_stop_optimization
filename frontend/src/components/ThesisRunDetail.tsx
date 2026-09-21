@@ -67,7 +67,7 @@ export default function ThesisRunDetail({ run, comparison }: { run: ThesisRunSum
   useEffect(() => { if (playing && cursor >= end) setPlaying(false); }, [playing, cursor, end]);
   const points = (detail?.points ?? []).filter(p => p.value != null && Number.isFinite(p.value));
   const xmax = Math.max(1, run.elapsedSeconds ?? 0, ...points.map(p => p.seconds));
-  const ymax = Math.max(1, ...points.map(p => p.value!));
+  const ymax = Math.max(1, run.primalSeedObjective ?? 0, ...points.map(p => p.value!));
   const color = { validated: "#157f69", native: "#64748b", bound: "#c76c17" };
   const path = (kind: Point["kind"]) => points.filter(p => p.kind === kind).sort((a, b) => a.seconds - b.seconds).map((p, i) => `${i ? "H" : "M"}${60 + p.seconds / xmax * 760}${i ? "V" : ","}${260 - p.value! / ymax * 220}`).join(" ");
   const diagnostics = detail?.diagnostics.at(-1);
@@ -75,6 +75,7 @@ export default function ThesisRunDetail({ run, comparison }: { run: ThesisRunSum
     <p className="eyebrow">Run detail · {run.status}</p>
     <h2>{run.method.replaceAll("_", " ")} · K={run.k} · {run.method === "all_stop_phase" ? `search ceiling N≤${run.demand}` : `N=${run.demand}`}</h2>
     <p>{run.releaseResolutionSeconds} s releases · seed {run.seed} · {run.primalSeedKind ? `start: ${run.primalSeedKind}` : "no imported start"}</p>
+    {run.primalSeedKind === "imported_all_stop" && <p>Validated All-Stop MIP start: {run.primalSeedObjective?.toLocaleString()} passenger-seconds. The dashed line is inherited quality, not a new improvement.</p>}
     <p>{run.provenance === "main_study" ? "Main study" : "Calibration / regression"}{run.stopReason ? ` · stopped: ${run.stopReason}` : ""}{run.cumulativeSeconds != null ? ` · cumulative stage time ${run.cumulativeSeconds.toFixed(1)} s` : ""}</p>
     {run.supervisedWallSeconds != null && <p>Total process wall time: {run.supervisedWallSeconds.toFixed(2)} s · peak process-tree RSS: {run.peakRssBytes == null ? "unavailable" : `${(run.peakRssBytes / 1024 ** 3).toFixed(2)} GiB`}</p>}
     {run.parentRunId && <p>Parent run: {run.parentRunId} · {run.transferKind ?? "documented transfer"}</p>}
@@ -85,6 +86,7 @@ export default function ThesisRunDetail({ run, comparison }: { run: ThesisRunSum
       <text x="60" y="20">{run.method === "evolution" ? "validated passengers served" : "passenger-seconds"}</text>
       <text x="60" y="283">0 s</text><text x="760" y="283">{xmax.toFixed(1)} s</text>
       <text x="5" y="45">{ymax.toFixed(0)}</text>
+      {run.primalSeedKind === "imported_all_stop" && run.primalSeedObjective != null && <line x1="60" x2="820" y1={260-run.primalSeedObjective/ymax*220} y2={260-run.primalSeedObjective/ymax*220} stroke="#157f69" strokeDasharray="6 4" />}
       {(["native", "bound", "validated"] as const).map(kind => <g key={kind}><path d={path(kind)} stroke={color[kind]} fill="none" strokeWidth="2" />{points.filter(p => p.kind === kind).map((p, i) => <circle key={i} cx={60 + p.seconds / xmax * 760} cy={260 - p.value! / ymax * 220} r="3" fill={color[kind]} />)}</g>)}
     </svg>
     <p>Green: independently validated. Gray: native incumbent, not yet independently checked. Orange: global bound where available.</p>
