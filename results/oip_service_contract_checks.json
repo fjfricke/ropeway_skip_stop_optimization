@@ -1,0 +1,42 @@
+{
+  "passenger_contract": "Same cabin, later destination STOP allowed by service deadline",
+  "solver_search_performed": false,
+  "records": [
+    {
+      "trial_id": "f0_mix_38_6_6_k50",
+      "valid": true,
+      "served": 5870,
+      "later_destination_passengers": 3,
+      "result_file": "oip_fixed_mixes_geometric_k50_20260919/trials/f0_mix_38_6_6_k50/attempt_1/result.json",
+      "sha256": "8e6fb3c1d0bfcdca30a5acd6da23d78d23619b88337378dede99d63cfc06251e",
+      "domain_fingerprint": "580b1060d8cb34ed0241d27f649f16886b14d927a7aa007153906e042cb92d5a"
+    },
+    {
+      "trial_id": "f0_mix_0_25_25_k50",
+      "valid": true,
+      "served": 4045,
+      "later_destination_passengers": 242,
+      "result_file": "oip_fixed_mixes_geometric_k50_20260919/trials/f0_mix_0_25_25_k50/attempt_1/result.json",
+      "sha256": "41a3d06c6e9ea86a2cccf1b0e05ef9a2962cd65412bcaf8af461a0db06d53563",
+      "domain_fingerprint": "580b1060d8cb34ed0241d27f649f16886b14d927a7aa007153906e042cb92d5a"
+    },
+    {
+      "trial_id": "f2_mix_0_31_31_k62",
+      "valid": true,
+      "served": 2266,
+      "later_destination_passengers": 38,
+      "result_file": "oip_fixed_mixes_geometric_120_20260918/trials/f2_mix_0_31_31_k62/attempt_1/result.json",
+      "sha256": "c5a616f0cd1197f7a6673272c3fc72fcfd4f0fceeec8b82f976516407a55e227",
+      "domain_fingerprint": "694b9065927840785eb5ac6824c049313b7f5001f092ab6b7c007381effb144f"
+    },
+    {
+      "trial_id": "f0_mix_0_31_31_k62",
+      "valid": true,
+      "served": 4412,
+      "later_destination_passengers": 609,
+      "result_file": "oip_fixed_mixes_geometric_120_20260918/trials/f0_mix_0_31_31_k62/attempt_2/result.json",
+      "sha256": "fd483bf1fb9bdefb9b54daf35af854fc359cf2a58645f236a78964a18373fdda",
+      "domain_fingerprint": "0e3c3dd8692b3f983fb15229f8fef935fb0c54bfbb7a4c036ad7abb199764539"
+    }
+  ]
+}

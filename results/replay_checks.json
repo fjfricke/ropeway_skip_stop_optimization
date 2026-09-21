@@ -1,0 +1,2003 @@
+{
+  "checker_contract": "Finite resource entry through operation horizon; full clearance; continuous spacing on visible horizon",
+  "checker_source_sha256": {
+    "frontend/src/safety/decodeSafetyInputs.ts": "6766745c754316d7f7583f34881313f2fe5cd45e84f243249496b3de76fac44b",
+    "frontend/src/safety/replaySafety.worker.ts": "87e27545af76f999f88cfdce70d9c924fa972c01f51c326d32fb562991d42abe",
+    "frontend/src/safety/certifyReplaySafety.ts": "ef02231873a06780c05044d2142a3a22cdc360ab83c41ba5775526734dc9c917",
+    "frontend/src/safety/useReplaySafetyReport.ts": "3b7f592c29ac4aaad13dbbeb7c3b7c295af81abceb0660048672b2516e182f92",
+    "frontend/src/safety/geometry.ts": "9cf2917c5dbbe00c7dcef31ddaea65bde9619e4636ae5fa3fab655c764934f50",
+    "frontend/src/safety/markers.ts": "f0635fa3386e5f03c78d18c3232798649de3f6157f037dafec9474d26cef1064",
+    "frontend/src/safety/types.ts": "ff962a7018672f585c459c0cab813a482567178a0039d9e3ceeb8922e6f01bcc",
+    "frontend/src/safety/headways.ts": "b1093f4752ee08158b8ad0bf7d0bac77a57c95be9e2f5a53cbd45fb38719eb04",
+    "frontend/src/safety/index.ts": "fd7689adaa4e4918fc823f3ceff7dd80e9f3ee742795fe01a3c26c9f168df346"
+  },
+  "records": [
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_geometric_20260919__relative_25_f0_k10_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f0_k10_all_stop/attempt_001/result.json",
+      "sha256": "6c93fec39c8726ac93e3b17e311033d8128505d16ee532685cb55207c4b7f6b4",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_geometric_20260919__relative_25_f0_k10_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f0_k10_skip_stop/attempt_001/result.json",
+      "sha256": "9d4cb9c14010c4de0eb1a74c5e03836d615a23ecba666e08575fbc2cfd48b2ad",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_geometric_20260919__relative_25_f2_k10_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f2_k10_all_stop/attempt_001/result.json",
+      "sha256": "6dc661ffdcc885a4b5169ef6ef6e81d897a2241127101b8f547a8ab666ca44fc",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_geometric_20260919__relative_25_f2_k10_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f2_k10_skip_stop/attempt_001/result.json",
+      "sha256": "34ed165b48091d831dacfd80df44bc7d3faf0edd3d4867bb53f1d9b65ccb9a37",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_geometric_20260919__relative_25_f3_k10_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f3_k10_all_stop/attempt_001/result.json",
+      "sha256": "4eec1c375ad91c5f847d7c7664a17786b46e632ab2ca612b8a7bbd1c74f64b6e",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_geometric_20260919__relative_25_f3_k10_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f3_k10_skip_stop/attempt_001/result.json",
+      "sha256": "dfed594d36da1154b70ab82061caa1424258cf2b993bee90c6c59de8971657bb",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_geometric_20260919__relative_25_f4_k10_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f4_k10_all_stop/attempt_001/result.json",
+      "sha256": "23d25117a5e2740ba81cfa5eb7b970d935e3965cbbe6bde7bee4d0b1f36fb9a1",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_geometric_20260919__relative_25_f4_k10_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f4_k10_skip_stop/attempt_001/result.json",
+      "sha256": "3efb84eb6256eaee8b0276ad9c629629ef48813832742af50a7830b36a62a26c",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_geometric_20260919__relative_75_f0_k10_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f0_k10_all_stop/attempt_001/result.json",
+      "sha256": "ad6c1d421d4b405c75e258379d6b072965ed40a7d74cd6ae138d86d536877b77",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_geometric_20260919__relative_75_f0_k10_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f0_k10_skip_stop/attempt_001/result.json",
+      "sha256": "73c4bf5b00387b149cf282fde8f68a1bff8bf94146f5c462b5d49a19b83ef63d",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_geometric_20260919__relative_75_f2_k10_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f2_k10_all_stop/attempt_001/result.json",
+      "sha256": "665f9d6843648ae3fd28c4b38b609068d629585845c8f025b634b664d278de44",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_geometric_20260919__relative_75_f2_k10_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f2_k10_skip_stop/attempt_001/result.json",
+      "sha256": "69e0c54dfa80baeaee17678a4ddd0996b741302ae5ca2ecf103fd31ee725b76c",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_geometric_20260919__relative_75_f3_k10_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f3_k10_all_stop/attempt_001/result.json",
+      "sha256": "5167cb2a01bd474dfc0928758ffb1ee8dd5a58698dac1698cdc3c390763b794b",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_geometric_20260919__relative_75_f3_k10_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f3_k10_skip_stop/attempt_001/result.json",
+      "sha256": "c7ac24483695b6a15b1d079159026e0f5570daf7c6d1ad94f366a1ace52b8db4",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_geometric_20260919__relative_75_f4_k10_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f4_k10_all_stop/attempt_001/result.json",
+      "sha256": "da120690417cb2b6a9b64cef6433dbc209d0d114fc889d263b131464a817aaf2",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_geometric_20260919__relative_75_f4_k10_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f4_k10_skip_stop/attempt_001/result.json",
+      "sha256": "1be6e9cd240f517c9a19cb5f7903b2306cb98a373bea7cc2443ceb127168d0f0",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__relative_25_f0_k20_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f0_k20_all_stop/attempt_001/result.json",
+      "sha256": "8b9891243ad3b71084099a1b09391e270af7623fe65065fa7f28fed5129dcef5",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__relative_25_f0_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f0_k20_skip_stop/attempt_001/result.json",
+      "sha256": "2d976aabc564de85e66545ff5b24e5897c054d7076a1f5e0f94d839dd9164e42",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__relative_25_f2_k20_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f2_k20_all_stop/attempt_001/result.json",
+      "sha256": "bc0ab178ef8707014911a0074334e17f982fe82ae8ec2bd1dd43eda950863ee8",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__relative_25_f2_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f2_k20_skip_stop/attempt_001/result.json",
+      "sha256": "c779b98bf4bf9b1e51a4e04afcd1f96db67084785a1093431e115946ff0c3499",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__relative_25_f3_k20_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f3_k20_all_stop/attempt_001/result.json",
+      "sha256": "09e8fbaa7a290eb9cc4a720412a9914585ad0e1d60b873ac7a61ddecf9ee87a0",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__relative_25_f3_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f3_k20_skip_stop/attempt_001/result.json",
+      "sha256": "29eb6b66b3f66d5d11f9daec953b36f52cd1ed15588b5818493e2600e66ec00a",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__relative_25_f4_k20_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f4_k20_all_stop/attempt_001/result.json",
+      "sha256": "97d9e80e4704cd3814d4ae4de3cf0051d873f1461ad30c05c7718c17ef9eff47",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__relative_25_f4_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f4_k20_skip_stop/attempt_001/result.json",
+      "sha256": "016bde70a1a9f491507407ddde6a9d8121de979a25de3dc415f882ec22375077",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__relative_75_f0_k20_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f0_k20_all_stop/attempt_001/result.json",
+      "sha256": "6fcf9ef5ad8ce1311c3783132b9104158324a4eca95a0cb1ed3ff6ff99a1cf0f",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__relative_75_f0_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f0_k20_skip_stop/attempt_001/result.json",
+      "sha256": "d823ec369c607e664e34903eb77297025d34e4b7a6e18c6c204ff824f56e30df",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__relative_75_f0_k20_skip_stop__a2",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f0_k20_skip_stop/attempt_002/result.json",
+      "sha256": "a8b52614a519008cf5e631d850af743fef81f6c9b53796d31a603f273a022957",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__relative_75_f2_k20_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f2_k20_all_stop/attempt_001/result.json",
+      "sha256": "c9f4f19c02ff50f84cd9a635c936e87c32b9e73bc986ec935f23ea93cf5dee5f",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__relative_75_f2_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f2_k20_skip_stop/attempt_001/result.json",
+      "sha256": "0bf8159f7916da6e595e9eeea47ac36f4afed18ac4aa340bbec6e44131244e73",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__relative_75_f3_k20_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f3_k20_all_stop/attempt_001/result.json",
+      "sha256": "962141e413e7ad83e68b6a4a2be144bebd9fae84e9d3df34a83f965585ce6d16",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__relative_75_f3_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f3_k20_skip_stop/attempt_001/result.json",
+      "sha256": "c019f98d53471b6f4f72cecbe3abde258a15277200449aa666cd375a4c7bfc3f",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__relative_75_f4_k20_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f4_k20_all_stop/attempt_001/result.json",
+      "sha256": "ae0f07256ae65fbbd0e6a90565ebe8a4eecf0e8ec8f70a00d7a0d5221f96c596",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__relative_75_f4_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f4_k20_skip_stop/attempt_001/result.json",
+      "sha256": "11d97a5d4372f3588fd0b61ae3bba05ba8f4bf72c3a91b05724265909e0c3862",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__relative_25_f0_k30_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f0_k30_all_stop/attempt_001/result.json",
+      "sha256": "727c9b05b422f5b96caad6d1b84a2367ac7da5f4c05ead8c959ee61bc27e0594",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__relative_25_f2_k30_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f2_k30_all_stop/attempt_001/result.json",
+      "sha256": "81dd5c8c76488d262b110c06b92afebfe2b48b141f1e4aefa307a5c4f8ee9a76",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__relative_25_f2_k30_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f2_k30_skip_stop/attempt_001/result.json",
+      "sha256": "090cffbfd712b903066fdfb0d93362dd88ab6b0c6a489c83c7d65d02ed0754ad",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__relative_25_f3_k30_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f3_k30_all_stop/attempt_001/result.json",
+      "sha256": "e783271a8a5d29368421b2d7843f438d1a1a1218d6112fce5f5772254a97a28b",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__relative_25_f3_k30_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f3_k30_skip_stop/attempt_001/result.json",
+      "sha256": "1babead1f9531345f6c88a71e5b9095e3457c03785c752feb353f13c2475db12",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__relative_25_f4_k30_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f4_k30_all_stop/attempt_001/result.json",
+      "sha256": "2d60952b29b9a3f796c2ccd2cc9b2c7bf67efee3ccfc56a3d6fd99cc719ccd76",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__relative_25_f4_k30_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_25_f4_k30_skip_stop/attempt_001/result.json",
+      "sha256": "13db3bda5ad75e9e57efb9ea02a49335e43c5ce3bcf01eab0298f68094cb94de",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__relative_75_f0_k30_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f0_k30_all_stop/attempt_001/result.json",
+      "sha256": "cecd9cdfac6c28629453cf9bf3eb8fb4bdf240f868685e773a33b0fa7490b8a6",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__relative_75_f2_k30_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f2_k30_all_stop/attempt_001/result.json",
+      "sha256": "25b1c9f16fba606b5b0d22000763cbeb23540f15ed01865ab3954a2c06285f94",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__relative_75_f2_k30_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f2_k30_skip_stop/attempt_001/result.json",
+      "sha256": "c832bdab1bfaef8443d71216495eb573b0eb7fa0442a5f5b72e94dca0eb6710d",
+      "status": "unsafe",
+      "violation_details": [
+        {
+          "activeFromSeconds": 2663.65,
+          "activeUntilSeconds": 2664,
+          "actualSeparation": 3.1800052346661687,
+          "cabinIds": [
+            20,
+            29
+          ],
+          "id": "geometry:segment:20:88:1:S3_cw_brake|segment:29:90:0:S3_cw_platform",
+          "kind": "geometric_spacing",
+          "leaderBehavior": null,
+          "message": "3.180 m available, 3.500 m required",
+          "nodeId": "S3_platform_entry_cw",
+          "requiredSeparation": 3.5,
+          "resourceId": null,
+          "ruleId": null,
+          "segmentId": "S3_cw_brake",
+          "timeSeconds": 2664,
+          "unit": "m",
+          "visitIndices": [
+            24,
+            23
+          ]
+        }
+      ],
+      "violations": 1
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__relative_75_f3_k30_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f3_k30_all_stop/attempt_001/result.json",
+      "sha256": "446b4087c8e2d1a61534eaaf3a200a3fcb83a46b8915478804176eb18dbaa0c1",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__relative_75_f3_k30_skip_stop__a2",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f3_k30_skip_stop/attempt_002/result.json",
+      "sha256": "430421331c4b5f53c10aa2a71a2214e587a20b7c6205e84cf03ea84fe96b659d",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__relative_75_f4_k30_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f4_k30_all_stop/attempt_001/result.json",
+      "sha256": "da3d2ea836ff1dcd2acb061bdfe475e41623cf74ced1ec1c3be8eb7d107a991d",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__relative_75_f4_k30_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/relative_75_f4_k30_skip_stop/attempt_001/result.json",
+      "sha256": "2b507104e0b30529774c9a46501d596d9f8e572c9b6536f1e7f984ccbaee9edb",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__constant_50_f0_k20_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/constant_50_f0_k20_all_stop/attempt_001/result.json",
+      "sha256": "fd023d0c8106d55397d4df51c2e5a7bc4feddc2727777ae89d02d5b578779b83",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__constant_50_f0_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/constant_50_f0_k20_skip_stop/attempt_001/result.json",
+      "sha256": "dedf7153680c13b5b514bfbddc18d272817393e6e6b4156b3445350342791434",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__constant_50_f2_k20_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/constant_50_f2_k20_all_stop/attempt_001/result.json",
+      "sha256": "5f61d396d7e44aa44b74609a010be971f76eccafc57b00120c76b1588e0ab8ab",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__constant_50_f2_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/constant_50_f2_k20_skip_stop/attempt_001/result.json",
+      "sha256": "c00df102700992ac49e031d961d141743b82b74e096fc258a68f880514631502",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__constant_50_f3_k20_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/constant_50_f3_k20_all_stop/attempt_001/result.json",
+      "sha256": "762de7918e9520c24dca3331b8e91754a23ccd927849ab0ef3febb8216f6f2f1",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__constant_50_f3_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/constant_50_f3_k20_skip_stop/attempt_001/result.json",
+      "sha256": "b578c3c4f7868e7a7a431e4361f6c53f3ec6f37fc4caf3980a70409b016d8ef8",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__constant_50_f4_k20_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/constant_50_f4_k20_all_stop/attempt_001/result.json",
+      "sha256": "45e4cfe1e9d01cd3ac49ec66b4486099055a26cace96315cca550f4e063735c3",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_geometric_20260919__constant_50_f4_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/constant_50_f4_k20_skip_stop/attempt_001/result.json",
+      "sha256": "66038a9238a08c6efa271590ad255f504d8ae514c86889206e85d60658916e10",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__constant_50_f0_k30_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/constant_50_f0_k30_all_stop/attempt_001/result.json",
+      "sha256": "bfec0f1c1af42c21efaa7c74243f19be37b9a19c2757e6757a711dea3d94262e",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__constant_50_f2_k30_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/constant_50_f2_k30_all_stop/attempt_001/result.json",
+      "sha256": "e45fbb0535572763b3f35f9a9b366653dea6b7aa7128d2d552a502e1dffe5e96",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__constant_50_f2_k30_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/constant_50_f2_k30_skip_stop/attempt_001/result.json",
+      "sha256": "8f3a2b12554c923bbbcc125507ef0b73d47b401d07166fa367cb8214e7581657",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__constant_50_f3_k30_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/constant_50_f3_k30_all_stop/attempt_001/result.json",
+      "sha256": "2cadb4d0240404c6a00caa568370d8a1c4d8381be488ebe6304877b73dc1be81",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__constant_50_f3_k30_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/constant_50_f3_k30_skip_stop/attempt_001/result.json",
+      "sha256": "e77cf69534b0639083ac82d3b8e886ffe68bf3860afb41324ed7ff4ca0826bb8",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__constant_50_f4_k30_all_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/constant_50_f4_k30_all_stop/attempt_001/result.json",
+      "sha256": "0e81866ae6fc778e222534012f276248dbacb8d7eb1b3a191dc2cd7b4886ddcf",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_geometric_20260919__constant_50_f4_k30_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_geometric_20260919/runs/constant_50_f4_k30_skip_stop/attempt_001/result.json",
+      "sha256": "9f5dc255e74859ce30147bf23d7574bf48c2022a3f0b20e64220f72f2b2b6de9",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_all_stop_mip_start_20260920__relative_25_f0_k10_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/relative_25_f0_k10_skip_stop/attempt_001/result.json",
+      "sha256": "105397c4acb38454ed87a1b1ceb5413131b8c4ff0dc338371d270d36459121a7",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_all_stop_mip_start_20260920__relative_25_f2_k10_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/relative_25_f2_k10_skip_stop/attempt_001/result.json",
+      "sha256": "cb6cc729b11f1938a1c1bf77712081d0d3e4add71a91cf786697f98c50be6d17",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_all_stop_mip_start_20260920__relative_75_f0_k10_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/relative_75_f0_k10_skip_stop/attempt_001/result.json",
+      "sha256": "31416bb1fb00f92396b41461bfb8ada1dc2964d87ef296ac708ecd7130006d4f",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        10,
+        10,
+        10,
+        10,
+        10
+      ],
+      "diagnostics": [],
+      "expected": 10,
+      "id": "thesis_journey_all_stop_mip_start_20260920__relative_75_f2_k10_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/relative_75_f2_k10_skip_stop/attempt_001/result.json",
+      "sha256": "bec44a201c046f58589e0cc21db98526cc3d2170210eb4c61c39edbbd1380b2d",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_all_stop_mip_start_20260920__relative_25_f0_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/relative_25_f0_k20_skip_stop/attempt_001/result.json",
+      "sha256": "0b815e7c00ea7c24a47850c6cad2e709604a1bdc6ed662fb99333a720329ae00",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_all_stop_mip_start_20260920__relative_25_f2_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/relative_25_f2_k20_skip_stop/attempt_001/result.json",
+      "sha256": "bb7c638ed921b44f992acc9374ef5dcf5db0b8dfc31ffe4fa03e4e9564b54a96",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_all_stop_mip_start_20260920__relative_25_f3_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/relative_25_f3_k20_skip_stop/attempt_001/result.json",
+      "sha256": "7d539239dce2a6f52fec1d6218387b430b3b79bec0473c49b6aa68fadf344f00",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_all_stop_mip_start_20260920__relative_75_f0_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/relative_75_f0_k20_skip_stop/attempt_001/result.json",
+      "sha256": "7bb0d1f04c890e8a2c2b67bd11d00c0641ecc4a639f9a44b44c2d0e04cb07f64",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_all_stop_mip_start_20260920__relative_75_f2_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/relative_75_f2_k20_skip_stop/attempt_001/result.json",
+      "sha256": "1f23f0fb10a4924002458abba3266bfb6975925c9a744a188add74c0d1d959f0",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_all_stop_mip_start_20260920__relative_75_f3_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/relative_75_f3_k20_skip_stop/attempt_001/result.json",
+      "sha256": "32ffa212aaabb65dcf145ae34fd968b28eaa7bbaf77563d7955496c88bf564d3",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_all_stop_mip_start_20260920__relative_25_f0_k30_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/relative_25_f0_k30_skip_stop/attempt_001/result.json",
+      "sha256": "197549a748f413c27580a0df66883c4652099ffdbb0c0246488bea29da1f2871",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_all_stop_mip_start_20260920__relative_25_f2_k30_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/relative_25_f2_k30_skip_stop/attempt_001/result.json",
+      "sha256": "72eec15096ef864fbe637686e19451ad04810142811287208092156463ac6867",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_all_stop_mip_start_20260920__relative_25_f3_k30_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/relative_25_f3_k30_skip_stop/attempt_001/result.json",
+      "sha256": "6e66f120a72da925ca2123159436d8e85ba9c1585ceb82ec1725bcae381f89fb",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_all_stop_mip_start_20260920__relative_75_f0_k30_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/relative_75_f0_k30_skip_stop/attempt_001/result.json",
+      "sha256": "2c4ba42968171d4865b908e0e540053a03b94e8a0b8d58b67562549c1bc76f65",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_all_stop_mip_start_20260920__relative_75_f2_k30_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/relative_75_f2_k30_skip_stop/attempt_001/result.json",
+      "sha256": "1af907f60950ebfb464e4b7683f5c42d28ed7575ffd230203524d2ba5669bf8b",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_all_stop_mip_start_20260920__relative_75_f3_k30_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/relative_75_f3_k30_skip_stop/attempt_001/result.json",
+      "sha256": "bdee2bb01353735d6401e9ee544a6ed604dd8f956852f1c0c14f6d23787a2c38",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_all_stop_mip_start_20260920__constant_50_f0_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/constant_50_f0_k20_skip_stop/attempt_001/result.json",
+      "sha256": "894ced27559eb43abff29bee08c55b721dc320b5a9e75da94bfb151fd4b15ea7",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_all_stop_mip_start_20260920__constant_50_f2_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/constant_50_f2_k20_skip_stop/attempt_001/result.json",
+      "sha256": "97e14d807112e9fa8f9d5108955be7c169b660e814adf0978f25c371808f2931",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        20,
+        20,
+        20,
+        20,
+        20
+      ],
+      "diagnostics": [],
+      "expected": 20,
+      "id": "thesis_journey_all_stop_mip_start_20260920__constant_50_f3_k20_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/constant_50_f3_k20_skip_stop/attempt_001/result.json",
+      "sha256": "1bfaa04df29db4c68cdb1fcb759154b1d424f5cff8c44c0ab2ec26e6c43efebd",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_all_stop_mip_start_20260920__constant_50_f0_k30_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/constant_50_f0_k30_skip_stop/attempt_001/result.json",
+      "sha256": "660778b8e9fc0b05814be8d0315a2e67e323d8f82f7a30f9a16e9666d13ec08e",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_all_stop_mip_start_20260920__constant_50_f2_k30_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/constant_50_f2_k30_skip_stop/attempt_001/result.json",
+      "sha256": "192201c37c4bc7c41b85bd6e480013c8d3bc58e24224fba6f75988f770400070",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        30,
+        30,
+        30,
+        30,
+        30
+      ],
+      "diagnostics": [],
+      "expected": 30,
+      "id": "thesis_journey_all_stop_mip_start_20260920__constant_50_f3_k30_skip_stop__a1",
+      "missing": [],
+      "result_file": "thesis_journey_all_stop_mip_start_20260920/runs/constant_50_f3_k30_skip_stop/attempt_001/result.json",
+      "sha256": "f17d9c521c379ef84dd63a7d47168ed3627f625391af9b5ef9662b2506fd4cce",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        62,
+        62,
+        62,
+        62,
+        62
+      ],
+      "diagnostics": [],
+      "expected": 62,
+      "id": "oip_fixed_mixes_geometric_120_20260918__f2_mix_62_0_0_k62__a1",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_120_20260918/trials/f2_mix_62_0_0_k62/attempt_1/result.json",
+      "sha256": "dcd8060fdc8bf8287a56df5864e784bf35f379cfc63cc2d6c0d9fbef1317ffee",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        62,
+        62,
+        62,
+        62,
+        62
+      ],
+      "diagnostics": [],
+      "expected": 62,
+      "id": "oip_fixed_mixes_geometric_120_20260918__f2_mix_0_31_31_k62__a1",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_120_20260918/trials/f2_mix_0_31_31_k62/attempt_1/result.json",
+      "sha256": "c5a616f0cd1197f7a6673272c3fc72fcfd4f0fceeec8b82f976516407a55e227",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        62,
+        62,
+        62,
+        62,
+        62
+      ],
+      "diagnostics": [],
+      "expected": 62,
+      "id": "oip_fixed_mixes_geometric_120_20260918__f3_mix_62_0_0_k62__a2",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_120_20260918/trials/f3_mix_62_0_0_k62/attempt_2/result.json",
+      "sha256": "5dde81b0d0400c0c676e435a47fb89b3595c07e3211e17496d3177ee1532ab28",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        62,
+        62,
+        62,
+        62,
+        62
+      ],
+      "diagnostics": [],
+      "expected": 62,
+      "id": "oip_fixed_mixes_geometric_120_20260918__f3_mix_0_31_31_k62__a1",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_120_20260918/trials/f3_mix_0_31_31_k62/attempt_1/result.json",
+      "sha256": "b71363dc6db7a630c86890d53b097198f5d6579299f85be9ff203384a171ce1d",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        62,
+        62,
+        62,
+        62,
+        62
+      ],
+      "diagnostics": [],
+      "expected": 62,
+      "id": "oip_fixed_mixes_geometric_120_20260918__f0_mix_62_0_0_k62__a1",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_120_20260918/trials/f0_mix_62_0_0_k62/attempt_1/result.json",
+      "sha256": "d256f03ad714d33ea1e621a110e39523c0b32998307e7cee17ef1ae12cb6d626",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        62,
+        62,
+        62,
+        62,
+        62
+      ],
+      "diagnostics": [],
+      "expected": 62,
+      "id": "oip_fixed_mixes_geometric_120_20260918__f0_mix_0_31_31_k62__a2",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_120_20260918/trials/f0_mix_0_31_31_k62/attempt_2/result.json",
+      "sha256": "fd483bf1fb9bdefb9b54daf35af854fc359cf2a58645f236a78964a18373fdda",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        62,
+        62,
+        62,
+        62,
+        62
+      ],
+      "diagnostics": [],
+      "expected": 62,
+      "id": "oip_fixed_mixes_geometric_120_20260918__reference__f0",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_120_20260918/references/f0/result.json",
+      "sha256": "1159fedf35b246f3c7e48c1ab536930a5a9c07993b6ed112e2ac0820022266ee",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        62,
+        62,
+        62,
+        62,
+        62
+      ],
+      "diagnostics": [],
+      "expected": 62,
+      "id": "oip_fixed_mixes_geometric_120_20260918__reference__f2",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_120_20260918/references/f2/result.json",
+      "sha256": "39349c0c77d1a889329cac750cdaa6deb8375980cdba01d6a5fdf5e1ad9d5571",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        62,
+        62,
+        62,
+        62,
+        62
+      ],
+      "diagnostics": [],
+      "expected": 62,
+      "id": "oip_fixed_mixes_geometric_120_20260918__reference__f3",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_120_20260918/references/f3/result.json",
+      "sha256": "a0314f675ae9b634a97709dacdaa254ee9efdda8cbf432846e2b1e9dc71598fe",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        50,
+        50,
+        50,
+        50,
+        50
+      ],
+      "diagnostics": [],
+      "expected": 50,
+      "id": "oip_fixed_mixes_geometric_k50_20260919__f2_mix_50_0_0_k50__a1",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_k50_20260919/trials/f2_mix_50_0_0_k50/attempt_1/result.json",
+      "sha256": "08bbab003bf42c76ee477ac053bf2f8e3cf928cdeaf8fc6e71491a4369ac4047",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        50,
+        50,
+        50,
+        50,
+        50
+      ],
+      "diagnostics": [],
+      "expected": 50,
+      "id": "oip_fixed_mixes_geometric_k50_20260919__f2_mix_12_19_19_k50__a1",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_k50_20260919/trials/f2_mix_12_19_19_k50/attempt_1/result.json",
+      "sha256": "d84bbe0d8c341ce94d3d960bb7d9913fb171b8bb86ff9d5a83903772217e828c",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        50,
+        50,
+        50,
+        50,
+        50
+      ],
+      "diagnostics": [],
+      "expected": 50,
+      "id": "oip_fixed_mixes_geometric_k50_20260919__f2_mix_0_25_25_k50__a1",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_k50_20260919/trials/f2_mix_0_25_25_k50/attempt_1/result.json",
+      "sha256": "460df11a0c6be9a0460397d71fcc57f5ed03bfc9b91c1e6f27a69c1a5c3707df",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        50,
+        50,
+        50,
+        50,
+        50
+      ],
+      "diagnostics": [],
+      "expected": 50,
+      "id": "oip_fixed_mixes_geometric_k50_20260919__f3_mix_50_0_0_k50__a2",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_k50_20260919/trials/f3_mix_50_0_0_k50/attempt_2/result.json",
+      "sha256": "910ca4a4b7efedd753a410942c11489c614e3635c709eb5303502488126b6e0c",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        50,
+        50,
+        50,
+        50,
+        50
+      ],
+      "diagnostics": [],
+      "expected": 50,
+      "id": "oip_fixed_mixes_geometric_k50_20260919__f3_mix_38_6_6_k50__a2",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_k50_20260919/trials/f3_mix_38_6_6_k50/attempt_2/result.json",
+      "sha256": "f7e29d02639ff3ff999602e95250e64a85d36147de9b002f0d320c61f82c9c86",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        50,
+        50,
+        50,
+        50,
+        50
+      ],
+      "diagnostics": [],
+      "expected": 50,
+      "id": "oip_fixed_mixes_geometric_k50_20260919__f3_mix_24_13_13_k50__a2",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_k50_20260919/trials/f3_mix_24_13_13_k50/attempt_2/result.json",
+      "sha256": "f5114532c6aa27be141939552307ed4ac8b11f806f72d6a262c89e125e7bb078",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        50,
+        50,
+        50,
+        50,
+        50
+      ],
+      "diagnostics": [],
+      "expected": 50,
+      "id": "oip_fixed_mixes_geometric_k50_20260919__f3_mix_12_19_19_k50__a1",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_k50_20260919/trials/f3_mix_12_19_19_k50/attempt_1/result.json",
+      "sha256": "c43ccc16e036548e9819792bb7b6834a171872fd22a7352a009d9c799f3b474f",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        50,
+        50,
+        50,
+        50,
+        50
+      ],
+      "diagnostics": [],
+      "expected": 50,
+      "id": "oip_fixed_mixes_geometric_k50_20260919__f3_mix_0_25_25_k50__a1",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_k50_20260919/trials/f3_mix_0_25_25_k50/attempt_1/result.json",
+      "sha256": "19d63bf21d6762cc6de61480384bce709a4084773730f10260b7b3abc798b8c5",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        50,
+        50,
+        50,
+        50,
+        50
+      ],
+      "diagnostics": [],
+      "expected": 50,
+      "id": "oip_fixed_mixes_geometric_k50_20260919__f0_mix_50_0_0_k50__a1",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_k50_20260919/trials/f0_mix_50_0_0_k50/attempt_1/result.json",
+      "sha256": "a4c0ca327cdb971a84fa67f7cb3872744327fb3971e6c5cfbce0dc46654f42e6",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        50,
+        50,
+        50,
+        50,
+        50
+      ],
+      "diagnostics": [],
+      "expected": 50,
+      "id": "oip_fixed_mixes_geometric_k50_20260919__f0_mix_38_6_6_k50__a1",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_k50_20260919/trials/f0_mix_38_6_6_k50/attempt_1/result.json",
+      "sha256": "8e6fb3c1d0bfcdca30a5acd6da23d78d23619b88337378dede99d63cfc06251e",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        50,
+        50,
+        50,
+        50,
+        50
+      ],
+      "diagnostics": [],
+      "expected": 50,
+      "id": "oip_fixed_mixes_geometric_k50_20260919__f0_mix_24_13_13_k50__a1",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_k50_20260919/trials/f0_mix_24_13_13_k50/attempt_1/result.json",
+      "sha256": "0379a2dc1cdfcbe9105f82d5e365480677855b4b0c324a9d1f8038508d4c286b",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        50,
+        50,
+        50,
+        50,
+        50
+      ],
+      "diagnostics": [],
+      "expected": 50,
+      "id": "oip_fixed_mixes_geometric_k50_20260919__f0_mix_12_19_19_k50__a1",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_k50_20260919/trials/f0_mix_12_19_19_k50/attempt_1/result.json",
+      "sha256": "d917a1658bbc2c29fa0a453cc1e1968fa6eb41547a8600f175c9fa383bf488dc",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        50,
+        50,
+        50,
+        50,
+        50
+      ],
+      "diagnostics": [],
+      "expected": 50,
+      "id": "oip_fixed_mixes_geometric_k50_20260919__f0_mix_0_25_25_k50__a1",
+      "missing": [],
+      "result_file": "oip_fixed_mixes_geometric_k50_20260919/trials/f0_mix_0_25_25_k50/attempt_1/result.json",
+      "sha256": "41a3d06c6e9ea86a2cccf1b0e05ef9a2962cd65412bcaf8af461a0db06d53563",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        50,
+        50,
+        50,
+        50,
+        50
+      ],
+      "diagnostics": [],
+      "expected": 50,
+      "id": "oip_fixed_mixes_geometric_k50_20260919__phase_reference__f0__a1",
+      "missing": [],
+      "result_file": "oip_k50_phase_references_20260919/f0/attempt_1/result.json",
+      "sha256": "fd042971181f72d435f8eb79e9a09b3374824d7f8c04091f57e1cf6960ce326d",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        50,
+        50,
+        50,
+        50,
+        50
+      ],
+      "diagnostics": [],
+      "expected": 50,
+      "id": "oip_fixed_mixes_geometric_k50_20260919__phase_reference__f2__a1",
+      "missing": [],
+      "result_file": "oip_k50_phase_references_20260919/f2/attempt_1/result.json",
+      "sha256": "fe0d1f90140ef3728396ef3d738a3bbcb330832907a4c3cbf64d2118a9aedb61",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    },
+    {
+      "counts": [
+        50,
+        50,
+        50,
+        50,
+        50
+      ],
+      "diagnostics": [],
+      "expected": 50,
+      "id": "oip_fixed_mixes_geometric_k50_20260919__phase_reference__f3__a1",
+      "missing": [],
+      "result_file": "oip_k50_phase_references_20260919/f3/attempt_1/result.json",
+      "sha256": "73cfc0adbb08d2cac6605f7d48f1ed2a6c2d192f7e3a0b4598ca2d0acbe3fd48",
+      "status": "safe",
+      "violation_details": [],
+      "violations": 0
+    }
+  ]
+}
